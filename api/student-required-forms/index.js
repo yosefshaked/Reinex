@@ -127,7 +127,7 @@ async function findPendingRequiredFormSubmission(client, orgId, { clientProfileI
     return null;
   }
   const { data, error } = await withOrgScope(client, 'form_submissions', orgId)
-    .select('id, metadata, submitted_at')
+    .select('id, otp_metadata, metadata, submitted_at')
     .eq('client_profile_id', clientProfileId)
     .eq('form_id', formId)
     .eq('service_id', serviceId)
@@ -283,6 +283,22 @@ async function sendRequiredForm(context, req, { controlClient, env, orgId, userI
             responseBody.message = 'email_send_failed_manual_fallback';
           }
         }
+        // Sync expires_at into otp_metadata so the list UI can display the expiry date.
+        // Only patch if not already present; non-fatal on error.
+        const existingOtpMeta = existingSubmission.otp_metadata && typeof existingSubmission.otp_metadata === 'object'
+          ? existingSubmission.otp_metadata
+          : {};
+        if (!existingOtpMeta.expires_at && existingRouting.expires_at) {
+          const { error: syncExpiresError } = await withOrgScope(client, 'form_submissions', orgId)
+            .update({ otp_metadata: { ...existingOtpMeta, expires_at: existingRouting.expires_at } })
+            .eq('id', existingSubmission.id);
+          if (syncExpiresError) {
+            context.log?.warn?.('student-required-forms failed to sync otp_metadata.expires_at on reused submission', {
+              message: syncExpiresError?.message,
+              submissionId: existingSubmission.id,
+            });
+          }
+        }
         return respond(context, 200, responseBody);
       }
     }
@@ -370,6 +386,24 @@ async function sendRequiredForm(context, req, { controlClient, env, orgId, userI
     await withOrgScope(client, 'form_submissions', orgId).delete().eq('id', submissionId);
     context.log?.error?.('student-required-forms failed to create active routing', { message: routingError?.message, submissionId });
     return respond(context, 500, { message: 'failed_to_create_active_routing' });
+  }
+
+  // Write expires_at back into otp_metadata so the list UI can display the expiry date. Non-fatal.
+  const { error: patchExpiresError } = await withOrgScope(client, 'form_submissions', orgId)
+    .update({
+      otp_metadata: {
+        access_mode: 'invite_token',
+        delivery_method: deliveryMethod,
+        invite_status: 'pending',
+        expires_at: expiresAt,
+      },
+    })
+    .eq('id', submissionId);
+  if (patchExpiresError) {
+    context.log?.warn?.('student-required-forms failed to patch otp_metadata.expires_at on new submission', {
+      message: patchExpiresError?.message,
+      submissionId,
+    });
   }
 
   const inviteUrl = buildInviteLink(req, env, routingId);

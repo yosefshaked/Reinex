@@ -793,6 +793,27 @@ export default function SubjectFormsTab({
                                   </div>
                                 )}
 
+                                {canEdit && isRequiredForm && !isSubmitted && (
+                                  <div className="pt-2 border-t border-border">
+                                    <p className="text-xs text-muted-foreground mb-1.5">שליחה חוזרת של קישור</p>
+                                    <Button
+                                      type="button"
+                                      size="sm"
+                                      variant="outline"
+                                      className="gap-2"
+                                      onClick={() => setSendRequiredForm({
+                                        service_id: submission.metadata?.service_id || '',
+                                        form_id: submission.form_id,
+                                        required_form_label: submission.metadata?.required_form_label || submission.form_name || 'טופס חובה',
+                                        service_name: '',
+                                      })}
+                                    >
+                                      <Send className="h-4 w-4" />
+                                      שלח שוב
+                                    </Button>
+                                  </div>
+                                )}
+
                                 <div className="pt-2 border-t border-border">
                                   <p className="text-xs text-muted-foreground mb-1.5">מעקב גישה (IP)</p>
                                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 text-xs">
