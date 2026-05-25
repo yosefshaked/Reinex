@@ -27,13 +27,16 @@ import { normalizeMembershipRole, isAdminRole } from '@/features/students/utils/
 import {
   buildInitialAnswers,
   buildSharedBlockMap,
+  createBuiltInRequiredFormQuestion,
   createQuestion,
   createSection,
   createSharedPlacement,
   createTextBlock,
   findItemByIdRaw,
   getAvailableSourceQuestions,
+  getRequiredFormBuiltInQuestions,
   getWaitingListBuiltInQuestions,
+  isBuiltInRequiredFormQuestion,
   isQuestionItem,
   isSharedItem,
   normalizeAlertRules,
@@ -542,6 +545,16 @@ export default function FormBuilderPage() {
     [formUsage, previewAnswers],
   );
 
+  const usedBuiltInRfIds = useMemo(() => {
+    const ids = new Set();
+    for (const section of schema.sections) {
+      for (const item of section.items || []) {
+        if (isBuiltInRequiredFormQuestion(item)) ids.add(item.id);
+      }
+    }
+    return ids;
+  }, [schema]);
+
   useEffect(() => {
     const sharedBlockId = selectedItem?.shared_block_id;
     if (!sharedBlockId || !session || !activeOrgId) {
@@ -591,6 +604,7 @@ export default function FormBuilderPage() {
 
   const addQuestion = (type) => addItemToTargetSection(createQuestion(type));
   const addText = () => addItemToTargetSection(createTextBlock());
+  const addBuiltInQuestion = (builtInDef) => addItemToTargetSection(createBuiltInRequiredFormQuestion(builtInDef));
   const insertSharedBlock = (blockId) => {
     const block = sharedBlocks.find((entry) => entry.id === blockId);
     if (!block) return;
@@ -801,7 +815,7 @@ export default function FormBuilderPage() {
             <Separator />
             <div className="space-y-2"><Label>פרטי טופס</Label><Input value={formName} onChange={(event) => setFormName(event.target.value)} placeholder="שם הטופס" /><Textarea value={description} onChange={(event) => setDescription(event.target.value)} placeholder="תיאור קצר" rows={3} /><Select value={formUsage} onValueChange={setFormUsage}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="general">טופס כללי</SelectItem><SelectItem value="waiting_list_intake">טופס רשימת המתנה</SelectItem><SelectItem value="required_form">טופס חובה</SelectItem></SelectContent></Select><div className="flex flex-wrap gap-2 text-xs text-slate-500"><Badge variant="outline">טיוטה v{version}</Badge><Badge variant="outline">{publishedVersion ? `פורסם v${publishedVersion}` : 'לא פורסם'}</Badge>{lastSavedAt ? <Badge variant="outline">נשמר {new Date(lastSavedAt).toLocaleString('he-IL')}</Badge> : null}{publishedAt ? <Badge variant="outline">פורסם {new Date(publishedAt).toLocaleDateString('he-IL')}</Badge> : null}</div></div>
             <Separator />
-            <div className="space-y-2"><Button className="w-full gap-2" variant="outline" onClick={addSection}><Layers3 className="h-4 w-4" />הוסף סעיף</Button><Button className="w-full gap-2" variant="outline" onClick={addText}><Plus className="h-4 w-4" />טקסט מקומי</Button><div className="grid grid-cols-1 gap-2">{QUESTION_TYPE_DEFINITIONS.map((definition) => <Button key={definition.type} variant="ghost" className="justify-start rounded-xl border border-slate-200" onClick={() => addQuestion(definition.type)}><Plus className="me-2 h-4 w-4" />{definition.label}</Button>)}</div></div>
+            <div className="space-y-2"><Button className="w-full gap-2" variant="outline" onClick={addSection}><Layers3 className="h-4 w-4" />הוסף סעיף</Button><Button className="w-full gap-2" variant="outline" onClick={addText}><Plus className="h-4 w-4" />טקסט מקומי</Button><div className="grid grid-cols-1 gap-2">{QUESTION_TYPE_DEFINITIONS.map((definition) => <Button key={definition.type} variant="ghost" className="justify-start rounded-xl border border-slate-200" onClick={() => addQuestion(definition.type)}><Plus className="me-2 h-4 w-4" />{definition.label}</Button>)}</div>{formUsage === 'required_form' ? <><Separator /><div className="space-y-1"><Label className="text-xs text-violet-700">שדות מערכת לטופס חובה</Label>{getRequiredFormBuiltInQuestions().filter((def) => !usedBuiltInRfIds.has(def.id)).map((def) => <Button key={def.id} variant="ghost" className="w-full justify-start rounded-xl border border-violet-200 bg-violet-50/50 text-violet-800 hover:bg-violet-100" onClick={() => addBuiltInQuestion(def)}><Plus className="me-2 h-4 w-4" />{def.label}</Button>)}{getRequiredFormBuiltInQuestions().every((def) => usedBuiltInRfIds.has(def.id)) ? <p className="py-1 text-xs text-slate-400">כל שדות המערכת נוספו לטופס</p> : null}</div></> : null}</div>
             <Separator />
             <div className="space-y-3"><div className="flex items-center gap-2 text-sm font-semibold text-slate-800"><Blocks className="h-4 w-4" />בלוקים משותפים</div><Button variant="outline" className="w-full" onClick={() => guardedNavigate('/forms/shared-blocks')}>נהל ספריית בלוקים משותפים</Button><div className="space-y-2"><Label>הוסף שאלה משותפת</Label><Select value={selectedSharedQuestionId} onValueChange={setSelectedSharedQuestionId}><SelectTrigger><SelectValue placeholder="בחר/י שאלה משותפת" /></SelectTrigger><SelectContent>{sharedQuestionBlocks.map((block) => <SelectItem key={block.id} value={block.id}>{block.name}</SelectItem>)}</SelectContent></Select><Button className="w-full" variant="outline" disabled={!selectedSharedQuestionId} onClick={() => insertSharedBlock(selectedSharedQuestionId)}>הוסף לטופס</Button></div><div className="space-y-2"><Label>הוסף טקסט משותף</Label><Select value={selectedSharedTextId} onValueChange={setSelectedSharedTextId}><SelectTrigger><SelectValue placeholder="בחר/י טקסט משותף" /></SelectTrigger><SelectContent>{sharedTextBlocks.map((block) => <SelectItem key={block.id} value={block.id}>{block.name}</SelectItem>)}</SelectContent></Select><Button className="w-full" variant="outline" disabled={!selectedSharedTextId} onClick={() => insertSharedBlock(selectedSharedTextId)}>הוסף לטופס</Button></div></div>
           </CardContent>
@@ -809,13 +823,13 @@ export default function FormBuilderPage() {
 
         <div className="space-y-4">
           {formUsage === 'waiting_list_intake' ? <WaitingListBuiltInPreview answers={previewAnswers} onAnswersChange={setPreviewAnswers} readOnly={mode !== 'preview'} /> : null}
-          {mode === 'preview' ? <SectionedFormRenderer schema={resolvedSchema} sharedBlockMap={sharedBlockMap} visibilityRules={visibilityRules} answers={previewAnswers} evaluationAnswers={previewEvaluationAnswers} onAnswersChange={setPreviewAnswers} /> : <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}><SortableContext items={schema.sections.map((section) => `section:${section.id}`)} strategy={verticalListSortingStrategy}>{resolvedSchema.sections.map((section) => <SortableCard key={section.id} id={`section:${section.id}`} selected={selected.type === 'section' && selected.id === section.id} onSelect={() => setSelected({ type: 'section', id: section.id })} title={section.title} subtitle={section.description} badges={<Badge variant="outline">{section.items.length} פריטים</Badge>}><SortableContext items={section.items.map((item) => `item:${item.id}`)} strategy={verticalListSortingStrategy}><div className="space-y-3">{section.items.map((item) => <SortableCard key={item.id} id={`item:${item.id}`} selected={selected.type === 'item' && selected.id === item.id} onSelect={() => setSelected({ type: 'item', id: item.id })} stopSelectionPropagation title={isQuestionItem(item) ? item.label : (item.title || 'טקסט מידע')} subtitle={isQuestionItem(item) ? item.description : item.content} badges={<div className="flex flex-wrap gap-1"><Badge variant="secondary">{itemTypeLabel(item)}</Badge><Badge variant="outline">{isSharedItem(item) ? 'משותף' : 'מקומי'}</Badge>{visibilityRules.some((group) => group.target_type === 'item' && group.target_id === item.id) ? <Badge variant="outline">מותנה</Badge> : null}{isQuestionItem(item) && alertRules.some((rule) => rule.question_id === item.id) ? <Badge variant="outline">דגלים</Badge> : null}</div>} />)}</div></SortableContext></SortableCard>)}</SortableContext></DndContext>}
+          {mode === 'preview' ? <SectionedFormRenderer schema={resolvedSchema} sharedBlockMap={sharedBlockMap} visibilityRules={visibilityRules} answers={previewAnswers} evaluationAnswers={previewEvaluationAnswers} onAnswersChange={setPreviewAnswers} /> : <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}><SortableContext items={schema.sections.map((section) => `section:${section.id}`)} strategy={verticalListSortingStrategy}>{resolvedSchema.sections.map((section) => <SortableCard key={section.id} id={`section:${section.id}`} selected={selected.type === 'section' && selected.id === section.id} onSelect={() => setSelected({ type: 'section', id: section.id })} title={section.title} subtitle={section.description} badges={<Badge variant="outline">{section.items.length} פריטים</Badge>}><SortableContext items={section.items.map((item) => `item:${item.id}`)} strategy={verticalListSortingStrategy}><div className="space-y-3">{section.items.map((item) => <SortableCard key={item.id} id={`item:${item.id}`} selected={selected.type === 'item' && selected.id === item.id} onSelect={() => setSelected({ type: 'item', id: item.id })} stopSelectionPropagation title={isQuestionItem(item) ? item.label : (item.title || 'טקסט מידע')} subtitle={isQuestionItem(item) ? item.description : item.content} badges={<div className="flex flex-wrap gap-1"><Badge variant="secondary">{itemTypeLabel(item)}</Badge><Badge variant="outline">{isSharedItem(item) ? 'משותף' : 'מקומי'}</Badge>{visibilityRules.some((group) => group.target_type === 'item' && group.target_id === item.id) ? <Badge variant="outline">מותנה</Badge> : null}{isQuestionItem(item) && alertRules.some((rule) => rule.question_id === item.id) ? <Badge variant="outline">דגלים</Badge> : null}{isBuiltInRequiredFormQuestion(item) ? <Badge className="border-violet-200 bg-violet-50 text-violet-700">שדה מערכת</Badge> : null}</div>} />)}</div></SortableContext></SortableCard>)}</SortableContext></DndContext>}
         </div>
 
         <Card className="xl:sticky xl:top-4 xl:h-fit">
           <CardContent className="space-y-4 p-4">
             {selected.type === 'section' && selectedSection ? <><div className="space-y-2"><Label>שם הסעיף</Label><Input value={selectedSection.title} onChange={(event) => updateSchema((prev) => ({ ...prev, sections: prev.sections.map((section) => section.id === selectedSection.id ? { ...section, title: event.target.value } : section) }))} /></div><div className="space-y-2"><Label>תיאור</Label><Textarea rows={3} value={selectedSection.description} onChange={(event) => updateSchema((prev) => ({ ...prev, sections: prev.sections.map((section) => section.id === selectedSection.id ? { ...section, description: event.target.value } : section) }))} /></div><Button variant="destructive" className="w-full gap-2" disabled={schema.sections.length === 1} onClick={() => updateSchema((prev) => ({ ...prev, sections: prev.sections.filter((section) => section.id !== selectedSection.id) }))}><Trash2 className="h-4 w-4" />מחק סעיף</Button></> : null}
-            {selected.type === 'item' && selectedItem ? <ItemEditor selectedItem={selectedItem} selectedQuestion={selectedQuestion} selectedSharedBlockDetail={selectedSharedBlockDetail} updateSelectedItem={updateSelectedItem} deleteSelectedItem={deleteSelectedItem} detachSharedItem={detachSharedItem} navigate={guardedNavigate} /> : null}
+            {selected.type === 'item' && selectedItem && isBuiltInRequiredFormQuestion(selectedItem) ? <Alert className="border-violet-200 bg-violet-50"><AlertDescription className="text-xs text-violet-700">שדה מערכת — בעת הגשת הטופס, שדה זה ישמש לעדכון <strong>{getRequiredFormBuiltInQuestions().find((def) => def.id === selectedItem.id)?.fill_hint || selectedItem.label}</strong>.</AlertDescription></Alert> : null}{selected.type === 'item' && selectedItem ? <ItemEditor selectedItem={selectedItem} selectedQuestion={selectedQuestion} selectedSharedBlockDetail={selectedSharedBlockDetail} updateSelectedItem={updateSelectedItem} deleteSelectedItem={deleteSelectedItem} detachSharedItem={detachSharedItem} navigate={guardedNavigate} /> : null}
             <Separator />
             {selected.id ? <VisibilityEditor selected={selected} selectedGroups={selectedGroups} setVisibilityRules={setVisibilityRules} updateVisibilityGroup={updateVisibilityGroup} availableSources={availableSources} /> : null}
             {selectedQuestion && ['single_select', 'multi_select', 'yes_no'].includes(selectedQuestion.question_type) ? <AlertRulesEditor selectedQuestion={selectedQuestion} alertRules={alertRules} updateAlertRule={updateAlertRule} /> : null}

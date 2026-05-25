@@ -35,6 +35,10 @@ import {
   sendInviteEmail,
 } from '../_shared/form-routing.js';
 import { resolveClientProfileDeliveryDestination } from '../_shared/form-delivery-destination.js';
+import {
+  createOrReuseGuardianByParts,
+  upsertClientGuardianLink,
+} from '../_shared/client-profiles.js';
 
 const ROUTING_CATEGORY = 'required_form';
 const WORKFLOW_KIND = 'required_form';
@@ -669,6 +673,82 @@ async function submitPublicInvite(context, req, { controlClient }) {
   if (updateError) {
     context.log?.error?.('student-required-forms failed to update submission on submit', { message: updateError?.message, submissionId });
     return respond(context, 500, { message: 'failed_to_submit' });
+  }
+
+  // Apply required-form built-in field updates.
+  // Any rf_* answer keys map 1:1 to client_profiles columns or guardian fields.
+  // These updates are best-effort — a failure here does not roll back the submission.
+  const rfClientProfilePatch = {};
+  const rfFirstName = normalizeString(preparedAnswers?.rf_first_name);
+  const rfLastName = normalizeString(preparedAnswers?.rf_last_name);
+  const rfIdentityNumber = String(preparedAnswers?.rf_identity_number || '').replace(/\D/g, '').trim();
+  const rfPhone = String(preparedAnswers?.rf_phone || '').replace(/[^\d]/g, '').trim();
+  const rfEmail = normalizeString(preparedAnswers?.rf_email).toLowerCase();
+  const rfDateOfBirth = normalizeString(preparedAnswers?.rf_date_of_birth);
+
+  if (rfFirstName) rfClientProfilePatch.first_name = rfFirstName;
+  if (rfLastName) rfClientProfilePatch.last_name = rfLastName;
+  if (rfIdentityNumber) rfClientProfilePatch.identity_number = rfIdentityNumber;
+  if (rfPhone) rfClientProfilePatch.phone = rfPhone;
+  if (rfEmail) rfClientProfilePatch.email = rfEmail;
+  if (rfDateOfBirth) rfClientProfilePatch.date_of_birth = rfDateOfBirth;
+
+  if (Object.keys(rfClientProfilePatch).length > 0) {
+    rfClientProfilePatch.updated_at = nowIso;
+    const { error: profilePatchError } = await withOrgScope(client, 'client_profiles', orgId)
+      .update(rfClientProfilePatch)
+      .eq('id', submission.client_profile_id);
+    if (profilePatchError) {
+      context.log?.warn?.('student-required-forms failed to patch client_profile from rf_ answers', {
+        message: profilePatchError?.message,
+        clientProfileId: submission.client_profile_id,
+      });
+    } else {
+      await writeTenantAudit(context, client, {
+        correlationId: randomUUID(),
+        actorUserId: null,
+        eventType: 'client_profile.required_form_field_update',
+        retentionCategory: TENANT_AUDIT_RETENTION.STANDARD,
+        resourceType: 'client_profile',
+        resourceId: submission.client_profile_id,
+        afterState: rfClientProfilePatch,
+        details: { origin: 'api/student-required-forms', submission_id: submissionId },
+      });
+    }
+  }
+
+  const rfGuardianFirstName = normalizeString(preparedAnswers?.rf_guardian_first_name);
+  const rfGuardianLastName = normalizeString(preparedAnswers?.rf_guardian_last_name) || null;
+  const rfGuardianPhone = String(preparedAnswers?.rf_guardian_phone || '').replace(/[^\d]/g, '').trim() || null;
+  const rfGuardianEmail = normalizeString(preparedAnswers?.rf_guardian_email).toLowerCase() || null;
+  const rfGuardianRelationshipRaw = normalizeString(preparedAnswers?.rf_guardian_relationship);
+  const rfGuardianRelationship = ['father', 'mother', 'caretaker', 'other'].includes(rfGuardianRelationshipRaw)
+    ? rfGuardianRelationshipRaw
+    : 'other';
+
+  if (rfGuardianFirstName) {
+    try {
+      const guardianResult = await createOrReuseGuardianByParts(client, {
+        orgId,
+        firstName: rfGuardianFirstName,
+        lastName: rfGuardianLastName,
+        phone: rfGuardianPhone,
+        email: rfGuardianEmail,
+      });
+      if (guardianResult?.guardianId) {
+        await upsertClientGuardianLink(client, {
+          orgId,
+          clientProfileId: submission.client_profile_id,
+          guardianId: guardianResult.guardianId,
+          relationship: rfGuardianRelationship,
+        });
+      }
+    } catch (guardianError) {
+      context.log?.warn?.('student-required-forms failed to create/link guardian from rf_ answers', {
+        message: guardianError?.message,
+        clientProfileId: submission.client_profile_id,
+      });
+    }
   }
 
   // Delete the routing row (one-time use)
