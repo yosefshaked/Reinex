@@ -708,21 +708,29 @@ export default async function (context, req) {
       endDate = currentRange.endDate;
     }
 
-    const snapshot = hmoProviderId
-      ? await billingService.getHmoProviderReceivablesSnapshot({
-        hmoProviderId,
-        periodStart: startDate || null,
-        periodEnd: endDate || null,
-      })
-      : await fetchBillingSnapshot(supabase, {
-        orgId,
-        studentId,
-        clientProfileId,
-        startDate,
-        endDate,
-      });
+    try {
+      const snapshot = hmoProviderId
+        ? await billingService.getHmoProviderReceivablesSnapshot({
+          hmoProviderId,
+          periodStart: startDate || null,
+          periodEnd: endDate || null,
+        })
+        : await fetchBillingSnapshot(supabase, {
+          orgId,
+          studentId,
+          clientProfileId,
+          startDate,
+          endDate,
+        });
 
-    return respond(context, 200, snapshot);
+      return respond(context, 200, snapshot);
+    } catch (snapshotError) {
+      context.log?.error?.('billing/snapshot failed', {
+        message: snapshotError?.message,
+        code: snapshotError?.code,
+      });
+      return respondTracked(context, 500, { message: 'billing_snapshot_failed' }, undefined, { error: snapshotError });
+    }
   }
 
   if (!isAdminRole(role)) {

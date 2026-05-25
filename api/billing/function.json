@@ -1,4 +1,5 @@
 {
+  "entryPoint": "default",
   "bindings": [
     {
       "authLevel": "anonymous",
