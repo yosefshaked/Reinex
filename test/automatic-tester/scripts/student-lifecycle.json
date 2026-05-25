@@ -4,7 +4,7 @@
     "name": "Student Lifecycle",
     "description": "Full lifecycle: admin pre-creates a student via API, creates a waiting-list entry by searching the combobox, verifies the entry, verifies the student appears in the roster, and views the student profile.",
     "version": "1.2.1",
-    "last_validated_at": "2026-05-24T10:28:54Z",
+    "last_validated_at": "2026-05-25T13:10:00Z",
     "author": "claude-ai",
     "dependencies": {
       "routes": [
@@ -28,7 +28,6 @@
   "variables": {
     "STUDENT_FIRST": "טסט",
     "STUDENT_LAST":  "אוטומטי",
-    "STUDENT_ID":    "999000001",
     "STUDENT_PHONE": "0501234567"
   },
 
@@ -74,11 +73,15 @@
           "endpoint": "/api/students-list",
           "body": {
             "first_name": "{{STUDENT_FIRST}}",
-            "last_name":  "{{STUDENT_LAST}}",
-            "identity_number": "{{STUDENT_ID}}",
-            "phone": "{{STUDENT_PHONE}}"
+            "last_name":  "{{STUDENT_LAST}} {{RUN_NUMERIC_ID}}",
+            "identity_number": "997{{RUN_NUMERIC_ID}}",
+            "phone": "0501{{RUN_NUMERIC_ID}}"
           },
-          "ignoreStatus": [409]
+          "store": "STUDENT_UUID",
+          "storeField": "id",
+          "stores": [
+            { "variable": "STUDENT_CLIENT_PROFILE_ID", "field": "client_profile_id" }
+          ]
         },
         {
           "id": "navigate-waiting-list",
@@ -120,23 +123,23 @@
         },
         {
           "id": "type-student-name",
-          "description": "Type the student first name to filter the combobox options",
+          "description": "Type the run-specific identity number to filter the combobox options",
           "action": "type",
           "selector": "#waiting-student",
-          "value": "{{STUDENT_FIRST}}"
+          "value": "997{{RUN_NUMERIC_ID}}"
         },
         {
           "id": "wait-for-student-option",
           "description": "Wait for the matching student option to appear in the dropdown",
           "action": "waitForSelector",
-          "selector": "[role='option']:has-text('{{STUDENT_FIRST}}')",
+          "selector": "[role='option']:has-text('997{{RUN_NUMERIC_ID}}')",
           "state": "visible"
         },
         {
           "id": "click-student-option",
           "description": "Click the student option to select them — this calls commitOption → handleStudentChange with a valid clientProfileId",
           "action": "click",
-          "selector": "[role='option']:has-text('{{STUDENT_FIRST}}')",
+          "selector": "[role='option']:has-text('997{{RUN_NUMERIC_ID}}')",
           "first": true
         },
         {
@@ -214,7 +217,7 @@
           "description": "Confirm the new student's entry card is visible in the queue",
           "action": "assert",
           "type": "visible",
-          "selector": "button:has-text('{{STUDENT_FIRST}}')"
+          "selector": "button:has-text('{{STUDENT_LAST}} {{RUN_NUMERIC_ID}}')"
         },
         {
           "id": "screenshot-entry-in-list",
@@ -243,11 +246,18 @@
           "selector": "table"
         },
         {
+          "id": "search-student-in-roster",
+          "description": "Filter the roster by the run-specific identity number so pagination and sorting do not hide the row",
+          "action": "fill",
+          "selector": "input[placeholder='חיפוש לפי שם, טלפון, תעודת זהות...']",
+          "value": "997{{RUN_NUMERIC_ID}}"
+        },
+        {
           "id": "assert-student-in-roster",
           "description": "Confirm the student row is visible in the table",
           "action": "assert",
           "type": "visible",
-          "selector": "tr:has-text('{{STUDENT_FIRST}}')"
+          "selector": "tr:has-text('{{STUDENT_LAST}} {{RUN_NUMERIC_ID}}')"
         },
         {
           "id": "screenshot-student-in-roster",
@@ -275,10 +285,17 @@
           "selector": "table"
         },
         {
+          "id": "search-student-in-roster",
+          "description": "Filter the roster by the run-specific identity number before opening the profile",
+          "action": "fill",
+          "selector": "input[placeholder='חיפוש לפי שם, טלפון, תעודת זהות...']",
+          "value": "997{{RUN_NUMERIC_ID}}"
+        },
+        {
           "id": "click-student-link",
           "description": "Click the student's name link to open the profile",
           "action": "click",
-          "selector": "tr:has-text('{{STUDENT_FIRST}}') a"
+          "selector": "tr:has-text('{{STUDENT_LAST}} {{RUN_NUMERIC_ID}}') a"
         },
         {
           "id": "wait-for-profile-url",
@@ -291,7 +308,7 @@
           "description": "Confirm student name appears in the page heading",
           "action": "assert",
           "type": "visible",
-          "selector": "h1:has-text('{{STUDENT_FIRST}}')"
+          "selector": "body:has-text('{{STUDENT_LAST}} {{RUN_NUMERIC_ID}}')"
         },
         {
           "id": "screenshot-profile",

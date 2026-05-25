@@ -2,6 +2,8 @@
 setlocal enabledelayedexpansion
 title Reinex - Automatic Tester Setup
 cd /d "%~dp0"
+set "SUPABASE_TELEMETRY_DISABLED=1"
+set "TESTER_ROOT=%CD%"
 
 echo.
 echo =====================================================
@@ -40,20 +42,59 @@ if errorlevel 1 (
     goto :after_supabase
 )
 
-supabase status >nul 2>&1
-if not errorlevel 1 (
+set "SUPABASE_STATUS_LOG=%TEMP%\reinex-supabase-status-%RANDOM%.log"
+pushd "%TESTER_ROOT%"
+call supabase status > "%SUPABASE_STATUS_LOG%" 2>&1
+set "SUPABASE_STATUS_ERROR=%ERRORLEVEL%"
+popd
+
+if "%SUPABASE_STATUS_ERROR%"=="0" (
     echo [OK] Supabase already running
+    if exist "%SUPABASE_STATUS_LOG%" del "%SUPABASE_STATUS_LOG%" >nul 2>&1
     goto :after_supabase
 )
 
+echo [WARN] supabase status failed from automatic-tester:
+echo        %TESTER_ROOT%
+echo.
+if exist "%SUPABASE_STATUS_LOG%" (
+    type "%SUPABASE_STATUS_LOG%"
+    del "%SUPABASE_STATUS_LOG%" >nul 2>&1
+) else (
+    echo        No status output was captured.
+)
+echo.
+if not exist "%TESTER_ROOT%\supabase\config.toml" (
+    echo Supabase config is missing. Creating automatic-tester project config...
+    pushd "%TESTER_ROOT%"
+    call supabase init --force
+    set "SUPABASE_INIT_ERROR=!ERRORLEVEL!"
+    popd
+    if not "!SUPABASE_INIT_ERROR!"=="0" (
+        echo.
+        echo [ERROR] supabase init failed. See the message above.
+        pause & exit /b 1
+    )
+)
+
 echo Supabase is not running. Starting it now in a new window...
-pushd "%~dp0..\.."
-start "Supabase" cmd /k "supabase start"
-popd
+start "Supabase" /D "%TESTER_ROOT%" cmd /k "call supabase start"
 echo.
 echo Supabase is starting in that window.
 echo When you see "Started supabase local development setup" press any key here.
 pause
+
+echo Verifying Supabase after startup...
+pushd "%TESTER_ROOT%"
+call supabase status
+set "SUPABASE_STATUS_ERROR=%ERRORLEVEL%"
+popd
+if not "%SUPABASE_STATUS_ERROR%"=="0" (
+    echo.
+    echo [ERROR] Supabase still is not available. See the message above.
+    pause & exit /b 1
+)
+echo [OK] Supabase is running
 
 :after_supabase
 

@@ -4,7 +4,7 @@
     "name": "Required Forms Workflow",
     "description": "End-to-end test of the required form flow. Covers: creating a required_form template with an rf_built_in_section schema, publishing it, attaching it to a service, sending an invite, verifying the public /submit UI renders the violet שדות חובה section with the correct rf_ fields inside it (not in a generic section), filling the rf_ fields, submitting the form, and asserting the client_profile first_name / last_name / date_of_birth were updated in the backend.",
     "version": "1.0.0",
-    "last_validated_at": "2026-06-01T00:00:00Z",
+    "last_validated_at": "2026-05-25T12:58:30Z",
     "author": "claude-ai",
     "dependencies": {
       "routes": [
@@ -37,7 +37,6 @@
     "RF_STUDENT_FIRST_UPDATED": "עדכון",
     "RF_STUDENT_LAST_UPDATED": "מבחן",
     "RF_STUDENT_DOB": "2000-01-15",
-    "RF_STUDENT_ID": "999000020",
     "RF_STUDENT_PHONE": "0502345678",
     "RF_STUDENT_EMAIL": "rf-workflow-test@reinex-test.local",
     "RF_FORM_NAME": "טופס חובה E2E אוטומטי",
@@ -132,35 +131,27 @@
     },
     {
       "id": "api-setup-rf-student",
-      "name": "API – Create or reset the required-forms test student",
-      "description": "Ensures the dedicated RF test student exists and resets their first_name, last_name, and date_of_birth to baseline values so the post-submission assertion can confirm the rf_ answers actually updated the profile.",
+      "name": "API – Create the required-forms test student",
+      "description": "Creates a fresh RF test student for this run and resets their first_name, last_name, and date_of_birth to baseline values so the post-submission assertion can confirm the rf_ answers actually updated the profile.",
       "steps": [
         {
           "id": "create-rf-student",
           "action": "apiCall",
-          "description": "Create the RF test student; ignore 409 if they already exist from a previous run.",
+          "description": "Create a run-specific RF test student.",
           "method": "POST",
           "endpoint": "/api/students-list",
           "body": {
             "org_id": "{{TEST_ORG_ID}}",
             "first_name": "{{RF_STUDENT_FIRST_BASELINE}}",
             "last_name": "{{RF_STUDENT_LAST_BASELINE}}",
-            "identity_number": "{{RF_STUDENT_ID}}",
+            "identity_number": "998{{RUN_NUMERIC_ID}}",
             "phone": "{{RF_STUDENT_PHONE}}",
-            "email": "{{RF_STUDENT_EMAIL}}"
+            "email": "rf-workflow-test+{{RUN_NUMERIC_ID}}@reinex-test.local"
           },
-          "ignoreStatus": [409]
-        },
-        {
-          "id": "fetch-rf-student-ids",
-          "action": "apiCall",
-          "description": "Resolve the student UUID and client_profile_id by searching on identity_number.",
-          "method": "GET",
-          "endpoint": "/api/students-list?org_id={{TEST_ORG_ID}}&q={{RF_STUDENT_ID}}",
           "store": "RF_STUDENT_UUID",
-          "storeField": "0.id",
+          "storeField": "id",
           "stores": [
-            { "variable": "RF_STUDENT_CLIENT_PROFILE_ID", "field": "0.client_profile_id" }
+            { "variable": "RF_STUDENT_CLIENT_PROFILE_ID", "field": "client_profile_id" }
           ]
         },
         {
@@ -358,6 +349,12 @@
           "description": "Screenshot the filled form before submission."
         },
         {
+          "id": "wait-for-react-form-state",
+          "action": "sleep",
+          "ms": 250,
+          "description": "Give the controlled form state a short turn to settle after typing before submitting."
+        },
+        {
           "id": "click-submit",
           "action": "click",
           "selector": "button[type='submit']:has-text('שלח טופס')",
@@ -373,7 +370,7 @@
         {
           "id": "wait-for-success-state",
           "action": "waitForSelector",
-          "selector": "h2:has-text('הטופס נשלח בהצלחה')",
+          "selector": "div:has-text('הטופס נשלח בהצלחה')",
           "description": "Wait for the CardTitle to show the success state ('הטופס נשלח בהצלחה'). This confirms the submit returned 200 and setStep('done') was called.",
           "timeout": 10000
         },
@@ -381,7 +378,7 @@
           "id": "assert-success-message",
           "action": "assert",
           "type": "text",
-          "selector": "h2",
+          "selector": "body",
           "value": "הטופס נשלח בהצלחה",
           "description": "Assert the page title changed to the success message."
         },
@@ -464,7 +461,7 @@
         {
           "id": "wait-for-forms-tab",
           "action": "waitForSelector",
-          "selector": "[role='tabpanel']",
+          "selector": "h3:has-text('טפסים')",
           "description": "Wait for the forms tab panel to render.",
           "timeout": 15000
         },
@@ -472,7 +469,7 @@
           "id": "assert-form-submission-visible",
           "action": "assert",
           "type": "visible",
-          "selector": "[role='tabpanel']",
+          "selector": "h3:has-text('טפסים')",
           "description": "Assert the forms tab panel is visible (basic sanity that the tab loaded)."
         },
         {

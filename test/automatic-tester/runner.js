@@ -163,9 +163,12 @@ function buildDynamicVars() {
   const now = new Date();
   const y   = now.getUTCFullYear();
   const m   = now.getUTCMonth(); // 0-based; Date.UTC handles m=-1 → December correctly
+  const runNumericId = String(Date.now() % 1000000).padStart(6, '0');
   return {
     CURRENT_MONTH_START: new Date(Date.UTC(y, m,     1, 8, 0, 0)).toISOString(),
     PREV_MONTH_START:    new Date(Date.UTC(y, m - 1, 1, 8, 0, 0)).toISOString(),
+    RUN_ID:              `run-${runNumericId}`,
+    RUN_NUMERIC_ID:      runNumericId,
   };
 }
 

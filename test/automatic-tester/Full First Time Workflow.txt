@@ -1,4 +1,5 @@
 supabase start                  # Supabase stack (Docker)
+supabase init                                   #  Create the container
 npm run dev                     # or swa start (the Reinex app)
 
 cd test/automatic-tester

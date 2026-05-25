@@ -578,7 +578,7 @@ async function loadPublicInvite(context, req, { controlClient }) {
 // Action: submit (POST, public — authenticated by invite token)
 // ─────────────────────────────────────────────────────────────
 
-async function submitPublicInvite(context, req, { controlClient }) {
+async function submitPublicInvite(context, req, { controlClient, env }) {
   const body = parseRequestBody(req);
   const inviteToken = normalizeUuid(body?.invite_token || body?.inviteToken || body?.invite);
   if (!inviteToken) return respond(context, 400, { message: 'invalid_invite_token' });
@@ -643,8 +643,16 @@ async function submitPublicInvite(context, req, { controlClient }) {
   }
 
   const rawAnswers = body?.answers && typeof body.answers === 'object' && !Array.isArray(body.answers) ? body.answers : {};
-  const preparedAnswers = prepareAnswersForStorage(rawAnswers, publicFormState.form_schema);
-  const alertFlags = evaluateAlertFlags(preparedAnswers, form.alert_rules);
+  const preparedAnswers = prepareAnswersForStorage({
+    formSchema: publicFormState.form_schema,
+    answers: rawAnswers,
+    env,
+  });
+  const alertFlags = evaluateAlertFlags({
+    formSchema: publicFormState.form_schema,
+    alertRules: form.alert_rules,
+    answers: preparedAnswers,
+  });
   const schemaSnapshot = materializeSchemaForSnapshot(publicFormState.form_schema, {
     version: form.version,
     formId: form.id,
@@ -1070,7 +1078,7 @@ export default async function studentRequiredForms(context, req) {
     return loadPublicInvite(context, req, { controlClient });
   }
   if (method === 'POST' && action === 'submit') {
-    return submitPublicInvite(context, req, { controlClient });
+    return submitPublicInvite(context, req, { controlClient, env });
   }
 
   // Authenticated actions
