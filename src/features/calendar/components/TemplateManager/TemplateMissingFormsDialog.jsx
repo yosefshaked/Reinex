@@ -74,6 +74,7 @@ export default function TemplateMissingFormsDialog({
   onSent,
 }) {
   const [sendTarget, setSendTarget] = useState(null);
+  const [sentPending, setSentPending] = useState(false);
 
   function handleClose() {
     setSendTarget(null);
@@ -160,10 +161,14 @@ export default function TemplateMissingFormsDialog({
       {sendTarget && (
         <SendRequiredFormDialog
           open={Boolean(sendTarget)}
-          onClose={() => setSendTarget(null)}
-          onSent={() => {
+          onClose={() => {
+            const wasSent = sentPending;
             setSendTarget(null);
-            onSent?.();
+            setSentPending(false);
+            if (wasSent) onSent?.();
+          }}
+          onSent={() => {
+            setSentPending(true);
           }}
           student={sendTarget.participant?.student || null}
           clientProfile={sendTarget.participant?.client_profile || null}

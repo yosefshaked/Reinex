@@ -413,6 +413,7 @@ export default function SubjectFormsTab({
   const [resendState, setResendState] = useState({ submissionId: '', deliveryMethod: '' });
   const [resendDialog, setResendDialog] = useState({ open: false, submission: null, deliveryMethod: '' });
   const [sendRequiredForm, setSendRequiredForm] = useState(null); // compliance entry to send
+  const [sendRequiredFormSent, setSendRequiredFormSent] = useState(false);
 
   const activeOrgId = activeOrg?.id || null;
   const effectiveClientProfileId = String(clientProfileId || clientProfile?.id || student?.client_profile_id || '').trim();
@@ -879,7 +880,15 @@ export default function SubjectFormsTab({
 
       <SendRequiredFormDialog
         open={Boolean(sendRequiredForm)}
-        onClose={() => setSendRequiredForm(null)}
+        onClose={() => {
+          const wasSent = sendRequiredFormSent;
+          setSendRequiredForm(null);
+          setSendRequiredFormSent(false);
+          if (wasSent) {
+            void loadSubmissions();
+            onComplianceRefresh?.();
+          }
+        }}
         student={student}
         clientProfile={clientProfile}
         serviceId={sendRequiredForm?.service_id || ''}
@@ -887,9 +896,7 @@ export default function SubjectFormsTab({
         requiredFormLabel={sendRequiredForm?.required_form_label || sendRequiredForm?.form_name || ''}
         serviceName={sendRequiredForm?.service_name || ''}
         onSent={() => {
-          setSendRequiredForm(null);
-          void loadSubmissions();
-          onComplianceRefresh?.();
+          setSendRequiredFormSent(true);
         }}
       />
     </div>

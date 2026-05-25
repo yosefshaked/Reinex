@@ -28,10 +28,14 @@ export function resolveSubjectFormDeliveryContact({ student = null, clientProfil
   const participantClientProfile = participant?.client_profile || null;
   const resolvedStudent = student || participantStudent || null;
   const resolvedClientProfile = clientProfile || participantClientProfile || null;
+  // 'primary_guardian' is set by the calendar endpoint on nested participant shapes.
+  // 'guardian' is set by the students-list endpoint on the merged student record.
   const guardian = resolvedClientProfile?.primary_guardian
     || resolvedStudent?.primary_guardian
+    || resolvedStudent?.guardian
     || participantClientProfile?.primary_guardian
     || participantStudent?.primary_guardian
+    || participantStudent?.guardian
     || null;
 
   const profileName = compactName([
