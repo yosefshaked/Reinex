@@ -349,7 +349,8 @@ export default async function forms(context, req) {
       .select(selectFields)
       .order('created_at', { ascending: false });
 
-    if (selectionMode || !isAdmin) {
+    const isActiveParam = normalizeString(req?.query?.is_active ?? req?.query?.isActive);
+    if (selectionMode || !isAdmin || isActiveParam === 'true') {
       query.eq('is_active', true);
     }
     if (usageFilter) {
