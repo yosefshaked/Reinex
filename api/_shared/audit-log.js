@@ -215,6 +215,7 @@ export const AUDIT_ACTIONS = {
   FORM_TEMPLATE_CREATED: 'form_template.created',
   FORM_TEMPLATE_UPDATED: 'form_template.updated',
   FORM_TEMPLATE_PUBLISHED: 'form_template.published',
+  FORM_TEMPLATE_REACTIVATED: 'form_template.reactivated',
   FORM_TEMPLATE_DELETED: 'form_template.deleted',
   FORM_SUBMISSION_INITIATED: 'form_submission.initiated',
   FORM_SUBMISSION_RESENT: 'form_submission.resent',

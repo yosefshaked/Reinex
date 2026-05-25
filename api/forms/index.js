@@ -44,6 +44,17 @@ function normalizeOptionalJson(value) {
   return value;
 }
 
+function normalizeBooleanFlag(value) {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value !== 0;
+  if (typeof value === 'string') {
+    const normalized = normalizeString(value).toLowerCase();
+    if (['true', '1', 'yes', 'on'].includes(normalized)) return true;
+    if (['false', '0', 'no', 'off'].includes(normalized)) return false;
+  }
+  return null;
+}
+
 function normalizeFormUsage(value) {
   const normalized = normalizeString(value).toLowerCase();
   if (!normalized) return '';
@@ -688,6 +699,14 @@ export default async function forms(context, req) {
       updates.form_usage = formUsage;
     }
 
+    if (Object.prototype.hasOwnProperty.call(body, 'is_active') || Object.prototype.hasOwnProperty.call(body, 'isActive')) {
+      const isActive = normalizeBooleanFlag(body?.is_active ?? body?.isActive);
+      if (isActive === null) {
+        return respond(context, 400, { message: 'invalid_is_active' });
+      }
+      updates.is_active = isActive;
+    }
+
     if (Object.prototype.hasOwnProperty.call(body, 'form_schema') || Object.prototype.hasOwnProperty.call(body, 'formSchema')) {
       const formSchema = normalizeOptionalJson(body?.form_schema ?? body?.formSchema);
       if (formSchema === null && (body?.form_schema !== null && body?.formSchema !== null)) {
@@ -773,6 +792,9 @@ export default async function forms(context, req) {
       return respond(context, 404, { message: 'form_not_found' });
     }
 
+    const transitionedToActive = existing.is_active === false && data.is_active === true;
+    const transitionedToInactive = existing.is_active === true && data.is_active === false;
+
     try {
       await syncFormSharedBlockLinks(supabase, orgId, formId, {
         draftSchema: nextSchema,
@@ -795,7 +817,11 @@ export default async function forms(context, req) {
       userId,
       userEmail,
       userRole: role,
-      actionType: AUDIT_ACTIONS.FORM_TEMPLATE_UPDATED,
+      actionType: transitionedToActive
+        ? AUDIT_ACTIONS.FORM_TEMPLATE_REACTIVATED
+        : transitionedToInactive
+          ? AUDIT_ACTIONS.FORM_TEMPLATE_DELETED
+          : AUDIT_ACTIONS.FORM_TEMPLATE_UPDATED,
       actionCategory: AUDIT_CATEGORIES.FORMS,
       resourceType: 'form',
       resourceId: formId,
@@ -807,17 +833,25 @@ export default async function forms(context, req) {
     await writeTenantFormAudit(supabase, context, {
       orgId,
       actorUserId: userId,
-      eventType: publishRequested ? 'form.template_published' : 'form.template_updated',
+      eventType: publishRequested
+        ? 'form.template_published'
+        : transitionedToActive
+          ? 'form.template_reactivated'
+          : transitionedToInactive
+            ? 'form.template_deactivated'
+            : 'form.template_updated',
       retentionCategory: TENANT_AUDIT_RETENTION.STANDARD,
       resourceType: 'form',
       resourceId: formId,
       beforeState: {
         version: existing.version,
         published_at: existing.published_at,
+        is_active: existing.is_active,
       },
       afterState: {
         version: data.version,
         published_at: data.published_at,
+        is_active: data.is_active,
       },
       details: {
         updated_fields: Object.keys(updates).filter((k) => k !== 'updated_at'),

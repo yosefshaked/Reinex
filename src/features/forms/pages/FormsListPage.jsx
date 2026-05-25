@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, FileText, Loader2, AlertCircle, MoreHorizontal, Trash2, Eye } from 'lucide-react';
+import { Plus, FileText, Loader2, AlertCircle, MoreHorizontal, Trash2, Eye, RotateCcw } from 'lucide-react';
 import PageLayout from '@/components/ui/PageLayout.jsx';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -50,6 +50,17 @@ function getDraftDefaultsByUsage(usage) {
     name: 'טופס כללי חדש',
     description: 'טופס כללי למילוי ושליחת מידע נוסף.',
   };
+}
+
+function isPublishedForm(form) {
+  if (!form || typeof form !== 'object') return false;
+  if (form.is_published === true) return true;
+  if (form.requires_publish_migration === true) return true;
+  const metadata = form.metadata;
+  if (metadata && typeof metadata === 'object' && !Array.isArray(metadata) && metadata.published_form_schema && typeof metadata.published_form_schema === 'object') {
+    return true;
+  }
+  return Boolean(form.published_at);
 }
 
 export default function FormsListPage() {
@@ -168,6 +179,21 @@ export default function FormsListPage() {
     } catch (err) {
       console.error('Failed to deactivate form', err);
       toast.error(err?.message || 'שגיאה בהשבתת הטופס');
+    }
+  };
+
+  const handleReactivate = async (form) => {
+    try {
+      await authenticatedFetch(`forms/${form.id}`, {
+        session,
+        method: 'PUT',
+        body: { org_id: activeOrgId, is_active: true },
+      });
+      toast.success(`הטופס "${form.name}" הופעל מחדש`);
+      void loadForms();
+    } catch (err) {
+      console.error('Failed to reactivate form', err);
+      toast.error(err?.message || 'שגיאה בהפעלה מחדש של הטופס');
     }
   };
 
@@ -310,7 +336,11 @@ export default function FormsListPage() {
                   </TableCell>
                   <TableCell className="text-center">
                     {form.is_active ? (
-                      <Badge variant="secondary">פעיל</Badge>
+                      isPublishedForm(form) ? (
+                        <Badge variant="secondary">פורסם</Badge>
+                      ) : (
+                        <Badge variant="outline">טיוטה</Badge>
+                      )
                     ) : (
                       <Badge variant="destructive">מושבת</Badge>
                     )}
@@ -331,13 +361,21 @@ export default function FormsListPage() {
                             <Eye className="h-4 w-4" />
                             עריכת שאלון
                           </DropdownMenuItem>
-                          {form.is_active && (
+                          {form.is_active ? (
                             <DropdownMenuItem
                               className="gap-2 text-red-600 focus:text-red-600"
                               onClick={() => handleDeactivate(form)}
                             >
                               <Trash2 className="h-4 w-4" />
                               השבת טופס
+                            </DropdownMenuItem>
+                          ) : (
+                            <DropdownMenuItem
+                              className="gap-2"
+                              onClick={() => handleReactivate(form)}
+                            >
+                              <RotateCcw className="h-4 w-4" />
+                              הפעל מחדש
                             </DropdownMenuItem>
                           )}
                         </DropdownMenuContent>
