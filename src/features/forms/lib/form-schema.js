@@ -362,6 +362,22 @@ function attachCompatibilityQuestions(section) {
   };
 }
 
+// Reserved section ID for the mandatory built-in questions section in required_form flows.
+export const RF_BUILT_IN_SECTION_ID = 'rf_built_in_section';
+
+export function isBuiltInRequiredFormSection(section) {
+  return section?.id === RF_BUILT_IN_SECTION_ID;
+}
+
+export function createRequiredFormBuiltInSection(items = []) {
+  return {
+    id: RF_BUILT_IN_SECTION_ID,
+    title: 'שדות חובה',
+    description: 'פרטים אלו ישמשו לעדכון פרופיל התלמיד/ה',
+    items,
+  };
+}
+
 export function createEmptyFormSchema() {
   return {
     version: FORM_SCHEMA_VERSION,

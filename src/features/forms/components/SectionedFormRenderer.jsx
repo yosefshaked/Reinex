@@ -6,7 +6,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
-import { getVisibleSections, isQuestionItem } from '@/features/forms/lib/form-schema.js';
+import { getVisibleSections, isQuestionItem, RF_BUILT_IN_SECTION_ID } from '@/features/forms/lib/form-schema.js';
 
 function RequiredLabel({ htmlFor, children, required = false }) {
   return (
@@ -415,9 +415,9 @@ export default function SectionedFormRenderer({
   return (
     <div className={cn('space-y-5', className)}>
       {visibleSections.map((section) => (
-        <div key={section.id} className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div key={section.id} className={section.id === RF_BUILT_IN_SECTION_ID ? 'rounded-3xl border border-violet-200 bg-violet-50/30 p-5 shadow-sm' : 'rounded-3xl border border-slate-200 bg-white p-5 shadow-sm'}>
           <div className="mb-4 space-y-1">
-            <h4 className="text-sm font-semibold text-slate-900">{section.title}</h4>
+            <h4 className={section.id === RF_BUILT_IN_SECTION_ID ? 'text-sm font-semibold text-violet-900' : 'text-sm font-semibold text-slate-900'}>{section.title}</h4>
             {section.description ? <p className="text-xs text-slate-500">{section.description}</p> : null}
           </div>
           <div className="space-y-4">
