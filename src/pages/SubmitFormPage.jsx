@@ -9,7 +9,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
 import SectionedFormRenderer from '@/features/forms/components/SectionedFormRenderer.jsx';
-import { buildInitialAnswers, getVisibleSections, normalizeFormSchema, normalizeVisibilityRules, validateVisibleAnswers } from '@/features/forms/lib/form-schema.js';
+import { buildInitialAnswers, getVisibleSections, isBuiltInRequiredFormQuestion, normalizeFormSchema, normalizeVisibilityRules, validateVisibleAnswers } from '@/features/forms/lib/form-schema.js';
 import { normalizePreferredTimeRangeToGrid, ceilClockTimeToGrid } from '@/lib/time-grid.js';
 
 const DAYS_OF_WEEK = [
@@ -297,6 +297,24 @@ export default function SubmitFormPage() {
     () => getVisibleSections(formSchema, visibilityRules, visibilityEvaluationAnswers),
     [formSchema, visibilityEvaluationAnswers, visibilityRules],
   );
+
+  const rfBuiltInItems = useMemo(
+    () =>
+      inviteFlow === 'required_form'
+        ? (formSchema?.sections ?? []).flatMap((s) => (s.items ?? []).filter(isBuiltInRequiredFormQuestion))
+        : [],
+    [formSchema, inviteFlow],
+  );
+
+  const regularFormSchema = useMemo(() => {
+    if (inviteFlow !== 'required_form' || rfBuiltInItems.length === 0) return formSchema;
+    return {
+      ...formSchema,
+      sections: (formSchema?.sections ?? [])
+        .map((s) => ({ ...s, items: (s.items ?? []).filter((item) => !isBuiltInRequiredFormQuestion(item)) }))
+        .filter((s) => s.items.length > 0),
+    };
+  }, [formSchema, inviteFlow, rfBuiltInItems]);
 
   useEffect(() => {
     if (Object.keys(customValidationErrors).length > 0) {
@@ -1138,39 +1156,98 @@ export default function SubmitFormPage() {
                   </div>
                 )}
 
-                <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-                  <div className="mb-4 flex items-center gap-3">
-                    <div className="rounded-2xl bg-slate-100 p-3 text-slate-700">
-                      <FileCheck2 className="h-5 w-5" />
-                    </div>
-                    <div>
-                      <h4 className="text-sm font-semibold text-slate-900">שאלות נוספות</h4>
-                      <p className="text-xs text-slate-500">מלאו כל שאלה רלוונטית כדי שנוכל להמשיך את הטיפול מהר יותר.</p>
-                    </div>
-                  </div>
+                {inviteFlow === 'required_form' ? (
                   <form
-                    className="space-y-4"
+                    className="space-y-5"
                     onSubmit={(event) => {
                       event.preventDefault();
                       void handleSubmitForm();
                     }}
                   >
-                    <SectionedFormRenderer
-                      schema={formSchema}
-                      visibilityRules={visibilityRules}
-                      answers={answers}
-                      evaluationAnswers={visibilityEvaluationAnswers}
-                      onAnswersChange={setAnswers}
-                      validationErrors={customValidationErrors}
-                    />
-                    <div className="pt-4">
+                    {rfBuiltInItems.length > 0 ? (
+                      <div className="rounded-3xl border border-violet-200 bg-violet-50/30 p-5 shadow-sm">
+                        <div className="mb-4 flex items-center gap-3">
+                          <div className="rounded-2xl bg-violet-100 p-3 text-violet-700">
+                            <ClipboardList className="h-5 w-5" />
+                          </div>
+                          <div>
+                            <h4 className="text-sm font-semibold text-slate-900">שדות חובה</h4>
+                            <p className="text-xs text-slate-500">פרטים אלו ישמשו לעדכון פרופיל התלמיד/ה.</p>
+                          </div>
+                        </div>
+                        <SectionedFormRenderer
+                          schema={{ ...formSchema, sections: [{ id: 'rf_built_in', title: '', description: '', items: rfBuiltInItems }] }}
+                          visibilityRules={[]}
+                          answers={answers}
+                          evaluationAnswers={visibilityEvaluationAnswers}
+                          onAnswersChange={setAnswers}
+                          validationErrors={customValidationErrors}
+                        />
+                      </div>
+                    ) : null}
+                    {regularFormSchema.sections.length > 0 ? (
+                      <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+                        <div className="mb-4 flex items-center gap-3">
+                          <div className="rounded-2xl bg-slate-100 p-3 text-slate-700">
+                            <FileCheck2 className="h-5 w-5" />
+                          </div>
+                          <div>
+                            <h4 className="text-sm font-semibold text-slate-900">שאלות נוספות</h4>
+                            <p className="text-xs text-slate-500">מלאו כל שאלה רלוונטית כדי שנוכל להמשיך את הטיפול מהר יותר.</p>
+                          </div>
+                        </div>
+                        <SectionedFormRenderer
+                          schema={regularFormSchema}
+                          visibilityRules={visibilityRules}
+                          answers={answers}
+                          evaluationAnswers={visibilityEvaluationAnswers}
+                          onAnswersChange={setAnswers}
+                          validationErrors={customValidationErrors}
+                        />
+                      </div>
+                    ) : null}
+                    <div className="pt-2">
                       <Button type="submit" className="h-11 w-full gap-2 rounded-xl" disabled={submitLoading}>
                         {submitLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
                         שלח טופס
                       </Button>
                     </div>
                   </form>
-                </div>
+                ) : (
+                  <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+                    <div className="mb-4 flex items-center gap-3">
+                      <div className="rounded-2xl bg-slate-100 p-3 text-slate-700">
+                        <FileCheck2 className="h-5 w-5" />
+                      </div>
+                      <div>
+                        <h4 className="text-sm font-semibold text-slate-900">שאלות נוספות</h4>
+                        <p className="text-xs text-slate-500">מלאו כל שאלה רלוונטית כדי שנוכל להמשיך את הטיפול מהר יותר.</p>
+                      </div>
+                    </div>
+                    <form
+                      className="space-y-4"
+                      onSubmit={(event) => {
+                        event.preventDefault();
+                        void handleSubmitForm();
+                      }}
+                    >
+                      <SectionedFormRenderer
+                        schema={formSchema}
+                        visibilityRules={visibilityRules}
+                        answers={answers}
+                        evaluationAnswers={visibilityEvaluationAnswers}
+                        onAnswersChange={setAnswers}
+                        validationErrors={customValidationErrors}
+                      />
+                      <div className="pt-4">
+                        <Button type="submit" className="h-11 w-full gap-2 rounded-xl" disabled={submitLoading}>
+                          {submitLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                          שלח טופס
+                        </Button>
+                      </div>
+                    </form>
+                  </div>
+                )}
               </div>
             )}
 

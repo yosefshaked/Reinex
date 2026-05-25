@@ -65,7 +65,7 @@ export const REQUIRED_FORM_BUILT_IN_QUESTIONS = [
   {
     id: 'rf_guardian_relationship',
     type: 'single_select',
-    label: 'קשר לתלמיד/ה',
+    label: 'קשר האפוטרופוס לתלמיד/ה',
     fill_hint: 'קשר האפוטרופוס',
     options: [
       { value: 'father', label: 'אב' },
