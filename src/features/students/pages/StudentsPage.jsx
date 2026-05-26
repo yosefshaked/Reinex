@@ -9,10 +9,11 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Plus, Loader2, Pencil, X, User, FileWarning, AlertCircle } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast.jsx';
 import { useOrg } from '@/org/OrgContext.jsx';
 import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { authenticatedFetch } from '@/lib/api-client.js';
+import { extractSupportCode, resolveApiErrorMessage } from '@/lib/error-support.js';
 import { useInstructors, useStudents } from '@/hooks/useOrgData.js';
 import AddStudentForm, { AddStudentFormFooter } from '@/features/admin/components/AddStudentForm.jsx';
 import EditStudentModal from '@/features/admin/components/EditStudentModal.jsx';
@@ -445,14 +446,14 @@ export default function StudentsPage() {
       await refreshRoster();
       setIsAddDialogOpen(false);
     } catch (error) {
-      const apiMessage = error?.data?.message || error?.message;
+      const apiMessage = resolveApiErrorMessage(error);
       const apiCode = error?.data?.error || error?.data?.code || error?.code;
       console.error('[students-list][POST] Failed to create student', {
         status: error?.status,
         code: apiCode,
         message: apiMessage,
       });
-      let message = 'הוספת תלמיד נכשלה.';
+      let message = extractSupportCode(apiMessage) ? apiMessage : 'הוספת תלמיד נכשלה.';
       if (apiCode === 'identity_number_duplicate' || apiMessage === 'duplicate_identity_number') {
         message = 'תעודת זהות קיימת כבר במערכת.';
       } else if (apiMessage === 'missing national id') {
@@ -516,14 +517,14 @@ export default function StudentsPage() {
       await refreshRoster();
       handleEditModalClose();
     } catch (error) {
-      const apiMessage = error?.data?.message || error?.message;
+      const apiMessage = resolveApiErrorMessage(error);
       const apiCode = error?.data?.error || error?.data?.code || error?.code;
       console.error('[students-list][PUT] Failed to update student', {
         status: error?.status,
         code: apiCode,
         message: apiMessage,
       });
-      let message = 'עדכון פרטי התלמיד נכשל.';
+      let message = extractSupportCode(apiMessage) ? apiMessage : 'עדכון פרטי התלמיד נכשל.';
       if (apiCode === 'identity_number_duplicate' || apiMessage === 'duplicate_identity_number') {
         message = 'תעודת זהות קיימת כבר במערכת.';
       } else if (apiMessage === 'invalid national id') {

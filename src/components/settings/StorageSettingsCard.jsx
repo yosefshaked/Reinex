@@ -5,7 +5,7 @@ import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast.jsx';
 import { Lock, HardDrive, Cloud, Loader2, CheckCircle2, Trash2, AlertTriangle, RefreshCw, Zap } from 'lucide-react';
 import { saveStorageConfiguration, deleteStorageConfiguration, reconnectStorageConfiguration, testStorageConnection } from '@/features/settings/api/storage.js';
 import { useOrg } from '@/org/OrgContext.jsx';

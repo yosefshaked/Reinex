@@ -13,7 +13,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { useOrg } from '@/org/OrgContext.jsx';
 import { authenticatedFetch } from '@/lib/api-client.js';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast.jsx';
 import { QUESTION_TYPE_DEFINITIONS, SHARED_BLOCK_TYPES, TEXT_BLOCK_VARIANTS } from '@/features/forms/lib/form-schema.js';
 import { normalizeMembershipRole, isAdminRole } from '@/features/students/utils/endpoints.js';
 

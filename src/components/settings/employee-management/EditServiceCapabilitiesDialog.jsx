@@ -7,7 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Briefcase, CalendarClock, Plus, Trash2, Users, AlertCircle } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast.jsx';
 import { authenticatedFetch } from '@/lib/api-client';
 import { DAY_OPTIONS } from '@/lib/day-of-week.js';
 import { getAvailabilitySummary, normalizeAvailabilityWindows } from '@/lib/instructor-availability.js';

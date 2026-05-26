@@ -7,6 +7,17 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/auth/AuthContext.jsx';
 import { useOrg } from '@/org/OrgContext.jsx';
+import { createSupportAwareApiError } from '@/lib/error-support.js';
+
+async function readErrorPayload(response) {
+  try {
+    const text = await response.text();
+    return text ? JSON.parse(text) : {};
+  } catch (parseError) {
+    console.error('[ERROR-FRONTEND] Failed to parse error response:', parseError);
+    return {};
+  }
+}
 
 export function useDocuments(entityType, entityId) {
   const { session } = useAuth();
@@ -53,15 +64,8 @@ export function useDocuments(entityType, entityId) {
 
       if (!response.ok) {
         console.error('[ERROR-FRONTEND] Response not OK, reading error...');
-        let errorData;
-        try {
-          const text = await response.text();
-          errorData = text ? JSON.parse(text) : {};
-        } catch (parseError) {
-          console.error('[ERROR-FRONTEND] Failed to parse error response:', parseError);
-          errorData = {};
-        }
-        throw new Error(errorData.error || errorData.message || `HTTP ${response.status}`);
+        const errorData = await readErrorPayload(response);
+        throw createSupportAwareApiError(errorData, response.status);
       }
 
       // Read response text first to debug empty body issue
@@ -81,7 +85,7 @@ export function useDocuments(entityType, entityId) {
         message: err.message,
         stack: err.stack
       });
-      setError(err.message);
+      setError(err);
       setDocuments([]);
     } finally {
       setLoading(false);
@@ -127,14 +131,8 @@ export function useDocuments(entityType, entityId) {
     });
 
     if (!response.ok) {
-      let errorData;
-      try {
-        const text = await response.text();
-        errorData = text ? JSON.parse(text) : {};
-      } catch {
-        errorData = {};
-      }
-      throw new Error(errorData.error || errorData.message || `HTTP ${response.status}`);
+      const errorData = await readErrorPayload(response);
+      throw createSupportAwareApiError(errorData, response.status);
     }
 
     const data = await response.json();
@@ -166,14 +164,8 @@ export function useDocuments(entityType, entityId) {
     });
 
     if (!response.ok) {
-      let errorData;
-      try {
-        const text = await response.text();
-        errorData = text ? JSON.parse(text) : {};
-      } catch {
-        errorData = {};
-      }
-      throw new Error(errorData.error || errorData.message || `HTTP ${response.status}`);
+      const errorData = await readErrorPayload(response);
+      throw createSupportAwareApiError(errorData, response.status);
     }
 
     // Refresh documents list
@@ -200,14 +192,8 @@ export function useDocuments(entityType, entityId) {
     });
 
     if (!response.ok) {
-      let errorData;
-      try {
-        const text = await response.text();
-        errorData = text ? JSON.parse(text) : {};
-      } catch {
-        errorData = {};
-      }
-      throw new Error(errorData.error || errorData.message || `HTTP ${response.status}`);
+      const errorData = await readErrorPayload(response);
+      throw createSupportAwareApiError(errorData, response.status);
     }
 
     // Refresh documents list
@@ -239,15 +225,8 @@ export function useDocuments(entityType, entityId) {
     });
 
     if (!response.ok) {
-      let errorData;
-      try {
-        const text = await response.text();
-        errorData = text ? JSON.parse(text) : {};
-      } catch {
-        errorData = {};
-      }
-      const errorMsg = errorData.error || errorData.message || `HTTP ${response.status}`;
-      throw new Error(errorMsg);
+      const errorData = await readErrorPayload(response);
+      throw createSupportAwareApiError(errorData, response.status);
     }
 
     const data = await response.json();

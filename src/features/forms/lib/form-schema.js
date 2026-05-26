@@ -51,6 +51,35 @@ export const TEXT_BLOCK_VARIANTS = [
   { value: 'success', label: 'אישור' },
 ];
 
+// Required-form built-in questions: use reserved IDs prefixed rf_.
+// Each question maps 1:1 to a DB column on client_profiles or guardians.
+// The fill_hint field is shown in the builder as plain-language context;
+// the backend uses the reserved ID itself to decide which column to update.
+export const REQUIRED_FORM_BUILT_IN_QUESTIONS = [
+  { id: 'rf_first_name', type: 'short_text', label: 'שם פרטי של התלמיד/ה', fill_hint: 'שם פרטי' },
+  { id: 'rf_last_name', type: 'short_text', label: 'שם משפחה של התלמיד/ה', fill_hint: 'שם משפחה' },
+  { id: 'rf_date_of_birth', type: 'date', label: 'תאריך לידה', fill_hint: 'יום הולדת' },
+  { id: 'rf_identity_number', type: 'israeli_id', label: 'מספר זהות', fill_hint: 'מספר זהות' },
+  { id: 'rf_phone', type: 'phone', label: 'טלפון', fill_hint: 'טלפון' },
+  { id: 'rf_email', type: 'email', label: 'אימייל', fill_hint: 'אימייל' },
+  {
+    id: 'rf_guardian_relationship',
+    type: 'single_select',
+    label: 'קשר האפוטרופוס לתלמיד/ה',
+    fill_hint: 'קשר האפוטרופוס',
+    options: [
+      { value: 'father', label: 'אב' },
+      { value: 'mother', label: 'אם' },
+      { value: 'caretaker', label: 'מטפל/ת' },
+      { value: 'other', label: 'אחר' },
+    ],
+  },
+  { id: 'rf_guardian_first_name', type: 'short_text', label: 'שם פרטי של האפוטרופוס', fill_hint: 'שם פרטי (אפוטרופוס)' },
+  { id: 'rf_guardian_last_name', type: 'short_text', label: 'שם משפחה של האפוטרופוס', fill_hint: 'שם משפחה (אפוטרופוס)' },
+  { id: 'rf_guardian_phone', type: 'phone', label: 'טלפון אפוטרופוס', fill_hint: 'טלפון (אפוטרופוס)' },
+  { id: 'rf_guardian_email', type: 'email', label: 'אימייל אפוטרופוס', fill_hint: 'אימייל (אפוטרופוס)' },
+];
+
 export const WAITING_LIST_BUILT_IN_QUESTIONS = [
   { id: 'wl_student_first_name', type: 'short_text', label: 'שם פרטי של התלמיד/ה' },
   { id: 'wl_student_last_name', type: 'short_text', label: 'שם משפחה של התלמיד/ה' },
@@ -330,6 +359,22 @@ function attachCompatibilityQuestions(section) {
       options: normalizeOptions(item.options, item.question_type),
       ui: normalizeObject(item.ui, {}),
     })),
+  };
+}
+
+// Reserved section ID for the mandatory built-in questions section in required_form flows.
+export const RF_BUILT_IN_SECTION_ID = 'rf_built_in_section';
+
+export function isBuiltInRequiredFormSection(section) {
+  return section?.id === RF_BUILT_IN_SECTION_ID;
+}
+
+export function createRequiredFormBuiltInSection(items = []) {
+  return {
+    id: RF_BUILT_IN_SECTION_ID,
+    title: 'שדות חובה',
+    description: 'פרטים אלו ישמשו לעדכון פרופיל התלמיד/ה',
+    items,
   };
 }
 
@@ -662,6 +707,33 @@ export function getWaitingListBuiltInQuestions() {
     ...question,
     options: Array.isArray(question.options) ? question.options.map((option) => ({ ...option })) : [],
   }));
+}
+
+export function getRequiredFormBuiltInQuestions() {
+  return REQUIRED_FORM_BUILT_IN_QUESTIONS.map((question) => ({
+    ...question,
+    options: Array.isArray(question.options) ? question.options.map((option) => ({ ...option })) : [],
+  }));
+}
+
+/** Returns true when item is a local question with a reserved rf_ built-in ID. */
+export function isBuiltInRequiredFormQuestion(item) {
+  return isQuestionItem(item) && typeof item.id === 'string' && item.id.startsWith('rf_');
+}
+
+/** Creates a normalised schema item for a required-form built-in question, preserving its reserved ID. */
+export function createBuiltInRequiredFormQuestion(builtInDef) {
+  return normalizeQuestionItem({
+    id: builtInDef.id,
+    type: FORM_ITEM_TYPES.LOCAL_QUESTION,
+    question_type: builtInDef.type,
+    label: builtInDef.label,
+    description: '',
+    required: false,
+    placeholder: '',
+    options: Array.isArray(builtInDef.options) ? builtInDef.options.map((option) => ({ ...option })) : [],
+    ui: {},
+  }, { type: FORM_ITEM_TYPES.LOCAL_QUESTION, fallbackIdPrefix: builtInDef.id });
 }
 
 export function getAvailableSourceQuestions(schema, targetType, targetId, { formUsage = 'general', sharedBlockMap = {} } = {}) {

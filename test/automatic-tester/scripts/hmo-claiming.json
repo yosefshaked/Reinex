@@ -3,8 +3,8 @@
     "id": "hmo-claiming",
     "name": "HMO Claiming – End to End",
     "description": "Full HMO claiming flow: create provider + track → assign authorization to student → create lesson → mark attended → open financials claims tab → create draft batch → submit batch.",
-    "version": "1.0.0",
-    "last_validated_at": "2026-05-11T00:00:00Z",
+    "version": "1.0.1",
+    "last_validated_at": "2026-05-25T12:25:27Z",
     "author": "claude-ai",
     "dependencies": {
       "routes": [
@@ -55,7 +55,7 @@
     {
       "id": "api-setup-service",
       "name": "API – Resolve service ID",
-      "description": "Fetches the first available service to use for the HMO track and lesson instance.",
+      "description": "Fetches the first available service to use for the HMO track and lesson instance, then ensures it has a billable default price so ledger-backed HMO claims can be created.",
       "steps": [
         {
           "id": "get-service",
@@ -65,6 +65,21 @@
           "endpoint": "/api/services?org_id={{TEST_ORG_ID}}",
           "store": "SERVICE_ID",
           "storeField": "0.id"
+        },
+        {
+          "id": "ensure-service-price-direct",
+          "action": "apiCall",
+          "description": "Direct Supabase PATCH to ensure the selected service has a default customer charge. Billing blocks lesson ledger creation when this is missing, even for fully HMO-covered lessons.",
+          "method": "PATCH",
+          "endpoint": "{{SUPABASE_URL}}/rest/v1/Services?id=eq.{{SERVICE_ID}}&org_id=eq.{{TEST_ORG_ID}}",
+          "headers": {
+            "apikey": "{{SERVICE_ROLE_KEY}}",
+            "Prefer": "return=minimal"
+          },
+          "body": {
+            "default_customer_charge_amount": 10000,
+            "payment_model": "fixed_rate"
+          }
         }
       ]
     },
@@ -96,7 +111,7 @@
           "action": "apiCall",
           "description": "Direct Supabase INSERT to set base_rate=0 capability for the service – bypasses the PostgREST onConflict constraint issue in local dev. Ignores 409 if the row already exists.",
           "method": "POST",
-          "endpoint": "http://127.0.0.1:54331/rest/v1/instructor_service_capabilities",
+          "endpoint": "{{SUPABASE_URL}}/rest/v1/instructor_service_capabilities",
           "headers": {
             "apikey": "{{SERVICE_ROLE_KEY}}",
             "Prefer": "return=minimal"
@@ -128,20 +143,12 @@
           "body": {
             "org_id": "{{TEST_ORG_ID}}",
             "first_name": "{{HMO_STUDENT_FIRST}}",
-            "last_name": "{{HMO_STUDENT_LAST}}",
-            "identity_number": "{{HMO_STUDENT_ID}}",
+            "last_name": "{{HMO_STUDENT_LAST}} {{RUN_ID}}",
+            "identity_number": "999{{RUN_NUMERIC_ID}}",
             "phone": "{{HMO_STUDENT_PHONE}}"
           },
-          "ignoreStatus": [409]
-        },
-        {
-          "id": "get-student-id",
-          "action": "apiCall",
-          "description": "GET student list to resolve UUID (handles both 201 and 409 above)",
-          "method": "GET",
-          "endpoint": "/api/students-list?org_id={{TEST_ORG_ID}}&q={{HMO_STUDENT_ID}}",
           "store": "HMO_STUDENT_UUID",
-          "storeField": "0.id"
+          "storeField": "id"
         }
       ]
     },
@@ -159,7 +166,7 @@
           "body": {
             "org_id": "{{TEST_ORG_ID}}",
             "entity": "provider",
-            "name": "{{HMO_PROVIDER_NAME}}",
+            "name": "{{HMO_PROVIDER_NAME}} {{RUN_ID}}",
             "is_active": true
           },
           "ignoreStatus": [409]
@@ -171,7 +178,7 @@
           "method": "GET",
           "endpoint": "/api/settings/medical-providers?org_id={{TEST_ORG_ID}}",
           "store": "HMO_PROVIDER_ID",
-          "storeField": "providers.[name={{HMO_PROVIDER_NAME}}].id"
+          "storeField": "providers.[name={{HMO_PROVIDER_NAME}} {{RUN_ID}}].id"
         },
         {
           "id": "create-track",
@@ -184,7 +191,7 @@
             "entity": "track",
             "provider_id": "{{HMO_PROVIDER_ID}}",
             "service_id": "{{SERVICE_ID}}",
-            "name": "{{HMO_TRACK_NAME}}",
+            "name": "{{HMO_TRACK_NAME}} {{RUN_ID}}",
             "payment_mode": "fully_paid_by_hmo",
             "default_customer_charge_amount": 0,
             "default_insurer_claim_amount": 10000,
@@ -199,7 +206,7 @@
           "method": "GET",
           "endpoint": "/api/settings/medical-providers?org_id={{TEST_ORG_ID}}",
           "store": "HMO_TRACK_ID",
-          "storeField": "providers.[name={{HMO_PROVIDER_NAME}}].tracks.[name={{HMO_TRACK_NAME}}].id"
+          "storeField": "providers.[name={{HMO_PROVIDER_NAME}} {{RUN_ID}}].tracks.[name={{HMO_TRACK_NAME}} {{RUN_ID}}].id"
         }
       ]
     },
@@ -357,7 +364,7 @@
         {
           "id": "curr-select-all",
           "action": "click",
-          "selector": "div:has(button:has-text('{{HMO_PROVIDER_NAME}}')) button:has-text('בחר הכל')",
+          "selector": "div:has(button:has-text('{{HMO_PROVIDER_NAME}} {{RUN_ID}}')) button:has-text('בחר הכל')",
           "description": "Select all claimable rows for the HMO provider in the current month"
         },
         {
@@ -446,7 +453,7 @@
         {
           "id": "prev-assert-claimable-row",
           "action": "waitForSelector",
-          "selector": "div:has(button:has-text('{{HMO_PROVIDER_NAME}}')) button:has-text('בחר הכל')",
+          "selector": "div:has(button:has-text('{{HMO_PROVIDER_NAME}} {{RUN_ID}}')) button:has-text('בחר הכל')",
           "description": "Assert that the previous month's lesson appears as a claimable row"
         },
         {
@@ -457,7 +464,7 @@
         {
           "id": "prev-select-all",
           "action": "click",
-          "selector": "div:has(button:has-text('{{HMO_PROVIDER_NAME}}')) button:has-text('בחר הכל')",
+          "selector": "div:has(button:has-text('{{HMO_PROVIDER_NAME}} {{RUN_ID}}')) button:has-text('בחר הכל')",
           "description": "Select all claimable rows for the HMO provider in the previous month"
         },
         {

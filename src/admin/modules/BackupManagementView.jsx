@@ -1,5 +1,5 @@
 import React from 'react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast.jsx';
 import { ArchiveRestore, Loader2, RotateCw, ShieldCheck, Upload } from 'lucide-react';
 import { authenticatedFetch } from '@/lib/api-client.js';
 import SystemAdminModuleShell from './SystemAdminModuleShell.jsx';

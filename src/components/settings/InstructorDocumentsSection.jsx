@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast.jsx';
 import { FileText, Upload, Download, Trash2, Loader2, AlertCircle, CheckCircle, CheckCircle2, ArrowUpDown, ArrowUp, ArrowDown, Calendar, CalendarX, Edit } from 'lucide-react';
 import { fetchSettingsValue } from '@/features/settings/api/settings.js';
 import { format, parseISO, isBefore, startOfDay } from 'date-fns';
@@ -12,6 +12,7 @@ import { he } from 'date-fns/locale';
 import { getAuthClient } from '@/lib/supabase-manager.js';
 import { useDocuments } from '@/hooks/useDocuments';
 import { checkDocumentDuplicate } from '@/features/students/api/documents-check.js';
+import { createSupportAwareApiError, extractSupportCode } from '@/lib/error-support.js';
 import {
   Dialog,
   DialogContent,
@@ -35,6 +36,11 @@ const REQUEST_STATE = {
   loading: 'loading',
   error: 'error',
 };
+
+async function readDocumentActionError(response, fallback) {
+  const errorData = await response.json().catch(() => ({}));
+  return createSupportAwareApiError(errorData, response.status, fallback);
+}
 
 function formatFileDate(dateString) {
   if (!dateString) return '';
@@ -503,8 +509,8 @@ export default function InstructorDocumentsSection({ instructor, session, orgId,
           toast.error('שגיאת הרשאה. נא להתחבר מחדש');
         } else if (errorMessage.includes('403') || errorMessage.includes('can_only_check_own')) {
           toast.error('ניתן לבדוק רק קבצים ששייכים לך');
-        } else if (errorMessage.includes('500')) {
-          toast.error('שגיאת שרת בעת בדיקת כפליות');
+        } else if (extractSupportCode(error)) {
+          toast.error(errorMessage);
         } else if (!errorMessage.includes('AbortError')) {
           console.warn('Duplicate check error details:', error);
         }
@@ -636,17 +642,16 @@ export default function InstructorDocumentsSection({ instructor, session, orgId,
             let errorMessage = xhr.statusText || 'Upload failed';
             try {
               const errorData = JSON.parse(xhr.responseText);
-              if (errorData.message) {
-                errorMessage = errorData.message;
-              }
-              if (errorData.details) {
-                errorMessage += `: ${errorData.details}`;
-              }
-              
+
               // Check for auth errors
               if (xhr.status === 401 || errorData.message === 'invalid_or_expired_token' || errorData.message === 'missing_bearer') {
                 errorMessage = 'ההרשאה פגה במהלך ההעלאה';
+                reject(new Error(errorMessage));
+                return;
               }
+
+              reject(createSupportAwareApiError(errorData, xhr.status, errorMessage));
+              return;
             } catch {
               // Use default error message
               if (xhr.status === 401) {
@@ -713,8 +718,7 @@ export default function InstructorDocumentsSection({ instructor, session, orgId,
       });
 
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ error: 'Delete failed' }));
-        throw new Error(errorData.error || 'Delete failed');
+        throw await readDocumentActionError(response, 'Delete failed');
       }
 
       toast.success('הקובץ נמחק בהצלחה', { id: toastId });
@@ -728,7 +732,7 @@ export default function InstructorDocumentsSection({ instructor, session, orgId,
       }
     } catch (error) {
       console.error('File delete failed:', error);
-      toast.error('מחיקת הקובץ נכשלה', { id: toastId });
+      toast.error(`מחיקת הקובץ נכשלה: ${error?.message || 'שגיאה לא ידועה'}`, { id: toastId });
       setDeleteState(REQUEST_STATE.idle);
     }
   }, [session, orgId, onRefresh, fetchDocuments]);
@@ -766,8 +770,7 @@ export default function InstructorDocumentsSection({ instructor, session, orgId,
       );
 
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || 'Failed to get download URL');
+        throw await readDocumentActionError(response, 'Failed to get download URL');
       }
 
       const { url } = await response.json();
@@ -775,7 +778,7 @@ export default function InstructorDocumentsSection({ instructor, session, orgId,
       toast.success('קובץ הורד בהצלחה', { id: toastId });
     } catch (error) {
       console.error('File download failed:', error);
-      toast.error('הורדת הקובץ נכשלה', { id: toastId });
+      toast.error(`הורדת הקובץ נכשלה: ${error?.message || 'שגיאה לא ידועה'}`, { id: toastId });
     }
   }, [session, orgId]);
 
@@ -808,8 +811,7 @@ export default function InstructorDocumentsSection({ instructor, session, orgId,
       });
 
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ error: 'Update failed' }));
-        throw new Error(errorData.error || 'Update failed');
+        throw await readDocumentActionError(response, 'Update failed');
       }
 
       toast.success(newResolved ? 'המסמך סומן כטופל!' : 'הסימון בוטל!', { id: toastId });
@@ -858,8 +860,7 @@ export default function InstructorDocumentsSection({ instructor, session, orgId,
         });
 
         if (!response.ok) {
-          const errorData = await response.json().catch(() => ({ error: 'Update failed' }));
-          throw new Error(errorData.error || 'Update failed');
+          throw await readDocumentActionError(response, 'Update failed');
         }
 
         toast.success('המסמך עודכן בהצלחה!', { id: toastId });

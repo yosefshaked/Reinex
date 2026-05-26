@@ -35,3 +35,6 @@ settings.json
 /.cache
 /.pki
 /.github/agents
+/manual-db-backup/backups
+/manual-db-backup/supabase
+/supabase

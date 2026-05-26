@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Copy, Pencil, Send } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast.jsx';
 import ProfileMasterStrip from '@/components/ui/ProfileMasterStrip.jsx';
 import { authenticatedFetch } from '@/lib/api-client.js';
 import { useOrg } from '@/org/OrgContext.jsx';

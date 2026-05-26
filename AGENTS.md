@@ -39,6 +39,28 @@ Read this first. Detailed task docs live in [`./agents-docs`](agents-docs/).
 ## User-Facing Workflow Reference
 - Complete page/action/dialog tree verified against pre-prod (May 2026): [`docs/app-workflow-tree.md`](docs/app-workflow-tree.md)
 
+## After Writing Code — Required Validation
+
+Run the relevant check(s) after every edit before considering the task done.
+
+| Files changed | Command |
+|---|---|
+| `src/lib/setup-sql.js` | `npm run lint:sql` |
+| `src/lib/setup-sql.js` + any migration | `npm run lint:sql && npm run lint:upsert-conflicts` |
+| `api/**/*.js` — any `.upsert({ onConflict })` added or changed | `npm run lint:upsert-conflicts` |
+| `scripts/validate-upsert-conflicts.js` | `npm run lint:upsert-conflicts` |
+| `scripts/validate-setup-sql.js` | `npm run lint:sql` |
+| `api/**/*.js` — general API logic | `npm run lint:api` |
+| `src/**/*.js` or `src/**/*.jsx` | `npm run lint` |
+| Finance/billing/payroll logic | `npm run test:finance-calendar` |
+| Pre-deploy / full check | `npm run build` |
+
+**Upsert contract rule:** Any table added to `withOrgScope().upsert({ onConflict: '...' })` in `api/` must also be:
+1. Added to `EXPECTED_CONFLICTS_BY_TABLE` in `scripts/validate-upsert-conflicts.js`
+2. Given a matching `CREATE UNIQUE INDEX IF NOT EXISTS` or named `UNIQUE` constraint in `src/lib/setup-sql.js`
+
+Skipping either step causes a `42P10` PostgreSQL runtime error that is silent until the upsert is exercised.
+
 ## Before Writing Code
 - Read the matching `agents-docs` file first; if the task spans domains, read more than one.
 - Check the helper docs before adding fetch, validation, date, currency, schema, or formatting utilities.

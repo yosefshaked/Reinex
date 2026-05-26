@@ -4,8 +4,10 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import ErrorMessageText from '@/components/ui/ErrorMessageText.jsx';
 import { cn } from '@/lib/utils';
 import { authenticatedFetch } from '@/lib/api-client.js';
+import { resolveApiErrorMessage } from '@/lib/error-support.js';
 import HiddenUatAdminToolsDialog from '@/features/admin/components/HiddenUatAdminToolsDialog.jsx';
 import { useOrg } from '@/org/OrgContext.jsx';
 import { normalizeMembershipRole, isAdminOrOffice, isAdminRole } from '@/features/students/utils/endpoints.js';
@@ -170,7 +172,7 @@ export default function Sidebar({ hidden = false, onToggleHidden }) {
       setAuthDialogOpen(false);
       setAdminToolsOpen(true);
     } catch (error) {
-      setAuthError(error?.data?.message || error?.message || 'אימות נכשל.');
+      setAuthError(resolveApiErrorMessage(error, 'אימות נכשל.'));
     } finally {
       setIsAuthenticating(false);
     }
@@ -296,7 +298,7 @@ export default function Sidebar({ hidden = false, onToggleHidden }) {
               }}
             />
             {authError ? (
-              <p className="text-sm text-red-600">{authError}</p>
+              <ErrorMessageText error={authError} className="text-sm text-red-600" supportClassName="text-red-600" />
             ) : null}
           </div>
 

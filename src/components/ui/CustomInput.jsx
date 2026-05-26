@@ -1,5 +1,6 @@
 import { forwardRef, useId } from "react"
 
+import ErrorMessageText from "@/components/ui/ErrorMessageText.jsx"
 import { cn } from "@/lib/utils"
 
 const Input = forwardRef(function Input(
@@ -29,7 +30,7 @@ const Input = forwardRef(function Input(
         {...props}
       />
       {error ? (
-        <p className="text-body-sm text-error-600">{error}</p>
+        <ErrorMessageText error={error} className="text-body-sm text-error-600" supportClassName="text-error-600" />
       ) : helperText ? (
         <p className="text-body-sm text-neutral-500">{helperText}</p>
       ) : null}

@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast.jsx';
 import { fetchEmploymentScopePolicySettings } from '@/features/settings/api/index.js';
 import { upsertSetting } from '@/features/settings/api/settings.js';
 

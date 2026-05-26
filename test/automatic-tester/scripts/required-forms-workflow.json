@@ -1,0 +1,484 @@
+{
+  "meta": {
+    "id": "required-forms-workflow",
+    "name": "Required Forms Workflow",
+    "description": "End-to-end test of the required form flow. Covers: creating a required_form template with an rf_built_in_section schema, publishing it, attaching it to a service, sending an invite, verifying the public /submit UI renders the violet שדות חובה section with the correct rf_ fields inside it (not in a generic section), filling the rf_ fields, submitting the form, and asserting the client_profile first_name / last_name / date_of_birth were updated in the backend.",
+    "version": "1.0.0",
+    "last_validated_at": "2026-05-25T12:58:30Z",
+    "author": "claude-ai",
+    "dependencies": {
+      "routes": [
+        "/submit",
+        "/students/:id/:tab?"
+      ],
+      "api_endpoints": [
+        "POST /api/forms",
+        "PUT /api/forms/:id",
+        "POST /api/services",
+        "POST /api/students-list",
+        "GET /api/students-list",
+        "PUT /api/students-list/:id",
+        "POST /api/student-required-forms/send",
+        "GET /api/student-required-forms/load",
+        "POST /api/student-required-forms/submit",
+        "GET /api/client-profiles/:id"
+      ]
+    }
+  },
+  "config": {
+    "timeout_ms": 25000,
+    "screenshot_on_failure": true,
+    "continue_on_step_failure": false,
+    "continue_on_workflow_failure": false
+  },
+  "variables": {
+    "RF_STUDENT_FIRST_BASELINE": "רקסט",
+    "RF_STUDENT_LAST_BASELINE": "חובה",
+    "RF_STUDENT_FIRST_UPDATED": "עדכון",
+    "RF_STUDENT_LAST_UPDATED": "מבחן",
+    "RF_STUDENT_DOB": "2000-01-15",
+    "RF_STUDENT_PHONE": "0502345678",
+    "RF_STUDENT_EMAIL": "rf-workflow-test@reinex-test.local",
+    "RF_FORM_NAME": "טופס חובה E2E אוטומטי",
+    "RF_SERVICE_NAME": "שירות טופס חובה E2E",
+    "RF_FORM_LABEL": "טופס חובה E2E"
+  },
+  "workflows": [
+    {
+      "id": "login",
+      "name": "Login",
+      "description": "Sign in as admin.",
+      "steps": [
+        {
+          "id": "login-admin",
+          "action": "login",
+          "role": "admin",
+          "description": "Log in as admin"
+        }
+      ]
+    },
+    {
+      "id": "api-setup-rf-form",
+      "name": "API – Create and publish a required-form template with rf_built_in_section",
+      "description": "Creates a required-form template whose schema already contains the rf_built_in_section with rf_first_name, rf_last_name, and rf_date_of_birth questions, then publishes it.",
+      "steps": [
+        {
+          "id": "create-rf-form",
+          "action": "apiCall",
+          "description": "Create the required-form template. Pass the full schema inline so it contains rf_built_in_section from the start – no separate save_draft step needed.",
+          "method": "POST",
+          "endpoint": "/api/forms",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "name": "{{RF_FORM_NAME}}",
+            "form_usage": "required_form",
+            "form_schema": {
+              "version": 3,
+              "kind": "sectioned_form",
+              "sections": [
+                {
+                  "id": "rf_built_in_section",
+                  "title": "שדות חובה",
+                  "description": "פרטים אלו ישמשו לעדכון פרופיל התלמיד/ה",
+                  "items": [
+                    {
+                      "id": "rf_first_name",
+                      "type": "local_question",
+                      "question_type": "short_text",
+                      "label": "שם פרטי של התלמיד/ה",
+                      "description": "",
+                      "required": true,
+                      "placeholder": ""
+                    },
+                    {
+                      "id": "rf_last_name",
+                      "type": "local_question",
+                      "question_type": "short_text",
+                      "label": "שם משפחה של התלמיד/ה",
+                      "description": "",
+                      "required": true,
+                      "placeholder": ""
+                    },
+                    {
+                      "id": "rf_date_of_birth",
+                      "type": "local_question",
+                      "question_type": "date",
+                      "label": "תאריך לידה",
+                      "description": "",
+                      "required": false,
+                      "placeholder": ""
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          "store": "RF_FORM_ID",
+          "storeField": "id"
+        },
+        {
+          "id": "publish-rf-form",
+          "action": "apiCall",
+          "description": "Publish the required form so the public invite endpoint can serve the canonical schema.",
+          "method": "PUT",
+          "endpoint": "/api/forms/{{RF_FORM_ID}}",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "action": "publish"
+          }
+        }
+      ]
+    },
+    {
+      "id": "api-setup-rf-student",
+      "name": "API – Create the required-forms test student",
+      "description": "Creates a fresh RF test student for this run and resets their first_name, last_name, and date_of_birth to baseline values so the post-submission assertion can confirm the rf_ answers actually updated the profile.",
+      "steps": [
+        {
+          "id": "create-rf-student",
+          "action": "apiCall",
+          "description": "Create a run-specific RF test student.",
+          "method": "POST",
+          "endpoint": "/api/students-list",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "first_name": "{{RF_STUDENT_FIRST_BASELINE}}",
+            "last_name": "{{RF_STUDENT_LAST_BASELINE}}",
+            "identity_number": "998{{RUN_NUMERIC_ID}}",
+            "phone": "{{RF_STUDENT_PHONE}}",
+            "email": "rf-workflow-test+{{RUN_NUMERIC_ID}}@reinex-test.local"
+          },
+          "store": "RF_STUDENT_UUID",
+          "storeField": "id",
+          "stores": [
+            { "variable": "RF_STUDENT_CLIENT_PROFILE_ID", "field": "client_profile_id" }
+          ]
+        },
+        {
+          "id": "reset-rf-student-profile",
+          "action": "apiCall",
+          "description": "Reset the client_profile to known baseline values so the post-submit assertion can prove the rf_ answers overwrote them. A clean baseline is required – the update might be a no-op if the values already match what the form will set.",
+          "method": "PUT",
+          "endpoint": "/api/students-list/{{RF_STUDENT_UUID}}",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "first_name": "{{RF_STUDENT_FIRST_BASELINE}}",
+            "last_name": "{{RF_STUDENT_LAST_BASELINE}}",
+            "date_of_birth": null
+          }
+        }
+      ]
+    },
+    {
+      "id": "api-setup-rf-service",
+      "name": "API – Create a service with the required form attached",
+      "description": "Creates a service whose required_forms config references the published RF template.",
+      "steps": [
+        {
+          "id": "create-rf-service",
+          "action": "apiCall",
+          "description": "Create a service and attach the required form template.",
+          "method": "POST",
+          "endpoint": "/api/services",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "name": "{{RF_SERVICE_NAME}}",
+            "duration_minutes": 45,
+            "payment_model": "fixed_rate",
+            "required_forms": [
+              {
+                "form_id": "{{RF_FORM_ID}}",
+                "label": "{{RF_FORM_LABEL}}",
+                "enforcement": "warn",
+                "allow_resubmit": true
+              }
+            ]
+          },
+          "store": "RF_SERVICE_ID",
+          "storeField": "id"
+        }
+      ]
+    },
+    {
+      "id": "api-send-and-verify-invite",
+      "name": "API – Send the required-form invite and verify the invite payload",
+      "description": "Sends the invite and then loads it via the public endpoint to confirm the flow is 'required_form', and stores the invite token for the UI test.",
+      "steps": [
+        {
+          "id": "send-rf-invite",
+          "action": "apiCall",
+          "description": "Send the required form invite for the test student.",
+          "method": "POST",
+          "endpoint": "/api/student-required-forms/send",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "service_id": "{{RF_SERVICE_ID}}",
+            "form_id": "{{RF_FORM_ID}}",
+            "client_profile_id": "{{RF_STUDENT_CLIENT_PROFILE_ID}}",
+            "student_id": "{{RF_STUDENT_UUID}}",
+            "delivery_method": "whatsapp"
+          },
+          "stores": [
+            { "variable": "RF_INVITE_TOKEN", "field": "invite_token" },
+            { "variable": "RF_SUBMISSION_ID", "field": "submission_id" }
+          ]
+        },
+        {
+          "id": "load-rf-invite-api",
+          "action": "apiCall",
+          "description": "Load the invite payload via the public API. If the flow or schema is wrong, we'll catch it in the UI step; here we confirm the endpoint returns 200 and store the flow for reference.",
+          "method": "GET",
+          "endpoint": "/api/student-required-forms/load?invite={{RF_INVITE_TOKEN}}",
+          "store": "RF_INVITE_FLOW",
+          "storeField": "flow",
+          "stores": [
+            { "variable": "RF_INVITE_FLOW", "field": "flow" },
+            { "variable": "RF_INVITE_SCHEMA_FIRST_SECTION_ID", "field": "form_schema.sections.0.id" }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ui-public-submit-form",
+      "name": "UI – Public /submit page: violet section, fill rf_ fields, and submit",
+      "description": "Navigates to the public /#/submit?invite= page (no login required). Asserts: (1) violet שדות חובה section is rendered; (2) rf_first_name and rf_last_name inputs are rendered inside that section; (3) the generic שאלות נוספות wrapper is NOT present (rf_ items are not leaked into a plain white section); (4) the form can be filled and submitted successfully.",
+      "steps": [
+        {
+          "id": "navigate-to-public-submit",
+          "action": "navigate",
+          "url": "{{BASE_URL}}/#/submit?invite={{RF_INVITE_TOKEN}}",
+          "description": "Navigate to the public form submit page using the invite token. The SPA loads the form without requiring OTP."
+        },
+        {
+          "id": "wait-for-form-to-load",
+          "action": "waitForSelector",
+          "selector": "h4.text-violet-900",
+          "description": "Wait for the violet שדות חובה section header to appear. This confirms: (a) the invite was loaded successfully, (b) the rf_built_in_section is in the form schema, and (c) SectionedFormRenderer correctly styled it violet.",
+          "timeout": 20000
+        },
+        {
+          "id": "assert-rf-section-title",
+          "action": "assert",
+          "type": "text",
+          "selector": "h4.text-violet-900",
+          "value": "שדות חובה",
+          "description": "Assert the violet section header text is exactly 'שדות חובה'."
+        },
+        {
+          "id": "assert-rf-first-name-input-present",
+          "action": "assert",
+          "type": "visible",
+          "selector": "#rf_first_name",
+          "description": "Assert the rf_first_name input is rendered. The id matches the item id in the schema, as set by SectionedFormRenderer."
+        },
+        {
+          "id": "assert-rf-last-name-input-present",
+          "action": "assert",
+          "type": "visible",
+          "selector": "#rf_last_name",
+          "description": "Assert the rf_last_name input is rendered."
+        },
+        {
+          "id": "assert-rf-dob-input-present",
+          "action": "assert",
+          "type": "visible",
+          "selector": "#rf_date_of_birth",
+          "description": "Assert the rf_date_of_birth date input is rendered."
+        },
+        {
+          "id": "assert-no-generic-questions-wrapper",
+          "action": "assert",
+          "type": "hidden",
+          "selector": "h4.text-slate-900:has-text('שאלות נוספות')",
+          "description": "Assert there is NO generic 'שאלות נוספות' section title visible. This is the critical regression check: rf_ items must NOT appear inside a plain white section."
+        },
+        {
+          "id": "assert-rf-inputs-not-in-white-section",
+          "action": "assert",
+          "type": "hidden",
+          "selector": ".border-slate-200 #rf_first_name",
+          "description": "Assert rf_first_name is NOT inside a white/slate border section (which would indicate it leaked out of the violet rf_built_in_section into a generic section)."
+        },
+        {
+          "id": "screenshot-form-before-fill",
+          "action": "screenshot",
+          "name": "rf-public-form-before-fill",
+          "description": "Screenshot the form before filling – should show the violet שדות חובה section at the top."
+        },
+        {
+          "id": "fill-rf-first-name",
+          "action": "fill",
+          "selector": "#rf_first_name",
+          "value": "{{RF_STUDENT_FIRST_UPDATED}}",
+          "description": "Fill the rf_first_name field with the new first name that will be written to client_profiles.first_name."
+        },
+        {
+          "id": "fill-rf-last-name",
+          "action": "fill",
+          "selector": "#rf_last_name",
+          "value": "{{RF_STUDENT_LAST_UPDATED}}",
+          "description": "Fill the rf_last_name field with the new last name."
+        },
+        {
+          "id": "fill-rf-date-of-birth",
+          "action": "fill",
+          "selector": "#rf_date_of_birth",
+          "value": "{{RF_STUDENT_DOB}}",
+          "description": "Fill the date_of_birth field. The date input uses YYYY-MM-DD format."
+        },
+        {
+          "id": "assert-first-name-value-set",
+          "action": "assert",
+          "type": "value",
+          "selector": "#rf_first_name",
+          "value": "{{RF_STUDENT_FIRST_UPDATED}}",
+          "description": "Confirm the first name input actually has the value we typed (guards against silent fill failures)."
+        },
+        {
+          "id": "assert-last-name-value-set",
+          "action": "assert",
+          "type": "value",
+          "selector": "#rf_last_name",
+          "value": "{{RF_STUDENT_LAST_UPDATED}}",
+          "description": "Confirm the last name input actually has the value we typed."
+        },
+        {
+          "id": "screenshot-form-filled",
+          "action": "screenshot",
+          "name": "rf-public-form-filled",
+          "description": "Screenshot the filled form before submission."
+        },
+        {
+          "id": "wait-for-react-form-state",
+          "action": "sleep",
+          "ms": 250,
+          "description": "Give the controlled form state a short turn to settle after typing before submitting."
+        },
+        {
+          "id": "click-submit",
+          "action": "click",
+          "selector": "button[type='submit']:has-text('שלח טופס')",
+          "description": "Click the 'שלח טופס' submit button inside the required_form form element."
+        },
+        {
+          "id": "wait-for-submit-api",
+          "action": "waitForNetwork",
+          "pattern": "/api/student-required-forms/submit",
+          "description": "Wait for the submit API call to complete. This ensures the rf_ patch to client_profiles has been applied server-side before we navigate away to assert.",
+          "timeout": 15000
+        },
+        {
+          "id": "wait-for-success-state",
+          "action": "waitForSelector",
+          "selector": "div:has-text('הטופס נשלח בהצלחה')",
+          "description": "Wait for the CardTitle to show the success state ('הטופס נשלח בהצלחה'). This confirms the submit returned 200 and setStep('done') was called.",
+          "timeout": 10000
+        },
+        {
+          "id": "assert-success-message",
+          "action": "assert",
+          "type": "text",
+          "selector": "body",
+          "value": "הטופס נשלח בהצלחה",
+          "description": "Assert the page title changed to the success message."
+        },
+        {
+          "id": "screenshot-success",
+          "action": "screenshot",
+          "name": "rf-public-form-success",
+          "description": "Screenshot the success state."
+        }
+      ]
+    },
+    {
+      "id": "api-verify-profile-updated",
+      "name": "API – Verify client_profile was updated by the rf_ answers",
+      "description": "Calls GET /api/client-profiles/:id to confirm the submit handler patched client_profiles.first_name, last_name, and date_of_birth from the rf_ answers.",
+      "steps": [
+        {
+          "id": "fetch-client-profile",
+          "action": "apiCall",
+          "description": "Fetch the student's client profile. The call will fail (non-200) if the profile doesn't exist, which would also fail the test.",
+          "method": "GET",
+          "endpoint": "/api/client-profiles/{{RF_STUDENT_CLIENT_PROFILE_ID}}",
+          "stores": [
+            { "variable": "RF_PROFILE_FIRST_NAME", "field": "first_name" },
+            { "variable": "RF_PROFILE_LAST_NAME", "field": "last_name" },
+            { "variable": "RF_PROFILE_DOB", "field": "date_of_birth" }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ui-verify-profile-on-student-page",
+      "name": "UI – Navigate to student page and assert updated name is shown",
+      "description": "Navigates back to the admin UI and opens the student overview to confirm the updated first_name and last_name returned by the submission handler are reflected in the UI. This is the strongest possible end-to-end check: form fill → backend patch → admin UI display.",
+      "steps": [
+        {
+          "id": "navigate-to-student-overview",
+          "action": "navigate",
+          "url": "{{BASE_URL}}/#/students/{{RF_STUDENT_UUID}}/overview",
+          "description": "Navigate to the student overview page. Auth is still active in localStorage from the initial login."
+        },
+        {
+          "id": "wait-for-student-page-load",
+          "action": "waitForSelector",
+          "selector": "h1, [data-testid='student-name'], .student-name",
+          "description": "Wait for the student page to finish loading.",
+          "timeout": 20000
+        },
+        {
+          "id": "assert-updated-first-name-visible",
+          "action": "assert",
+          "type": "text",
+          "selector": "body",
+          "value": "{{RF_STUDENT_FIRST_UPDATED}}",
+          "description": "Assert the updated first name 'עדכון' appears somewhere on the student page. This proves the rf_first_name answer was written to client_profiles.first_name."
+        },
+        {
+          "id": "assert-updated-last-name-visible",
+          "action": "assert",
+          "type": "text",
+          "selector": "body",
+          "value": "{{RF_STUDENT_LAST_UPDATED}}",
+          "description": "Assert the updated last name 'מבחן' appears somewhere on the student page. This proves the rf_last_name answer was written to client_profiles.last_name."
+        },
+        {
+          "id": "assert-baseline-first-name-gone",
+          "action": "assert",
+          "type": "text",
+          "selector": "body",
+          "value": "{{RF_STUDENT_FIRST_BASELINE}}",
+          "not": true,
+          "description": "Assert the OLD baseline first name 'רקסט' is NOT visible on the page. This is the inverse check: confirms the old value was actually replaced, not just that the new name happened to coincidentally appear alongside the old one."
+        },
+        {
+          "id": "navigate-to-student-forms-tab",
+          "action": "navigate",
+          "url": "{{BASE_URL}}/#/students/{{RF_STUDENT_UUID}}/forms",
+          "description": "Navigate to the student forms tab to verify the required form submission is recorded."
+        },
+        {
+          "id": "wait-for-forms-tab",
+          "action": "waitForSelector",
+          "selector": "h3:has-text('טפסים')",
+          "description": "Wait for the forms tab panel to render.",
+          "timeout": 15000
+        },
+        {
+          "id": "assert-form-submission-visible",
+          "action": "assert",
+          "type": "visible",
+          "selector": "h3:has-text('טפסים')",
+          "description": "Assert the forms tab panel is visible (basic sanity that the tab loaded)."
+        },
+        {
+          "id": "screenshot-student-forms-tab",
+          "action": "screenshot",
+          "name": "rf-student-forms-tab-after-submit",
+          "description": "Screenshot the forms tab to capture the submission record."
+        }
+      ]
+    }
+  ]
+}

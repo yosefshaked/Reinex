@@ -1,5 +1,6 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
+import ErrorMessageText from '@/components/ui/ErrorMessageText.jsx';
 import { getAuthClient } from '@/lib/supabase-manager.js';
 import { adminAuthProvider } from './authProvider.js';
 
@@ -452,7 +453,9 @@ export default function MfaPage() {
           {state.info ? <p className="text-sm text-slate-600">{state.info}</p> : null}
 
           {state.error ? (
-            <p className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{state.error}</p>
+            <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+              <ErrorMessageText error={state.error} className="text-sm text-rose-700" supportClassName="text-rose-700" />
+            </div>
           ) : null}
 
           <div className="flex flex-wrap items-center gap-3">

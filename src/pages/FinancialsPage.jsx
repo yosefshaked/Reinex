@@ -41,7 +41,7 @@ import StudentBillingWorkspace from '@/features/students/components/StudentBilli
 import BillingSettingsWorkspace from '@/features/finance/components/BillingSettingsWorkspace.jsx';
 import HmoProviderBillingWorkspace from '@/features/finance/components/HmoProviderBillingWorkspace.jsx';
 import { isAdminOrOffice, isAdminRole, normalizeMembershipRole } from '@/features/students/utils/endpoints.js';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast.jsx';
 import { formatCurrency, toAgorot } from '@/lib/currency.js';
 import { getHmoClaimFeedback, getHmoClaimValidationFeedback } from '@/features/finance/lib/hmo-claim-feedback.js';
 
@@ -185,7 +185,7 @@ function resolveClaimBatchState(batchStatus) {
   }
 }
 
-function resolveClaimBadgeState(claim) {
+function _resolveClaimBadgeState(claim) {
   const batchState = resolveClaimBatchState(claim?.hmo_invoice_batch_status);
   if (batchState) {
     return batchState;
@@ -193,7 +193,7 @@ function resolveClaimBadgeState(claim) {
   return resolveClaimWorkflowState(claim);
 }
 
-function formatBatchStatus(status) {
+function _formatBatchStatus(status) {
   switch (`${status || ''}`.toLowerCase()) {
     case 'draft': return 'טיוטה';
     case 'issued':

@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Plus, ArrowRight, Loader2, SlidersHorizontal, Sparkles, UsersRound } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
+import ErrorSupportCode from '@/components/ui/ErrorSupportCode.jsx';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import {
   DropdownMenu,
@@ -18,6 +19,7 @@ import { DAY_OPTIONS } from '@/lib/day-of-week.js';
 import { TemplateScheduleCalendar } from '../components/TemplateManager/TemplateScheduleCalendar';
 import { AddTemplateDialog } from '../components/TemplateManager/AddTemplateDialog';
 import { TemplateEditDialog } from '../components/TemplateManager/TemplateEditDialog';
+import TemplateMissingFormsDialog from '../components/TemplateManager/TemplateMissingFormsDialog';
 import CalendarServicePalette from '../components/CalendarServicePalette.jsx';
 import { useTemplates, useTemplateMutations } from '../hooks/useTemplates';
 import { useCalendarInstructors } from '../hooks/useCalendar';
@@ -143,6 +145,10 @@ export default function TemplateManagerPage() {
   const { instructors, isLoading: instructorsLoading, error: instructorsError } = useCalendarInstructors();
   const { matchWaitingEntryToTemplate, isSubmitting: isAssigning } = useTemplateMutations();
   const [capacityAssignError, setCapacityAssignError] = useState('');
+  const [missingFormsMap, setMissingFormsMap] = useState({});
+  const [missingFormsRefetch, setMissingFormsRefetch] = useState(0);
+  const [missingFormsDialogTemplate, setMissingFormsDialogTemplate] = useState(null);
+  const [missingFormsDialogEntries, setMissingFormsDialogEntries] = useState([]);
 
   const isLoading = templatesLoading || instructorsLoading;
   const errorMsg = templatesError || instructorsError;
@@ -218,6 +224,32 @@ export default function TemplateManagerPage() {
       cancelled = true;
     };
   }, [activeOrgId, session, isLoading, errorMsg]);
+
+  // Fetch required-form compliance for all templates in a single bulk call
+  useEffect(() => {
+    if (isLoading || !activeOrgId || !session) {
+      setMissingFormsMap({});
+      return;
+    }
+
+    let cancelled = false;
+
+    async function fetchRequiredFormsCompliance() {
+      try {
+        const params = new URLSearchParams();
+        params.set('org_id', activeOrgId);
+        const data = await authenticatedFetch(`student-required-forms/compliance-bulk?${params}`, { session });
+        if (!cancelled) {
+          setMissingFormsMap(data && typeof data === 'object' && !Array.isArray(data) ? data : {});
+        }
+      } catch {
+        if (!cancelled) setMissingFormsMap({});
+      }
+    }
+
+    void fetchRequiredFormsCompliance();
+    return () => { cancelled = true; };
+  }, [activeOrgId, session, isLoading, missingFormsRefetch]);
 
   const waitingListSeed = useMemo(() => {
     const waitingListEntryId = searchParams.get('waiting_list_entry_id') || '';
@@ -347,6 +379,11 @@ export default function TemplateManagerPage() {
 
   function handleTemplateClick(template) {
     setSelectedTemplate(template);
+  }
+
+  function handleMissingFormsClick(template, entries) {
+    setMissingFormsDialogTemplate(template);
+    setMissingFormsDialogEntries(entries || []);
   }
 
   function handleAddSuccess() {
@@ -572,6 +609,7 @@ export default function TemplateManagerPage() {
         <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-4 text-destructive">
           <p className="text-base font-semibold">אירעה שגיאה בטעינת הנתונים.</p>
           <p className="mt-1 text-sm">נסו לרענן את הדף. אם הבעיה חוזרת, פנו לתמיכה.</p>
+          <ErrorSupportCode error={errorMsg} />
         </div>
       )}
 
@@ -701,8 +739,10 @@ export default function TemplateManagerPage() {
           showWaitingListMatches={showWaitingMatches}
           waitingListTemplateMatches={waitingMatches.capacity.template_matches}
           waitingListCandidates={waitingMatches.clear_space.candidates}
+          missingFormsMap={missingFormsMap}
           isLoading={waitingMatchesLoading}
           onWaitingListMatchClick={handleWaitingListMatchClick}
+          onMissingFormsClick={handleMissingFormsClick}
         />
       )}
 
@@ -763,6 +803,17 @@ export default function TemplateManagerPage() {
         onClose={() => setSelectedTemplate(null)}
         onUpdate={handleUpdateSuccess}
         onFixAvailability={handleFixAvailability}
+      />
+
+      <TemplateMissingFormsDialog
+        open={Boolean(missingFormsDialogTemplate)}
+        onClose={() => setMissingFormsDialogTemplate(null)}
+        template={missingFormsDialogTemplate}
+        missingFormsEntries={missingFormsDialogEntries}
+        onSent={() => {
+          setMissingFormsDialogTemplate(null);
+          setMissingFormsRefetch((n) => n + 1);
+        }}
       />
 
       <Dialog

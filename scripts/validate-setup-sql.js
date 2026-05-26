@@ -25,6 +25,7 @@ const RULES = {
   FRONTEND_RPC_COVERAGE: 'SQL015',
   UNQUALIFIED_JOIN_AGGREGATE: 'SQL016',
   UNQUALIFIED_CTE_ID_REFERENCE: 'SQL017',
+  UPSERT_CONFLICT_INDEX_COVERAGE: 'SQL018',
   BROAD_EXCEPTION_SWALLOW: 'SQL101',
   DESTRUCTIVE_DROP_TABLE: 'SQL102',
 };
@@ -517,6 +518,103 @@ function validateUnqualifiedJoinAggregates() {
   }
 }
 
+// SQL018: Every table registered in the upsert-conflicts validator must have a
+// matching CREATE UNIQUE INDEX or named UNIQUE constraint in setup-sql. Without
+// this, ON CONFLICT upserts will fail at runtime with 42P10 even though the
+// JS code and SQL file individually look correct.
+const KNOWN_UPSERT_CONFLICT_COLUMNS = {
+  Settings: 'org_id,key',
+  grace_cancellation_requests: 'org_id,lesson_participant_id',
+  instructor_service_capabilities: 'org_id,employee_id,service_id',
+  instructor_profiles: 'employee_id',
+};
+
+function buildColPattern(cols) {
+  // Match column names with or without double-quote wrapping, separated by commas
+  return cols.split(',').map((c) => `"?${c.trim()}"?`).join('\\s*,\\s*');
+}
+
+function normalizeSqlIdentifier(value) {
+  return String(value || '').trim().replace(/^"|"$/g, '').toLowerCase();
+}
+
+function normalizeSqlColumnList(value) {
+  return String(value || '')
+    .split(',')
+    .map((segment) => normalizeSqlIdentifier(segment))
+    .filter(Boolean)
+    .join(',');
+}
+
+function collectSqlUniqueIndexes(sqlText) {
+  const indexes = new Map();
+  const pattern = /CREATE\s+UNIQUE\s+INDEX\s+(?:IF\s+NOT\s+EXISTS\s+)?("?[A-Za-z0-9_]+"?)\s+ON\s+public\.((?:"?[A-Za-z0-9_]+"?))\s*\(([^)]*)\)/gi;
+  for (const match of sqlText.matchAll(pattern)) {
+    const indexName = normalizeSqlIdentifier(match[1]);
+    const tableName = normalizeSqlIdentifier(match[2]);
+    const columns = normalizeSqlColumnList(match[3]);
+    if (!indexName || !tableName || !columns) continue;
+    indexes.set(indexName, { tableName, columns });
+  }
+  return indexes;
+}
+
+function hasMatchingSqlUniqueUsingIndex(sqlText, table, cols, uniqueIndexes) {
+  const escapedTable = table.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const targetCols = normalizeSqlColumnList(cols);
+  const pattern = new RegExp(
+    `ALTER TABLE\\s+public\\.(?:"?${escapedTable}"?)[\\s\\S]{0,1200}?UNIQUE\\s+USING\\s+INDEX\\s+("?[A-Za-z0-9_]+"?)`,
+    'gi',
+  );
+
+  for (const match of sqlText.matchAll(pattern)) {
+    const indexName = normalizeSqlIdentifier(match[1]);
+    const indexMeta = uniqueIndexes.get(indexName);
+    if (!indexMeta) continue;
+    if (indexMeta.tableName !== normalizeSqlIdentifier(table)) continue;
+    if (indexMeta.columns !== targetCols) continue;
+    return true;
+  }
+
+  return false;
+}
+
+function validateUpsertConflictIndexCoverage() {
+  const uniqueIndexes = collectSqlUniqueIndexes(sql);
+  for (const [table, cols] of Object.entries(KNOWN_UPSERT_CONFLICT_COLUMNS)) {
+    const colPattern = buildColPattern(cols);
+    const escapedTable = table.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const columnList = cols.split(',').map((c) => c.trim());
+
+    // 1. Explicit CREATE UNIQUE INDEX on those columns
+    const hasIndex = new RegExp(
+      `CREATE UNIQUE INDEX\\s+(?:IF NOT EXISTS\\s+)?\\w+\\s+ON\\s+public\\.(?:"?${escapedTable}"?)\\s*\\(\\s*${colPattern}\\s*\\)`,
+      'i',
+    ).test(sql);
+
+    // 2. Named UNIQUE constraint via ALTER TABLE (including UNIQUE USING INDEX)
+    const hasConstraint = new RegExp(
+      `ALTER TABLE\\s+public\\.(?:"?${escapedTable}"?)[\\s\\S]{0,800}?UNIQUE\\s*\\(\\s*${colPattern}\\s*\\)`,
+      'i',
+    ).test(sql);
+
+    const hasConstraintUsingIndex = hasMatchingSqlUniqueUsingIndex(sql, table, cols, uniqueIndexes);
+
+    // 3. Single-column onConflict that matches a PRIMARY KEY column definition
+    const hasPrimaryKey = columnList.length === 1 && new RegExp(
+      `CREATE TABLE IF NOT EXISTS\\s+public\\.(?:"?${escapedTable}"?)[\\s\\S]{0,2000}?"?${columnList[0]}"?[^\\n]*(PRIMARY KEY)`,
+      'i',
+    ).test(sql);
+
+    if (!hasIndex && !hasConstraint && !hasConstraintUsingIndex && !hasPrimaryKey) {
+      addError(
+        RULES.UPSERT_CONFLICT_INDEX_COVERAGE,
+        `Table "${table}" is used in upsert with onConflict=(${cols}) but no matching CREATE UNIQUE INDEX, UNIQUE constraint, or PRIMARY KEY exists in setup-sql. Add one or the ON CONFLICT upsert will fail at runtime with 42P10.`,
+      );
+    }
+  }
+}
+
 function validateUnqualifiedCteIdReferences() {
   const riskyReferences = [
     {
@@ -706,6 +804,7 @@ function main() {
     validateFrontendRpcCoverage();
     validateUnqualifiedJoinAggregates();
     validateUnqualifiedCteIdReferences();
+    validateUpsertConflictIndexCoverage();
     validateWarnings();
   }
 

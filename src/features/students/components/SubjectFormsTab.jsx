@@ -17,7 +17,8 @@ import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { useOrg } from '@/org/OrgContext.jsx';
 import SendFormDialog from '@/features/students/components/SendFormDialog.jsx';
 import ResendOtpDialog from '@/features/students/components/ResendOtpDialog.jsx';
-import { toast } from 'sonner';
+import SendRequiredFormDialog from '@/features/students/components/SendRequiredFormDialog.jsx';
+import { toast } from '@/lib/toast.jsx';
 import { findQuestionLabel, normalizeFormSchema } from '@/features/forms/lib/form-schema.js';
 
 const WAITING_LIST_RELATIONSHIP_LABELS = {
@@ -398,6 +399,8 @@ export default function SubjectFormsTab({
   clientProfileId = '',
   clientProfile = null,
   canEdit = false,
+  requiredFormsCompliance = [],
+  onComplianceRefresh,
 }) {
   const { session } = useSupabase();
   const { activeOrg } = useOrg();
@@ -409,6 +412,8 @@ export default function SubjectFormsTab({
   const [sendOpen, setSendOpen] = useState(false);
   const [resendState, setResendState] = useState({ submissionId: '', deliveryMethod: '' });
   const [resendDialog, setResendDialog] = useState({ open: false, submission: null, deliveryMethod: '' });
+  const [sendRequiredForm, setSendRequiredForm] = useState(null); // compliance entry to send
+  const [sendRequiredFormSent, setSendRequiredFormSent] = useState(false);
 
   const activeOrgId = activeOrg?.id || null;
   const effectiveClientProfileId = String(clientProfileId || clientProfile?.id || student?.client_profile_id || '').trim();
@@ -536,6 +541,21 @@ export default function SubjectFormsTab({
     answersEntries: buildAnswerEntries(submission),
   })), [submissions]);
 
+  const missingComplianceEntries = useMemo(
+    () => (Array.isArray(requiredFormsCompliance) ? requiredFormsCompliance.filter((e) => e.status === 'missing') : []),
+    [requiredFormsCompliance],
+  );
+
+  const complianceBySubmissionId = useMemo(() => {
+    const map = {};
+    if (Array.isArray(requiredFormsCompliance)) {
+      requiredFormsCompliance.forEach((entry) => {
+        if (entry.submission_id) map[entry.submission_id] = entry;
+      });
+    }
+    return map;
+  }, [requiredFormsCompliance]);
+
   return (
     <div className="space-y-4">
       <div className="bg-white rounded-xl border border-border shadow-sm overflow-hidden">
@@ -573,13 +593,13 @@ export default function SubjectFormsTab({
             </div>
           )}
 
-          {!loading && !error && submissionsWithMeta.length === 0 && (
+          {!loading && !error && submissionsWithMeta.length === 0 && missingComplianceEntries.length === 0 && (
             <div className="rounded-lg border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
               עדיין לא נשלחו טפסים.
             </div>
           )}
 
-          {!loading && !error && submissionsWithMeta.length > 0 && (
+          {!loading && !error && (submissionsWithMeta.length > 0 || missingComplianceEntries.length > 0) && (
             <div className="overflow-x-auto">
               <Table>
                 <TableHeader>
@@ -594,14 +614,49 @@ export default function SubjectFormsTab({
                   </TableRow>
                 </TableHeader>
                 <TableBody>
+                  {missingComplianceEntries.map((entry) => (
+                    <TableRow key={`missing-${entry.service_id}-${entry.form_id}`} className="bg-red-50/50">
+                      <TableCell className="font-medium">
+                        <div className="flex flex-col gap-0.5">
+                          <span>{entry.required_form_label || entry.form_name || 'טופס חובה'}</span>
+                          {entry.service_name ? <span className="text-xs text-muted-foreground">{entry.service_name}</span> : null}
+                          <Badge className="w-fit border-amber-300 bg-amber-100 text-amber-800 hover:bg-amber-100 text-xs mt-0.5" variant="outline">חובה</Badge>
+                        </div>
+                      </TableCell>
+                      <TableCell>—</TableCell>
+                      <TableCell>—</TableCell>
+                      <TableCell>
+                        <Badge className="border-red-300 bg-red-100 text-red-700 hover:bg-red-100" variant="outline">חסר</Badge>
+                      </TableCell>
+                      <TableCell>—</TableCell>
+                      <TableCell>—</TableCell>
+                      <TableCell className="text-end">
+                        {canEdit && (
+                          <Button type="button" size="sm" variant="outline" className="gap-1 text-xs" onClick={() => setSendRequiredForm(entry)}>
+                            <Send className="h-3 w-3" />
+                            שלח טופס
+                          </Button>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  ))}
                   {submissionsWithMeta.map((submission) => {
                     const isExpanded = expandedId === submission.id;
                     const isSubmitted = String(submission?.metadata?.workflow_status || '').toLowerCase() === 'submitted';
                     const isResending = resendState.submissionId === submission.id;
+                    const complianceEntry = complianceBySubmissionId[submission.id] || null;
+                    const isRequiredForm = complianceEntry !== null || String(submission?.metadata?.workflow_kind || '').toLowerCase() === 'required_form';
                     return (
                       <React.Fragment key={submission.id}>
                         <TableRow>
-                          <TableCell className="font-medium">{submission.form_name || 'טופס ללא שם'}</TableCell>
+                          <TableCell className="font-medium">
+                            <div className="flex flex-col gap-0.5">
+                              <span>{submission.form_name || 'טופס ללא שם'}</span>
+                              {isRequiredForm && (
+                                <Badge className="w-fit border-amber-300 bg-amber-100 text-amber-800 hover:bg-amber-100 text-xs" variant="outline">חובה</Badge>
+                              )}
+                            </div>
+                          </TableCell>
                           <TableCell>{formatDateTime(submission.submitted_at || submission?.metadata?.initiated_at)}</TableCell>
                           <TableCell>{formatDateTime(submission?.otp_metadata?.expires_at || submission?.metadata?.otp_expires_at)}</TableCell>
                           <TableCell>
@@ -694,7 +749,7 @@ export default function SubjectFormsTab({
                                   </div>
                                 ) : null}
 
-                                {canEdit && !isSubmitted && (
+                                {canEdit && !isSubmitted && !isRequiredForm && (
                                   <div className="pt-2 border-t border-border">
                                     <p className="text-xs text-muted-foreground mb-1.5">שליחה חוזרת של OTP</p>
                                     <div className="flex flex-wrap gap-2">
@@ -721,6 +776,42 @@ export default function SubjectFormsTab({
                                         שלח שוב במייל
                                       </Button>
                                     </div>
+                                  </div>
+                                )}
+
+                                {canEdit && isRequiredForm && complianceEntry?.allow_resubmit && isSubmitted && (
+                                  <div className="pt-2 border-t border-border">
+                                    <Button
+                                      type="button"
+                                      size="sm"
+                                      variant="outline"
+                                      className="gap-2"
+                                      onClick={() => setSendRequiredForm(complianceEntry)}
+                                    >
+                                      <Send className="h-4 w-4" />
+                                      שלח מחדש
+                                    </Button>
+                                  </div>
+                                )}
+
+                                {canEdit && isRequiredForm && !isSubmitted && (
+                                  <div className="pt-2 border-t border-border">
+                                    <p className="text-xs text-muted-foreground mb-1.5">שליחה חוזרת של קישור</p>
+                                    <Button
+                                      type="button"
+                                      size="sm"
+                                      variant="outline"
+                                      className="gap-2"
+                                      onClick={() => setSendRequiredForm({
+                                        service_id: submission.metadata?.service_id || '',
+                                        form_id: submission.form_id,
+                                        required_form_label: submission.metadata?.required_form_label || submission.form_name || 'טופס חובה',
+                                        service_name: '',
+                                      })}
+                                    >
+                                      <Send className="h-4 w-4" />
+                                      שלח שוב
+                                    </Button>
                                   </div>
                                 )}
 
@@ -784,6 +875,28 @@ export default function SubjectFormsTab({
           const { submission, deliveryMethod } = resendDialog;
           setResendDialog({ open: false, submission: null, deliveryMethod: '' });
           void handleResend(submission, deliveryMethod, expiresInMinutes);
+        }}
+      />
+
+      <SendRequiredFormDialog
+        open={Boolean(sendRequiredForm)}
+        onClose={() => {
+          const wasSent = sendRequiredFormSent;
+          setSendRequiredForm(null);
+          setSendRequiredFormSent(false);
+          if (wasSent) {
+            void loadSubmissions();
+            onComplianceRefresh?.();
+          }
+        }}
+        student={student}
+        clientProfile={clientProfile}
+        serviceId={sendRequiredForm?.service_id || ''}
+        formId={sendRequiredForm?.form_id || ''}
+        requiredFormLabel={sendRequiredForm?.required_form_label || sendRequiredForm?.form_name || ''}
+        serviceName={sendRequiredForm?.service_name || ''}
+        onSent={() => {
+          setSendRequiredFormSent(true);
         }}
       />
     </div>

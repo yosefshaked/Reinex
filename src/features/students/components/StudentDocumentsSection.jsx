@@ -5,7 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast.jsx';
 import { FileText, Upload, Download, Trash2, ChevronDown, ChevronUp, Loader2, AlertCircle, CheckCircle2, Eye, ArrowUpDown, ArrowUp, ArrowDown, Calendar, CalendarX, CheckCircle, Edit } from 'lucide-react';
 import { fetchSettingsValue } from '@/features/settings/api/settings.js';
 import { format, parseISO, isBefore, startOfDay } from 'date-fns';
@@ -14,6 +14,7 @@ import { useOrg } from '@/org/OrgContext.jsx';
 import { getAuthClient } from '@/lib/supabase-manager.js';
 import { useDocuments } from '@/hooks/useDocuments';
 import { checkDocumentDuplicate } from '@/features/students/api/documents-check.js';
+import { createSupportAwareApiError, extractSupportCode } from '@/lib/error-support.js';
 import {
   Dialog,
   DialogContent,
@@ -37,6 +38,11 @@ const REQUEST_STATE = {
   loading: 'loading',
   error: 'error',
 };
+
+async function readDocumentActionError(response, fallback) {
+  const errorData = await response.json().catch(() => ({}));
+  return createSupportAwareApiError(errorData, response.status, fallback);
+}
 
 function formatFileDate(dateString) {
   if (!dateString) return '';
@@ -528,8 +534,8 @@ export default function StudentDocumentsSection({ student, session, orgId, onRef
           toast.error('שגיאת הרשאה. נא להתחבר מחדש');
         } else if (errorMessage.includes('403') || errorMessage.includes('Forbidden')) {
           toast.error('אין לך הרשאה לבצע בדיקה זו');
-        } else if (errorMessage.includes('500')) {
-          toast.error('שגיאת שרת בעת בדיקת כפליות');
+        } else if (extractSupportCode(error)) {
+          toast.error(errorMessage);
         } else if (!errorMessage.includes('AbortError')) {
           console.warn('Duplicate check error details:', error);
         }
@@ -877,7 +883,7 @@ export default function StudentDocumentsSection({ student, session, orgId, onRef
           } else {
             try {
               const errorData = JSON.parse(xhr.responseText);
-              toast.error(errorData.error || 'העלאת הקבצים נכשלה', { id: toastId });
+              toast.error(createSupportAwareApiError(errorData, xhr.status, 'העלאת הקבצים נכשלה').message, { id: toastId });
             } catch {
               toast.error(`העלאת הקבצים נכשלה (שגיאה ${xhr.status})`, { id: toastId });
             }
@@ -938,8 +944,7 @@ export default function StudentDocumentsSection({ student, session, orgId, onRef
         });
 
         if (!response.ok) {
-          const errorData = await response.json().catch(() => ({ error: 'Delete failed' }));
-          throw new Error(errorData.error || 'Delete failed');
+          throw await readDocumentActionError(response, 'Delete failed');
         }
 
         toast.success('הקובץ נמחק בהצלחה!');
@@ -1002,8 +1007,7 @@ export default function StudentDocumentsSection({ student, session, orgId, onRef
         });
 
         if (!response.ok) {
-          const errorData = await response.json().catch(() => ({ error: 'Update failed' }));
-          throw new Error(errorData.error || 'Update failed');
+          throw await readDocumentActionError(response, 'Update failed');
         }
 
         toast.success(newResolved ? 'המסמך סומן כטופל!' : 'הסימון בוטל!', { id: toastId });
@@ -1054,8 +1058,7 @@ export default function StudentDocumentsSection({ student, session, orgId, onRef
         });
 
         if (!response.ok) {
-          const errorData = await response.json().catch(() => ({ error: 'Update failed' }));
-          throw new Error(errorData.error || 'Update failed');
+          throw await readDocumentActionError(response, 'Update failed');
         }
 
         toast.success('המסמך עודכן בהצלחה!', { id: toastId });
@@ -1103,8 +1106,7 @@ export default function StudentDocumentsSection({ student, session, orgId, onRef
         );
 
         if (!response.ok) {
-          const errorData = await response.json().catch(() => ({}));
-          throw new Error(errorData.error || 'Failed to get download URL');
+          throw await readDocumentActionError(response, 'Failed to get download URL');
         }
 
         const { url } = await response.json();
@@ -1144,8 +1146,7 @@ export default function StudentDocumentsSection({ student, session, orgId, onRef
         );
 
         if (!response.ok) {
-          const errorData = await response.json().catch(() => ({}));
-          throw new Error(errorData.error || errorData.message || 'Failed to get preview URL');
+          throw await readDocumentActionError(response, 'Failed to get preview URL');
         }
 
         const { url, contentType } = await response.json();

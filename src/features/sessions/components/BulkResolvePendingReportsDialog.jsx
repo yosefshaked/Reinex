@@ -10,7 +10,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast.jsx';
 import { Users, UserPlus, X } from 'lucide-react';
 import { useOrg } from '@/org/OrgContext.jsx';
 import { useStudents, useInstructors } from '@/hooks/useOrgData.js';

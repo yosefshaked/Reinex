@@ -22,6 +22,14 @@ import { attachErrorTracking, respondTracked } from '../_shared/error-events.js'
 
 const MAX_BODY_BYTES = 96 * 1024;
 
+/**
+ * Pure helper: should the payment handler auto-resolve open claim tasks?
+ * Exported for unit testing — mirrors the inline check inside record_hmo_claim_payment.
+ */
+export function resolveOpenClaimTasksEnabled(body) {
+  return body?.resolve_open_claim_tasks !== false && body?.resolveOpenClaimTasks !== false;
+}
+
 function isPlainObject(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
@@ -700,21 +708,29 @@ export default async function (context, req) {
       endDate = currentRange.endDate;
     }
 
-    const snapshot = hmoProviderId
-      ? await billingService.getHmoProviderReceivablesSnapshot({
-        hmoProviderId,
-        periodStart: startDate || null,
-        periodEnd: endDate || null,
-      })
-      : await fetchBillingSnapshot(supabase, {
-        orgId,
-        studentId,
-        clientProfileId,
-        startDate,
-        endDate,
-      });
+    try {
+      const snapshot = hmoProviderId
+        ? await billingService.getHmoProviderReceivablesSnapshot({
+          hmoProviderId,
+          periodStart: startDate || null,
+          periodEnd: endDate || null,
+        })
+        : await fetchBillingSnapshot(supabase, {
+          orgId,
+          studentId,
+          clientProfileId,
+          startDate,
+          endDate,
+        });
 
-    return respond(context, 200, snapshot);
+      return respond(context, 200, snapshot);
+    } catch (snapshotError) {
+      context.log?.error?.('billing/snapshot failed', {
+        message: snapshotError?.message,
+        code: snapshotError?.code,
+      });
+      return respondTracked(context, 500, { message: 'billing_snapshot_failed' }, undefined, { error: snapshotError });
+    }
   }
 
   if (!isAdminRole(role)) {
@@ -897,8 +913,7 @@ export default async function (context, req) {
         metadata: body?.metadata && typeof body.metadata === 'object' ? body.metadata : {},
       });
 
-      const shouldResolveOpenClaims = body?.resolve_open_claim_tasks !== false
-        && body?.resolveOpenClaimTasks !== false;
+      const shouldResolveOpenClaims = resolveOpenClaimTasksEnabled(body);
       let resolvedTaskCount = 0;
       let resolvedTaskIds = [];
 

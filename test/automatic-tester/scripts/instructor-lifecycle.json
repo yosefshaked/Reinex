@@ -3,8 +3,8 @@
     "id": "instructor-lifecycle",
     "name": "Instructor Lifecycle",
     "description": "Admin views the instructor roster. Then the instructor logs in, views their dashboard and assigned students, and navigates to their calendar.",
-    "version": "1.0.0",
-    "last_validated_at": "2026-04-23T23:59:00Z",
+    "version": "1.0.1",
+    "last_validated_at": "2026-05-24T10:28:54Z",
     "author": "claude-ai",
     "dependencies": {
       "routes": [

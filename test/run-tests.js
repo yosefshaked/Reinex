@@ -22,7 +22,10 @@ function testSwapLayout() {
 
 function testSidebarVariants() {
   const cls = sidebarMenuButtonVariants({ variant: 'default', size: 'default' });
-  assert.ok(typeof cls === 'string' && cls.length > 0, 'sidebarMenuButtonVariants returns classes');
+  assert.ok(typeof cls === 'string', 'sidebarMenuButtonVariants returns a string');
+  for (const expected of ['flex', 'w-full', 'items-center', 'rounded-md', 'h-8', 'text-sm', 'hover:bg-sidebar-accent']) {
+    assert.ok(cls.includes(expected), `sidebarMenuButtonVariants default/default must include "${expected}"`);
+  }
 }
 
 async function run() {

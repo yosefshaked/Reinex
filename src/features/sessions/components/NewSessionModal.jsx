@@ -2,11 +2,12 @@ import React, { useCallback, useEffect, useMemo, useState, useRef } from 'react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Loader2, Calendar, CalendarCheck, CalendarClock } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast.jsx';
 import { useAuth } from '@/auth/AuthContext.jsx';
 import { useOrg } from '@/org/OrgContext.jsx';
 import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { authenticatedFetch } from '@/lib/api-client.js';
+import { extractSupportCode, resolveApiErrorMessage } from '@/lib/error-support.js';
 import NewSessionForm, { NewSessionFormFooter } from './NewSessionForm.jsx';
 import { ensureSessionFormFallback, parseSessionFormConfig } from '@/features/sessions/utils/form-config.js';
 import { normalizeMembershipRole, isAdminRole } from '@/features/students/utils/endpoints.js';
@@ -646,8 +647,8 @@ export default function NewSessionModal({
       console.error('Failed to save session record', error);
       setSubmitState(REQUEST_STATE.error);
       // Map known server messages to clear, localized explanations
-      const serverMessage = error?.data?.message || error?.message || '';
-      let friendly = 'שמירת המפגש נכשלה.';
+      const serverMessage = resolveApiErrorMessage(error);
+      let friendly = extractSupportCode(serverMessage) ? serverMessage : 'שמירת המפגש נכשלה.';
       if (serverMessage === 'student_missing_instructor') {
         friendly = 'לא ניתן לתעד מפגש: לתלמיד זה לא משויך מדריך פעיל. נא לשייך מדריך תחילה.';
       } else if (serverMessage === 'student_not_assigned_to_user') {

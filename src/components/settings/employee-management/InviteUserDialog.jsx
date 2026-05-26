@@ -4,7 +4,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { MailPlus } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast.jsx';
 import { createInvitation } from '@/api/invitations.js';
 
 export default function InviteUserDialog({ open, onOpenChange, activeOrgId, session, onInviteSent }) {

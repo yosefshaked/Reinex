@@ -15,7 +15,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast.jsx';
 import { formatStudentName } from '@/features/students/utils/name-utils.js';
 import { authenticatedFetch } from '@/lib/api-client.js';
 import { updateStudentFromForm, updateStudentStatus } from '@/features/students/api/students.js';

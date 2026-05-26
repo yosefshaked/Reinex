@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react'
 import { fetchLessonInstances } from '@/features/scheduling/api/lesson-instances.js'
 import Card from '@/components/ui/CustomCard.jsx'
 import { Button } from '@/components/ui/button'
+import ErrorMessageText from '@/components/ui/ErrorMessageText.jsx'
 
 function formatDateInputValue(date) {
   const year = date.getFullYear()
@@ -56,7 +57,7 @@ export default function DayScheduleView({ orgId }) {
       } catch (err) {
         if (cancelled) return
         setStatus('error')
-        setError(err?.data?.message || err?.message || 'שגיאה בטעינת היומן')
+        setError(err || 'שגיאה בטעינת היומן')
       }
     }
 
@@ -115,7 +116,7 @@ export default function DayScheduleView({ orgId }) {
 
       {status === 'error' && (
         <Card className="rounded-2xl border border-border bg-surface p-lg shadow-sm">
-          <p className="text-sm text-error">{error}</p>
+          <ErrorMessageText error={error} className="text-sm text-error" supportClassName="text-error" />
         </Card>
       )}
 

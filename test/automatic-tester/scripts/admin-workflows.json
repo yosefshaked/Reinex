@@ -2,9 +2,9 @@
   "meta": {
     "id": "admin-workflows",
     "name": "Admin Core Workflows",
-    "description": "Smoke-tests the most important admin-only pages and flows: dashboard tasks, calendar, forms builder, financials, settings, and audit log.",
-    "version": "1.0.0",
-    "last_validated_at": "2026-04-23T23:59:00Z",
+    "description": "Smoke-tests the most important admin-only pages and flows: dashboard tasks, calendar, forms builder including required-form type selection, financials, settings, and audit log.",
+    "version": "1.1.0",
+    "last_validated_at": "2026-05-24T12:34:40Z",
     "author": "claude-ai",
     "dependencies": {
       "routes": [
@@ -173,6 +173,45 @@
           "description": "Wait for forms API to respond",
           "action": "waitForNetwork",
           "pattern": "/api/forms"
+        },
+        {
+          "id": "open-create-dialog",
+          "description": "Open the new form dialog",
+          "action": "click",
+          "selector": "button:has-text(\"צור טופס חדש\"), button:has-text(\"צור טופס ראשון\")",
+          "first": true
+        },
+        {
+          "id": "open-form-usage-select",
+          "description": "Open the form type selector",
+          "action": "click",
+          "selector": "#form-usage"
+        },
+        {
+          "id": "assert-required-form-option",
+          "description": "Confirm required forms can be selected from the manager",
+          "action": "waitForSelector",
+          "selector": "[role=\"option\"]:has-text(\"טופס חובה\")"
+        },
+        {
+          "id": "select-required-form-option",
+          "description": "Select required form type",
+          "action": "click",
+          "selector": "[role=\"option\"]:has-text(\"טופס חובה\")"
+        },
+        {
+          "id": "assert-required-form-selected",
+          "description": "Confirm the selected type is visible",
+          "action": "assert",
+          "type": "text",
+          "selector": "#form-usage",
+          "value": "טופס חובה"
+        },
+        {
+          "id": "close-create-dialog",
+          "description": "Close the dialog without creating a form",
+          "action": "click",
+          "selector": "[role=\"dialog\"] button:has-text(\"ביטול\")"
         },
         {
           "id": "assert-url",

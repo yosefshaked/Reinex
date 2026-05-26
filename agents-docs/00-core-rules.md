@@ -41,3 +41,24 @@
 - Use `createDashboardTask` (from `dashboard-tasks.js`) to push inbox tasks for domain operations that require user follow-up; it is idempotent — duplicate open tasks for the same `taskType` + `resourceType` + `resourceId` are suppressed automatically.
 - Dashboard task helpers are single-DB org-scoped primitives: always pass `orgId` to `createDashboardTask`, `listDashboardTasks`, and `resolveDashboardTask`. Do not call them without org scope.
 - Dashboard inbox UI should summarize open tasks by task kind/count rather than rendering long flat lists one row per task when volumes grow. Task rows remain the source data, but the default dashboard presentation should aggregate them.
+
+## Required validation after edits
+
+| Files changed | Command |
+|---|---|
+| `src/lib/setup-sql.js` | `npm run lint:sql` |
+| `src/lib/setup-sql.js` + any migration | `npm run lint:sql && npm run lint:upsert-conflicts` |
+| `api/**/*.js` — any `.upsert({ onConflict })` added/changed | `npm run lint:upsert-conflicts` |
+| `scripts/validate-upsert-conflicts.js` | `npm run lint:upsert-conflicts` |
+| `scripts/validate-setup-sql.js` | `npm run lint:sql` |
+| `api/**/*.js` — general API changes | `npm run lint:api` |
+| `src/**/*.js` or `src/**/*.jsx` | `npm run lint` |
+| Finance/billing/payroll logic | `npm run test:finance-calendar` |
+| Pre-deploy | `npm run build` |
+
+**Upsert contract (42P10 prevention):** A new `withOrgScope().upsert({ onConflict: '...' })` call requires three simultaneous changes:
+1. Add the table+columns to `EXPECTED_CONFLICTS_BY_TABLE` in `scripts/validate-upsert-conflicts.js`
+2. Add `CREATE UNIQUE INDEX IF NOT EXISTS` or a named `UNIQUE` constraint in `src/lib/setup-sql.js`
+3. Run `npm run lint:upsert-conflicts` to verify both sides agree
+
+Missing step 2 causes PostgreSQL error `42P10` at runtime — silent in code review, only visible when the upsert is exercised on a real DB.

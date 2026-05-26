@@ -6,7 +6,7 @@ import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { useOrg } from '@/org/OrgContext.jsx';
 import { authenticatedFetch } from '@/lib/api-client.js';
 import { normalizeMembershipRole, isAdminRole } from '@/features/students/utils/endpoints.js';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast.jsx';
 import { updateStudentFromForm } from '@/features/students/api/students.js';
 import EditStudentModal from '@/features/admin/components/EditStudentModal.jsx';
 import StudentHeader from '@/features/students/components/StudentHeader.jsx';
@@ -48,6 +48,9 @@ export default function StudentDetailPage() {
   const [student, setStudent] = useState(null);
   const [studentError, setStudentError] = useState('');
 
+  // Required forms compliance
+  const [requiredFormsCompliance, setRequiredFormsCompliance] = useState([]);
+
   // Edit modal
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [isUpdatingStudent, setIsUpdatingStudent] = useState(false);
@@ -64,6 +67,20 @@ export default function StudentDetailPage() {
     activeOrgId &&
     !supabaseLoading
   );
+
+  const loadCompliance = useCallback(async (resolvedStudentId) => {
+    if (!resolvedStudentId || !canFetch) return;
+    try {
+      const params = new URLSearchParams();
+      params.set('org_id', activeOrgId);
+      params.set('student_id', resolvedStudentId);
+      const data = await authenticatedFetch(`student-required-forms/compliance?${params}`, { session });
+      setRequiredFormsCompliance(Array.isArray(data) ? data : []);
+    } catch {
+      // Non-critical — don't block UI on compliance fetch failure
+      setRequiredFormsCompliance([]);
+    }
+  }, [activeOrgId, canFetch, session]);
 
   // Fetch core student data with guardian
   const loadStudent = useCallback(async ({ shouldApply = () => true } = {}) => {
@@ -90,6 +107,7 @@ export default function StudentDetailPage() {
 
       setStudent(match);
       setStudentState(REQUEST_STATE.idle);
+      void loadCompliance(match.id);
       return match;
     } catch (error) {
       if (!shouldApply()) return null;
@@ -169,7 +187,7 @@ export default function StudentDetailPage() {
       ),
     },
     { key: 'financial', label: 'כספים', content: <StudentFinancialTab studentId={studentId} student={student} /> },
-    { key: 'forms', label: 'טפסים', content: <StudentFormsTab studentId={studentId} student={student} canEdit={canEdit} /> },
+    { key: 'forms', label: 'טפסים', content: <StudentFormsTab studentId={studentId} student={student} canEdit={canEdit} requiredFormsCompliance={requiredFormsCompliance} onComplianceRefresh={() => loadCompliance(studentId)} /> },
   ];
 
   // Loading states
@@ -227,6 +245,7 @@ export default function StudentDetailPage() {
             isUpdating={isUpdatingStudent}
             onEdit={handleOpenEdit}
             onSuspend={loadStudent}
+            requiredFormsCompliance={requiredFormsCompliance}
           />
         )}
         activeTab={activeTab}

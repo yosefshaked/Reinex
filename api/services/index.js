@@ -41,6 +41,37 @@ function normalizeOptionalText(value) {
 }
 
 const PAYMENT_MODELS = new Set(['fixed_rate', 'per_student']);
+const REQUIRED_FORM_ENFORCEMENT_VALUES = new Set(['warn', 'block']);
+
+function normalizeRequiredForms(value) {
+  if (value === null || value === undefined) {
+    return { value: null, valid: true };
+  }
+  if (!Array.isArray(value)) {
+    return { value: null, valid: false };
+  }
+  const normalized = [];
+  for (const entry of value) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      return { value: null, valid: false };
+    }
+    const formId = String(entry.form_id || '').trim();
+    if (!UUID_PATTERN.test(formId)) {
+      return { value: null, valid: false };
+    }
+    const label = String(entry.label || '').trim();
+    if (!label) {
+      return { value: null, valid: false };
+    }
+    const enforcement = String(entry.enforcement || 'warn').trim().toLowerCase();
+    if (!REQUIRED_FORM_ENFORCEMENT_VALUES.has(enforcement)) {
+      return { value: null, valid: false };
+    }
+    const allowResubmit = entry.allow_resubmit !== false;
+    normalized.push({ form_id: formId, label, enforcement, allow_resubmit: allowResubmit });
+  }
+  return { value: normalized, valid: true };
+}
 
 function normalizePaymentModel(value) {
   if (value === null || value === undefined || value === '') {
@@ -152,7 +183,7 @@ export default async function services(context, req) {
 
   if (method === 'GET') {
     const { data, error } = await withOrgScope(supabase, 'Services', orgId)
-      .select('id, name, duration_minutes, payment_model, default_customer_charge_amount, color, is_active, metadata')
+      .select('id, name, duration_minutes, payment_model, default_customer_charge_amount, color, is_active, metadata, required_forms')
       .order('name', { ascending: true });
 
     if (error) {
@@ -205,6 +236,11 @@ export default async function services(context, req) {
       return respond(context, 400, { message: 'invalid_metadata' });
     }
 
+    const requiredFormsResult = normalizeRequiredForms(body?.required_forms ?? body?.requiredForms ?? []);
+    if (!requiredFormsResult.valid) {
+      return respond(context, 400, { message: 'invalid_required_forms' });
+    }
+
     const { data, error } = await withOrgScope(supabase, 'Services', orgId)
       .insert({
         name,
@@ -214,8 +250,9 @@ export default async function services(context, req) {
         color: colorResult.value,
         is_active: isActiveResult.value === null ? true : isActiveResult.value,
         metadata: metadataResult.value,
+        required_forms: requiredFormsResult.value ?? [],
       })
-      .select('id, name, duration_minutes, payment_model, default_customer_charge_amount, color, is_active, metadata')
+      .select('id, name, duration_minutes, payment_model, default_customer_charge_amount, color, is_active, metadata, required_forms')
       .single();
 
     if (error) {
@@ -297,6 +334,14 @@ export default async function services(context, req) {
       updates.is_active = isActiveResult.value;
     }
 
+    if (Object.prototype.hasOwnProperty.call(body, 'required_forms') || Object.prototype.hasOwnProperty.call(body, 'requiredForms')) {
+      const requiredFormsResult = normalizeRequiredForms(body?.required_forms ?? body?.requiredForms);
+      if (!requiredFormsResult.valid) {
+        return respond(context, 400, { message: 'invalid_required_forms' });
+      }
+      updates.required_forms = requiredFormsResult.value ?? [];
+    }
+
     if (Object.keys(updates).length === 0) {
       return respond(context, 400, { message: 'missing_updates' });
     }
@@ -304,7 +349,7 @@ export default async function services(context, req) {
     const { data, error } = await withOrgScope(supabase, 'Services', orgId)
       .update(updates)
       .eq('id', serviceId)
-      .select('id, name, duration_minutes, payment_model, default_customer_charge_amount, color, is_active, metadata')
+      .select('id, name, duration_minutes, payment_model, default_customer_charge_amount, color, is_active, metadata, required_forms')
       .maybeSingle();
 
     if (error) {

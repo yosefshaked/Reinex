@@ -1090,10 +1090,15 @@ CREATE TABLE IF NOT EXISTS public."Services" (
   "color" text,
   "is_active" boolean NOT NULL DEFAULT true,
   "metadata" jsonb,
+  "required_forms" jsonb NOT NULL DEFAULT '[]'::jsonb,
   CONSTRAINT "Services_pkey" PRIMARY KEY ("id"),
   CONSTRAINT Services_payment_model_check CHECK ("payment_model" IS NULL OR "payment_model" IN ('fixed_rate', 'per_student')),
   CONSTRAINT Services_default_customer_charge_amount_non_negative_check CHECK ("default_customer_charge_amount" IS NULL OR "default_customer_charge_amount" >= 0)
 );
+
+-- Migration: add required_forms config column to Services
+ALTER TABLE public."Services"
+  ADD COLUMN IF NOT EXISTS required_forms jsonb NOT NULL DEFAULT '[]'::jsonb;
 
 
 -- -----------------------------------------------------------------
@@ -1306,11 +1311,48 @@ SET availability_windows = '[]'::jsonb
 WHERE availability_windows IS NULL;
 
 
-CREATE UNIQUE INDEX IF NOT EXISTS instructor_service_capabilities_employee_service_uidx
-  ON public.instructor_service_capabilities (org_id, employee_id, service_id);
+-- Only create the staging index if the named constraint does not already exist.
+-- On first run: index is created here, then promoted to the constraint below (and renamed).
+-- On re-run: the constraint (and its backing index under the constraint name) already exist,
+-- so this block is skipped — preventing a redundant standalone unique index.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'instructor_service_capabilities_org_employee_service_uniq'
+      AND conrelid = 'public.instructor_service_capabilities'::regclass
+  ) THEN
+    CREATE UNIQUE INDEX IF NOT EXISTS instructor_service_capabilities_employee_service_uidx
+      ON public.instructor_service_capabilities (org_id, employee_id, service_id);
+  END IF;
+END $$;
 
 CREATE INDEX IF NOT EXISTS instructor_service_capabilities_employee_id_idx
   ON public.instructor_service_capabilities (org_id, employee_id);
+
+-- Migration: promote unique index to a named constraint so ON CONFLICT upsert works
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'instructor_service_capabilities_org_employee_service_uniq'
+    AND conrelid = 'public.instructor_service_capabilities'::regclass
+  ) THEN
+    IF EXISTS (
+      SELECT 1 FROM pg_indexes
+      WHERE schemaname = 'public'
+      AND indexname = 'instructor_service_capabilities_employee_service_uidx'
+    ) THEN
+      ALTER TABLE public.instructor_service_capabilities
+        ADD CONSTRAINT instructor_service_capabilities_org_employee_service_uniq
+        UNIQUE USING INDEX instructor_service_capabilities_employee_service_uidx;
+    ELSE
+      ALTER TABLE public.instructor_service_capabilities
+        ADD CONSTRAINT instructor_service_capabilities_org_employee_service_uniq
+        UNIQUE (org_id, employee_id, service_id);
+    END IF;
+  END IF;
+END $$;
 
 -- -----------------------------------------------------------------
 -- public.lesson_templates
@@ -1479,7 +1521,6 @@ CREATE TABLE IF NOT EXISTS public.lesson_instances (
   CONSTRAINT lesson_instances_instructor_employee_id_fkey FOREIGN KEY (instructor_employee_id) REFERENCES public."Employees"(id),
   CONSTRAINT lesson_instances_service_id_fkey FOREIGN KEY (service_id) REFERENCES public."Services"(id),
   CONSTRAINT lesson_instances_applied_override_id_fkey FOREIGN KEY (applied_override_id) REFERENCES public.lesson_template_overrides(id),
-  CONSTRAINT lesson_instances_status_check CHECK (status IN ('scheduled','completed','cancelled')),
   CONSTRAINT lesson_instances_documentation_status_check CHECK (documentation_status IN ('undocumented','documented')),
   CONSTRAINT lesson_instances_created_source_check CHECK (created_source IN ('weekly_generation','one_time','manual_reschedule','migration'))
 );
@@ -1510,6 +1551,10 @@ END $$;
 
 ALTER TABLE public.lesson_instances
   DROP CONSTRAINT IF EXISTS lesson_instances_status_check;
+
+ALTER TABLE public.lesson_instances
+  ADD CONSTRAINT lesson_instances_status_check
+  CHECK (status IN ('scheduled', 'completed', 'cancelled'));
 
 DO $$
 BEGIN
@@ -2296,7 +2341,7 @@ CREATE TABLE IF NOT EXISTS public.forms (
   updated_at timestamptz NOT NULL DEFAULT now(),
   is_active boolean NOT NULL DEFAULT true,
   metadata jsonb NULL,
-  CONSTRAINT forms_form_usage_check CHECK (form_usage IN ('general','waiting_list_intake'))
+  CONSTRAINT forms_form_usage_check CHECK (form_usage IN ('general','waiting_list_intake','required_form'))
 );
 
 
@@ -2304,6 +2349,12 @@ CREATE TABLE IF NOT EXISTS public.forms (
 UPDATE public.forms
 SET form_usage = COALESCE(NULLIF(form_usage, ''), 'general')
 WHERE form_usage IS NULL OR form_usage = '';
+
+-- Migration: expand form_usage to include required_form
+ALTER TABLE public.forms
+  DROP CONSTRAINT IF EXISTS forms_form_usage_check,
+  ADD CONSTRAINT forms_form_usage_check
+    CHECK (form_usage IN ('general','waiting_list_intake','required_form'));
 
 
 CREATE INDEX IF NOT EXISTS forms_is_active_idx ON public.forms (org_id, is_active);
@@ -2411,6 +2462,13 @@ CREATE INDEX IF NOT EXISTS form_submissions_student_id_idx
 
 CREATE INDEX IF NOT EXISTS form_submissions_submitted_by_guardian_id_idx
   ON public.form_submissions (org_id, submitted_by_guardian_id) WHERE submitted_by_guardian_id IS NOT NULL;
+
+-- Migration: add service_id to form_submissions for required-form compliance queries
+ALTER TABLE public.form_submissions
+  ADD COLUMN IF NOT EXISTS service_id uuid NULL REFERENCES public."Services"(id);
+
+CREATE INDEX IF NOT EXISTS form_submissions_service_id_idx
+  ON public.form_submissions (org_id, service_id) WHERE service_id IS NOT NULL;
 
 -- -----------------------------------------------------------------
 -- public.otp_challenges
@@ -3735,12 +3793,13 @@ BEGIN
     RAISE EXCEPTION 'invalid_org_id: x-org-id header is not a valid UUID';
   END;
 
-  -- Verify the caller is a member of the requested org
+  -- Verify the caller is an active member of the requested org
   IF NOT EXISTS (
     SELECT 1
     FROM public.org_memberships
     WHERE org_id = v_org_id
       AND user_id = auth.uid()
+      AND is_active = true
   ) THEN
     RAISE EXCEPTION 'forbidden: user is not a member of org %', v_org_id;
   END IF;
@@ -5523,7 +5582,7 @@ CREATE TABLE IF NOT EXISTS public.ledger_accounts (
   CONSTRAINT ledger_accounts_target_check CHECK (
     (account_type = 'student' AND student_id IS NOT NULL AND hmo_provider_id IS NULL)
     OR (account_type = 'client_profile' AND client_profile_id IS NOT NULL AND student_id IS NULL AND hmo_provider_id IS NULL)
-    OR (account_type = 'hmo_provider' AND hmo_provider_id IS NOT NULL AND student_id IS NULL)
+    OR (account_type = 'hmo_provider' AND hmo_provider_id IS NOT NULL AND student_id IS NULL AND client_profile_id IS NULL)
   )
 );
 
@@ -5606,7 +5665,7 @@ BEGIN
     INTO v_invalid_count
   FROM public.ledger_accounts account
   WHERE NOT (
-    (account.account_type = 'student' AND account.student_id IS NOT NULL AND account.client_profile_id IS NOT NULL AND account.hmo_provider_id IS NULL)
+    (account.account_type = 'student' AND account.student_id IS NOT NULL AND account.hmo_provider_id IS NULL)
     OR (account.account_type = 'client_profile' AND account.client_profile_id IS NOT NULL AND account.student_id IS NULL AND account.hmo_provider_id IS NULL)
     OR (account.account_type = 'hmo_provider' AND account.hmo_provider_id IS NOT NULL AND account.student_id IS NULL AND account.client_profile_id IS NULL)
   );
@@ -5637,7 +5696,7 @@ ALTER TABLE public.ledger_accounts
 ALTER TABLE public.ledger_accounts
   ADD CONSTRAINT ledger_accounts_target_check
   CHECK (
-    (account_type = 'student' AND student_id IS NOT NULL AND client_profile_id IS NOT NULL AND hmo_provider_id IS NULL)
+    (account_type = 'student' AND student_id IS NOT NULL AND hmo_provider_id IS NULL)
     OR (account_type = 'client_profile' AND client_profile_id IS NOT NULL AND student_id IS NULL AND hmo_provider_id IS NULL)
     OR (account_type = 'hmo_provider' AND hmo_provider_id IS NOT NULL AND student_id IS NULL AND client_profile_id IS NULL)
   );
@@ -5669,7 +5728,7 @@ CREATE TABLE IF NOT EXISTS public.hmo_invoice_batches (
   hmo_provider_id uuid NOT NULL REFERENCES public.hmo_providers(id) ON DELETE RESTRICT,
   period_start date NULL,
   period_end date NULL,
-  status text NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'issued', 'submitted', 'acknowledged', 'partially_paid', 'paid', 'disputed', 'closed', 'cancelled')),
+  status text NOT NULL DEFAULT 'draft',
   total_amount integer NOT NULL DEFAULT 0 CHECK (total_amount >= 0),
   paid_amount integer NOT NULL DEFAULT 0 CHECK (paid_amount >= 0),
   external_reference text NULL,
@@ -5711,7 +5770,7 @@ CREATE TABLE IF NOT EXISTS public.hmo_invoice_batch_items (
   expected_amount integer NOT NULL DEFAULT 0 CHECK (expected_amount >= 0),
   expected_unit_count integer NOT NULL DEFAULT 1 CHECK (expected_unit_count > 0),
   paid_amount integer NOT NULL DEFAULT 0 CHECK (paid_amount >= 0),
-  status text NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'submitted', 'acknowledged', 'partially_paid', 'paid', 'disputed', 'cancelled')),
+  status text NOT NULL DEFAULT 'draft',
   lesson_participant_id uuid NULL REFERENCES public.lesson_participants(id) ON DELETE SET NULL,
   hmo_authorization_id uuid NULL REFERENCES public.hmo_authorizations(id) ON DELETE SET NULL,
   hmo_provider_id uuid NULL REFERENCES public.hmo_providers(id) ON DELETE SET NULL,

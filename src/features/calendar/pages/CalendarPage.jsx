@@ -26,7 +26,7 @@ import {
 } from '../utils/instructor-whatsapp.js';
 import { addLocalDays, getTodayLocalDateString, getWeekStartDate, parseLocalDateString, toLocalDateString } from '../utils/localDate.js';
 import { clearGenerationReview, readGenerationReview } from '../utils/generationReviewStorage.js';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast.jsx';
 
 const CALENDAR_DATE_KEY = 'reinex_calendar_date';
 const CALENDAR_VIEW_KEY = 'reinex_calendar_view';

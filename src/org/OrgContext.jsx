@@ -7,7 +7,7 @@ import React, {
   useRef,
   useState,
 } from 'react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast.jsx';
 import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { getAuthClient } from '@/lib/supabase-manager.js';
 import { useRuntimeConfig } from '@/runtime/RuntimeConfigContext.jsx';

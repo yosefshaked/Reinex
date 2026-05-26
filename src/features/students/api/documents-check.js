@@ -6,6 +6,7 @@
  * - Instructor documents
  * - Organization documents
  */
+import { createSupportAwareApiError, extractSupportCode } from '@/lib/error-support.js';
 
 /**
  * Check for duplicate files before upload
@@ -58,14 +59,16 @@ export async function checkDocumentDuplicate({
     const data = await response.json();
 
     if (!response.ok) {
-      const errorMessage = data?.message || data?.error || `HTTP ${response.status}`;
-      throw new Error(errorMessage);
+      throw createSupportAwareApiError(data, response.status);
     }
 
     return data;
   } catch (error) {
     if (error.name === 'AbortError') {
       throw error; // Let caller handle abort
+    }
+    if (extractSupportCode(error)) {
+      throw error;
     }
     throw new Error(`Failed to check duplicates: ${error.message}`);
   }

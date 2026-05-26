@@ -3,7 +3,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Button } from '@/components/ui/button';
 import { TextField } from '@/components/ui/forms-ui';
 import { UserPlus } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast.jsx';
 import { authenticatedFetch } from '@/lib/api-client';
 
 export default function CreateManualInstructorDialog({ open, onOpenChange, orgId, session, onSuccess }) {

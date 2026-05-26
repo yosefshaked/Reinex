@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Loader2, AlertCircle, Phone, MessageCircle, Mail } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import ErrorMessageText from '@/components/ui/ErrorMessageText.jsx';
 import { authenticatedFetch } from '@/lib/api-client.js';
 import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { useOrg } from '@/org/OrgContext.jsx';
@@ -266,7 +267,9 @@ export default function StudentOverviewTab({ student }) {
     return (
       <div className="rounded-lg bg-amber-50 p-4 text-sm text-amber-800 flex items-start gap-2">
         <AlertCircle className="h-5 w-5 flex-shrink-0 mt-0.5" />
-        <p>{error}</p>
+        <div>
+          <ErrorMessageText error={error} className="text-sm text-amber-800" supportClassName="text-amber-800" />
+        </div>
       </div>
     );
   }

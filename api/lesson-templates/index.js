@@ -191,8 +191,8 @@ function buildTemplateSelect() {
     'updated_at',
     'metadata',
     'instructor:Employees(id, first_name, middle_name, last_name, email)',
-    'service:Services(id, name, duration_minutes, color)',
-    'participants:lesson_template_participants(id, student_id, student:students(id, client_profile_id, client_profile:client_profiles(id, first_name, middle_name, last_name)))',
+    'service:Services(id, name, duration_minutes, color, required_forms)',
+    'participants:lesson_template_participants(id, student_id, student:students(id, client_profile_id, client_profile:client_profiles(id, first_name, middle_name, last_name, phone, email)))',
   ].join(',');
 }
 
@@ -210,6 +210,8 @@ function normalizeTemplateParticipant(row) {
           first_name: profile?.first_name || '',
           middle_name: profile?.middle_name || null,
           last_name: profile?.last_name || '',
+          phone: profile?.phone || '',
+          email: profile?.email || '',
         }
       : null,
   };
@@ -225,6 +227,90 @@ function normalizeTemplateRecord(template) {
     // Keep legacy student_id field for backward compat with generator fallback.
     participants,
   };
+}
+
+async function attachPrimaryGuardiansToTemplateRecords(client, orgId, records, context) {
+  const rows = Array.isArray(records) ? records : [];
+  const clientProfileIds = Array.from(new Set(
+    rows.flatMap((template) => (
+      Array.isArray(template?.participants)
+        ? template.participants.map((participant) => participant?.student?.client_profile_id).filter(Boolean)
+        : []
+    )),
+  ));
+
+  if (!clientProfileIds.length) return rows;
+
+  let guardianLinks = [];
+  try {
+    const { data, error } = await withOrgScope(client, 'client_guardians', orgId)
+      .select('client_profile_id, guardian_id, relationship, is_primary, created_at')
+      .in('client_profile_id', clientProfileIds)
+      .order('client_profile_id', { ascending: true })
+      .order('is_primary', { ascending: false })
+      .order('created_at', { ascending: true });
+
+    if (error) throw error;
+    guardianLinks = Array.isArray(data) ? data : [];
+  } catch (error) {
+    context?.log?.warn?.('lesson-templates failed to fetch template participant guardian links', { message: error?.message });
+    return rows;
+  }
+
+  const primaryLinkByClientProfile = new Map();
+  for (const link of guardianLinks) {
+    if (!link?.client_profile_id || !link?.guardian_id || primaryLinkByClientProfile.has(link.client_profile_id)) continue;
+    primaryLinkByClientProfile.set(link.client_profile_id, link);
+  }
+
+  const guardianIds = Array.from(new Set(
+    Array.from(primaryLinkByClientProfile.values()).map((link) => link.guardian_id).filter(Boolean),
+  ));
+  if (!guardianIds.length) return rows;
+
+  const guardiansById = new Map();
+  try {
+    const { data, error } = await withOrgScope(client, 'guardians', orgId)
+      .select('id, first_name, middle_name, last_name, phone, email')
+      .in('id', guardianIds);
+
+    if (error) throw error;
+    for (const guardian of data || []) {
+      if (guardian?.id) guardiansById.set(guardian.id, guardian);
+    }
+  } catch (error) {
+    context?.log?.warn?.('lesson-templates failed to fetch template participant guardians', { message: error?.message });
+    return rows;
+  }
+
+  return rows.map((template) => ({
+    ...template,
+    participants: Array.isArray(template?.participants)
+      ? template.participants.map((participant) => {
+          const clientProfileId = participant?.student?.client_profile_id;
+          const link = clientProfileId ? primaryLinkByClientProfile.get(clientProfileId) : null;
+          const guardian = link?.guardian_id ? guardiansById.get(link.guardian_id) : null;
+          if (!guardian || !participant?.student) return participant;
+
+          return {
+            ...participant,
+            student: {
+              ...participant.student,
+              primary_guardian: {
+                id: guardian.id,
+                first_name: guardian.first_name,
+                middle_name: guardian.middle_name,
+                last_name: guardian.last_name,
+                phone: guardian.phone ?? null,
+                email: guardian.email ?? null,
+                relationship: link.relationship ?? null,
+                is_primary: link.is_primary ?? true,
+              },
+            },
+          };
+        })
+      : [],
+  }));
 }
 
 function isDuplicateTemplateConstraintError(error) {
@@ -289,7 +375,7 @@ async function loadServiceForTemplate(client, orgId, serviceId, { requireActive 
   }
 
   let query = withOrgScope(client, 'Services', orgId)
-    .select('id, duration_minutes, is_active')
+    .select('id, duration_minutes, is_active, required_forms')
     .eq('id', serviceId);
 
   if (requireActive) {
@@ -377,6 +463,50 @@ async function rollbackCreatedTemplate(context, client, orgId, templateId, detai
   }
 
   return { ok: true, error: null };
+}
+
+async function resolveClientProfileIdsForStudents(client, orgId, studentIds) {
+  if (!studentIds.length) return {};
+  const { data, error } = await withOrgScope(client, 'students', orgId)
+    .select('id, client_profile_id')
+    .in('id', studentIds);
+  if (error) throw error;
+  const map = {};
+  (data || []).forEach((row) => {
+    if (row.id && row.client_profile_id) map[row.id] = row.client_profile_id;
+  });
+  return map;
+}
+
+async function loadRequiredFormSubmissionKeysForEnrollment(client, orgId, {
+  clientProfileIds,
+  formIds,
+  serviceId,
+}) {
+  const profileIds = Array.from(new Set((clientProfileIds || []).filter(Boolean)));
+  const normalizedFormIds = Array.from(new Set((formIds || []).filter(Boolean)));
+  if (!profileIds.length || !normalizedFormIds.length || !serviceId) {
+    return new Set();
+  }
+
+  const { data, error } = await withOrgScope(client, 'form_submissions', orgId)
+    .select('client_profile_id, form_id')
+    .in('client_profile_id', profileIds)
+    .in('form_id', normalizedFormIds)
+    .eq('service_id', serviceId)
+    .contains('metadata', { workflow_kind: 'required_form', workflow_status: 'submitted' });
+
+  if (error) throw error;
+
+  const submissionKeys = new Set();
+  for (const row of (data || [])) {
+    const profileId = normalizeUuid(row?.client_profile_id);
+    const formId = normalizeUuid(row?.form_id);
+    if (!profileId || !formId) continue;
+    submissionKeys.add(`${profileId}:${formId}`);
+  }
+
+  return submissionKeys;
 }
 
 export default async function lessonTemplates(context, req) {
@@ -473,7 +603,12 @@ export default async function lessonTemplates(context, req) {
         return tracked500('failed_to_load_lesson_templates', error);
       }
 
-      const rows = (Array.isArray(data) ? [...data] : []).map(normalizeTemplateRecord);
+      const rows = await attachPrimaryGuardiansToTemplateRecords(
+        supabase,
+        orgId,
+        (Array.isArray(data) ? [...data] : []).map(normalizeTemplateRecord),
+        context,
+      );
       rows.sort(compareTemplatesByDayAndTime);
 
       return respond(context, 200, rows);
@@ -548,7 +683,13 @@ export default async function lessonTemplates(context, req) {
       return tracked500('failed_to_load_lesson_templates', error);
     }
 
-    return respond(context, 200, (Array.isArray(data) ? data : []).map(normalizeTemplateRecord));
+    const rows = await attachPrimaryGuardiansToTemplateRecords(
+      supabase,
+      orgId,
+      (Array.isArray(data) ? data : []).map(normalizeTemplateRecord),
+      context,
+    );
+    return respond(context, 200, rows);
   }
 
   if (!isAdmin) {
@@ -808,6 +949,67 @@ export default async function lessonTemplates(context, req) {
         message: instructorSlotConflict.code,
         conflicting_template_ids: (instructorSlotConflict.templates || []).map((template) => template.id).filter(Boolean),
       });
+    }
+
+    // Required-form compliance check
+    const requiredForms = Array.isArray(selectedService?.required_forms) ? selectedService.required_forms : [];
+    if (requiredForms.length > 0 && allStudentIds.length > 0) {
+      const acknowledgeWarnings = Boolean(body?.acknowledge_required_form_warnings);
+      try {
+        const clientProfileMap = await resolveClientProfileIdsForStudents(supabase, orgId, allStudentIds);
+        const requiredFormIds = Array.from(new Set(requiredForms
+          .map((rf) => normalizeUuid(rf?.form_id))
+          .filter(Boolean)));
+        const clientProfileIds = Array.from(new Set(allStudentIds
+          .map((sid) => normalizeUuid(clientProfileMap[sid]))
+          .filter(Boolean)));
+        const submittedRequiredFormKeys = await loadRequiredFormSubmissionKeysForEnrollment(supabase, orgId, {
+          clientProfileIds,
+          formIds: requiredFormIds,
+          serviceId,
+        });
+        const hardBlocks = [];
+        const warnings = [];
+        for (const sid of allStudentIds) {
+          const cpId = clientProfileMap[sid];
+          if (!cpId) continue;
+          for (const rf of requiredForms) {
+            const requiredFormId = normalizeUuid(rf?.form_id);
+            if (!requiredFormId) continue;
+            const submitted = submittedRequiredFormKeys.has(`${cpId}:${requiredFormId}`);
+            if (!submitted) {
+              const entry = {
+                student_id: sid,
+                client_profile_id: cpId,
+                form_id: requiredFormId,
+                label: rf.label || 'טופס חובה',
+              };
+              if (rf.enforcement === 'block') {
+                hardBlocks.push(entry);
+              } else {
+                warnings.push(entry);
+              }
+            }
+          }
+        }
+        if (hardBlocks.length > 0) {
+          return respond(context, 409, {
+            message: 'required_form_missing',
+            hard_blocks: hardBlocks,
+            warnings,
+          });
+        }
+        if (warnings.length > 0 && !acknowledgeWarnings) {
+          return respond(context, 200, { required_form_warnings: warnings });
+        }
+      } catch (complianceError) {
+        // Non-blocking: log and proceed (compliance check failure should not block enrollment)
+        context.log?.warn?.('lesson-templates failed required-form compliance check, proceeding', {
+          message: complianceError?.message,
+          serviceId,
+          studentIds: allStudentIds,
+        });
+      }
     }
 
     const { data, error } = await withOrgScope(supabase, 'lesson_templates', orgId)

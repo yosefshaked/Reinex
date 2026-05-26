@@ -100,6 +100,7 @@ export async function ensureMembership(supabase, orgId, userId) {
     .select('role')
     .eq('org_id', orgId)
     .eq('user_id', userId)
+    .eq('is_active', true)
     .maybeSingle();
 
   if (error) {

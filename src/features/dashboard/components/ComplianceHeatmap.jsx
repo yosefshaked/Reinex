@@ -6,8 +6,10 @@ import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import ErrorSupportCode from '@/components/ui/ErrorSupportCode.jsx'
 import { fetchWeeklyComplianceView } from '@/api/weekly-compliance'
 import { fetchDailyCompliance } from '@/api/daily-compliance.js'
+import { resolveDisplayErrorMessage } from '@/lib/error-support.js'
 import { useIsMobile } from '@/hooks/use-mobile.jsx'
 import { useOrg } from '@/org/OrgContext.jsx'
 import { useInstructors } from '@/hooks/useOrgData.js'
@@ -151,7 +153,7 @@ export function ComplianceHeatmap() {
         setData(result)
       } catch (err) {
         console.error('Failed to load compliance data:', err)
-        setError(err.message)
+        setError(err)
       } finally {
         setIsLoading(false)
       }
@@ -343,7 +345,7 @@ export function ComplianceHeatmap() {
       }
     } catch (err) {
       console.error('Failed to refresh compliance data:', err)
-      setError(err.message)
+      setError(err)
     } finally {
       setIsLoading(false)
     }
@@ -458,7 +460,8 @@ export function ComplianceHeatmap() {
           ) : error ? (
             <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-lg text-destructive">
               <p className="text-base font-semibold">אירעה שגיאה בטעינת הנתונים.</p>
-              <p className="mt-xs text-sm">{error}</p>
+              <p className="mt-xs text-sm">{resolveDisplayErrorMessage(error, 'נסו לרענן את הדף או לחזור מאוחר יותר.')}</p>
+              <ErrorSupportCode error={error} />
             </div>
           ) : !heatmapData ? (
             <p className="text-sm text-muted-foreground">אין נתונים להצגה</p>

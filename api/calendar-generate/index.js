@@ -278,7 +278,7 @@ function buildIssueMessage(entry) {
   return normalizeString(entry?.type) || 'generation_issue';
 }
 
-function buildActionableIssues({ conflicts, warnings, applied }) {
+function buildActionableIssues({ conflicts, applied }) {
   const conflictIssues = Array.isArray(conflicts)
     ? conflicts.map((entry) => ({
       source: 'preview_conflict',
@@ -331,28 +331,12 @@ function buildActionableIssues({ conflicts, warnings, applied }) {
     }))
     : [];
 
-  const warningIssues = Array.isArray(warnings)
-    ? warnings.map((entry) => ({
-      source: 'hmo_warning',
-      issue_type: normalizeString(entry?.type) || 'hmo_authorization_gap',
-      issue_types: [normalizeString(entry?.type) || 'hmo_authorization_gap'],
-      message: buildIssueMessage(entry),
-      template_id: normalizeString(entry?.template_id) || null,
-      student_id: normalizeString(entry?.student_id) || null,
-      student_name: normalizeString(entry?.student_name) || '',
-      client_profile_id: normalizeString(entry?.client_profile_id) || null,
-      service_name: normalizeString(entry?.service_name) || '',
-      datetime_start: normalizeString(entry?.datetime_start) || null,
-      target_date: normalizeString(entry?.target_date) || null,
-      time_of_day: normalizeString(entry?.time_of_day) || extractTimePart(entry?.datetime_start) || null,
-      retry_item: null,
-      repair_targets: Array.isArray(entry?.repair_targets) && entry.repair_targets.length > 0
-        ? entry.repair_targets
-        : buildRepairTargets(entry),
-    }))
-    : [];
+  // HMO warnings (source: 'hmo_warning') are intentionally excluded from actionable_issues.
+  // They are informational — the lesson slot was already added to proposals before the HMO
+  // coverage check runs, so no lesson creation was blocked.  They are surfaced via the
+  // dedicated `warnings` array and the hmo_coverage_warnings summary counter.
 
-  return [...conflictIssues, ...warningIssues, ...applyIssues];
+  return [...conflictIssues, ...applyIssues];
 }
 
 function buildCoverageWarningFromDecision(candidate, coverageDecision) {
@@ -490,7 +474,7 @@ function buildDiffResponse({
   skippedOverrides,
   applied,
 }) {
-  const actionableIssues = buildActionableIssues({ conflicts, warnings, applied });
+  const actionableIssues = buildActionableIssues({ conflicts, applied });
   return {
     generation_run_id: generationRunId,
     start_date: startDate,

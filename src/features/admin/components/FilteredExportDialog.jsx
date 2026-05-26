@@ -8,7 +8,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Loader2 } from 'lucide-react';
 import { useOrg } from '@/org/OrgContext.jsx';
 import { authenticatedFetchBlob } from '@/lib/api-client.js';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast.jsx';
 
 export function FilteredExportDialog({ open, onClose, instructors = [], tags = [] }) {
   const { activeOrgId } = useOrg();
