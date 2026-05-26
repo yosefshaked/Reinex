@@ -4,13 +4,15 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge.jsx';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
-import { Plus, LayoutTemplate, Wand2, PanelRight } from 'lucide-react';
+import { Plus, LayoutTemplate, Wand2, PanelRight, ChevronDown, Coffee } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { DateNavigator } from '../components/CalendarHeader/DateNavigator.jsx';
 import { LessonInstanceDialog } from '../components/LessonInstanceDialog';
 import { AddLessonDialog } from '../components/AddLessonDialog';
 import { ManualGenerationDialog } from '../components/ManualGenerationDialog';
-import { useCalendarInstances, useCalendarInstructors } from '../hooks/useCalendar';
+import { useCalendarInstances, useCalendarInstructors, useInstructorBreaks } from '../hooks/useCalendar';
+import AddBreakDialog from '../components/AddBreakDialog';
 import ReinexFullCalendar from '../components/ReinexFullCalendar';
 import CalendarWorkspaceDock from '../components/CalendarWorkspaceDock.jsx';
 import InstructorWhatsAppDialog from '../components/InstructorWhatsAppDialog.jsx';
@@ -62,6 +64,7 @@ export default function CalendarPage() {
   const [whatsAppCompose, setWhatsAppCompose] = useState(null);
   const [availabilityFixIssue, setAvailabilityFixIssue] = useState(null);
   const [mobileDockOpen, setMobileDockOpen] = useState(false);
+  const [showAddBreakDialog, setShowAddBreakDialog] = useState(false);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -158,6 +161,7 @@ export default function CalendarPage() {
     refetch: refetchInstructors,
   } = useCalendarInstructors();
   const { instances, isLoading: instancesLoading, error: instancesError, refetch: refetchInstances } = useCalendarInstances(dateForQuery, viewMode);
+  const { breaks, refetch: refetchBreaks } = useInstructorBreaks(dateForQuery, viewMode);
   const isCalendarLoading = instructorsLoading || instancesLoading;
 
   const workspaceSummary = useMemo(
@@ -225,6 +229,10 @@ export default function CalendarPage() {
     refetchInstances();
     setPendingSlotSelection(null);
     setPendingServiceId('');
+  };
+
+  const handleBreakAdded = () => {
+    refetchBreaks();
   };
 
   const handleUpdateSuccess = () => {
@@ -409,10 +417,26 @@ export default function CalendarPage() {
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex flex-wrap items-center gap-3">
               <h1 className="shrink-0 text-lg font-semibold text-neutral-900">לוח זמנים</h1>
-              <Button onClick={handleOpenBlankCreateLesson} className="gap-2">
-                <Plus className="h-4 w-4" />
-                שיעור חדש
-              </Button>
+              {/* Split button: primary = new lesson, dropdown = new break */}
+              <div className="flex">
+                <Button onClick={handleOpenBlankCreateLesson} className="gap-2 rounded-e-none border-e-0">
+                  <Plus className="h-4 w-4" />
+                  שיעור חדש
+                </Button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button className="rounded-s-none px-2" data-testid="calendar-add-break-trigger">
+                      <ChevronDown className="h-4 w-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem onClick={() => setShowAddBreakDialog(true)}>
+                      <Coffee className="me-2 h-4 w-4" />
+                      הוסף הפסקה
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
               <Button variant="outline" onClick={() => setShowGenerationDialog(true)} className="gap-2">
                 <Wand2 className="h-4 w-4" />
                 יצירה מתבניות
@@ -516,6 +540,7 @@ export default function CalendarPage() {
                   currentDate={currentDate}
                   viewMode={viewMode}
                   instances={instances}
+                  breaks={breaks}
                   instructors={instructors}
                   isLoading={isCalendarLoading}
                   calendarNavigationRef={calendarNavigationRef}
@@ -528,6 +553,7 @@ export default function CalendarPage() {
                   onOpenInstructorWhatsApp={openInstructorWhatsApp}
                   emptyState={workspaceSummary.emptyState}
                   onEmptyStateAction={handleCalendarEmptyStateAction}
+                  onBreakUpdated={refetchBreaks}
                 />
               </div>
             </div>
@@ -613,6 +639,14 @@ export default function CalendarPage() {
         introMessage={availabilityFixIssue?.blocksVisibility
           ? 'למדריך/ה אין חלונות זמינות מוגדרים לשירות זה, ולכן הוא/היא לא מופיעים כרגע בלוח.'
           : 'לשירות זה חסרה זמינות מוגדרת. אפשר לעדכן כאן ולהמשיך לעבוד בלוח.'}
+      />
+
+      <AddBreakDialog
+        open={showAddBreakDialog}
+        onClose={() => setShowAddBreakDialog(false)}
+        onSuccess={handleBreakAdded}
+        instructors={instructors}
+        defaultDate={currentDate}
       />
     </div>
   );

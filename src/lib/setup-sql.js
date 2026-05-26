@@ -1654,6 +1654,31 @@ CREATE INDEX IF NOT EXISTS lesson_participants_locked_at_idx
   ON public.lesson_participants (org_id, locked_at) WHERE locked_at IS NOT NULL;
 
 -- -----------------------------------------------------------------
+-- public.instructor_breaks
+-- -----------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS public.instructor_breaks (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id uuid NOT NULL REFERENCES public.organizations(id),
+  instructor_employee_id uuid NOT NULL,
+  datetime_start timestamptz NOT NULL,
+  duration_minutes int NOT NULL,
+  break_type text NOT NULL DEFAULT 'break',
+  note text NULL,
+  created_by uuid NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  metadata jsonb NULL,
+  CONSTRAINT instructor_breaks_instructor_employee_id_fkey FOREIGN KEY (instructor_employee_id) REFERENCES public."Employees"(id),
+  CONSTRAINT instructor_breaks_break_type_check CHECK (break_type IN ('break', 'meeting', 'unavailable', 'personal'))
+);
+
+CREATE INDEX IF NOT EXISTS instructor_breaks_datetime_start_idx
+  ON public.instructor_breaks (org_id, datetime_start);
+CREATE INDEX IF NOT EXISTS instructor_breaks_instructor_datetime_idx
+  ON public.instructor_breaks (org_id, instructor_employee_id, datetime_start);
+
+-- -----------------------------------------------------------------
 -- public.grace_cancellation_requests
 -- -----------------------------------------------------------------
 
@@ -4091,6 +4116,7 @@ ALTER TABLE public.lesson_template_overrides ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.lesson_template_participants ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.lesson_instances ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.lesson_participants ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.instructor_breaks ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.grace_cancellation_requests ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.commitments ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.ledger_transactions ENABLE ROW LEVEL SECURITY;
@@ -4140,6 +4166,7 @@ BEGIN
     'lesson_template_participants',
     'lesson_instances',
     'lesson_participants',
+    'instructor_breaks',
     'grace_cancellation_requests',
     'commitments',
     'ledger_transactions',
@@ -4238,6 +4265,7 @@ GRANT ALL ON TABLE public.lesson_template_overrides TO app_user;
 GRANT ALL ON TABLE public.lesson_template_participants TO app_user;
 GRANT ALL ON TABLE public.lesson_instances TO app_user;
 GRANT ALL ON TABLE public.lesson_participants TO app_user;
+GRANT ALL ON TABLE public.instructor_breaks TO app_user;
 GRANT ALL ON TABLE public.grace_cancellation_requests TO app_user;
 GRANT ALL ON TABLE public.commitments TO app_user;
 GRANT ALL ON TABLE public.ledger_transactions TO app_user;

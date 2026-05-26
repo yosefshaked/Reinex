@@ -320,6 +320,7 @@ const SCHEMA_PROBE_TABLES = [
   'profiles',
   'organizations',
   'org_memberships',
+  'instructor_breaks',
 ];
 
 // Specific columns that were added in later versions of setup-sql.js.

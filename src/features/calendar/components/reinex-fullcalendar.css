@@ -268,6 +268,47 @@
   text-overflow: ellipsis;
 }
 
+/* Break event styling */
+.reinex-fullcalendar .fc .fc-event.reinex-calendar-break,
+.reinex-fullcalendar .fc .fc-timegrid-event.reinex-calendar-break {
+  background-color: rgb(241 245 249) !important;
+  border-color: rgb(148 163 184) !important;
+  background-image: repeating-linear-gradient(
+    -45deg,
+    transparent,
+    transparent 4px,
+    rgba(148, 163, 184, 0.25) 4px,
+    rgba(148, 163, 184, 0.25) 8px
+  ) !important;
+  cursor: grab;
+}
+
+.reinex-calendar-break-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  padding: 0.1rem 0.25rem;
+  height: 100%;
+  overflow: hidden;
+}
+
+.reinex-calendar-break-card__label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: rgb(71 85 105);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.reinex-calendar-break-card__note {
+  font-size: 0.65rem;
+  color: rgb(100 116 139);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .reinex-calendar-event {
   position: relative;
   display: flex;
