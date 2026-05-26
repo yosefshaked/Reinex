@@ -478,17 +478,35 @@ async function resolveClientProfileIdsForStudents(client, orgId, studentIds) {
   return map;
 }
 
-async function checkRequiredFormSubmittedForEnrollment(client, orgId, { clientProfileId, formId, serviceId }) {
+async function loadRequiredFormSubmissionKeysForEnrollment(client, orgId, {
+  clientProfileIds,
+  formIds,
+  serviceId,
+}) {
+  const profileIds = Array.from(new Set((clientProfileIds || []).filter(Boolean)));
+  const normalizedFormIds = Array.from(new Set((formIds || []).filter(Boolean)));
+  if (!profileIds.length || !normalizedFormIds.length || !serviceId) {
+    return new Set();
+  }
+
   const { data, error } = await withOrgScope(client, 'form_submissions', orgId)
-    .select('id')
-    .eq('client_profile_id', clientProfileId)
-    .eq('form_id', formId)
+    .select('client_profile_id, form_id')
+    .in('client_profile_id', profileIds)
+    .in('form_id', normalizedFormIds)
     .eq('service_id', serviceId)
-    .contains('metadata', { workflow_kind: 'required_form', workflow_status: 'submitted' })
-    .limit(1)
-    .maybeSingle();
+    .contains('metadata', { workflow_kind: 'required_form', workflow_status: 'submitted' });
+
   if (error) throw error;
-  return Boolean(data?.id);
+
+  const submissionKeys = new Set();
+  for (const row of (data || [])) {
+    const profileId = normalizeUuid(row?.client_profile_id);
+    const formId = normalizeUuid(row?.form_id);
+    if (!profileId || !formId) continue;
+    submissionKeys.add(`${profileId}:${formId}`);
+  }
+
+  return submissionKeys;
 }
 
 export default async function lessonTemplates(context, req) {
@@ -939,23 +957,31 @@ export default async function lessonTemplates(context, req) {
       const acknowledgeWarnings = Boolean(body?.acknowledge_required_form_warnings);
       try {
         const clientProfileMap = await resolveClientProfileIdsForStudents(supabase, orgId, allStudentIds);
+        const requiredFormIds = Array.from(new Set(requiredForms
+          .map((rf) => normalizeUuid(rf?.form_id))
+          .filter(Boolean)));
+        const clientProfileIds = Array.from(new Set(allStudentIds
+          .map((sid) => normalizeUuid(clientProfileMap[sid]))
+          .filter(Boolean)));
+        const submittedRequiredFormKeys = await loadRequiredFormSubmissionKeysForEnrollment(supabase, orgId, {
+          clientProfileIds,
+          formIds: requiredFormIds,
+          serviceId,
+        });
         const hardBlocks = [];
         const warnings = [];
         for (const sid of allStudentIds) {
           const cpId = clientProfileMap[sid];
           if (!cpId) continue;
           for (const rf of requiredForms) {
-            if (!rf?.form_id) continue;
-            const submitted = await checkRequiredFormSubmittedForEnrollment(supabase, orgId, {
-              clientProfileId: cpId,
-              formId: rf.form_id,
-              serviceId,
-            });
+            const requiredFormId = normalizeUuid(rf?.form_id);
+            if (!requiredFormId) continue;
+            const submitted = submittedRequiredFormKeys.has(`${cpId}:${requiredFormId}`);
             if (!submitted) {
               const entry = {
                 student_id: sid,
                 client_profile_id: cpId,
-                form_id: rf.form_id,
+                form_id: requiredFormId,
                 label: rf.label || 'טופס חובה',
               };
               if (rf.enforcement === 'block') {

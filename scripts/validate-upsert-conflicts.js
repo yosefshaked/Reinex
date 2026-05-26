@@ -167,8 +167,54 @@ function buildColPattern(cols) {
   return cols.split(',').map((c) => `"?${c.trim()}"?`).join('\\s*,\\s*');
 }
 
+function normalizeIdentifier(value) {
+  return String(value || '').trim().replace(/^"|"$/g, '').toLowerCase();
+}
+
+function normalizeColumnList(value) {
+  return String(value || '')
+    .split(',')
+    .map((segment) => normalizeIdentifier(segment))
+    .filter(Boolean)
+    .join(',');
+}
+
+function collectUniqueIndexes(sqlText) {
+  const indexes = new Map();
+  const pattern = /CREATE\s+UNIQUE\s+INDEX\s+(?:IF\s+NOT\s+EXISTS\s+)?("?[A-Za-z0-9_]+"?)\s+ON\s+public\.((?:"?[A-Za-z0-9_]+"?))\s*\(([^)]*)\)/gi;
+  for (const match of sqlText.matchAll(pattern)) {
+    const indexName = normalizeIdentifier(match[1]);
+    const tableName = normalizeIdentifier(match[2]);
+    const columns = normalizeColumnList(match[3]);
+    if (!indexName || !tableName || !columns) continue;
+    indexes.set(indexName, { tableName, columns });
+  }
+  return indexes;
+}
+
+function hasMatchingUniqueUsingIndex(sqlText, table, cols, uniqueIndexes) {
+  const escapedTable = table.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const targetCols = normalizeColumnList(cols);
+  const pattern = new RegExp(
+    `ALTER TABLE\\s+public\\.(?:"?${escapedTable}"?)[\\s\\S]{0,1200}?UNIQUE\\s+USING\\s+INDEX\\s+("?[A-Za-z0-9_]+"?)`,
+    'gi',
+  );
+
+  for (const match of sqlText.matchAll(pattern)) {
+    const indexName = normalizeIdentifier(match[1]);
+    const indexMeta = uniqueIndexes.get(indexName);
+    if (!indexMeta) continue;
+    if (indexMeta.tableName !== normalizeIdentifier(table)) continue;
+    if (indexMeta.columns !== targetCols) continue;
+    return true;
+  }
+
+  return false;
+}
+
 function validateConflictIndexesExistInSql() {
   const errs = [];
+  const uniqueIndexes = collectUniqueIndexes(setupSql);
 
   for (const [table, expectedList] of Object.entries(EXPECTED_CONFLICTS_BY_TABLE)) {
     for (const rawColumns of expectedList) {
@@ -183,16 +229,18 @@ function validateConflictIndexesExistInSql() {
       ).test(setupSql);
 
       const hasConstraint = new RegExp(
-        `ALTER TABLE\\s+public\\.(?:"?${escapedTable}"?)[\\s\\S]{0,800}?UNIQUE\\s*(?:USING INDEX|\\(\\s*${colPattern}\\s*\\))`,
+        `ALTER TABLE\\s+public\\.(?:"?${escapedTable}"?)[\\s\\S]{0,800}?UNIQUE\\s*\\(\\s*${colPattern}\\s*\\)`,
         'i',
       ).test(setupSql);
+
+      const hasConstraintUsingIndex = hasMatchingUniqueUsingIndex(setupSql, table, cols, uniqueIndexes);
 
       const hasPrimaryKey = columnList.length === 1 && new RegExp(
         `CREATE TABLE IF NOT EXISTS\\s+public\\.(?:"?${escapedTable}"?)[\\s\\S]{0,2000}?"?${columnList[0]}"?[^\\n]*(PRIMARY KEY)`,
         'i',
       ).test(setupSql);
 
-      if (!hasIndex && !hasConstraint && !hasPrimaryKey) {
+      if (!hasIndex && !hasConstraint && !hasConstraintUsingIndex && !hasPrimaryKey) {
         errs.push(
           `Table '${table}' uses onConflict='${cols}' but no matching CREATE UNIQUE INDEX, UNIQUE constraint, or PRIMARY KEY was found in setup-sql.js. Without this the ON CONFLICT upsert will fail at runtime with 42P10.`,
         );
