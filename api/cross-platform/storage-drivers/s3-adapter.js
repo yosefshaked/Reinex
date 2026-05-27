@@ -239,6 +239,23 @@ export function createS3Driver(config) {
     },
 
     /**
+     * Generate a pre-signed PUT URL for direct browser-to-storage uploads.
+     *
+     * @param {string} key - Object key (path within bucket)
+     * @param {string} contentType - MIME type the browser will send in Content-Type
+     * @param {number} expiresIn - URL validity in seconds (default: 900 = 15 min)
+     * @returns {Promise<string>} Pre-signed PUT URL
+     */
+    async getUploadUrl(key, contentType, expiresIn = 900) {
+      const command = new PutObjectCommand({
+        Bucket: bucket,
+        Key: key,
+        ContentType: contentType || 'application/octet-stream',
+      });
+      return getSignedUrl(s3Client, command, { expiresIn });
+    },
+
+    /**
      * Get driver type
      */
     getType() {

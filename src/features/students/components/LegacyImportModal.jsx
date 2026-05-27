@@ -1,3 +1,9 @@
+/**
+ * @deprecated This component is no longer mounted anywhere in the application.
+ * Use the Import Workspaces flow (/import-workspaces) instead, which provides
+ * full review, dry-run simulation, and atomic commit for batch student imports.
+ * This file is kept for reference only and can be safely removed.
+ */
 import React, { useEffect, useMemo, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';

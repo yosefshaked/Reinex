@@ -27,6 +27,7 @@ import {
   PanelRightClose,
   Loader2,
   Shield,
+  FolderInput,
 } from 'lucide-react';
 
 const NAV_ITEMS = [
@@ -39,6 +40,7 @@ const NAV_ITEMS = [
   { key: 'services', label: 'שירותים', to: '/services', icon: ListChecks },
   { key: 'financials', label: 'כספים', to: '/financials', icon: Coins },
   { key: 'forms', label: 'טפסים', to: '/forms', icon: FileText },
+  { key: 'import', label: 'ייבוא נתונים', to: '/import-workspaces', icon: FolderInput, adminOnly: true },
   { key: 'settings', label: 'הגדרות', to: '/Settings', icon: Settings },
 ];
 
@@ -69,6 +71,7 @@ export default function Sidebar({ hidden = false, onToggleHidden }) {
     () => NAV_ITEMS.filter((item) => (
       (canManageClients || !['one-time-customers', 'waiting-list'].includes(item.key))
       && (isAdmin || item.key !== 'forms')
+      && (isAdmin || !item.adminOnly)
     )),
     [canManageClients, isAdmin],
   );

@@ -41,6 +41,8 @@ import FormsListPage from './features/forms/pages/FormsListPage.jsx';
 import FormBuilderPage from './features/forms/pages/FormBuilderPage.jsx';
 import FormPreviewPage from './features/forms/pages/FormPreviewPage.jsx';
 import FormBlocksPage from './features/forms/pages/FormBlocksPage.jsx';
+import ImportWorkspacesListPage from './features/import-workspaces/pages/ImportWorkspacesListPage.jsx';
+import ImportWorkspaceDashboard from './features/import-workspaces/pages/ImportWorkspaceDashboard.jsx';
 import SubmitFormPage from './pages/SubmitFormPage.jsx';
 import LegalPage from './pages/LegalPage.jsx';
 import { bootstrapSupabaseCallback } from './auth/bootstrapSupabaseCallback.js';
@@ -127,6 +129,8 @@ function App({ config = null }) {
                     <Route path="/students/:id/:tab?" element={<StudentDetailPage />} />
                     <Route path="/Settings" element={<Settings />} />
                     <Route path="/diagnostics" element={<Diagnostics />} />
+                    <Route path="/import-workspaces" element={<ImportWorkspacesListPage />} />
+                    <Route path="/import-workspaces/:id" element={<ImportWorkspaceDashboard />} />
                   </Route>
                 </Route>
                 <Route path="*" element={<Navigate to="/" replace />} />

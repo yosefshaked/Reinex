@@ -173,7 +173,7 @@ echo.
 set /p RUN_NOW=Run all tests now? [Y/N]:
 if /i "!RUN_NOW!"=="Y" (
     echo.
-    call node runner.js --all --headed
+    call npm run test:headed
 )
 
 echo.

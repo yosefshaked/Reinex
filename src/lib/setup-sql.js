@@ -6035,4 +6035,720 @@ CREATE INDEX IF NOT EXISTS contact_requests_email_created_idx
 ALTER TABLE public.contact_requests ENABLE ROW LEVEL SECURITY;
 
 -- No GRANT to app_user — service_role only. Same pattern as admin_data.
+
+-- =================================================================
+-- Import Workspace: Four-Table Phase 1 Staging Foundation
+-- =================================================================
+-- Tables: import_workspaces, import_rows, import_candidates, import_commit_ledger
+-- All staging data is tenant-scoped via org_id.
+-- ON DELETE CASCADE on workspace_id ensures workspace deletion cleans
+-- up all staged rows, candidates, and ledger entries atomically.
+-- =================================================================
+
+CREATE TABLE IF NOT EXISTS public.import_workspaces (
+  id         uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id     uuid        NOT NULL REFERENCES public.organizations(id),
+  name       text        NOT NULL,
+  status     text        NOT NULL DEFAULT 'draft',
+  config     jsonb       NOT NULL DEFAULT '{}',
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT import_workspaces_status_chk CHECK (
+    status IN (
+      'draft', 'profiling', 'mapping', 'analyzing', 'needs_review',
+      'ready_to_commit', 'partially_committed', 'committed', 'archived', 'cancelled'
+    )
+  )
+);
+
+CREATE INDEX IF NOT EXISTS import_workspaces_org_status_idx
+  ON public.import_workspaces (org_id, status);
+
+CREATE INDEX IF NOT EXISTS import_workspaces_updated_idx
+  ON public.import_workspaces (org_id, updated_at DESC);
+
+-- import_rows: frontend-parsed row chunks.
+-- raw_data is the permanent audit source of truth after R2 raw files expire (30-day TTL).
+-- source_reference must include a timestamp/hash suffix so re-uploading a corrected
+-- file never collides with the (workspace_id, source_reference, row_index) unique key.
+CREATE TABLE IF NOT EXISTS public.import_rows (
+  id               uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id           uuid        NOT NULL REFERENCES public.organizations(id),
+  workspace_id     uuid        NOT NULL REFERENCES public.import_workspaces(id) ON DELETE CASCADE,
+  source_reference text        NOT NULL CHECK (source_reference <> ''),
+  row_index        integer     NOT NULL,
+  raw_data         jsonb       NOT NULL,
+  created_at       timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT import_rows_row_index_non_neg CHECK (row_index >= 0)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS import_rows_workspace_source_row_uidx
+  ON public.import_rows (workspace_id, source_reference, row_index);
+
+CREATE INDEX IF NOT EXISTS import_rows_workspace_idx
+  ON public.import_rows (workspace_id);
+
+-- import_candidates: normalized Golden Record entities ready for review, dry-run, and commit.
+-- blocking_issues_count is denormalized from issues[] — backend must recalculate on every issues write.
+-- depends_on_candidate_id is the Phase 1 single-parent DAG for guardian links and notes.
+-- SET NULL on depends_on deletion ensures children become unblocked rather than orphaned.
+CREATE TABLE IF NOT EXISTS public.import_candidates (
+  id                      uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id                  uuid        NOT NULL REFERENCES public.organizations(id),
+  workspace_id            uuid        NOT NULL REFERENCES public.import_workspaces(id) ON DELETE CASCADE,
+  entity_type             text        NOT NULL,
+  status                  text        NOT NULL DEFAULT 'needs_review',
+  candidate_data          jsonb       NOT NULL DEFAULT '{}',
+  merged_from_row_ids     uuid[]      NOT NULL DEFAULT '{}',
+  issues                  jsonb       NOT NULL DEFAULT '[]',
+  blocking_issues_count   integer     NOT NULL DEFAULT 0,
+  decisions               jsonb       NOT NULL DEFAULT '{}',
+  depends_on_candidate_id uuid        REFERENCES public.import_candidates(id) ON DELETE SET NULL,
+  created_at              timestamptz NOT NULL DEFAULT now(),
+  updated_at              timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT import_candidates_entity_type_chk CHECK (
+    entity_type IN (
+      'active_student', 'inactive_student', 'guardian',
+      'guardian_link', 'service', 'student_note'
+    )
+  ),
+  CONSTRAINT import_candidates_status_chk CHECK (
+    status IN (
+      'needs_review', 'ready', 'blocked', 'blocked_by_dependency',
+      'skipped', 'committed', 'failed'
+    )
+  ),
+  CONSTRAINT import_candidates_blocking_count_non_neg CHECK (blocking_issues_count >= 0)
+);
+
+CREATE INDEX IF NOT EXISTS import_candidates_workspace_idx
+  ON public.import_candidates (workspace_id);
+
+CREATE INDEX IF NOT EXISTS import_candidates_workspace_status_idx
+  ON public.import_candidates (workspace_id, status);
+
+CREATE INDEX IF NOT EXISTS import_candidates_workspace_entity_idx
+  ON public.import_candidates (workspace_id, entity_type);
+
+-- Sparse index: only rows with a parent dependency need this lookup
+CREATE INDEX IF NOT EXISTS import_candidates_depends_on_idx
+  ON public.import_candidates (depends_on_candidate_id)
+  WHERE depends_on_candidate_id IS NOT NULL;
+
+-- source_row_id: the anchor import_row this candidate was derived from.
+-- Enables idempotent re-analysis upsert. Multiple rows merged into one candidate
+-- are captured in merged_from_row_ids; source_row_id is the primary/first row.
+ALTER TABLE public.import_candidates
+  ADD COLUMN IF NOT EXISTS source_row_id uuid REFERENCES public.import_rows(id) ON DELETE CASCADE;
+
+CREATE UNIQUE INDEX IF NOT EXISTS import_candidates_workspace_source_row_uidx
+  ON public.import_candidates (workspace_id, source_row_id);
+
+-- import_commit_ledger: immutable audit trail for every live record created, updated, or linked
+-- by an import commit. Workspace CASCADE handles bulk cleanup when a workspace is deleted.
+CREATE TABLE IF NOT EXISTS public.import_commit_ledger (
+  id                 uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id             uuid        NOT NULL REFERENCES public.organizations(id),
+  workspace_id       uuid        NOT NULL REFERENCES public.import_workspaces(id) ON DELETE CASCADE,
+  candidate_id       uuid        NOT NULL REFERENCES public.import_candidates(id) ON DELETE CASCADE,
+  live_resource_type text        NOT NULL CHECK (live_resource_type <> ''),
+  live_resource_id   uuid        NOT NULL,
+  action_taken       text        NOT NULL,
+  created_at         timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT import_commit_ledger_action_chk CHECK (
+    action_taken IN ('create', 'update', 'link')
+  )
+);
+
+CREATE INDEX IF NOT EXISTS import_commit_ledger_workspace_idx
+  ON public.import_commit_ledger (workspace_id);
+
+CREATE INDEX IF NOT EXISTS import_commit_ledger_candidate_idx
+  ON public.import_commit_ledger (candidate_id);
+
+-- Supports provenance lookups: "was this live record imported?"
+CREATE INDEX IF NOT EXISTS import_commit_ledger_resource_idx
+  ON public.import_commit_ledger (org_id, live_resource_type, live_resource_id);
+
+-- Enable RLS
+ALTER TABLE public.import_workspaces    ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.import_rows          ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.import_candidates    ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.import_commit_ledger ENABLE ROW LEVEL SECURITY;
+
+-- Tenant RLS policies (SELECT / INSERT / UPDATE / DELETE) — same pattern as all other tenant tables
+DO $$
+DECLARE
+  tbl text;
+  ops text[] := ARRAY['SELECT','INSERT','UPDATE','DELETE'];
+  op  text;
+  pol text;
+BEGIN
+  FOREACH tbl IN ARRAY ARRAY[
+    'import_workspaces',
+    'import_rows',
+    'import_candidates',
+    'import_commit_ledger'
+  ]
+  LOOP
+    FOREACH op IN ARRAY ops
+    LOOP
+      pol := left('tenant_' || lower(op) || '_' || tbl, 63);
+      EXECUTE 'DROP POLICY IF EXISTS ' || quote_ident(pol) || ' ON public.' || quote_ident(tbl);
+
+      IF op = 'SELECT' THEN
+        EXECUTE format(
+          'CREATE POLICY %I ON public.%I FOR SELECT TO authenticated, app_user USING (org_id = get_active_org_id())',
+          pol, tbl);
+      ELSIF op = 'INSERT' THEN
+        EXECUTE format(
+          'CREATE POLICY %I ON public.%I FOR INSERT TO authenticated, app_user WITH CHECK (org_id = get_active_org_id())',
+          pol, tbl);
+      ELSE  -- UPDATE / DELETE
+        EXECUTE format(
+          'CREATE POLICY %I ON public.%I FOR %s TO authenticated, app_user USING (org_id = get_active_org_id())',
+          pol, tbl, op);
+        IF op = 'UPDATE' THEN
+          EXECUTE format(
+            'ALTER POLICY %I ON public.%I WITH CHECK (org_id = get_active_org_id())',
+            pol, tbl);
+        END IF;
+      END IF;
+    END LOOP;
+  END LOOP;
+END $$;
+
+GRANT ALL ON TABLE public.import_workspaces    TO app_user;
+GRANT ALL ON TABLE public.import_rows          TO app_user;
+GRANT ALL ON TABLE public.import_candidates    TO app_user;
+GRANT ALL ON TABLE public.import_commit_ledger TO app_user;
+
+-- =================================================================
+-- Import Workspace RPC: atomic config shallow-merge
+-- =================================================================
+-- Merges p_config_patch into the existing config column using the
+-- PostgreSQL JSONB || (concat/merge) operator so that:
+--   - Keys present in p_config_patch overwrite the existing value.
+--   - Keys absent from p_config_patch are left untouched.
+-- This avoids the race condition where a blind Supabase JS .update({ config })
+-- call overwrites keys written by a concurrent analysis or progress update.
+--
+-- Security: INVOKER — runs under the calling role's permissions so RLS
+-- tenant isolation is fully enforced. The backend service_role bypasses RLS
+-- anyway, but INVOKER is the correct posture per the developer warnings.
+-- =================================================================
+CREATE OR REPLACE FUNCTION public.patch_import_workspace_config(
+  p_workspace_id uuid,
+  p_org_id       uuid,
+  p_config_patch jsonb
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY INVOKER
+AS $$
+DECLARE
+  v_config jsonb;
+BEGIN
+  UPDATE public.import_workspaces
+  SET
+    config     = config || p_config_patch,
+    updated_at = now()
+  WHERE id     = p_workspace_id
+    AND org_id = p_org_id
+  RETURNING config INTO v_config;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'workspace_not_found' USING ERRCODE = 'P0001';
+  END IF;
+
+  RETURN v_config;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.patch_import_workspace_config(uuid, uuid, jsonb)
+  TO authenticated, app_user;
+
+-- =================================================================
+-- commit_import_chunk
+-- Atomically commits a batch of import_candidates to the live tables.
+-- All candidates must be status='ready' with blocking_issues_count=0.
+-- 'skipped' candidates are marked skipped and bypassed.
+-- The function enforces the inactive_student invariant (requires
+-- identity_number + at least one name field).
+-- On completion it writes provenance metadata and an import_commit_ledger
+-- entry for every live resource created/updated.
+-- Security: INVOKER — runs under calling role so RLS is honoured.
+-- =================================================================
+CREATE OR REPLACE FUNCTION public.commit_import_chunk(
+  p_workspace_id  uuid,
+  p_org_id        uuid,
+  p_candidate_ids uuid[]
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY INVOKER
+AS $$
+DECLARE
+  v_candidate         RECORD;
+  v_candidate_data    jsonb;
+  v_decisions         jsonb;
+  v_results           jsonb := '[]'::jsonb;
+  v_result_item       jsonb;
+  v_import_provenance jsonb;
+
+  -- reusable scalars
+  v_identity          text;
+  v_first_name        text;
+  v_last_name         text;
+  v_phone             text;
+  v_email             text;
+  v_action            text;
+
+  -- live resource ids
+  v_cp_id             uuid;
+  v_student_id        uuid;
+  v_guardian_id       uuid;
+  v_link_id           uuid;
+  v_service_id        uuid;
+
+  v_remaining         integer;
+BEGIN
+
+  -- ── 1. Pre-flight: verify all supplied candidates are committable ─────────
+  FOR v_candidate IN
+    SELECT id, entity_type, status, blocking_issues_count, candidate_data
+    FROM   public.import_candidates
+    WHERE  id            = ANY(p_candidate_ids)
+      AND  workspace_id  = p_workspace_id
+      AND  org_id        = p_org_id
+  LOOP
+    -- Skipped candidates are allowed through (processed below)
+    IF v_candidate.status NOT IN ('ready', 'skipped') THEN
+      RAISE EXCEPTION 'candidate_not_ready: %', v_candidate.id
+        USING ERRCODE = 'P0002';
+    END IF;
+
+    IF v_candidate.blocking_issues_count > 0 THEN
+      RAISE EXCEPTION 'candidate_has_blockers: %', v_candidate.id
+        USING ERRCODE = 'P0002';
+    END IF;
+
+    -- Invariant: inactive_student must carry identity + at least one name
+    IF v_candidate.entity_type = 'inactive_student' AND v_candidate.status = 'ready' THEN
+      IF v_candidate.candidate_data->>'identity_number' IS NULL
+          OR trim(v_candidate.candidate_data->>'identity_number') = '' THEN
+        RAISE EXCEPTION 'inactive_student_missing_identity: %', v_candidate.id
+          USING ERRCODE = 'P0002';
+      END IF;
+      IF (v_candidate.candidate_data->>'first_name' IS NULL
+            OR trim(v_candidate.candidate_data->>'first_name') = '')
+          AND (v_candidate.candidate_data->>'last_name' IS NULL
+            OR trim(v_candidate.candidate_data->>'last_name') = '') THEN
+        RAISE EXCEPTION 'inactive_student_missing_name: %', v_candidate.id
+          USING ERRCODE = 'P0002';
+      END IF;
+    END IF;
+  END LOOP;
+
+  -- ── 2. Process candidates in topological order ───────────────────────────
+  FOR v_candidate IN
+    SELECT id, entity_type, status, candidate_data, decisions
+    FROM   public.import_candidates
+    WHERE  id            = ANY(p_candidate_ids)
+      AND  workspace_id  = p_workspace_id
+      AND  org_id        = p_org_id
+    ORDER BY
+      CASE entity_type
+        WHEN 'active_student'   THEN 1
+        WHEN 'inactive_student' THEN 1
+        WHEN 'service'          THEN 2
+        WHEN 'guardian'         THEN 2
+        WHEN 'guardian_link'    THEN 3
+        WHEN 'student_note'     THEN 4
+        ELSE 5
+      END,
+      created_at
+  LOOP
+    v_candidate_data    := v_candidate.candidate_data;
+    v_decisions         := v_candidate.decisions;
+    v_cp_id             := NULL;
+    v_student_id        := NULL;
+    v_guardian_id       := NULL;
+    v_link_id           := NULL;
+    v_service_id        := NULL;
+    v_result_item       := NULL;
+
+    v_import_provenance := jsonb_build_object(
+      'import_workspace_id', p_workspace_id,
+      'import_candidate_id', v_candidate.id,
+      'committed_at',        now()
+    );
+
+    -- ── SKIPPED ─────────────────────────────────────────────────────────────
+    IF v_candidate.status = 'skipped'
+        OR (v_decisions IS NOT NULL AND v_decisions->>'action' = 'skip') THEN
+      UPDATE public.import_candidates
+        SET status = 'skipped', updated_at = now()
+        WHERE id = v_candidate.id;
+      v_results := v_results || jsonb_build_array(jsonb_build_object(
+        'candidate_id', v_candidate.id,
+        'entity_type',  v_candidate.entity_type,
+        'action',       'skip'
+      ));
+      CONTINUE;
+    END IF;
+
+    -- ── ACTIVE / INACTIVE STUDENT ────────────────────────────────────────────
+    IF v_candidate.entity_type IN ('active_student', 'inactive_student') THEN
+      v_identity   := trim(coalesce(v_candidate_data->>'identity_number', ''));
+      v_first_name := trim(coalesce(v_candidate_data->>'first_name', ''));
+      v_last_name  := trim(coalesce(v_candidate_data->>'last_name', ''));
+      v_phone      := trim(coalesce(v_candidate_data->>'phone', ''));
+      v_email      := trim(coalesce(v_candidate_data->>'email', ''));
+
+      -- User explicitly linked to an existing client_profile
+      IF v_decisions IS NOT NULL
+          AND v_decisions->>'action' = 'link_to_existing'
+          AND v_decisions->>'linked_id' IS NOT NULL THEN
+        v_cp_id  := (v_decisions->>'linked_id')::uuid;
+        v_action := 'link';
+        -- Verify profile exists in this org
+        PERFORM 1 FROM public.client_profiles
+          WHERE id = v_cp_id AND org_id = p_org_id;
+        IF NOT FOUND THEN
+          RAISE EXCEPTION 'linked_profile_not_found: %', v_candidate.id
+            USING ERRCODE = 'P0002';
+        END IF;
+        UPDATE public.client_profiles
+          SET is_active  = CASE WHEN v_candidate.entity_type = 'inactive_student'
+                                THEN false ELSE is_active END,
+              metadata   = coalesce(metadata, '{}') || jsonb_build_object('import', v_import_provenance),
+              updated_at = now()
+          WHERE id = v_cp_id AND org_id = p_org_id;
+      ELSE
+        -- Try to find existing profile by identity_number
+        IF v_identity <> '' THEN
+          SELECT id INTO v_cp_id
+            FROM public.client_profiles
+            WHERE org_id = p_org_id AND identity_number = v_identity
+            LIMIT 1;
+        END IF;
+
+        IF v_cp_id IS NOT NULL THEN
+          v_action := 'update';
+          UPDATE public.client_profiles
+            SET phone      = coalesce(nullif(phone, ''), nullif(v_phone, '')),
+                email      = coalesce(nullif(email, ''), nullif(v_email, '')),
+                is_active  = CASE WHEN v_candidate.entity_type = 'inactive_student'
+                                  THEN false ELSE is_active END,
+                metadata   = coalesce(metadata, '{}') || jsonb_build_object('import', v_import_provenance),
+                updated_at = now()
+            WHERE id = v_cp_id AND org_id = p_org_id;
+        ELSE
+          v_action := 'create';
+          INSERT INTO public.client_profiles (
+            org_id, first_name, last_name, identity_number,
+            phone, email, is_active, metadata
+          ) VALUES (
+            p_org_id,
+            CASE WHEN v_first_name = '' THEN 'לא ידוע' ELSE v_first_name END,
+            CASE WHEN v_last_name  = '' THEN 'לא ידוע' ELSE v_last_name  END,
+            CASE WHEN v_identity   = '' THEN NULL       ELSE v_identity   END,
+            CASE WHEN v_phone      = '' THEN NULL       ELSE v_phone      END,
+            CASE WHEN v_email      = '' THEN NULL       ELSE v_email      END,
+            v_candidate.entity_type <> 'inactive_student',
+            jsonb_build_object('import', v_import_provenance)
+          )
+          RETURNING id INTO v_cp_id;
+        END IF;
+      END IF;
+
+      INSERT INTO public.import_commit_ledger (
+        org_id, workspace_id, candidate_id, live_resource_type, live_resource_id, action_taken
+      ) VALUES (
+        p_org_id, p_workspace_id, v_candidate.id, 'client_profiles', v_cp_id, v_action
+      );
+
+      -- Ensure a students record exists
+      SELECT id INTO v_student_id
+        FROM public.students
+        WHERE org_id = p_org_id AND client_profile_id = v_cp_id
+        LIMIT 1;
+
+      IF v_student_id IS NULL THEN
+        INSERT INTO public.students (org_id, client_profile_id, metadata)
+          VALUES (p_org_id, v_cp_id, jsonb_build_object('import', v_import_provenance))
+          RETURNING id INTO v_student_id;
+        INSERT INTO public.import_commit_ledger (
+          org_id, workspace_id, candidate_id, live_resource_type, live_resource_id, action_taken
+        ) VALUES (p_org_id, p_workspace_id, v_candidate.id, 'students', v_student_id, 'create');
+      ELSE
+        UPDATE public.students
+          SET metadata   = coalesce(metadata, '{}') || jsonb_build_object('import', v_import_provenance),
+              updated_at = now()
+          WHERE id = v_student_id AND org_id = p_org_id;
+        INSERT INTO public.import_commit_ledger (
+          org_id, workspace_id, candidate_id, live_resource_type, live_resource_id, action_taken
+        ) VALUES (p_org_id, p_workspace_id, v_candidate.id, 'students', v_student_id, 'link');
+      END IF;
+
+      v_result_item := jsonb_build_object(
+        'candidate_id',      v_candidate.id,
+        'entity_type',       v_candidate.entity_type,
+        'action',            v_action,
+        'client_profile_id', v_cp_id,
+        'student_id',        v_student_id
+      );
+    END IF;
+
+    -- ── GUARDIAN ─────────────────────────────────────────────────────────────
+    IF v_candidate.entity_type = 'guardian' THEN
+      v_first_name := trim(coalesce(v_candidate_data->>'first_name', ''));
+      v_last_name  := trim(coalesce(v_candidate_data->>'last_name', ''));
+      v_phone      := trim(coalesce(v_candidate_data->>'phone', ''));
+      v_email      := trim(coalesce(v_candidate_data->>'email', ''));
+
+      v_guardian_id := NULL;
+
+      IF v_phone <> '' THEN
+        SELECT id INTO v_guardian_id
+          FROM public.guardians
+          WHERE org_id = p_org_id AND phone = v_phone
+          LIMIT 1;
+      END IF;
+
+      IF v_guardian_id IS NULL AND v_email <> '' THEN
+        SELECT id INTO v_guardian_id
+          FROM public.guardians
+          WHERE org_id = p_org_id AND email = v_email
+          LIMIT 1;
+      END IF;
+
+      IF v_guardian_id IS NOT NULL THEN
+        v_action := 'update';
+        UPDATE public.guardians
+          SET phone    = coalesce(nullif(phone, ''), nullif(v_phone, '')),
+              email    = coalesce(nullif(email, ''), nullif(v_email, '')),
+              metadata = coalesce(metadata, '{}') || jsonb_build_object('import', v_import_provenance)
+          WHERE id = v_guardian_id AND org_id = p_org_id;
+      ELSE
+        v_action := 'create';
+        INSERT INTO public.guardians (org_id, first_name, last_name, phone, email, metadata)
+          VALUES (
+            p_org_id,
+            CASE WHEN v_first_name = '' THEN 'לא ידוע' ELSE v_first_name END,
+            CASE WHEN v_last_name  = '' THEN NULL       ELSE v_last_name  END,
+            CASE WHEN v_phone      = '' THEN NULL       ELSE v_phone      END,
+            CASE WHEN v_email      = '' THEN NULL       ELSE v_email      END,
+            jsonb_build_object('import', v_import_provenance)
+          )
+          RETURNING id INTO v_guardian_id;
+      END IF;
+
+      INSERT INTO public.import_commit_ledger (
+        org_id, workspace_id, candidate_id, live_resource_type, live_resource_id, action_taken
+      ) VALUES (p_org_id, p_workspace_id, v_candidate.id, 'guardians', v_guardian_id, v_action);
+
+      v_result_item := jsonb_build_object(
+        'candidate_id', v_candidate.id,
+        'entity_type',  v_candidate.entity_type,
+        'action',       v_action,
+        'guardian_id',  v_guardian_id
+      );
+    END IF;
+
+    -- ── GUARDIAN LINK ────────────────────────────────────────────────────────
+    IF v_candidate.entity_type = 'guardian_link' THEN
+      v_identity := trim(coalesce(
+        v_candidate_data->>'student_identity_number',
+        v_candidate_data->>'student_identity',
+        ''
+      ));
+      v_phone := trim(coalesce(
+        v_candidate_data->>'guardian_phone',
+        v_candidate_data->>'phone',
+        ''
+      ));
+
+      v_cp_id       := NULL;
+      v_guardian_id := NULL;
+
+      IF v_identity <> '' THEN
+        SELECT id INTO v_cp_id
+          FROM public.client_profiles
+          WHERE org_id = p_org_id AND identity_number = v_identity
+          LIMIT 1;
+      END IF;
+
+      IF v_phone <> '' THEN
+        SELECT id INTO v_guardian_id
+          FROM public.guardians
+          WHERE org_id = p_org_id AND phone = v_phone
+          LIMIT 1;
+      END IF;
+
+      IF v_cp_id IS NULL THEN
+        RAISE EXCEPTION 'guardian_link_student_not_found: %', v_candidate.id
+          USING ERRCODE = 'P0002';
+      END IF;
+      IF v_guardian_id IS NULL THEN
+        RAISE EXCEPTION 'guardian_link_guardian_not_found: %', v_candidate.id
+          USING ERRCODE = 'P0002';
+      END IF;
+
+      -- Insert link only if it does not already exist
+      SELECT id INTO v_link_id
+        FROM public.client_guardians
+        WHERE org_id          = p_org_id
+          AND client_profile_id = v_cp_id
+          AND guardian_id       = v_guardian_id;
+
+      IF v_link_id IS NOT NULL THEN
+        v_action := 'link';
+      ELSE
+        v_action := 'create';
+        INSERT INTO public.client_guardians (
+          org_id, client_profile_id, guardian_id, relationship, is_primary
+        ) VALUES (
+          p_org_id,
+          v_cp_id,
+          v_guardian_id,
+          coalesce(nullif(trim(coalesce(v_candidate_data->>'relationship', '')), ''), 'other'),
+          coalesce((v_candidate_data->>'is_primary')::boolean, false)
+        )
+        RETURNING id INTO v_link_id;
+      END IF;
+
+      INSERT INTO public.import_commit_ledger (
+        org_id, workspace_id, candidate_id, live_resource_type, live_resource_id, action_taken
+      ) VALUES (p_org_id, p_workspace_id, v_candidate.id, 'client_guardians', v_link_id, v_action);
+
+      v_result_item := jsonb_build_object(
+        'candidate_id',      v_candidate.id,
+        'entity_type',       v_candidate.entity_type,
+        'action',            v_action,
+        'client_guardian_id', v_link_id
+      );
+    END IF;
+
+    -- ── SERVICE ──────────────────────────────────────────────────────────────
+    IF v_candidate.entity_type = 'service' THEN
+      v_service_id := NULL;
+
+      SELECT id INTO v_service_id
+        FROM public."Services"
+        WHERE org_id = p_org_id
+          AND lower(trim(coalesce(name, ''))) = lower(trim(coalesce(v_candidate_data->>'name', '')))
+        LIMIT 1;
+
+      IF v_service_id IS NOT NULL THEN
+        v_action := 'link';
+      ELSE
+        v_action := 'create';
+        INSERT INTO public."Services" (org_id, name, is_active, metadata)
+          VALUES (
+            p_org_id,
+            trim(coalesce(v_candidate_data->>'name', '')),
+            true,
+            jsonb_build_object('import', v_import_provenance)
+          )
+          RETURNING id INTO v_service_id;
+      END IF;
+
+      INSERT INTO public.import_commit_ledger (
+        org_id, workspace_id, candidate_id, live_resource_type, live_resource_id, action_taken
+      ) VALUES (p_org_id, p_workspace_id, v_candidate.id, 'Services', v_service_id, v_action);
+
+      v_result_item := jsonb_build_object(
+        'candidate_id', v_candidate.id,
+        'entity_type',  v_candidate.entity_type,
+        'action',       v_action,
+        'service_id',   v_service_id
+      );
+    END IF;
+
+    -- ── STUDENT NOTE ─────────────────────────────────────────────────────────
+    IF v_candidate.entity_type = 'student_note' THEN
+      v_identity := trim(coalesce(
+        v_candidate_data->>'student_identity_number',
+        v_candidate_data->>'identity_number',
+        ''
+      ));
+      v_student_id := NULL;
+
+      IF v_identity <> '' THEN
+        SELECT s.id INTO v_student_id
+          FROM public.students s
+          JOIN public.client_profiles cp ON cp.id = s.client_profile_id
+          WHERE s.org_id = p_org_id AND cp.identity_number = v_identity
+          LIMIT 1;
+      END IF;
+
+      IF v_student_id IS NULL THEN
+        RAISE EXCEPTION 'student_note_student_not_found: %', v_candidate.id
+          USING ERRCODE = 'P0002';
+      END IF;
+
+      UPDATE public.students
+        SET notes_internal =
+              CASE
+                WHEN notes_internal IS NOT NULL AND notes_internal <> ''
+                THEN notes_internal || E'\n' || coalesce(v_candidate_data->>'note_text', '')
+                ELSE coalesce(v_candidate_data->>'note_text', '')
+              END,
+            updated_at = now()
+        WHERE id = v_student_id AND org_id = p_org_id;
+
+      INSERT INTO public.import_commit_ledger (
+        org_id, workspace_id, candidate_id, live_resource_type, live_resource_id, action_taken
+      ) VALUES (p_org_id, p_workspace_id, v_candidate.id, 'students', v_student_id, 'update');
+
+      v_result_item := jsonb_build_object(
+        'candidate_id', v_candidate.id,
+        'entity_type',  v_candidate.entity_type,
+        'action',       'update',
+        'student_id',   v_student_id
+      );
+    END IF;
+
+    -- Mark candidate as committed
+    UPDATE public.import_candidates
+      SET status = 'committed', updated_at = now()
+      WHERE id = v_candidate.id;
+
+    IF v_result_item IS NOT NULL THEN
+      v_results := v_results || jsonb_build_array(v_result_item);
+    END IF;
+  END LOOP;
+
+  -- ── 3. Flip workspace status based on remaining uncommitted candidates ────
+  SELECT count(*) INTO v_remaining
+    FROM public.import_candidates
+    WHERE workspace_id = p_workspace_id
+      AND org_id       = p_org_id
+      AND status NOT IN ('committed', 'skipped', 'failed');
+
+  IF v_remaining = 0 THEN
+    UPDATE public.import_workspaces
+      SET status = 'committed', updated_at = now()
+      WHERE id = p_workspace_id AND org_id = p_org_id;
+  ELSE
+    UPDATE public.import_workspaces
+      SET status     = 'partially_committed',
+          updated_at = now()
+      WHERE id     = p_workspace_id
+        AND org_id = p_org_id
+        AND status NOT IN ('committed');
+  END IF;
+
+  RETURN jsonb_build_object(
+    'committed',    jsonb_array_length(v_results),
+    'workspace_id', p_workspace_id,
+    'results',      v_results
+  );
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.commit_import_chunk(uuid, uuid, uuid[])
+  TO authenticated, app_user;
 `;

@@ -9,6 +9,7 @@
  * Supported step actions:
  *   navigate, fill, type, click, check, uncheck, hover, select, pressKey,
  *   waitForSelector, waitForURL, waitForNetwork, screenshot, sleep,
+ *   uploadFile,
  *   store, storeFromUrl, assert, apiCall, login, logout, clearStorage, scrollTo, focusAndFill
  *
  * click extras:   first (boolean), nth (0-based index)
@@ -355,6 +356,15 @@ async function executeStep(page, rawStep, ctx) {
     case 'uncheck': {
       await page.waitForSelector(selector, { state: 'visible', timeout: t });
       await page.uncheck(selector);
+      break;
+    }
+    case 'uploadFile': {
+      await page.waitForSelector(selector, { state: 'attached', timeout: t });
+      const files = step.files ?? step.filePath ?? step.file ?? step.value;
+      if (!files) {
+        throw new Error('uploadFile action requires one of: files, filePath, file, value');
+      }
+      await page.setInputFiles(selector, files);
       break;
     }
 
