@@ -1668,6 +1668,7 @@ CREATE TABLE IF NOT EXISTS public.instructor_breaks (
   created_by uuid NULL REFERENCES auth.users(id) ON DELETE SET NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
+  break_template_id uuid NULL,
   metadata jsonb NULL,
   CONSTRAINT instructor_breaks_instructor_employee_id_fkey FOREIGN KEY (instructor_employee_id) REFERENCES public."Employees"(id),
   CONSTRAINT instructor_breaks_break_type_check CHECK (break_type IN ('break', 'meeting', 'unavailable', 'personal'))
@@ -1677,6 +1678,8 @@ CREATE INDEX IF NOT EXISTS instructor_breaks_datetime_start_idx
   ON public.instructor_breaks (org_id, datetime_start);
 CREATE INDEX IF NOT EXISTS instructor_breaks_instructor_datetime_idx
   ON public.instructor_breaks (org_id, instructor_employee_id, datetime_start);
+CREATE INDEX IF NOT EXISTS instructor_breaks_template_idx
+  ON public.instructor_breaks (org_id, break_template_id) WHERE break_template_id IS NOT NULL;
 
 DO $$
 BEGIN
@@ -1686,6 +1689,68 @@ BEGIN
     ALTER TABLE public.instructor_breaks
       ADD CONSTRAINT instructor_breaks_created_by_fkey
       FOREIGN KEY (created_by) REFERENCES auth.users(id) ON DELETE SET NULL;
+  END IF;
+EXCEPTION
+  WHEN undefined_table THEN NULL;
+  WHEN insufficient_privilege THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.instructor_breaks
+    ADD COLUMN IF NOT EXISTS break_template_id uuid NULL;
+EXCEPTION
+  WHEN undefined_table THEN NULL;
+END $$;
+
+-- -----------------------------------------------------------------
+-- public.instructor_break_templates
+-- -----------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS public.instructor_break_templates (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id uuid NOT NULL REFERENCES public.organizations(id),
+  instructor_employee_id uuid NOT NULL,
+  day_of_week text NOT NULL,
+  time_of_day time NOT NULL,
+  duration_minutes int NOT NULL,
+  break_type text NOT NULL DEFAULT 'break',
+  note text NULL,
+  valid_from date NULL,
+  valid_until date NULL,
+  is_active boolean NOT NULL DEFAULT true,
+  created_by uuid NULL REFERENCES auth.users(id) ON DELETE SET NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  metadata jsonb NULL,
+  CONSTRAINT instructor_break_templates_instructor_fkey FOREIGN KEY (instructor_employee_id) REFERENCES public."Employees"(id),
+  CONSTRAINT instructor_break_templates_break_type_check CHECK (break_type IN ('break', 'meeting', 'unavailable', 'personal')),
+  CONSTRAINT instructor_break_templates_day_of_week_check CHECK (day_of_week IN ('sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'))
+);
+
+CREATE INDEX IF NOT EXISTS instructor_break_templates_instructor_idx
+  ON public.instructor_break_templates (org_id, instructor_employee_id);
+CREATE INDEX IF NOT EXISTS instructor_break_templates_active_idx
+  ON public.instructor_break_templates (org_id, is_active);
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'instructor_break_templates_created_by_fkey') THEN
+    ALTER TABLE public.instructor_break_templates
+      ADD CONSTRAINT instructor_break_templates_created_by_fkey
+      FOREIGN KEY (created_by) REFERENCES auth.users(id) ON DELETE SET NULL NOT VALID;
+  END IF;
+EXCEPTION
+  WHEN undefined_table THEN NULL;
+  WHEN insufficient_privilege THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'instructor_breaks_break_template_id_fkey') THEN
+    ALTER TABLE public.instructor_breaks
+      ADD CONSTRAINT instructor_breaks_break_template_id_fkey
+      FOREIGN KEY (break_template_id) REFERENCES public.instructor_break_templates(id) ON DELETE SET NULL NOT VALID;
   END IF;
 EXCEPTION
   WHEN undefined_table THEN NULL;
@@ -4290,6 +4355,7 @@ ALTER TABLE public.lesson_template_participants ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.lesson_instances ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.lesson_participants ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.instructor_breaks ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.instructor_break_templates ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.grace_cancellation_requests ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.commitments ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.ledger_transactions ENABLE ROW LEVEL SECURITY;
@@ -4340,6 +4406,7 @@ BEGIN
     'lesson_instances',
     'lesson_participants',
     'instructor_breaks',
+    'instructor_break_templates',
     'grace_cancellation_requests',
     'commitments',
     'ledger_transactions',
@@ -4439,6 +4506,7 @@ GRANT ALL ON TABLE public.lesson_template_participants TO app_user;
 GRANT ALL ON TABLE public.lesson_instances TO app_user;
 GRANT ALL ON TABLE public.lesson_participants TO app_user;
 GRANT ALL ON TABLE public.instructor_breaks TO app_user;
+GRANT ALL ON TABLE public.instructor_break_templates TO app_user;
 GRANT ALL ON TABLE public.grace_cancellation_requests TO app_user;
 GRANT ALL ON TABLE public.commitments TO app_user;
 GRANT ALL ON TABLE public.ledger_transactions TO app_user;

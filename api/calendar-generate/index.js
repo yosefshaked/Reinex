@@ -1167,6 +1167,43 @@ export default async function calendarGenerate(context, req) {
     }
   }
 
+  // --- Break template generation pass ---
+  if (!dryRun) {
+    const { data: breakTemplateRows } = await withOrgScope(supabase, 'instructor_break_templates', orgId)
+      .select('id, instructor_employee_id, day_of_week, time_of_day, duration_minutes, break_type, note, valid_from, valid_until')
+      .eq('is_active', true);
+
+    const dates = enumerateDates(startDate, endDate);
+    for (const template of breakTemplateRows || []) {
+      for (const date of dates) {
+        const dayToken = dayTokenForDate(date);
+        if (normalizeDayToken(template.day_of_week) !== normalizeDayToken(dayToken)) continue;
+        if (template.valid_from && date < template.valid_from) continue;
+        if (template.valid_until && date > template.valid_until) continue;
+        const timeHhMm = String(template.time_of_day || '').slice(0, 5);
+        const datetimeStartIso = buildUtcIsoForTimezoneDateTime(date, timeHhMm);
+        if (!datetimeStartIso) continue;
+        // Idempotency: skip if a break already exists at this time for this instructor
+        const { data: existingBreak } = await withOrgScope(supabase, 'instructor_breaks', orgId)
+          .select('id')
+          .eq('instructor_employee_id', template.instructor_employee_id)
+          .eq('datetime_start', datetimeStartIso)
+          .maybeSingle();
+        if (existingBreak) continue;
+        await withOrgScope(supabase, 'instructor_breaks', orgId).insert({
+          org_id: orgId,
+          instructor_employee_id: template.instructor_employee_id,
+          datetime_start: datetimeStartIso,
+          duration_minutes: template.duration_minutes,
+          break_type: template.break_type || 'break',
+          note: template.note || null,
+          break_template_id: template.id,
+          created_by: userId,
+        });
+      }
+    }
+  }
+
   const responsePayload = buildDiffResponse({
     generationRunId,
     startDate,

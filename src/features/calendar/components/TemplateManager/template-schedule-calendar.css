@@ -138,6 +138,64 @@
   margin-top: 0.15rem;
 }
 
+/* Break template tile */
+.reinex-template-break-event {
+  cursor: pointer;
+}
+
+.reinex-template-break-card {
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  border-radius: 0.55rem;
+  padding: 0.35rem 0.45rem;
+  color: rgb(92 66 45);
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 0.9), rgb(254 252 232 / 0.92)),
+    rgb(253 230 138 / 0.4);
+  box-shadow:
+    inset 3px 0 0 rgb(161 98 7),
+    inset 0 0 0 1px rgb(161 98 7 / 0.28),
+    0 8px 18px -16px rgb(92 66 45 / 0.35);
+}
+
+.reinex-template-break-card--inactive {
+  opacity: 0.55;
+  text-decoration: line-through;
+}
+
+.reinex-template-break-card__title {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1.15;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reinex-template-break-card__note {
+  font-size: 0.64rem;
+  line-height: 1.2;
+  margin-top: 0.1rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: rgb(120 85 50);
+}
+
+.reinex-template-break-card__time {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  color: rgb(120 85 50);
+  font-size: 0.66rem;
+  line-height: 1.15;
+  margin-top: 0.15rem;
+}
+
 @media (min-width: 1024px) {
   .reinex-template-calendar-shell {
     height: calc(100vh - 13.5rem);

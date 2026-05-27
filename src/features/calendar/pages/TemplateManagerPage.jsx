@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import PageLayout from '@/components/ui/PageLayout';
 import { Button } from '@/components/ui/button';
-import { Plus, ArrowRight, Loader2, SlidersHorizontal, Sparkles, UsersRound } from 'lucide-react';
+import { Plus, ArrowRight, Coffee, Loader2, SlidersHorizontal, Sparkles, UsersRound } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import ErrorSupportCode from '@/components/ui/ErrorSupportCode.jsx';
@@ -20,8 +20,11 @@ import { TemplateScheduleCalendar } from '../components/TemplateManager/Template
 import { AddTemplateDialog } from '../components/TemplateManager/AddTemplateDialog';
 import { TemplateEditDialog } from '../components/TemplateManager/TemplateEditDialog';
 import TemplateMissingFormsDialog from '../components/TemplateManager/TemplateMissingFormsDialog';
+import { AddBreakTemplateDialog } from '../components/TemplateManager/AddBreakTemplateDialog';
+import { EditBreakTemplateDialog } from '../components/TemplateManager/EditBreakTemplateDialog';
 import CalendarServicePalette from '../components/CalendarServicePalette.jsx';
 import { useTemplates, useTemplateMutations } from '../hooks/useTemplates';
+import { useInstructorBreakTemplates } from '../hooks/useInstructorBreakTemplates';
 import { useCalendarInstructors } from '../hooks/useCalendar';
 import EditServiceCapabilitiesDialog from '@/components/settings/employee-management/EditServiceCapabilitiesDialog.jsx';
 import { useOrg } from '@/org/OrgContext.jsx';
@@ -126,6 +129,9 @@ export default function TemplateManagerPage() {
     waitingListContext: null,
   });
   const [selectedTemplate, setSelectedTemplate] = useState(null);
+  const [showAddBreakTemplateDialog, setShowAddBreakTemplateDialog] = useState(false);
+  const [addBreakTemplateDefaults, setAddBreakTemplateDefaults] = useState({ instructorId: null, dayOfWeek: null, timeOfDay: '09:00', durationMinutes: 30 });
+  const [selectedBreakTemplate, setSelectedBreakTemplate] = useState(null);
   const [showCapabilitiesDialog, setShowCapabilitiesDialog] = useState(false);
   const [availabilityContext, setAvailabilityContext] = useState({
     instructorId: '',
@@ -142,6 +148,7 @@ export default function TemplateManagerPage() {
   const consumedTemplateEditSeedRef = useRef('');
 
   const { templates, isLoading: templatesLoading, error: templatesError, refetch: refetchTemplates } = useTemplates({ showInactive });
+  const { breakTemplates, refetch: refetchBreakTemplates } = useInstructorBreakTemplates({ showInactive });
   const { instructors, isLoading: instructorsLoading, error: instructorsError } = useCalendarInstructors();
   const { matchWaitingEntryToTemplate, isSubmitting: isAssigning } = useTemplateMutations();
   const [capacityAssignError, setCapacityAssignError] = useState('');
@@ -391,6 +398,20 @@ export default function TemplateManagerPage() {
     setSelectedMatchContext(null);
   }
 
+  function handleBreakTemplateClick(breakTemplate) {
+    setSelectedBreakTemplate(breakTemplate);
+  }
+
+  function handleBreakTemplateAddSuccess() {
+    refetchBreakTemplates();
+    setShowAddBreakTemplateDialog(false);
+  }
+
+  function handleBreakTemplateUpdateSuccess() {
+    refetchBreakTemplates();
+    setSelectedBreakTemplate(null);
+  }
+
   function handleFixAvailability({
     instructorId,
     serviceId,
@@ -590,6 +611,17 @@ export default function TemplateManagerPage() {
             <Plus className="h-4 w-4" />
             תבנית חדשה
           </Button>
+          <Button
+            variant="outline"
+            onClick={() => {
+              setAddBreakTemplateDefaults({ instructorId: null, dayOfWeek: null, timeOfDay: '09:00', durationMinutes: 30 });
+              setShowAddBreakTemplateDialog(true);
+            }}
+            className="gap-1"
+          >
+            <Coffee className="h-4 w-4" />
+            הפסקה חדשה
+          </Button>
           <Button variant="outline" onClick={() => navigate('/calendar')} className="gap-1">
             <ArrowRight className="h-4 w-4" />
             חזרה ללוח
@@ -727,8 +759,10 @@ export default function TemplateManagerPage() {
       {!isLoading && !errorMsg && (
         <TemplateScheduleCalendar
           templates={templates}
+          breakTemplates={breakTemplates}
           instructors={instructors}
           onTemplateClick={handleTemplateClick}
+          onBreakTemplateClick={handleBreakTemplateClick}
           onSlotClick={handleCellClick}
           onExternalServiceDrop={handleExternalServiceDrop}
           onUnavailableSlot={handleUnavailableTemplateSlot}
@@ -803,6 +837,25 @@ export default function TemplateManagerPage() {
         onClose={() => setSelectedTemplate(null)}
         onUpdate={handleUpdateSuccess}
         onFixAvailability={handleFixAvailability}
+      />
+
+      <AddBreakTemplateDialog
+        open={showAddBreakTemplateDialog}
+        onClose={() => setShowAddBreakTemplateDialog(false)}
+        onSuccess={handleBreakTemplateAddSuccess}
+        instructors={instructors}
+        defaultInstructorId={addBreakTemplateDefaults.instructorId}
+        defaultDayOfWeek={addBreakTemplateDefaults.dayOfWeek}
+        defaultTimeOfDay={addBreakTemplateDefaults.timeOfDay}
+        defaultDurationMinutes={addBreakTemplateDefaults.durationMinutes}
+      />
+
+      <EditBreakTemplateDialog
+        open={!!selectedBreakTemplate}
+        onClose={() => setSelectedBreakTemplate(null)}
+        breakTemplate={selectedBreakTemplate}
+        instructors={instructors}
+        onSuccess={handleBreakTemplateUpdateSuccess}
       />
 
       <TemplateMissingFormsDialog
