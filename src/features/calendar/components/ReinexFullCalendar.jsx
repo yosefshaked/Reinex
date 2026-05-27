@@ -681,6 +681,7 @@ export default function ReinexFullCalendar({
   selectedSlot,
   onSlotSelect,
   onEventClick,
+  onBreakClick,
   onDateChange,
   onEventRescheduled,
   onExternalServiceDrop,
@@ -992,11 +993,15 @@ export default function ReinexFullCalendar({
   }, [currentDate, viewMode]);
 
   const handleEventClick = useCallback((info) => {
+    if (info.event.extendedProps?.isBreak) {
+      onBreakClick?.(info.event.extendedProps.break);
+      return;
+    }
     const instance = info.event.extendedProps?.instance;
     if (instance) {
       onEventClick?.(instance);
     }
-  }, [onEventClick]);
+  }, [onBreakClick, onEventClick]);
 
   const handleDateSelect = useCallback((selectInfo) => {
     const startDate = selectInfo.start instanceof Date ? selectInfo.start : null;

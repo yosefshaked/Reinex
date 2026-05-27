@@ -13,6 +13,7 @@ import { AddLessonDialog } from '../components/AddLessonDialog';
 import { ManualGenerationDialog } from '../components/ManualGenerationDialog';
 import { useCalendarInstances, useCalendarInstructors, useInstructorBreaks } from '../hooks/useCalendar';
 import AddBreakDialog from '../components/AddBreakDialog';
+import EditBreakDialog from '../components/EditBreakDialog';
 import ReinexFullCalendar from '../components/ReinexFullCalendar';
 import CalendarWorkspaceDock from '../components/CalendarWorkspaceDock.jsx';
 import InstructorWhatsAppDialog from '../components/InstructorWhatsAppDialog.jsx';
@@ -67,6 +68,7 @@ export default function CalendarPage() {
   const [availabilityFixIssue, setAvailabilityFixIssue] = useState(null);
   const [mobileDockOpen, setMobileDockOpen] = useState(false);
   const [showAddBreakDialog, setShowAddBreakDialog] = useState(false);
+  const [selectedBreak, setSelectedBreak] = useState(null);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -559,6 +561,7 @@ export default function CalendarPage() {
                   emptyState={workspaceSummary.emptyState}
                   onEmptyStateAction={handleCalendarEmptyStateAction}
                   onBreakUpdated={refetchBreaks}
+                  onBreakClick={setSelectedBreak}
                 />
               </div>
             </div>
@@ -652,6 +655,14 @@ export default function CalendarPage() {
         onSuccess={handleBreakAdded}
         instructors={instructors}
         defaultDate={currentDate}
+      />
+
+      <EditBreakDialog
+        open={selectedBreak !== null}
+        breakItem={selectedBreak}
+        instructorName={instructors.find((i) => String(i.id) === String(selectedBreak?.instructor_employee_id))?.full_name || ''}
+        onClose={() => setSelectedBreak(null)}
+        onSuccess={() => { setSelectedBreak(null); refetchBreaks(); }}
       />
     </div>
   );
