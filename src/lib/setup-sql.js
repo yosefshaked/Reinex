@@ -112,7 +112,7 @@ CREATE TABLE IF NOT EXISTS public.organizations (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   name text NOT NULL,
   slug text NOT NULL UNIQUE,
-  created_by uuid NOT NULL,
+  created_by uuid NULL REFERENCES auth.users(id) ON DELETE SET NULL,
   verified_at timestamptz NULL,
   -- Merged from org_settings
   permissions jsonb NOT NULL DEFAULT '{}'::jsonb,
@@ -414,7 +414,7 @@ CREATE TABLE IF NOT EXISTS public.active_routing (
   category text NOT NULL DEFAULT 'active_org',
   routing_info jsonb NOT NULL DEFAULT '{}'::jsonb,
   expires_at timestamptz NULL,
-  created_by uuid NULL,
+  created_by uuid NULL REFERENCES auth.users(id) ON DELETE SET NULL,
   metadata jsonb NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
@@ -1134,7 +1134,7 @@ CREATE TABLE IF NOT EXISTS public.employee_attendance_records (
   notes text NULL,
   source_type text NOT NULL DEFAULT 'manual',
   version int NOT NULL DEFAULT 1,
-  created_by uuid NULL,
+  created_by uuid NULL REFERENCES auth.users(id) ON DELETE SET NULL,
   updated_by uuid NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
@@ -1175,7 +1175,7 @@ CREATE TABLE IF NOT EXISTS public.employee_leave_entries (
   notes text NULL,
   source_type text NOT NULL DEFAULT 'admin_manual',
   approved_by uuid NULL,
-  created_by uuid NULL,
+  created_by uuid NULL REFERENCES auth.users(id) ON DELETE SET NULL,
   updated_by uuid NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
@@ -1235,7 +1235,7 @@ CREATE TABLE IF NOT EXISTS public.employee_leave_balance_events (
   quantity_days numeric NOT NULL,
   effective_date date NOT NULL,
   notes text NULL,
-  created_by uuid NULL,
+  created_by uuid NULL REFERENCES auth.users(id) ON DELETE SET NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   metadata jsonb NULL,
   CONSTRAINT employee_leave_balance_events_employee_id_fkey FOREIGN KEY (employee_id) REFERENCES public."Employees"(id),
@@ -1261,7 +1261,7 @@ CREATE TABLE IF NOT EXISTS public.finance_corrections (
   effective_date date NOT NULL,
   notes text NULL,
   version int NOT NULL DEFAULT 1,
-  created_by uuid NULL,
+  created_by uuid NULL REFERENCES auth.users(id) ON DELETE SET NULL,
   updated_by uuid NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
@@ -1512,7 +1512,7 @@ CREATE TABLE IF NOT EXISTS public.lesson_instances (
   closed_at timestamptz NULL,
   created_source text NOT NULL,
   version int NOT NULL DEFAULT 1,
-  created_by uuid NULL,
+  created_by uuid NULL REFERENCES auth.users(id) ON DELETE SET NULL,
   updated_by uuid NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
@@ -1665,7 +1665,7 @@ CREATE TABLE IF NOT EXISTS public.instructor_breaks (
   duration_minutes int NOT NULL,
   break_type text NOT NULL DEFAULT 'break',
   note text NULL,
-  created_by uuid NULL,
+  created_by uuid NULL REFERENCES auth.users(id) ON DELETE SET NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   metadata jsonb NULL,
@@ -1678,6 +1678,20 @@ CREATE INDEX IF NOT EXISTS instructor_breaks_datetime_start_idx
 CREATE INDEX IF NOT EXISTS instructor_breaks_instructor_datetime_idx
   ON public.instructor_breaks (org_id, instructor_employee_id, datetime_start);
 
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'instructor_breaks_created_by_fkey'
+  ) THEN
+    ALTER TABLE public.instructor_breaks
+      ADD CONSTRAINT instructor_breaks_created_by_fkey
+      FOREIGN KEY (created_by) REFERENCES auth.users(id) ON DELETE SET NULL;
+  END IF;
+EXCEPTION
+  WHEN undefined_table THEN NULL;
+  WHEN insufficient_privilege THEN NULL;
+END $$;
+
 -- -----------------------------------------------------------------
 -- public.grace_cancellation_requests
 -- -----------------------------------------------------------------
@@ -1687,7 +1701,7 @@ CREATE TABLE IF NOT EXISTS public.grace_cancellation_requests (
   org_id uuid NOT NULL REFERENCES public.organizations(id),
   lesson_participant_id uuid NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
-  created_by uuid NULL,
+  created_by uuid NULL REFERENCES auth.users(id) ON DELETE SET NULL,
   reason text NULL,
   status text NOT NULL DEFAULT 'manually_excused',
   CONSTRAINT grace_cancellation_requests_lesson_participant_id_fkey FOREIGN KEY (lesson_participant_id) REFERENCES public.lesson_participants(id),
@@ -1697,8 +1711,13 @@ CREATE TABLE IF NOT EXISTS public.grace_cancellation_requests (
 
 DO $$
 BEGIN
-  ALTER TABLE public.grace_cancellation_requests
-    DROP CONSTRAINT IF EXISTS grace_cancellation_requests_created_by_fkey;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'grace_cancellation_requests_created_by_fkey'
+  ) THEN
+    ALTER TABLE public.grace_cancellation_requests
+      ADD CONSTRAINT grace_cancellation_requests_created_by_fkey
+      FOREIGN KEY (created_by) REFERENCES auth.users(id) ON DELETE SET NULL NOT VALID;
+  END IF;
 EXCEPTION
   WHEN undefined_table THEN NULL;
   WHEN insufficient_privilege THEN NULL;
@@ -1771,7 +1790,7 @@ CREATE TABLE IF NOT EXISTS public.instance_locks (
   lock_source_type text NOT NULL,
   lock_source_id uuid NOT NULL,
   lock_reason text NOT NULL,
-  created_by uuid NULL,
+  created_by uuid NULL REFERENCES auth.users(id) ON DELETE SET NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   metadata jsonb NULL,
   CONSTRAINT instance_locks_lesson_instance_id_fkey FOREIGN KEY (lesson_instance_id) REFERENCES public.lesson_instances(id) ON DELETE CASCADE,
@@ -1796,7 +1815,7 @@ CREATE TABLE IF NOT EXISTS public.participant_locks (
   lock_source_type text NOT NULL,
   lock_source_id uuid NOT NULL,
   lock_reason text NOT NULL,
-  created_by uuid NULL,
+  created_by uuid NULL REFERENCES auth.users(id) ON DELETE SET NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   metadata jsonb NULL,
   CONSTRAINT participant_locks_lesson_participant_id_fkey FOREIGN KEY (lesson_participant_id) REFERENCES public.lesson_participants(id) ON DELETE CASCADE,
@@ -1860,7 +1879,7 @@ CREATE TABLE IF NOT EXISTS public.dashboard_tasks (
   resource_id text NULL,
   action_path text NULL,
   version int NOT NULL DEFAULT 1,
-  created_by uuid NULL,
+  created_by uuid NULL REFERENCES auth.users(id) ON DELETE SET NULL,
   resolved_by uuid NULL,
   resolved_at timestamptz NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
@@ -2361,7 +2380,7 @@ CREATE TABLE IF NOT EXISTS public.forms (
   version int NOT NULL DEFAULT 1,
   published_at timestamptz NULL,
   archived_at timestamptz NULL,
-  created_by uuid NOT NULL,
+  created_by uuid NULL REFERENCES auth.users(id) ON DELETE SET NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   is_active boolean NOT NULL DEFAULT true,
@@ -2396,7 +2415,7 @@ CREATE TABLE IF NOT EXISTS public.shared_form_blocks (
   name text NOT NULL,
   content_schema jsonb NOT NULL DEFAULT '{}'::jsonb,
   is_active boolean NOT NULL DEFAULT true,
-  created_by uuid NOT NULL,
+  created_by uuid NULL REFERENCES auth.users(id) ON DELETE SET NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   metadata jsonb NULL,
@@ -4086,6 +4105,160 @@ CREATE POLICY "impersonation_sessions_select_admin"
   USING (
     (SELECT p.is_system_admin FROM public.profiles p WHERE p.id = auth.uid())
   );
+
+-- -----------------------------------------------------------------
+-- FK migrations: created_by → auth.users(id) ON DELETE SET NULL
+-- (runtime guard for existing databases; CREATE TABLE blocks already
+--  include the inline FK for greenfield installs; NOT VALID skips
+--  scanning existing rows for safety)
+-- -----------------------------------------------------------------
+
+DO $$
+BEGIN
+  ALTER TABLE public.organizations ALTER COLUMN created_by DROP NOT NULL;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'organizations_created_by_fkey') THEN
+    ALTER TABLE public.organizations
+      ADD CONSTRAINT organizations_created_by_fkey
+      FOREIGN KEY (created_by) REFERENCES auth.users(id) ON DELETE SET NULL NOT VALID;
+  END IF;
+EXCEPTION
+  WHEN undefined_table THEN NULL;
+  WHEN insufficient_privilege THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'active_routing_created_by_fkey') THEN
+    ALTER TABLE public.active_routing
+      ADD CONSTRAINT active_routing_created_by_fkey
+      FOREIGN KEY (created_by) REFERENCES auth.users(id) ON DELETE SET NULL NOT VALID;
+  END IF;
+EXCEPTION
+  WHEN undefined_table THEN NULL;
+  WHEN insufficient_privilege THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'employee_attendance_records_created_by_fkey') THEN
+    ALTER TABLE public.employee_attendance_records
+      ADD CONSTRAINT employee_attendance_records_created_by_fkey
+      FOREIGN KEY (created_by) REFERENCES auth.users(id) ON DELETE SET NULL NOT VALID;
+  END IF;
+EXCEPTION
+  WHEN undefined_table THEN NULL;
+  WHEN insufficient_privilege THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'employee_leave_entries_created_by_fkey') THEN
+    ALTER TABLE public.employee_leave_entries
+      ADD CONSTRAINT employee_leave_entries_created_by_fkey
+      FOREIGN KEY (created_by) REFERENCES auth.users(id) ON DELETE SET NULL NOT VALID;
+  END IF;
+EXCEPTION
+  WHEN undefined_table THEN NULL;
+  WHEN insufficient_privilege THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'employee_leave_balance_events_created_by_fkey') THEN
+    ALTER TABLE public.employee_leave_balance_events
+      ADD CONSTRAINT employee_leave_balance_events_created_by_fkey
+      FOREIGN KEY (created_by) REFERENCES auth.users(id) ON DELETE SET NULL NOT VALID;
+  END IF;
+EXCEPTION
+  WHEN undefined_table THEN NULL;
+  WHEN insufficient_privilege THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'finance_corrections_created_by_fkey') THEN
+    ALTER TABLE public.finance_corrections
+      ADD CONSTRAINT finance_corrections_created_by_fkey
+      FOREIGN KEY (created_by) REFERENCES auth.users(id) ON DELETE SET NULL NOT VALID;
+  END IF;
+EXCEPTION
+  WHEN undefined_table THEN NULL;
+  WHEN insufficient_privilege THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'lesson_instances_created_by_fkey') THEN
+    ALTER TABLE public.lesson_instances
+      ADD CONSTRAINT lesson_instances_created_by_fkey
+      FOREIGN KEY (created_by) REFERENCES auth.users(id) ON DELETE SET NULL NOT VALID;
+  END IF;
+EXCEPTION
+  WHEN undefined_table THEN NULL;
+  WHEN insufficient_privilege THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'instance_locks_created_by_fkey') THEN
+    ALTER TABLE public.instance_locks
+      ADD CONSTRAINT instance_locks_created_by_fkey
+      FOREIGN KEY (created_by) REFERENCES auth.users(id) ON DELETE SET NULL NOT VALID;
+  END IF;
+EXCEPTION
+  WHEN undefined_table THEN NULL;
+  WHEN insufficient_privilege THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'participant_locks_created_by_fkey') THEN
+    ALTER TABLE public.participant_locks
+      ADD CONSTRAINT participant_locks_created_by_fkey
+      FOREIGN KEY (created_by) REFERENCES auth.users(id) ON DELETE SET NULL NOT VALID;
+  END IF;
+EXCEPTION
+  WHEN undefined_table THEN NULL;
+  WHEN insufficient_privilege THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'dashboard_tasks_created_by_fkey') THEN
+    ALTER TABLE public.dashboard_tasks
+      ADD CONSTRAINT dashboard_tasks_created_by_fkey
+      FOREIGN KEY (created_by) REFERENCES auth.users(id) ON DELETE SET NULL NOT VALID;
+  END IF;
+EXCEPTION
+  WHEN undefined_table THEN NULL;
+  WHEN insufficient_privilege THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.forms ALTER COLUMN created_by DROP NOT NULL;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'forms_created_by_fkey') THEN
+    ALTER TABLE public.forms
+      ADD CONSTRAINT forms_created_by_fkey
+      FOREIGN KEY (created_by) REFERENCES auth.users(id) ON DELETE SET NULL NOT VALID;
+  END IF;
+EXCEPTION
+  WHEN undefined_table THEN NULL;
+  WHEN insufficient_privilege THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.shared_form_blocks ALTER COLUMN created_by DROP NOT NULL;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'shared_form_blocks_created_by_fkey') THEN
+    ALTER TABLE public.shared_form_blocks
+      ADD CONSTRAINT shared_form_blocks_created_by_fkey
+      FOREIGN KEY (created_by) REFERENCES auth.users(id) ON DELETE SET NULL NOT VALID;
+  END IF;
+EXCEPTION
+  WHEN undefined_table THEN NULL;
+  WHEN insufficient_privilege THEN NULL;
+END $$;
 
 -- Enable RLS on all tables (both domain and payroll)
 ALTER TABLE public.students ENABLE ROW LEVEL SECURITY;

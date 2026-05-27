@@ -1061,6 +1061,7 @@ export default async function calendarGenerate(context, req) {
           status: 'scheduled',
           documentation_status: 'undocumented',
           created_source: 'weekly_generation',
+          created_by: userId,
           metadata: instanceMetadata,
           applied_override_id: proposal.override_id || null,
           updated_at: new Date().toISOString(),

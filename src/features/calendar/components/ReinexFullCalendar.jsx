@@ -819,7 +819,6 @@ export default function ReinexFullCalendar({
       return undefined;
     }
 
-    let cancelled = false;
     setPendingDropInfo((current) => (
       current?.rawInfo === dropInfo
         ? { ...current, preview: null, previewError: '', previewLoading: true, previewRequestKey: requestKey }
@@ -844,16 +843,14 @@ export default function ReinexFullCalendar({
           },
         });
 
-        if (cancelled) return;
         setPendingDropInfo((current) => (
-          current?.rawInfo === dropInfo
+          current?.rawInfo === dropInfo && current?.previewRequestKey === requestKey
             ? { ...current, preview: payload?.preview || null, previewError: '', previewLoading: false, previewRequestKey: requestKey }
             : current
         ));
       } catch (error) {
-        if (cancelled) return;
         setPendingDropInfo((current) => (
-          current?.rawInfo === dropInfo
+          current?.rawInfo === dropInfo && current?.previewRequestKey === requestKey
             ? { ...current, preview: null, previewError: error?.message || 'לא ניתן היה לבנות תצוגה מקדימה להעברה.', previewLoading: false, previewRequestKey: requestKey }
             : current
         ));
@@ -861,9 +858,6 @@ export default function ReinexFullCalendar({
     }
 
     void fetchPreview();
-    return () => {
-      cancelled = true;
-    };
   }, [
     activeOrgId,
     pendingDropInfo,
