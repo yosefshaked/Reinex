@@ -19,6 +19,7 @@ import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { authenticatedFetch } from '@/lib/api-client.js';
 import { resolveApiErrorMessage } from '@/lib/error-support.js';
 import { normalizeFormDeliveryPhone, resolveSubjectFormDeliveryContact } from '@/features/forms/lib/delivery-contact.js';
+import { buildRequiredFormInviteWhatsAppMessage } from '@/lib/whatsapp-message-templates.js';
 
 function formatDateTime(value) {
   if (!value) return '—';
@@ -33,16 +34,13 @@ function formatDateTime(value) {
   }
 }
 
-function buildWhatsAppInviteLink(phone, inviteUrl, formLabel) {
+function buildWhatsAppInviteLink(phone, inviteUrl, formLabel, organizationName) {
   const normalizedPhone = normalizeFormDeliveryPhone(phone);
-  const message = [
-    'שלום,',
-    '',
-    `נשלח אליך קישור למילוי ${formLabel || 'טופס חובה'}:`,
+  const message = buildRequiredFormInviteWhatsAppMessage({
     inviteUrl,
-    '',
-    'אפשר לפתוח את הקישור ולמלא את הטופס.',
-  ].join('\n');
+    formLabel,
+    organizationName,
+  });
   return {
     normalizedPhone,
     url: `https://wa.me/${normalizedPhone}?text=${encodeURIComponent(message)}`,
@@ -89,7 +87,7 @@ export default function SendRequiredFormDialog({
   serviceName = '',
 }) {
   const { session } = useSupabase();
-  const { activeOrgId } = useOrg();
+  const { activeOrg, activeOrgId } = useOrg();
 
   const [deliveryMethod, setDeliveryMethod] = useState('whatsapp');
   const [validityOption, setValidityOption] = useState('10080');
@@ -171,7 +169,7 @@ export default function SendRequiredFormDialog({
       }
 
       // WhatsApp
-      const wa = buildWhatsAppInviteLink(phone, inviteUrl, requiredFormLabel);
+      const wa = buildWhatsAppInviteLink(phone, inviteUrl, requiredFormLabel, activeOrg?.name);
       setResult({
         mode: 'whatsapp',
         phone: wa.normalizedPhone,

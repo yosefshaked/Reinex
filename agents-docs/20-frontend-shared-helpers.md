@@ -42,6 +42,7 @@
 - `mapLooseSessionError`
 - `extractRegistrationTokens`, `extractInvitationToken`, `buildInvitationSearch`
 - `normalizeExternalHttpUrl`
+- WhatsApp message text helpers in [`../src/lib/whatsapp-message-templates.js`](../src/lib/whatsapp-message-templates.js) for organization signatures and shared form / waiting-list / reminder wording.
 
 ## Known patterns / do not reinvent
 - Default to [`../src/lib/api-client.js`](../src/lib/api-client.js) for authenticated requests.
@@ -53,6 +54,7 @@
 - The private `authenticatedFetch` inside [`../src/org/OrgContext.jsx`](../src/org/OrgContext.jsx) is local to that provider; do not copy it elsewhere.
 - [`../src/hooks/useDocuments.js`](../src/hooks/useDocuments.js) is a special-case raw-fetch hook for document upload/download flows; use it only for document work.
 - Money is carried as agorot integers across API/DB boundaries.
+- Do not hand-build repeated WhatsApp wording in page components. Reuse the shared WhatsApp message helpers so organization signatures and invite wording stay consistent across send/resend flows.
 - Treat account names as derived values. Use `formatUserAccountName` or the `displayName` returned by `useAccount()` / `fetchMyAccount()`; do not assume `profiles.full_name` exists on the frontend data model.
 - [`../src/lib/selectors.js`](../src/lib/selectors.js) is deprecated; do not reuse or extend it.
 - `createDataClient` is deprecated/removed in the single-DB model; do not reintroduce tenant client creation on the frontend.

@@ -18,6 +18,7 @@ import { useOrg } from '@/org/OrgContext.jsx';
 import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { authenticatedFetch } from '@/lib/api-client.js';
 import { resolveApiErrorMessage } from '@/lib/error-support.js';
+import { buildFormAccessWhatsAppMessage } from '@/lib/whatsapp-message-templates.js';
 
 function normalizeWaPhone(value) {
   const digits = String(value || '').replace(/[^\d]/g, '');
@@ -55,23 +56,17 @@ function formatDateTime(value) {
   }
 }
 
-function buildWhatsAppLink(phone, otp, submitLink, accessIdentifier, formName, expiresAt) {
+function buildWhatsAppLink(phone, otp, submitLink, accessIdentifier, formName, expiresAt, organizationName) {
   const normalizedPhone = normalizeWaPhone(phone);
   const expiryText = formatDateTime(expiresAt);
-  const message = [
-    'שלום,',
-    '',
-    `שם הטופס למילוי: ${formName || 'טופס'}`,
-    '',
-    'מצורף קישור למילוי טופס:',
+  const message = buildFormAccessWhatsAppMessage({
+    formName,
     submitLink,
-    '',
-    `מזהה גישה: ${accessIdentifier}`,
-    `קוד אימות: ${otp}`,
-    `תוקף הקישור עד: ${expiryText}`,
-    '',
-    'אפשר לפתוח את הקישור ולשלוח את הטופס.',
-  ].join('\n');
+    accessIdentifier,
+    otp,
+    expiresText: expiryText,
+    organizationName,
+  });
   return {
     normalizedPhone,
     url: `https://wa.me/${normalizedPhone}?text=${encodeURIComponent(message)}`,
@@ -105,7 +100,7 @@ function mapSendFormErrorMessage(code) {
 
 export default function SendFormDialog({ open, onOpenChange, student = null, clientProfile = null, onSent }) {
   const { session } = useSupabase();
-  const { activeOrgId } = useOrg();
+  const { activeOrg, activeOrgId } = useOrg();
   const subject = clientProfile || student;
 
   const [templates, setTemplates] = useState([]);
@@ -203,7 +198,7 @@ export default function SendFormDialog({ open, onOpenChange, student = null, cli
       const accessIdentifier = String(response?.access_identifier || subject?.identity_number || subject?.national_id || '');
       const expiresAt = String(response?.expires_at || '');
       const submitLink = buildSubmissionLink({ accessIdentifier, otp });
-      const wa = buildWhatsAppLink(phone, otp, submitLink, accessIdentifier, selectedTemplate?.name || 'טופס', expiresAt);
+      const wa = buildWhatsAppLink(phone, otp, submitLink, accessIdentifier, selectedTemplate?.name || 'טופס', expiresAt, activeOrg?.name);
       setResult({
         mode: 'whatsapp',
         otp,

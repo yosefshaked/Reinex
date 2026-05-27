@@ -44,11 +44,14 @@ function getStudentNames(instance) {
   return getParticipantDisplayNames(instance?.participants, 'ללא לקוח/ה').join(', ');
 }
 
-function buildLessonLine(instance) {
-  const serviceName = instance?.service?.service_name || 'שיעור';
+function getLessonServiceName(instance) {
+  return instance?.service?.service_name || 'שיעור';
+}
+
+function buildLessonParticipantLine(instance) {
   const endDate = addMinutes(instance?.datetime_start, instance?.duration_minutes);
   const timeRange = `${formatTimeLabel(instance?.datetime_start)}-${formatTimeLabel(endDate)}`;
-  return `${timeRange} - ${getStudentNames(instance)} | ${serviceName}`;
+  return `${timeRange} - ${getStudentNames(instance)}`;
 }
 
 const BREAK_TYPE_LABELS = {
@@ -64,6 +67,36 @@ function buildBreakLine(breakItem) {
   const label = BREAK_TYPE_LABELS[breakItem?.break_type] || 'הפסקה';
   const note = breakItem?.note ? ` (${breakItem.note})` : '';
   return `${timeRange} - ${label}${note}`;
+}
+
+function pushBlankLine(lines) {
+  if (lines.length > 0 && lines[lines.length - 1] !== '') {
+    lines.push('');
+  }
+}
+
+function buildGroupedScheduleLines(sortedItems) {
+  const lines = [];
+  let activeServiceName = '';
+
+  sortedItems.forEach(({ type, item }) => {
+    if (type === 'break') {
+      pushBlankLine(lines);
+      lines.push(buildBreakLine(item));
+      activeServiceName = '';
+      return;
+    }
+
+    const serviceName = getLessonServiceName(item);
+    if (serviceName !== activeServiceName) {
+      pushBlankLine(lines);
+      lines.push(`${serviceName}:`);
+      activeServiceName = serviceName;
+    }
+    lines.push(buildLessonParticipantLine(item));
+  });
+
+  return lines;
 }
 
 export function normalizeWhatsAppPhone(value) {
@@ -151,9 +184,9 @@ export function buildInstructorDayMessage({ instructorName, dateString, lessons,
 
   const lines = [
     `שלום ${instructorName},`,
-    `הלקוחות שלך ל-${formatWeekdayDateLabel(dateString)}:`,
+    `המשתתפים שלך ל-${formatWeekdayDateLabel(dateString)}:`,
     '',
-    ...sortedItems.map(({ type, item }) => (type === 'break' ? buildBreakLine(item) : buildLessonLine(item))),
+    ...buildGroupedScheduleLines(sortedItems),
     '',
     `סה״כ: ${lessons.length} שיעורים${breaks.length > 0 ? `, ${breaks.length} הפסקות` : ''}`,
   ];
@@ -185,7 +218,7 @@ export function buildInstructorWeekMessage({ instructorName, dateString, lessons
   const dayBlocks = Array.from(groupedByDay.entries()).flatMap(([dayKey, dayItems], index) => {
     const block = [
       `${formatWeekdayDateLabel(dayKey)}`,
-      ...dayItems.map(({ type, item }) => (type === 'break' ? buildBreakLine(item) : buildLessonLine(item))),
+      ...buildGroupedScheduleLines(dayItems),
     ];
 
     if (index < groupedByDay.size - 1) {
@@ -197,7 +230,7 @@ export function buildInstructorWeekMessage({ instructorName, dateString, lessons
 
   const lines = [
     `שלום ${instructorName},`,
-    `הלקוחות שלך לשבוע ${formatDateLabel(weekStart)} - ${formatDateLabel(weekEnd)}:`,
+    `המשתתפים שלך לשבוע ${formatDateLabel(weekStart)} - ${formatDateLabel(weekEnd)}:`,
     '',
     ...dayBlocks,
     '',
