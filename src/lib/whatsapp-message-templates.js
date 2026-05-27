@@ -21,7 +21,7 @@ export function appendOrganizationSignature(linesOrMessage, organizationName) {
   return [
     ...lines,
     '',
-    `נשלח מטעם ${orgName}`,
+    `בברכה, ${orgName}`,
   ].join('\n').trim();
 }
 

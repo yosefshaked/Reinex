@@ -14,6 +14,7 @@ import {
 } from '../_shared/org-bff.js';
 import { parseJsonBodyWithLimit } from '../_shared/validation.js';
 import { dayTokenForDate, normalizeDayToken } from '../_shared/day-of-week.js';
+import { breakTemplateMatchesDate, normalizeBreakTemplateTime } from '../_shared/break-template-schedule.js';
 import {
   buildUtcBoundsForTimezoneDateRange,
   buildUtcIsoForTimezoneDateTime,
@@ -1176,11 +1177,8 @@ export default async function calendarGenerate(context, req) {
     const dates = enumerateDates(startDate, endDate);
     for (const template of breakTemplateRows || []) {
       for (const date of dates) {
-        const dayToken = dayTokenForDate(date);
-        if (normalizeDayToken(template.day_of_week) !== normalizeDayToken(dayToken)) continue;
-        if (template.valid_from && date < template.valid_from) continue;
-        if (template.valid_until && date > template.valid_until) continue;
-        const timeHhMm = String(template.time_of_day || '').slice(0, 5);
+        if (!breakTemplateMatchesDate(template, date)) continue;
+        const timeHhMm = normalizeBreakTemplateTime(template.time_of_day);
         const datetimeStartIso = buildUtcIsoForTimezoneDateTime(date, timeHhMm);
         if (!datetimeStartIso) continue;
         // Idempotency: skip if a break already exists at this time for this instructor

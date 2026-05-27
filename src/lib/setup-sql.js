@@ -1678,8 +1678,6 @@ CREATE INDEX IF NOT EXISTS instructor_breaks_datetime_start_idx
   ON public.instructor_breaks (org_id, datetime_start);
 CREATE INDEX IF NOT EXISTS instructor_breaks_instructor_datetime_idx
   ON public.instructor_breaks (org_id, instructor_employee_id, datetime_start);
-CREATE INDEX IF NOT EXISTS instructor_breaks_template_idx
-  ON public.instructor_breaks (org_id, break_template_id) WHERE break_template_id IS NOT NULL;
 
 DO $$
 BEGIN
@@ -1702,6 +1700,9 @@ BEGIN
 EXCEPTION
   WHEN undefined_table THEN NULL;
 END $$;
+
+CREATE INDEX IF NOT EXISTS instructor_breaks_template_idx
+  ON public.instructor_breaks (org_id, break_template_id) WHERE break_template_id IS NOT NULL;
 
 -- -----------------------------------------------------------------
 -- public.instructor_break_templates

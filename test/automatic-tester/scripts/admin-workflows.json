@@ -3,8 +3,8 @@
     "id": "admin-workflows",
     "name": "Admin Core Workflows",
     "description": "Smoke-tests the most important admin-only pages and flows: dashboard tasks, calendar, forms builder including required-form type selection, financials, settings, and audit log.",
-    "version": "1.1.0",
-    "last_validated_at": "2026-05-24T12:34:40Z",
+    "version": "1.2.0",
+    "last_validated_at": "2026-05-27T00:00:00Z",
     "author": "claude-ai",
     "dependencies": {
       "routes": [
@@ -23,7 +23,8 @@
         "GET /api/forms",
         "GET /api/billing",
         "GET /api/settings",
-        "GET /api/instructors"
+        "GET /api/instructors",
+        "GET /api/instructor-break-templates"
       ]
     }
   },
@@ -127,7 +128,7 @@
     {
       "id": "calendar-templates",
       "name": "Calendar — Lesson Templates",
-      "description": "Open the template manager page.",
+      "description": "Open the template manager page and verify both lesson-template and break-template toolbar buttons are present.",
       "steps": [
         {
           "id": "navigate",
@@ -144,6 +145,12 @@
           "action": "assert",
           "type": "url",
           "pattern": "#/calendar/templates"
+        },
+        {
+          "id": "wait-for-break-template-button",
+          "description": "Confirm the 'הפסקה חדשה' button is rendered in the toolbar",
+          "action": "waitForSelector",
+          "selector": "button:has-text('הפסקה חדשה')"
         },
         {
           "id": "screenshot",
