@@ -10,7 +10,7 @@ import {
   resolveOrgId,
   withOrgScope,
 } from '../_shared/org-bff.js';
-import { attachErrorTracking, respondTracked, respondTrackedError } from '../_shared/error-events.js';
+import { attachErrorTracking, respondTrackedError } from '../_shared/error-events.js';
 
 const VALID_BREAK_TYPES = ['break', 'meeting', 'unavailable', 'personal'];
 
@@ -25,31 +25,32 @@ function normalizeBreakType(value) {
 }
 
 export default async function instructorBreaksHandler(context, req) {
-  attachErrorTracking(context);
-
   const env = readEnv();
   const config = readSupabaseAdminConfig(env);
   const client = createSupabaseAdminClient(config);
+  attachErrorTracking(context, req, client, { metadata: { endpoint: 'instructor-breaks' } });
 
   const authorization = resolveBearerAuthorization(req);
   if (!authorization?.token) {
-    return respondTracked(context, 401, { error: 'Unauthorized' });
+    return respond(context, 401, { message: 'missing_bearer' });
   }
 
   const authResult = await client.auth.getUser(authorization.token);
   if (authResult.error || !authResult.data?.user) {
-    return respondTracked(context, 401, { error: 'Unauthorized' });
+    return respond(context, 401, { message: 'invalid_or_expired_token' });
   }
   const user = authResult.data.user;
 
   const orgId = resolveOrgId(req);
   if (!orgId) {
-    return respondTracked(context, 400, { error: 'Missing org_id' });
+    return respond(context, 400, { message: 'missing_org_id' });
   }
+
+  attachErrorTracking(context, req, client, { orgId, userId: user.id, metadata: { endpoint: 'instructor-breaks' } });
 
   const membership = await ensureMembership(client, orgId, user.id);
   if (!membership) {
-    return respondTracked(context, 403, { error: 'Forbidden' });
+    return respond(context, 403, { message: 'forbidden' });
   }
 
   const method = req.method?.toUpperCase();
@@ -63,7 +64,7 @@ export default async function instructorBreaksHandler(context, req) {
     const instructorId = normalizeString(req.query?.instructor_employee_id || '');
 
     if (!startDate || !endDate) {
-      return respondTracked(context, 400, { error: 'start_date and end_date are required' });
+      return respond(context, 400, { message: 'start_date_and_end_date_required' });
     }
 
     let query = withOrgScope(client, 'instructor_breaks', orgId)
@@ -78,10 +79,17 @@ export default async function instructorBreaksHandler(context, req) {
 
     const { data, error } = await query;
     if (error) {
-      return respondTrackedError(context, error, 'instructor_breaks.get');
+      return respondTrackedError(context, req, client, {
+        status: 500,
+        message: 'failed_to_list_instructor_breaks',
+        orgId,
+        userId: user.id,
+        error,
+        metadata: { operation: 'list' },
+      });
     }
 
-    return respondTracked(context, 200, data);
+    return respond(context, 200, data);
   }
 
   // ---------------------------------------------------------------
@@ -89,7 +97,7 @@ export default async function instructorBreaksHandler(context, req) {
   // ---------------------------------------------------------------
   if (method === 'POST') {
     if (!['admin', 'owner'].includes(membership)) {
-      return respondTracked(context, 403, { error: 'Only admins can create breaks' });
+      return respond(context, 403, { message: 'forbidden' });
     }
 
     const body = await parseRequestBody(req);
@@ -100,13 +108,13 @@ export default async function instructorBreaksHandler(context, req) {
     const note = normalizeString(body?.note || '') || null;
 
     if (!UUID_PATTERN.test(instructorEmployeeId)) {
-      return respondTracked(context, 400, { error: 'instructor_employee_id is required' });
+      return respond(context, 400, { message: 'invalid_instructor_employee_id' });
     }
     if (!datetimeStart) {
-      return respondTracked(context, 400, { error: 'datetime_start is required' });
+      return respond(context, 400, { message: 'datetime_start_required' });
     }
     if (!Number.isFinite(durationMinutes) || durationMinutes < 1 || durationMinutes > 720) {
-      return respondTracked(context, 400, { error: 'duration_minutes must be between 1 and 720' });
+      return respond(context, 400, { message: 'invalid_duration_minutes' });
     }
 
     const { data, error } = await withOrgScope(client, 'instructor_breaks', orgId)
@@ -123,10 +131,17 @@ export default async function instructorBreaksHandler(context, req) {
       .single();
 
     if (error) {
-      return respondTrackedError(context, error, 'instructor_breaks.post');
+      return respondTrackedError(context, req, client, {
+        status: 500,
+        message: 'failed_to_create_instructor_break',
+        orgId,
+        userId: user.id,
+        error,
+        metadata: { operation: 'create' },
+      });
     }
 
-    return respondTracked(context, 201, data);
+    return respond(context, 201, data);
   }
 
   // ---------------------------------------------------------------
@@ -134,26 +149,26 @@ export default async function instructorBreaksHandler(context, req) {
   // ---------------------------------------------------------------
   if (method === 'PUT') {
     if (!['admin', 'owner'].includes(membership)) {
-      return respondTracked(context, 403, { error: 'Only admins can update breaks' });
+      return respond(context, 403, { message: 'forbidden' });
     }
 
     const body = await parseRequestBody(req);
     const breakId = normalizeString(body?.id || req.params?.id || '');
 
     if (!UUID_PATTERN.test(breakId)) {
-      return respondTracked(context, 400, { error: 'id is required' });
+      return respond(context, 400, { message: 'invalid_break_id' });
     }
 
     const updates = {};
     if (body?.datetime_start != null) {
       const datetimeStart = normalizeString(body.datetime_start);
-      if (!datetimeStart) return respondTracked(context, 400, { error: 'datetime_start cannot be empty' });
+      if (!datetimeStart) return respond(context, 400, { message: 'datetime_start_required' });
       updates.datetime_start = datetimeStart;
     }
     if (body?.duration_minutes != null) {
       const durationMinutes = Number(body.duration_minutes);
       if (!Number.isFinite(durationMinutes) || durationMinutes < 1 || durationMinutes > 720) {
-        return respondTracked(context, 400, { error: 'duration_minutes must be between 1 and 720' });
+        return respond(context, 400, { message: 'invalid_duration_minutes' });
       }
       updates.duration_minutes = durationMinutes;
     }
@@ -168,7 +183,7 @@ export default async function instructorBreaksHandler(context, req) {
     }
 
     if (Object.keys(updates).length === 0) {
-      return respondTracked(context, 400, { error: 'No fields to update' });
+      return respond(context, 400, { message: 'no_fields_to_update' });
     }
 
     updates.updated_at = new Date().toISOString();
@@ -180,13 +195,20 @@ export default async function instructorBreaksHandler(context, req) {
       .single();
 
     if (error) {
-      return respondTrackedError(context, error, 'instructor_breaks.put');
+      return respondTrackedError(context, req, client, {
+        status: 500,
+        message: 'failed_to_update_instructor_break',
+        orgId,
+        userId: user.id,
+        error,
+        metadata: { operation: 'update', breakId },
+      });
     }
     if (!data) {
-      return respondTracked(context, 404, { error: 'Break not found' });
+      return respond(context, 404, { message: 'break_not_found' });
     }
 
-    return respondTracked(context, 200, data);
+    return respond(context, 200, data);
   }
 
   // ---------------------------------------------------------------
@@ -194,12 +216,12 @@ export default async function instructorBreaksHandler(context, req) {
   // ---------------------------------------------------------------
   if (method === 'DELETE') {
     if (!['admin', 'owner'].includes(membership)) {
-      return respondTracked(context, 403, { error: 'Only admins can delete breaks' });
+      return respond(context, 403, { message: 'forbidden' });
     }
 
     const breakId = normalizeString(req.query?.id || req.params?.id || '');
     if (!UUID_PATTERN.test(breakId)) {
-      return respondTracked(context, 400, { error: 'id is required' });
+      return respond(context, 400, { message: 'invalid_break_id' });
     }
 
     const { error } = await withOrgScope(client, 'instructor_breaks', orgId)
@@ -207,11 +229,18 @@ export default async function instructorBreaksHandler(context, req) {
       .eq('id', breakId);
 
     if (error) {
-      return respondTrackedError(context, error, 'instructor_breaks.delete');
+      return respondTrackedError(context, req, client, {
+        status: 500,
+        message: 'failed_to_delete_instructor_break',
+        orgId,
+        userId: user.id,
+        error,
+        metadata: { operation: 'delete', breakId },
+      });
     }
 
     return respond(context, 204, null);
   }
 
-  return respondTracked(context, 405, { error: 'Method not allowed' });
+  return respond(context, 405, { message: 'method_not_allowed' });
 }
