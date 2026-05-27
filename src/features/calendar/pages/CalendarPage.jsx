@@ -23,7 +23,9 @@ import { buildCalendarWorkspaceSummary } from '../utils/calendarWorkspace.js';
 import {
   buildInstructorDayMessage,
   buildInstructorWeekMessage,
+  getInstructorDayBreaks,
   getInstructorDayLessons,
+  getInstructorWeekBreaks,
   getInstructorWeekLessons,
 } from '../utils/instructor-whatsapp.js';
 import { addLocalDays, getTodayLocalDateString, getWeekStartDate, parseLocalDateString, toLocalDateString } from '../utils/localDate.js';
@@ -334,15 +336,18 @@ export default function CalendarPage() {
     const lessons = mode === 'week'
       ? getInstructorWeekLessons(instances, sourceInstructor.id, currentDate)
       : getInstructorDayLessons(instances, sourceInstructor.id, currentDate);
+    const instructorBreaks = mode === 'week'
+      ? getInstructorWeekBreaks(breaks, sourceInstructor.id, currentDate)
+      : getInstructorDayBreaks(breaks, sourceInstructor.id, currentDate);
 
-    if (!lessons.length) {
+    if (!lessons.length && !instructorBreaks.length) {
       toast.error(mode === 'week' ? 'אין שיעורים מתוכננים או שהושלמו למדריך זה השבוע.' : 'אין שיעורים מתוכננים או שהושלמו למדריך זה ביום זה.');
       return;
     }
 
     const message = mode === 'week'
-      ? buildInstructorWeekMessage({ instructorName: sourceInstructor.full_name || 'מדריך', dateString: currentDate, lessons })
-      : buildInstructorDayMessage({ instructorName: sourceInstructor.full_name || 'מדריך', dateString: currentDate, lessons });
+      ? buildInstructorWeekMessage({ instructorName: sourceInstructor.full_name || 'מדריך', dateString: currentDate, lessons, breaks: instructorBreaks })
+      : buildInstructorDayMessage({ instructorName: sourceInstructor.full_name || 'מדריך', dateString: currentDate, lessons, breaks: instructorBreaks });
 
     setWhatsAppCompose({
       mode,
@@ -353,7 +358,7 @@ export default function CalendarPage() {
       phone: sourceInstructor.phone || '',
       message,
     });
-  }, [currentDate, instructors, instances, selectedInstance, viewMode]);
+  }, [breaks, currentDate, instructors, instances, selectedInstance, viewMode]);
   const handleFixAvailabilityIssue = useCallback((issue) => {
     if (!issue?.instructorId || !issue?.focusServiceId) {
       toast.error('לא נמצא שירות מתאים לתיקון הזמינות.');
