@@ -265,11 +265,25 @@ async function simulateService(supabase, orgId, candidateData) {
     };
   }
 
-  const { data: existing } = await withOrgScope(supabase, '"Services"', orgId)
-    .select('id, name, is_active')
-    .ilike('name', name)
-    .limit(1)
-    .maybeSingle();
+  const { data: services, error } = await withOrgScope(supabase, 'Services', orgId)
+    .select('id, name, is_active');
+
+  if (error) {
+    return {
+      outcome: 'error',
+      action_description: 'שגיאה בבדיקת שירות קיים',
+      target_table: 'Services',
+      matched_record_id: null,
+      matched_record_summary: null,
+      fields_that_would_change: [],
+      simulated_at: nowIso(),
+    };
+  }
+
+  const normalizedName = name.trim().toLowerCase();
+  const existing = (services || []).find((service) => (
+    normalizeString(service?.name).trim().toLowerCase() === normalizedName
+  ));
 
   if (existing?.id) {
     return {
