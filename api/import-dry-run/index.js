@@ -302,7 +302,51 @@ async function simulateService(supabase, orgId, candidateData) {
  * @returns {Promise<object>} dry_run_summary
  */
 async function simulateCandidate(supabase, orgId, candidate) {
-  const { entity_type, candidate_data = {}, decisions = {}, status } = candidate;
+  const { entity_type, candidate_data = {}, decisions = {}, status, blocking_issues_count = 0 } = candidate;
+
+  if (Number(blocking_issues_count || 0) > 0) {
+    return {
+      outcome: 'blocked',
+      is_blocked: true,
+      action_description: 'This candidate has unresolved blocking issues.',
+      target_table: null,
+      matched_record_id: null,
+      matched_record_summary: null,
+      fields_that_would_change: [],
+      simulated_at: nowIso(),
+    };
+  }
+
+  if (!['ready', 'skipped'].includes(status)) {
+    return {
+      outcome: 'blocked',
+      is_blocked: true,
+      action_description: `This candidate is not ready for import. Current status: ${status || 'unknown'}.`,
+      target_table: null,
+      matched_record_id: null,
+      matched_record_summary: null,
+      fields_that_would_change: [],
+      simulated_at: nowIso(),
+    };
+  }
+
+  if (entity_type === 'inactive_student') {
+    const identity = normalizeString(candidate_data?.identity_number);
+    const firstName = normalizeString(candidate_data?.first_name);
+    const lastName = normalizeString(candidate_data?.last_name);
+    if (!identity || (!firstName && !lastName)) {
+      return {
+        outcome: 'blocked',
+        is_blocked: true,
+        action_description: 'This inactive student fails the minimum archive policy: identity number and at least one name are required.',
+        target_table: 'client_profiles',
+        matched_record_id: null,
+        matched_record_summary: null,
+        fields_that_would_change: [],
+        simulated_at: nowIso(),
+      };
+    }
+  }
 
   // Short-circuit: already skipped
   if (status === 'skipped' || decisions?.action === 'skip') {
@@ -447,7 +491,7 @@ export default async function importDryRun(context, req) {
 
   // Fetch the requested candidates (org-scoped, workspace-scoped)
   const { data: candidates, error: candidatesError } = await withOrgScope(supabase, 'import_candidates', orgId)
-    .select('id, entity_type, status, candidate_data, decisions, issues')
+    .select('id, entity_type, status, candidate_data, decisions, issues, blocking_issues_count')
     .eq('workspace_id', workspaceId)
     .in('id', candidateIds);
 

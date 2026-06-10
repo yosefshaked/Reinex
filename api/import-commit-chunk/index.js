@@ -28,6 +28,7 @@ import {
   respond,
   withOrgScope,
 } from '../_shared/org-bff.js';
+import { respondTrackedError } from '../_shared/error-events.js';
 
 const MAX_CANDIDATES_PER_CALL = 50;
 
@@ -150,7 +151,18 @@ export default async function importCommitChunk(context, req) {
       return respond(context, 422, { message: 'student_note_student_not_found' });
     }
     context.log?.error?.('import-commit-chunk: rpc failed', { message: rpcError.message });
-    return respond(context, 500, { message: 'commit_failed', detail: rpcError.message });
+    return respondTrackedError(context, req, supabase, {
+      status: 500,
+      message: 'The database transaction encountered an error while committing this chunk. The operation has been rolled back safely.',
+      orgId,
+      userId,
+      error: rpcError,
+      metadata: {
+        endpoint: 'import-commit-chunk',
+        workspaceId,
+        candidateCount: candidateIds.length,
+      },
+    });
   }
 
   return respond(context, 200, rpcResult);

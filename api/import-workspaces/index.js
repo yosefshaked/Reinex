@@ -26,10 +26,70 @@ const ALLOWED_STATUSES = new Set([
   'cancelled',
 ]);
 
+function buildDefaultWorkspaceConfig() {
+  return {
+    files: [],
+    sheets: [],
+    sheetProfiles: [],
+    mappings: {
+      field_map: {},
+      fixed_values: {},
+      enum_dictionaries: {},
+      ignored_columns: [],
+    },
+    normalization: {
+      date_locale: 'he-IL',
+      encoding_override: null,
+      phone_cleanup: true,
+      identity_cleanup: true,
+    },
+    operationProgress: {
+      currentChunk: null,
+      totalChunks: null,
+      uploadedRows: 0,
+      analyzedRows: 0,
+      dryRunCandidates: 0,
+      committedCandidates: 0,
+      lastError: null,
+      resumableCursor: null,
+    },
+    importPolicy: {
+      rowChunkSize: 500,
+      candidateChunkSize: 100,
+      activeInactiveLanes: true,
+      inactiveArchiveRules: {
+        require_identity_number: true,
+        require_name: true,
+        require_conflicts_resolved: true,
+      },
+    },
+    r2: {
+      objects: [],
+      retentionDays: 30,
+    },
+  };
+}
+
 function normalizeUuid(value) {
   const normalized = normalizeString(value);
   if (!normalized) return '';
   return UUID_PATTERN.test(normalized) ? normalized : '';
+}
+
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function mergePlainObjects(base, patch) {
+  const output = { ...base };
+  for (const [key, value] of Object.entries(patch || {})) {
+    if (isPlainObject(value) && isPlainObject(output[key])) {
+      output[key] = mergePlainObjects(output[key], value);
+    } else {
+      output[key] = value;
+    }
+  }
+  return output;
 }
 
 export default async function importWorkspaces(context, req) {
@@ -101,8 +161,19 @@ export default async function importWorkspaces(context, req) {
     if (!name) {
       return respond(context, 400, { message: 'name_required' });
     }
+    const normalizedStatus = body?.status !== undefined ? normalizeString(body.status) : 'draft';
+    if (!ALLOWED_STATUSES.has(normalizedStatus)) {
+      return respond(context, 400, { message: 'invalid_status' });
+    }
+    if (
+      body?.config !== undefined &&
+      !isPlainObject(body.config)
+    ) {
+      return respond(context, 400, { message: 'config_must_be_object' });
+    }
+    const config = mergePlainObjects(buildDefaultWorkspaceConfig(), body?.config || {});
     const { data, error } = await withOrgScope(supabase, 'import_workspaces', orgId)
-      .insert({ name, status: 'draft', config: {} })
+      .insert({ name, status: normalizedStatus, config })
       .select()
       .single();
     if (error) {
@@ -148,7 +219,7 @@ export default async function importWorkspaces(context, req) {
     }
     if (
       configPatch !== undefined &&
-      (typeof configPatch !== 'object' || Array.isArray(configPatch) || configPatch === null)
+      !isPlainObject(configPatch)
     ) {
       return respond(context, 400, { message: 'config_must_be_object' });
     }
@@ -182,12 +253,17 @@ export default async function importWorkspaces(context, req) {
     // Scalar field update (name, status) — no concurrency concern for text fields
     if (hasScalars) {
       scalarPatch.updated_at = new Date().toISOString();
-      const { error: updateError } = await withOrgScope(supabase, 'import_workspaces', orgId)
+      const { data: scalarUpdated, error: updateError } = await withOrgScope(supabase, 'import_workspaces', orgId)
         .update(scalarPatch)
-        .eq('id', workspaceId);
+        .eq('id', workspaceId)
+        .select('id')
+        .maybeSingle();
       if (updateError) {
         context.log?.error?.('import-workspaces: scalar update failed', { message: updateError.message });
         return respond(context, 500, { message: 'failed_to_update_workspace' });
+      }
+      if (!scalarUpdated) {
+        return respond(context, 404, { message: 'workspace_not_found' });
       }
     }
 

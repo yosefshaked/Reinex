@@ -6288,17 +6288,25 @@ ALTER TABLE public.contact_requests ENABLE ROW LEVEL SECURITY;
 -- =================================================================
 
 CREATE TABLE IF NOT EXISTS public.import_workspaces (
-  id         uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
-  org_id     uuid        NOT NULL REFERENCES public.organizations(id),
-  name       text        NOT NULL,
-  status     text        NOT NULL DEFAULT 'draft',
-  config     jsonb       NOT NULL DEFAULT '{}',
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id uuid NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
+  name text NOT NULL,
+  status text NOT NULL DEFAULT 'draft',
+  config jsonb NOT NULL DEFAULT '{}'::jsonb,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
-  CONSTRAINT import_workspaces_status_chk CHECK (
+  CONSTRAINT import_workspaces_status_check CHECK (
     status IN (
-      'draft', 'profiling', 'mapping', 'analyzing', 'needs_review',
-      'ready_to_commit', 'partially_committed', 'committed', 'archived', 'cancelled'
+      'draft',
+      'profiling',
+      'mapping',
+      'analyzing',
+      'needs_review',
+      'ready_to_commit',
+      'partially_committed',
+      'committed',
+      'archived',
+      'cancelled'
     )
   )
 );
@@ -6314,57 +6322,69 @@ CREATE INDEX IF NOT EXISTS import_workspaces_updated_idx
 -- source_reference must include a timestamp/hash suffix so re-uploading a corrected
 -- file never collides with the (workspace_id, source_reference, row_index) unique key.
 CREATE TABLE IF NOT EXISTS public.import_rows (
-  id               uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
-  org_id           uuid        NOT NULL REFERENCES public.organizations(id),
-  workspace_id     uuid        NOT NULL REFERENCES public.import_workspaces(id) ON DELETE CASCADE,
-  source_reference text        NOT NULL CHECK (source_reference <> ''),
-  row_index        integer     NOT NULL,
-  raw_data         jsonb       NOT NULL,
-  created_at       timestamptz NOT NULL DEFAULT now(),
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id uuid NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
+  workspace_id uuid NOT NULL REFERENCES public.import_workspaces(id) ON DELETE CASCADE,
+  source_reference text NOT NULL CHECK (source_reference <> ''),
+  row_index integer NOT NULL,
+  raw_data jsonb NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT import_rows_row_index_non_neg CHECK (row_index >= 0)
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS import_rows_workspace_source_row_uidx
+CREATE UNIQUE INDEX IF NOT EXISTS import_rows_workspace_source_row_idx
   ON public.import_rows (workspace_id, source_reference, row_index);
 
-CREATE INDEX IF NOT EXISTS import_rows_workspace_idx
-  ON public.import_rows (workspace_id);
+CREATE INDEX IF NOT EXISTS import_rows_org_workspace_idx
+  ON public.import_rows (org_id, workspace_id);
+
+CREATE INDEX IF NOT EXISTS import_rows_workspace_source_idx
+  ON public.import_rows (workspace_id, source_reference);
 
 -- import_candidates: normalized Golden Record entities ready for review, dry-run, and commit.
 -- blocking_issues_count is denormalized from issues[] — backend must recalculate on every issues write.
 -- depends_on_candidate_id is the Phase 1 single-parent DAG for guardian links and notes.
 -- SET NULL on depends_on deletion ensures children become unblocked rather than orphaned.
 CREATE TABLE IF NOT EXISTS public.import_candidates (
-  id                      uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
-  org_id                  uuid        NOT NULL REFERENCES public.organizations(id),
-  workspace_id            uuid        NOT NULL REFERENCES public.import_workspaces(id) ON DELETE CASCADE,
-  entity_type             text        NOT NULL,
-  status                  text        NOT NULL DEFAULT 'needs_review',
-  candidate_data          jsonb       NOT NULL DEFAULT '{}',
-  merged_from_row_ids     uuid[]      NOT NULL DEFAULT '{}',
-  issues                  jsonb       NOT NULL DEFAULT '[]',
-  blocking_issues_count   integer     NOT NULL DEFAULT 0,
-  decisions               jsonb       NOT NULL DEFAULT '{}',
-  depends_on_candidate_id uuid        REFERENCES public.import_candidates(id) ON DELETE SET NULL,
-  created_at              timestamptz NOT NULL DEFAULT now(),
-  updated_at              timestamptz NOT NULL DEFAULT now(),
-  CONSTRAINT import_candidates_entity_type_chk CHECK (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id uuid NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
+  workspace_id uuid NOT NULL REFERENCES public.import_workspaces(id) ON DELETE CASCADE,
+  entity_type text NOT NULL,
+  status text NOT NULL DEFAULT 'needs_review',
+  candidate_data jsonb NOT NULL DEFAULT '{}'::jsonb,
+  merged_from_row_ids uuid[] NOT NULL DEFAULT '{}'::uuid[],
+  issues jsonb NOT NULL DEFAULT '[]'::jsonb,
+  blocking_issues_count integer NOT NULL DEFAULT 0,
+  decisions jsonb NOT NULL DEFAULT '{}'::jsonb,
+  depends_on_candidate_id uuid REFERENCES public.import_candidates(id) ON DELETE SET NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT import_candidates_entity_type_check CHECK (
     entity_type IN (
-      'active_student', 'inactive_student', 'guardian',
-      'guardian_link', 'service', 'student_note'
+      'active_student',
+      'inactive_student',
+      'guardian',
+      'guardian_link',
+      'service',
+      'student_note'
     )
   ),
-  CONSTRAINT import_candidates_status_chk CHECK (
+  CONSTRAINT import_candidates_status_check CHECK (
     status IN (
-      'needs_review', 'ready', 'blocked', 'blocked_by_dependency',
-      'skipped', 'committed', 'failed'
+      'needs_review',
+      'ready',
+      'blocked',
+      'blocked_by_dependency',
+      'skipped',
+      'committed',
+      'failed'
     )
   ),
-  CONSTRAINT import_candidates_blocking_count_non_neg CHECK (blocking_issues_count >= 0)
+  CONSTRAINT import_candidates_blocking_count_non_negative_check CHECK (blocking_issues_count >= 0),
+  CONSTRAINT import_candidates_no_self_dependency_check CHECK (
+    depends_on_candidate_id IS NULL OR depends_on_candidate_id <> id
+  )
 );
-
-CREATE INDEX IF NOT EXISTS import_candidates_workspace_idx
-  ON public.import_candidates (workspace_id);
 
 CREATE INDEX IF NOT EXISTS import_candidates_workspace_status_idx
   ON public.import_candidates (workspace_id, status);
@@ -6372,8 +6392,14 @@ CREATE INDEX IF NOT EXISTS import_candidates_workspace_status_idx
 CREATE INDEX IF NOT EXISTS import_candidates_workspace_entity_idx
   ON public.import_candidates (workspace_id, entity_type);
 
+CREATE INDEX IF NOT EXISTS import_candidates_workspace_entity_status_idx
+  ON public.import_candidates (workspace_id, entity_type, status);
+
+CREATE INDEX IF NOT EXISTS import_candidates_org_workspace_idx
+  ON public.import_candidates (org_id, workspace_id);
+
 -- Sparse index: only rows with a parent dependency need this lookup
-CREATE INDEX IF NOT EXISTS import_candidates_depends_on_idx
+CREATE INDEX IF NOT EXISTS import_candidates_dependency_idx
   ON public.import_candidates (depends_on_candidate_id)
   WHERE depends_on_candidate_id IS NOT NULL;
 
@@ -6386,20 +6412,25 @@ ALTER TABLE public.import_candidates
 CREATE UNIQUE INDEX IF NOT EXISTS import_candidates_workspace_source_row_uidx
   ON public.import_candidates (workspace_id, source_row_id);
 
+CREATE INDEX IF NOT EXISTS import_candidates_blocking_idx
+  ON public.import_candidates (workspace_id, blocking_issues_count)
+  WHERE blocking_issues_count > 0;
+
+CREATE INDEX IF NOT EXISTS import_candidates_merged_rows_gin_idx
+  ON public.import_candidates USING gin (merged_from_row_ids);
+
 -- import_commit_ledger: immutable audit trail for every live record created, updated, or linked
 -- by an import commit. Workspace CASCADE handles bulk cleanup when a workspace is deleted.
 CREATE TABLE IF NOT EXISTS public.import_commit_ledger (
-  id                 uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
-  org_id             uuid        NOT NULL REFERENCES public.organizations(id),
-  workspace_id       uuid        NOT NULL REFERENCES public.import_workspaces(id) ON DELETE CASCADE,
-  candidate_id       uuid        NOT NULL REFERENCES public.import_candidates(id) ON DELETE CASCADE,
-  live_resource_type text        NOT NULL CHECK (live_resource_type <> ''),
-  live_resource_id   uuid        NOT NULL,
-  action_taken       text        NOT NULL,
-  created_at         timestamptz NOT NULL DEFAULT now(),
-  CONSTRAINT import_commit_ledger_action_chk CHECK (
-    action_taken IN ('create', 'update', 'link')
-  )
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id uuid NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
+  workspace_id uuid NOT NULL REFERENCES public.import_workspaces(id) ON DELETE CASCADE,
+  candidate_id uuid NOT NULL REFERENCES public.import_candidates(id) ON DELETE CASCADE,
+  live_resource_type text NOT NULL CHECK (live_resource_type <> ''),
+  live_resource_id uuid NOT NULL,
+  action_taken text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT import_commit_ledger_action_check CHECK (action_taken IN ('create','update','link'))
 );
 
 CREATE INDEX IF NOT EXISTS import_commit_ledger_workspace_idx
@@ -6407,6 +6438,9 @@ CREATE INDEX IF NOT EXISTS import_commit_ledger_workspace_idx
 
 CREATE INDEX IF NOT EXISTS import_commit_ledger_candidate_idx
   ON public.import_commit_ledger (candidate_id);
+
+CREATE INDEX IF NOT EXISTS import_commit_ledger_org_workspace_idx
+  ON public.import_commit_ledger (org_id, workspace_id);
 
 -- Supports provenance lookups: "was this live record imported?"
 CREATE INDEX IF NOT EXISTS import_commit_ledger_resource_idx
@@ -6554,9 +6588,25 @@ DECLARE
   v_service_id        uuid;
 
   v_remaining         integer;
+  v_requested_count   integer;
+  v_found_count       integer;
 BEGIN
 
   -- ── 1. Pre-flight: verify all supplied candidates are committable ─────────
+  v_requested_count := coalesce(cardinality(p_candidate_ids), 0);
+
+  SELECT count(*) INTO v_found_count
+    FROM public.import_candidates
+    WHERE id           = ANY(p_candidate_ids)
+      AND workspace_id = p_workspace_id
+      AND org_id       = p_org_id;
+
+  IF v_found_count <> v_requested_count THEN
+    RAISE EXCEPTION 'Mismatched candidates: requested % vs found % in database.',
+      v_requested_count, v_found_count
+      USING ERRCODE = 'P0002';
+  END IF;
+
   FOR v_candidate IN
     SELECT id, entity_type, status, blocking_issues_count, candidate_data
     FROM   public.import_candidates

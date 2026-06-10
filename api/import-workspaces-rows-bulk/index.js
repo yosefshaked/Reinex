@@ -86,6 +86,18 @@ export default async function importWorkspacesRowsBulk(context, req) {
     return respond(context, 403, { message: 'forbidden' });
   }
 
+  const { data: workspace, error: workspaceError } = await withOrgScope(supabase, 'import_workspaces', orgId)
+    .select('id')
+    .eq('id', workspaceId)
+    .maybeSingle();
+  if (workspaceError) {
+    context.log?.error?.('import-workspaces-rows-bulk: workspace lookup failed', { message: workspaceError.message });
+    return respond(context, 500, { message: 'failed_to_verify_workspace' });
+  }
+  if (!workspace) {
+    return respond(context, 404, { message: 'workspace_not_found' });
+  }
+
   // ── Payload validation ────────────────────────────────────────────────────
 
   const sourceReference = normalizeString(body?.source_reference);

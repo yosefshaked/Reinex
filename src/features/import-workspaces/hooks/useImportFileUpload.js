@@ -144,7 +144,7 @@ export function useImportFileUpload(workspaceId) {
       objectKey = result.objectKey;
     } catch (err) {
       setUploadState({
-        status: 'error',
+        status: 'failed_nonblocking',
         progress: 0,
         objectKey: null,
         error: err.message ?? 'upload_url_error',
@@ -167,7 +167,7 @@ export function useImportFileUpload(workspaceId) {
       }
     } catch (err) {
       setUploadState({
-        status: 'error',
+        status: 'failed_nonblocking',
         progress: 0,
         objectKey: null,
         error: err.message ?? 'upload_failed',
@@ -188,7 +188,7 @@ export function useImportFileUpload(workspaceId) {
     } catch (err) {
       // Upload succeeded but metadata patch failed — expose partial state
       setUploadState({
-        status: 'error',
+        status: 'failed_nonblocking',
         progress: 90,
         objectKey,
         error: err.message ?? 'metadata_patch_failed',

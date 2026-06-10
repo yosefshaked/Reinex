@@ -271,6 +271,26 @@ export default async function importWorkspacesAnalyzeChunk(context, req) {
     return respond(context, 200, { analyzed: 0, candidates_created: 0, candidates_updated: 0 });
   }
 
+  const rowIds = rows.map((row) => row.id);
+  const { data: existingCandidates, error: existingCandidatesErr } = await withOrgScope(supabase, 'import_candidates', orgId)
+    .select('source_row_id, decisions')
+    .eq('workspace_id', workspaceId)
+    .in('source_row_id', rowIds);
+
+  if (existingCandidatesErr) {
+    context.log?.error?.('import-workspaces-analyze-chunk: failed to load existing decisions', {
+      message: existingCandidatesErr.message,
+    });
+    return respond(context, 500, { message: 'failed_to_load_existing_decisions' });
+  }
+
+  const existingDecisionsByRowId = new Map(
+    (existingCandidates || []).map((candidate) => [
+      candidate.source_row_id,
+      candidate.decisions && typeof candidate.decisions === 'object' ? candidate.decisions : {},
+    ]),
+  );
+
   // --- Apply mappings + normalize all rows ---
   const normalized = rows.map((row) => {
     const mapped = applyMappings(row.raw_data || {}, fieldMap);
@@ -311,12 +331,14 @@ export default async function importWorkspacesAnalyzeChunk(context, req) {
   // --- Build candidates ---
   const now = new Date().toISOString();
   const candidates = normalized.map(({ rowId, candidateData, fieldIssues }) => {
+    const existingDecisions = existingDecisionsByRowId.get(rowId) || {};
+    const hasResolvedDuplicateDecision = Boolean(normalizeString(existingDecisions?.action));
     const issues = [...fieldIssues, ...generateStructuralIssues(candidateData, entityType)];
 
     // Duplicate identity number check
     if (candidateData.identity_number) {
       const existingId = existingByIdNum.get(candidateData.identity_number);
-      if (existingId) {
+      if (existingId && !hasResolvedDuplicateDecision) {
         issues.push({
           code: 'duplicate_identity_number',
           severity: 'blocker',
@@ -352,7 +374,7 @@ export default async function importWorkspacesAnalyzeChunk(context, req) {
       merged_from_row_ids: [rowId],
       issues,
       blocking_issues_count: blockingIssuesCount,
-      decisions: {},
+      decisions: existingDecisions,
       updated_at: now,
     };
   });

@@ -68,6 +68,7 @@ function UploadStep({ hook, onDone }) {
   const isParsed    = parseState.status === 'done' && parsedRows !== null;
   const isUploading = ['requesting_url', 'uploading', 'saving_metadata'].includes(uploadState.status);
   const isParsing   = ['reading', 'parsing', 'saving_profile'].includes(parseState.status);
+  const uploadFailedNonblocking = uploadState.status === 'failed_nonblocking';
 
   return (
     <div className="space-y-4">
@@ -105,7 +106,7 @@ function UploadStep({ hook, onDone }) {
           </Button>
         )}
 
-        {isUploaded && !isParsed && (
+        {fileState.file && !isParsed && (
           <Button onClick={parse} disabled={isParsing} className="gap-2">
             {isParsing ? `מנתח… ${parseState.pct}%` : 'נתח קובץ'}
           </Button>
@@ -122,7 +123,13 @@ function UploadStep({ hook, onDone }) {
       {fileState.error && (
         <p className="text-xs text-destructive">{fileState.error}</p>
       )}
-      {uploadState.error && (
+      {uploadFailedNonblocking && (
+        <p className="text-xs text-amber-700 dark:text-amber-300">
+          העלאת הגיבוי לשרת נכשלה — ניתן להמשיך, הקובץ ינותח מקומית
+          {uploadState.error ? ` (${uploadState.error})` : ''}
+        </p>
+      )}
+      {uploadState.error && !uploadFailedNonblocking && (
         <p className="text-xs text-destructive">{uploadState.error}</p>
       )}
       {parseState.error && (
