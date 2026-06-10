@@ -34,6 +34,7 @@ function deriveCompletedSteps(ws, ingestionStatus, analysisStatus) {
   if (hasMappings)            completed.push('map');
   if (ingestDone)             completed.push('ingest');
   if (analyzeDone)            completed.push('analyze');
+  if (analyzeDone)            completed.push('review');
 
   return completed;
 }
@@ -603,6 +604,13 @@ export default function ImportWorkspaceDashboard() {
                 >
                   <Download className="h-4 w-4" />
                   ייצוא בעיות (CSV)
+                </Button>
+                <Button
+                  size="sm"
+                  className="gap-2 ms-auto"
+                  onClick={() => setCurrentStep('commit')}
+                >
+                  המשך לביצוע
                 </Button>
               </div>
               <CandidateQueue

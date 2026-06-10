@@ -16,7 +16,7 @@ import { ensureOrgPermissions } from '../_shared/permissions-utils.js';
 import { extractQuestionsForVersion } from '../_shared/version-lookup.js';
 import { attachErrorTracking, respondTracked } from '../_shared/error-events.js';
 import puppeteer from 'puppeteer-core';
-import chromium from '@sparticuz/chromium';
+import chromium from '@sparticuz/chromium-min';
 import { format, parseISO } from 'date-fns';
 import { he } from 'date-fns/locale';
 
@@ -692,12 +692,20 @@ export default async function (context, req) {
   // Generate PDF
   let browser;
   try {
+    const chromiumPackUrl = String(process.env.CHROMIUM_PACK_URL || '').trim();
+    if (!chromiumPackUrl) {
+      return respondStudentsExportError(context, 500, 'pdf_renderer_not_configured', new Error('CHROMIUM_PACK_URL is not configured'), {
+        action: 'configure_pdf_renderer',
+        student_id: studentId,
+      });
+    }
+
     context.log?.info?.('students-export launching browser');
     
     browser = await puppeteer.launch({
       args: chromium.args,
       defaultViewport: chromium.defaultViewport,
-      executablePath: await chromium.executablePath(),
+      executablePath: await chromium.executablePath(chromiumPackUrl),
       headless: chromium.headless,
     });
 

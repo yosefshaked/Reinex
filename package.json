@@ -5,6 +5,9 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
+  "engines": {
+    "node": ">=20.19 <23"
+  },
   "scripts": {
     "dev": "vite",
     "build": "npm run lint:api && npm run lint:api-responses:strict-ux && npm run lint:sql && vite build",
