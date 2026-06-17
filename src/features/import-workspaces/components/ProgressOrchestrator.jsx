@@ -127,17 +127,21 @@ function toDisplayStatus(hookStatus) {
  * @param {{
  *   ingestion: object,  // return value of useImportRowIngestion
  *   analysis: object,   // return value of useImportAnalysis
+ *   ingestDoneFromConfig?: boolean,
  * }} props
  */
-export function ProgressOrchestrator({ ingestion, analysis }) {
-  const analysisLocked = ingestion.status !== 'done';
+export function ProgressOrchestrator({ ingestion, analysis, ingestDoneFromConfig = false }) {
+  const ingestionStatus = ingestion.status === 'done' || ingestDoneFromConfig
+    ? 'done'
+    : ingestion.status;
+  const analysisLocked = !(ingestion.status === 'done' || ingestDoneFromConfig);
 
   return (
     <div className="grid gap-4 sm:grid-cols-2">
       <OperationCard
         title="קליטת שורות"
         description="שמירת שורות הגולמיות בשרת"
-        status={toDisplayStatus(ingestion.status)}
+        status={toDisplayStatus(ingestionStatus)}
         progress={ingestion.progress}
         processedRows={ingestion.uploadedRows ?? 0}
         totalRows={ingestion.totalRows ?? 0}

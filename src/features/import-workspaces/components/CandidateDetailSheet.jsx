@@ -63,6 +63,15 @@ function DryRunOutcomeBadge({ outcome }) {
   );
 }
 
+function formatMatchedRecordSummary(summary) {
+  if (!summary) return '';
+  if (typeof summary !== 'object') return String(summary);
+  return summary.name ??
+    Object.values(summary)
+      .filter(Boolean)
+      .join(' · ');
+}
+
 function IssueItem({ issue }) {
   const isBlocker = issue.severity === 'blocker';
   return (
@@ -213,7 +222,7 @@ export function CandidateDetailSheet({ candidate, workspaceId, open, onClose, on
                   )}
                   {dryRunSummary.matched_record_summary && (
                     <p className="text-xs text-muted-foreground">
-                      רשומה תואמת: {dryRunSummary.matched_record_summary}
+                      רשומה תואמת: {formatMatchedRecordSummary(dryRunSummary.matched_record_summary)}
                     </p>
                   )}
                   {dryRunSummary.fields_that_would_change?.length > 0 && (

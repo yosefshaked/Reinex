@@ -15,12 +15,23 @@ import {
   respond,
   withOrgScope,
 } from '../_shared/org-bff.js';
+import { attachErrorTracking, respondTracked } from '../_shared/error-events.js';
+
+// Internal (500-level) failures persist an error_events row and return the
+// support code; validation/auth/not-found/conflict stay on plain respond().
+function respondCandidatesError(context, status, message, error, metadata = {}) {
+  return respondTracked(context, status, { message }, undefined, { error, metadata });
+}
 
 const PAGE_SIZE = 50;
 
 const ALLOWED_CANDIDATE_STATUSES = new Set([
   'needs_review', 'ready', 'blocked', 'blocked_by_dependency',
   'skipped', 'committed', 'failed',
+]);
+
+const PATCH_ALLOWED_CANDIDATE_STATUSES = new Set([
+  'needs_review', 'ready', 'skipped', 'blocked',
 ]);
 
 const ALLOWED_ENTITY_TYPES = new Set([
@@ -32,6 +43,15 @@ function normalizeUuid(value) {
   const normalized = normalizeString(value);
   if (!normalized) return '';
   return UUID_PATTERN.test(normalized) ? normalized : '';
+}
+
+function countBlockingIssues(issues) {
+  return (Array.isArray(issues) ? issues : []).filter((issue) => issue?.severity === 'blocker').length;
+}
+
+function shouldClearDuplicateIdentityIssue(decisionsPatch) {
+  const action = normalizeString(decisionsPatch?.action);
+  return action === 'create_as_new' || action === 'link_to_existing';
 }
 
 export default async function importCandidates(context, req) {
@@ -61,12 +81,18 @@ export default async function importCandidates(context, req) {
     return respond(context, 400, { message: 'invalid_org_id' });
   }
 
+  attachErrorTracking(context, req, supabase, {
+    orgId,
+    userId,
+    metadata: { endpoint: 'import-candidates' },
+  });
+
   let role;
   try {
     role = await ensureMembership(supabase, orgId, userId);
   } catch (err) {
     context.log?.error?.('import-candidates: membership check failed', { message: err?.message });
-    return respond(context, 500, { message: 'failed_to_verify_membership' });
+    return respondCandidatesError(context, 500, 'failed_to_verify_membership', err, { action: 'verify_membership' });
   }
   if (!role) {
     return respond(context, 403, { message: 'forbidden' });
@@ -108,7 +134,7 @@ export default async function importCandidates(context, req) {
 
     if (error) {
       context.log?.error?.('import-candidates: list failed', { message: error.message });
-      return respond(context, 500, { message: 'failed_to_list_candidates' });
+      return respondCandidatesError(context, 500, 'failed_to_list_candidates', error, { action: 'list' });
     }
 
     return respond(context, 200, {
@@ -128,7 +154,7 @@ export default async function importCandidates(context, req) {
 
     // Fetch existing record first so we can merge decisions
     const { data: existing, error: fetchErr } = await withOrgScope(supabase, 'import_candidates', orgId)
-      .select('id, decisions, status')
+      .select('id, decisions, status, issues')
       .eq('id', candidateId)
       .single();
 
@@ -141,13 +167,22 @@ export default async function importCandidates(context, req) {
     // Merge decision patch into existing decisions (non-destructive)
     if (body?.decisions_patch && typeof body.decisions_patch === 'object') {
       updates.decisions = { ...(existing.decisions || {}), ...body.decisions_patch };
+      if (shouldClearDuplicateIdentityIssue(body.decisions_patch)) {
+        const filteredIssues = (Array.isArray(existing.issues) ? existing.issues : [])
+          .filter((issue) => issue?.code !== 'duplicate_identity_number');
+        updates.issues = filteredIssues;
+        updates.blocking_issues_count = countBlockingIssues(filteredIssues);
+      }
     }
 
     // Status update — validate against allowed values
     if (body?.status) {
       const newStatus = normalizeString(body.status);
-      if (!ALLOWED_CANDIDATE_STATUSES.has(newStatus)) {
-        return respond(context, 400, { message: 'invalid_status', allowed: [...ALLOWED_CANDIDATE_STATUSES] });
+      if (existing.status === 'committed') {
+        return respond(context, 409, { message: 'candidate_already_committed' });
+      }
+      if (!PATCH_ALLOWED_CANDIDATE_STATUSES.has(newStatus)) {
+        return respond(context, 400, { message: 'status_not_allowed' });
       }
       updates.status = newStatus;
     }
@@ -166,7 +201,7 @@ export default async function importCandidates(context, req) {
 
     if (updateErr) {
       context.log?.error?.('import-candidates: patch failed', { message: updateErr.message });
-      return respond(context, 500, { message: 'failed_to_patch_candidate' });
+      return respondCandidatesError(context, 500, 'failed_to_patch_candidate', updateErr, { action: 'patch', candidateId });
     }
 
     return respond(context, 200, { candidate: updated });

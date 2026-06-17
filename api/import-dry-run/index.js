@@ -30,6 +30,13 @@ import {
   findClientProfileByIdentityNumber,
 } from '../_shared/client-profiles.js';
 import { coerceIdentityNumber, validateIsraeliPhone, coerceEmail } from '../_shared/student-validation.js';
+import { attachErrorTracking, respondTracked } from '../_shared/error-events.js';
+
+// Internal (500-level) failures persist an error_events row and return the
+// support code; validation/auth/not-found stay on plain respond().
+function respondDryRunError(context, status, message, error, metadata = {}) {
+  return respondTracked(context, status, { message }, undefined, { error, metadata });
+}
 
 const MAX_CANDIDATES_PER_CALL = 50;
 
@@ -455,12 +462,18 @@ export default async function importDryRun(context, req) {
     return respond(context, 400, { message: 'invalid_org_id' });
   }
 
+  attachErrorTracking(context, req, supabase, {
+    orgId,
+    userId,
+    metadata: { endpoint: 'import-dry-run' },
+  });
+
   let role;
   try {
     role = await ensureMembership(supabase, orgId, userId);
   } catch (err) {
     context.log?.error?.('import-dry-run: membership check failed', { message: err?.message });
-    return respond(context, 500, { message: 'failed_to_verify_membership' });
+    return respondDryRunError(context, 500, 'failed_to_verify_membership', err, { action: 'verify_membership' });
   }
   if (!role) return respond(context, 403, { message: 'forbidden' });
   if (!isAdminOrOffice(role)) return respond(context, 403, { message: 'forbidden' });
@@ -497,7 +510,7 @@ export default async function importDryRun(context, req) {
     .maybeSingle();
   if (wsError) {
     context.log?.error?.('import-dry-run: workspace lookup failed', { message: wsError.message });
-    return respond(context, 500, { message: 'failed_to_load_workspace' });
+    return respondDryRunError(context, 500, 'failed_to_load_workspace', wsError, { action: 'load_workspace', workspaceId });
   }
   if (!workspace) {
     return respond(context, 404, { message: 'workspace_not_found' });
@@ -511,7 +524,7 @@ export default async function importDryRun(context, req) {
 
   if (candidatesError) {
     context.log?.error?.('import-dry-run: fetch candidates failed', { message: candidatesError.message });
-    return respond(context, 500, { message: 'failed_to_fetch_candidates' });
+    return respondDryRunError(context, 500, 'failed_to_fetch_candidates', candidatesError, { action: 'fetch_candidates', workspaceId });
   }
 
   const foundCandidates = candidates ?? [];
@@ -561,6 +574,7 @@ export default async function importDryRun(context, req) {
       outcome: summary.outcome,
       action_description: summary.action_description,
       matched_record_id: summary.matched_record_id,
+      matched_record_summary: summary.matched_record_summary,
       fields_that_would_change: summary.fields_that_would_change,
     });
   }

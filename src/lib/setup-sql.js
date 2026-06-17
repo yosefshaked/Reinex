@@ -6500,12 +6500,47 @@ GRANT ALL ON TABLE public.import_candidates    TO app_user;
 GRANT ALL ON TABLE public.import_commit_ledger TO app_user;
 
 -- =================================================================
--- Import Workspace RPC: atomic config shallow-merge
+-- Import Workspace helper: recursive JSONB merge
 -- =================================================================
--- Merges p_config_patch into the existing config column using the
--- PostgreSQL JSONB || (concat/merge) operator so that:
---   - Keys present in p_config_patch overwrite the existing value.
---   - Keys absent from p_config_patch are left untouched.
+-- Recursively merges JSON objects key-by-key. When either side is not an
+-- object, the right-hand value replaces the left-hand value. Arrays replace
+-- arrays rather than concatenating.
+-- =================================================================
+CREATE OR REPLACE FUNCTION public.jsonb_deep_merge(a jsonb, b jsonb)
+RETURNS jsonb
+LANGUAGE sql
+IMMUTABLE
+AS $$
+  SELECT CASE
+    WHEN jsonb_typeof(a) = 'object' AND jsonb_typeof(b) = 'object' THEN
+      coalesce((
+        SELECT jsonb_object_agg(merged.key, merged.value)
+        FROM (
+          SELECT
+            coalesce(left_side.key, right_side.key) AS key,
+            CASE
+              WHEN left_side.value IS NULL THEN right_side.value
+              WHEN right_side.value IS NULL THEN left_side.value
+              ELSE public.jsonb_deep_merge(left_side.value, right_side.value)
+            END AS value
+          FROM jsonb_each(a) AS left_side(key, value)
+          FULL JOIN jsonb_each(b) AS right_side(key, value)
+            ON left_side.key = right_side.key
+        ) AS merged
+      ), '{}'::jsonb)
+    ELSE coalesce(b, a)
+  END
+$$;
+
+GRANT EXECUTE ON FUNCTION public.jsonb_deep_merge(jsonb, jsonb)
+  TO authenticated, app_user;
+
+-- =================================================================
+-- Import Workspace RPC: atomic config deep-merge
+-- =================================================================
+-- Merges p_config_patch into the existing config column recursively so that:
+--   - Nested keys present in p_config_patch overwrite the existing value.
+--   - Nested keys absent from p_config_patch are left untouched.
 -- This avoids the race condition where a blind Supabase JS .update({ config })
 -- call overwrites keys written by a concurrent analysis or progress update.
 --
@@ -6527,7 +6562,7 @@ DECLARE
 BEGIN
   UPDATE public.import_workspaces
   SET
-    config     = config || p_config_patch,
+    config     = public.jsonb_deep_merge(config, p_config_patch),
     updated_at = now()
   WHERE id     = p_workspace_id
     AND org_id = p_org_id
@@ -6541,8 +6576,10 @@ BEGIN
 END;
 $$;
 
+REVOKE EXECUTE ON FUNCTION public.patch_import_workspace_config(uuid, uuid, jsonb)
+  FROM authenticated;
 GRANT EXECUTE ON FUNCTION public.patch_import_workspace_config(uuid, uuid, jsonb)
-  TO authenticated, app_user;
+  TO app_user;
 
 -- =================================================================
 -- commit_import_chunk
@@ -6590,6 +6627,7 @@ DECLARE
   v_remaining         integer;
   v_requested_count   integer;
   v_found_count       integer;
+  v_dependency_ready  boolean;
 BEGIN
 
   -- ── 1. Pre-flight: verify all supplied candidates are committable ─────────
@@ -6608,11 +6646,12 @@ BEGIN
   END IF;
 
   FOR v_candidate IN
-    SELECT id, entity_type, status, blocking_issues_count, candidate_data
+    SELECT id, entity_type, status, blocking_issues_count, candidate_data, depends_on_candidate_id
     FROM   public.import_candidates
     WHERE  id            = ANY(p_candidate_ids)
       AND  workspace_id  = p_workspace_id
       AND  org_id        = p_org_id
+    FOR UPDATE
   LOOP
     -- Skipped candidates are allowed through (processed below)
     IF v_candidate.status NOT IN ('ready', 'skipped') THEN
@@ -6620,24 +6659,44 @@ BEGIN
         USING ERRCODE = 'P0002';
     END IF;
 
-    IF v_candidate.blocking_issues_count > 0 THEN
-      RAISE EXCEPTION 'candidate_has_blockers: %', v_candidate.id
-        USING ERRCODE = 'P0002';
-    END IF;
+    IF v_candidate.depends_on_candidate_id IS NOT NULL
+        AND NOT (v_candidate.depends_on_candidate_id = ANY(p_candidate_ids)) THEN
+      SELECT true INTO v_dependency_ready
+        FROM public.import_candidates parent_candidate
+        WHERE parent_candidate.id           = v_candidate.depends_on_candidate_id
+          AND parent_candidate.workspace_id = p_workspace_id
+          AND parent_candidate.org_id       = p_org_id
+          AND parent_candidate.status       = 'committed'
+        FOR UPDATE;
 
-    -- Invariant: inactive_student must carry identity + at least one name
-    IF v_candidate.entity_type = 'inactive_student' AND v_candidate.status = 'ready' THEN
-      IF v_candidate.candidate_data->>'identity_number' IS NULL
-          OR trim(v_candidate.candidate_data->>'identity_number') = '' THEN
-        RAISE EXCEPTION 'inactive_student_missing_identity: %', v_candidate.id
+      IF coalesce(v_dependency_ready, false) IS NOT TRUE THEN
+        RAISE EXCEPTION 'candidate_dependency_not_committed: %', v_candidate.id
           USING ERRCODE = 'P0002';
       END IF;
-      IF (v_candidate.candidate_data->>'first_name' IS NULL
-            OR trim(v_candidate.candidate_data->>'first_name') = '')
-          AND (v_candidate.candidate_data->>'last_name' IS NULL
-            OR trim(v_candidate.candidate_data->>'last_name') = '') THEN
-        RAISE EXCEPTION 'inactive_student_missing_name: %', v_candidate.id
+
+      v_dependency_ready := false;
+    END IF;
+
+    IF v_candidate.status = 'ready' THEN
+      IF v_candidate.blocking_issues_count > 0 THEN
+        RAISE EXCEPTION 'candidate_has_blockers: %', v_candidate.id
           USING ERRCODE = 'P0002';
+      END IF;
+
+      -- Invariant: inactive_student must carry identity + at least one name
+      IF v_candidate.entity_type = 'inactive_student' THEN
+        IF v_candidate.candidate_data->>'identity_number' IS NULL
+            OR trim(v_candidate.candidate_data->>'identity_number') = '' THEN
+          RAISE EXCEPTION 'inactive_student_missing_identity: %', v_candidate.id
+            USING ERRCODE = 'P0002';
+        END IF;
+        IF (v_candidate.candidate_data->>'first_name' IS NULL
+              OR trim(v_candidate.candidate_data->>'first_name') = '')
+            AND (v_candidate.candidate_data->>'last_name' IS NULL
+              OR trim(v_candidate.candidate_data->>'last_name') = '') THEN
+          RAISE EXCEPTION 'inactive_student_missing_name: %', v_candidate.id
+            USING ERRCODE = 'P0002';
+        END IF;
       END IF;
     END IF;
   END LOOP;
@@ -6673,7 +6732,13 @@ BEGIN
     v_import_provenance := jsonb_build_object(
       'import_workspace_id', p_workspace_id,
       'import_candidate_id', v_candidate.id,
-      'committed_at',        now()
+      'committed_at',        now(),
+      'source_identity_number',
+        CASE
+          WHEN v_candidate_data ? 'identity_number'
+          THEN v_candidate_data->>'identity_number'
+          ELSE NULL
+        END
     );
 
     -- ── SKIPPED ─────────────────────────────────────────────────────────────
@@ -6717,6 +6782,23 @@ BEGIN
               metadata   = coalesce(metadata, '{}') || jsonb_build_object('import', v_import_provenance),
               updated_at = now()
           WHERE id = v_cp_id AND org_id = p_org_id;
+      ELSIF v_decisions IS NOT NULL
+          AND v_decisions->>'action' = 'create_as_new' THEN
+        v_action := 'create';
+        INSERT INTO public.client_profiles (
+          org_id, first_name, last_name, identity_number,
+          phone, email, is_active, metadata
+        ) VALUES (
+          p_org_id,
+          CASE WHEN v_first_name = '' THEN 'לא ידוע' ELSE v_first_name END,
+          CASE WHEN v_last_name  = '' THEN 'לא ידוע' ELSE v_last_name  END,
+          NULL,
+          CASE WHEN v_phone      = '' THEN NULL       ELSE v_phone      END,
+          CASE WHEN v_email      = '' THEN NULL       ELSE v_email      END,
+          v_candidate.entity_type <> 'inactive_student',
+          jsonb_build_object('import', v_import_provenance)
+        )
+        RETURNING id INTO v_cp_id;
       ELSE
         -- Try to find existing profile by identity_number
         IF v_identity <> '' THEN
@@ -6905,7 +6987,16 @@ BEGIN
           p_org_id,
           v_cp_id,
           v_guardian_id,
-          coalesce(nullif(trim(coalesce(v_candidate_data->>'relationship', '')), ''), 'other'),
+          CASE lower(trim(coalesce(v_candidate_data->>'relationship', '')))
+            WHEN 'father'    THEN 'father'
+            WHEN 'אבא'       THEN 'father'
+            WHEN 'mother'    THEN 'mother'
+            WHEN 'אמא'       THEN 'mother'
+            WHEN 'self'      THEN 'self'
+            WHEN 'caretaker' THEN 'caretaker'
+            WHEN 'other'     THEN 'other'
+            ELSE 'other'
+          END,
           coalesce((v_candidate_data->>'is_primary')::boolean, false)
         )
         RETURNING id INTO v_link_id;
@@ -7041,6 +7132,8 @@ BEGIN
 END;
 $$;
 
+REVOKE EXECUTE ON FUNCTION public.commit_import_chunk(uuid, uuid, uuid[])
+  FROM authenticated;
 GRANT EXECUTE ON FUNCTION public.commit_import_chunk(uuid, uuid, uuid[])
-  TO authenticated, app_user;
+  TO app_user;
 `;

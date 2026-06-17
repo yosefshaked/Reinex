@@ -27,15 +27,18 @@ release
 settings.json
 .env
 
-/supabase/.temp
 /api/local.settings.json
-/test/automatic-tester/reports
 /.aider-env
 .aider*
-/.cache
 /.pki
 /.github/agents
+/supabase
+
+# Temporary data
+/test-data
+/tools/Amir-System-Migration/__pycache__
 /manual-db-backup/backups
 /manual-db-backup/supabase
-/supabase
-/tools/Amir-System-Migration/__pycache__
+/supabase/.temp
+/test/automatic-tester/reports
+/.cache

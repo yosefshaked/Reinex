@@ -70,7 +70,14 @@ export default async function importCommitChunk(context, req) {
     role = await ensureMembership(supabase, orgId, userId);
   } catch (err) {
     context.log?.error?.('import-commit-chunk: membership check failed', { message: err?.message });
-    return respond(context, 500, { message: 'failed_to_verify_membership' });
+    return respondTrackedError(context, req, supabase, {
+      status: 500,
+      message: 'failed_to_verify_membership',
+      orgId,
+      userId,
+      error: err,
+      metadata: { endpoint: 'import-commit-chunk', action: 'verify_membership' },
+    });
   }
   if (!role) return respond(context, 403, { message: 'forbidden' });
   if (!isAdminOrOffice(role)) return respond(context, 403, { message: 'forbidden' });
@@ -106,7 +113,14 @@ export default async function importCommitChunk(context, req) {
     .maybeSingle();
   if (wsError) {
     context.log?.error?.('import-commit-chunk: workspace lookup failed', { message: wsError.message });
-    return respond(context, 500, { message: 'failed_to_load_workspace' });
+    return respondTrackedError(context, req, supabase, {
+      status: 500,
+      message: 'failed_to_load_workspace',
+      orgId,
+      userId,
+      error: wsError,
+      metadata: { endpoint: 'import-commit-chunk', action: 'load_workspace', workspaceId },
+    });
   }
   if (!workspace) {
     return respond(context, 404, { message: 'workspace_not_found' });
@@ -126,6 +140,12 @@ export default async function importCommitChunk(context, req) {
 
   if (rpcError) {
     const msg = rpcError.message ?? '';
+    if (msg.includes('Mismatched candidates')) {
+      return respond(context, 409, { message: 'candidate_ids_stale' });
+    }
+    if (msg.includes('candidate_dependency_not_committed')) {
+      return respond(context, 409, { message: 'candidate_dependency_not_committed' });
+    }
     if (msg.includes('candidate_not_ready')) {
       return respond(context, 409, { message: 'candidate_not_ready' });
     }

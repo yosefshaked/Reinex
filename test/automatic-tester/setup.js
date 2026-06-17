@@ -103,7 +103,11 @@ async function supabasePost(url, key, path, body, extraHeaders = {}) {
 }
 
 async function supabaseUpsert(url, key, path, body, conflictCols) {
-  const res = await fetch(`${url}${path}`, {
+  const separator = path.includes('?') ? '&' : '?';
+  const upsertPath = conflictCols
+    ? `${path}${separator}on_conflict=${encodeURIComponent(conflictCols)}`
+    : path;
+  const res = await fetch(`${url}${upsertPath}`, {
     method: 'POST',
     headers: supabaseHeaders(key, {
       'Prefer': `return=representation,resolution=merge-duplicates`,
@@ -467,7 +471,7 @@ function findDbContainer(supabaseUrl = null) {
   }
 }
 
-async function applySchema(supabaseUrl, serviceKey) {
+async function applySchema(supabaseUrl) {
   // Load the SQL from the repo's SSOT
   const sqlModulePath = join(REPO_ROOT, 'src', 'lib', 'setup-sql.js');
   if (!existsSync(sqlModulePath)) {
@@ -579,7 +583,7 @@ async function checkAndApplySchema(supabaseUrl, serviceKey) {
     return;
   }
 
-  await applySchema(supabaseUrl, serviceKey);
+  await applySchema(supabaseUrl);
 
   // Tell PostgREST to reload its schema cache so new columns are visible immediately
   step('Reloading PostgREST schema cache...');
@@ -775,9 +779,9 @@ async function deleteTestOrg(supabaseUrl, serviceKey) {
     'org_memberships',
   ];
   for (const table of deps) {
-    await supabaseDelete(supabaseUrl, serviceKey, `/rest/v1/${table}`, `org_id=eq.${orgId}`).catch(() => {});
+    await supabaseDelete(supabaseUrl, serviceKey, `/rest/v1/${table}`, `org_id=eq.${orgId}`).catch(() => { /* ignore cleanup errors */ });
   }
-  await supabaseDelete(supabaseUrl, serviceKey, '/rest/v1/organizations', `id=eq.${orgId}`).catch(() => {});
+  await supabaseDelete(supabaseUrl, serviceKey, '/rest/v1/organizations', `id=eq.${orgId}`).catch(() => { /* ignore cleanup errors */ });
   ok(`Deleted test organisation`);
 }
 

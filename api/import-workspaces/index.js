@@ -12,6 +12,14 @@ import {
   respond,
   withOrgScope,
 } from '../_shared/org-bff.js';
+import { attachErrorTracking, respondTracked } from '../_shared/error-events.js';
+
+// Wraps respondTracked so internal (500-level) failures persist an error_events
+// row and return the support code to the user. Validation/auth/not-found stay
+// on plain respond() — they are expected and user-actionable.
+function respondWorkspacesError(context, status, message, error, metadata = {}) {
+  return respondTracked(context, status, { message }, undefined, { error, metadata });
+}
 
 const ALLOWED_STATUSES = new Set([
   'draft',
@@ -122,12 +130,18 @@ export default async function importWorkspaces(context, req) {
     return respond(context, 400, { message: 'invalid_org_id' });
   }
 
+  attachErrorTracking(context, req, supabase, {
+    orgId,
+    userId,
+    metadata: { endpoint: 'import-workspaces' },
+  });
+
   let role;
   try {
     role = await ensureMembership(supabase, orgId, userId);
   } catch (err) {
     context.log?.error?.('import-workspaces: membership check failed', { message: err?.message });
-    return respond(context, 500, { message: 'failed_to_verify_membership' });
+    return respondWorkspacesError(context, 500, 'failed_to_verify_membership', err, { action: 'verify_membership' });
   }
   if (!role) {
     return respond(context, 403, { message: 'forbidden' });
@@ -150,7 +164,7 @@ export default async function importWorkspaces(context, req) {
     const { data, error } = await query;
     if (error) {
       context.log?.error?.('import-workspaces: list failed', { message: error.message });
-      return respond(context, 500, { message: 'failed_to_list_workspaces' });
+      return respondWorkspacesError(context, 500, 'failed_to_list_workspaces', error, { action: 'list' });
     }
     return respond(context, 200, { workspaces: data ?? [] });
   }
@@ -178,7 +192,7 @@ export default async function importWorkspaces(context, req) {
       .single();
     if (error) {
       context.log?.error?.('import-workspaces: create failed', { message: error.message });
-      return respond(context, 500, { message: 'failed_to_create_workspace' });
+      return respondWorkspacesError(context, 500, 'failed_to_create_workspace', error, { action: 'create' });
     }
     return respond(context, 201, { workspace: data });
   }
@@ -196,7 +210,7 @@ export default async function importWorkspaces(context, req) {
       .maybeSingle();
     if (error) {
       context.log?.error?.('import-workspaces: get failed', { message: error.message });
-      return respond(context, 500, { message: 'failed_to_get_workspace' });
+      return respondWorkspacesError(context, 500, 'failed_to_get_workspace', error, { action: 'get' });
     }
     if (!data) {
       return respond(context, 404, { message: 'workspace_not_found' });
@@ -246,7 +260,7 @@ export default async function importWorkspaces(context, req) {
           return respond(context, 404, { message: 'workspace_not_found' });
         }
         context.log?.error?.('import-workspaces: config patch rpc failed', { message: rpcError.message });
-        return respond(context, 500, { message: 'failed_to_patch_config' });
+        return respondWorkspacesError(context, 500, 'failed_to_patch_config', rpcError, { action: 'patch_config', workspaceId });
       }
     }
 
@@ -260,7 +274,7 @@ export default async function importWorkspaces(context, req) {
         .maybeSingle();
       if (updateError) {
         context.log?.error?.('import-workspaces: scalar update failed', { message: updateError.message });
-        return respond(context, 500, { message: 'failed_to_update_workspace' });
+        return respondWorkspacesError(context, 500, 'failed_to_update_workspace', updateError, { action: 'update_scalar', workspaceId });
       }
       if (!scalarUpdated) {
         return respond(context, 404, { message: 'workspace_not_found' });
@@ -274,7 +288,7 @@ export default async function importWorkspaces(context, req) {
       .maybeSingle();
     if (fetchError) {
       context.log?.error?.('import-workspaces: post-patch fetch failed', { message: fetchError.message });
-      return respond(context, 500, { message: 'failed_to_fetch_workspace' });
+      return respondWorkspacesError(context, 500, 'failed_to_fetch_workspace', fetchError, { action: 'post_patch_fetch', workspaceId });
     }
     if (!data) {
       return respond(context, 404, { message: 'workspace_not_found' });

@@ -6,7 +6,6 @@
 
 import { mkdir, writeFile, rm } from 'fs/promises';
 import { execSync } from 'child_process';
-import { join } from 'path';
 
 const TEST_DIRS = [
   'api/test-missing-config',
@@ -70,7 +69,7 @@ async function runValidator() {
       encoding: 'utf-8'
     });
     return false; // Should have failed
-  } catch (error) {
+  } catch {
     return true; // Expected to fail with our test cases
   }
 }

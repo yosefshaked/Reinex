@@ -14,6 +14,13 @@ import {
   respond,
 } from '../_shared/org-bff.js';
 import { getStorageDriver } from '../cross-platform/storage-drivers/index.js';
+import { attachErrorTracking, respondTracked } from '../_shared/error-events.js';
+
+// Internal (500-level) failures persist an error_events row and return the
+// support code; validation/auth/not-found stay on plain respond().
+function respondUploadUrlError(context, status, message, error, metadata = {}) {
+  return respondTracked(context, status, { message }, undefined, { error, metadata });
+}
 
 // Only these MIME types are accepted as import sources.
 const ALLOWED_CONTENT_TYPES = new Set([
@@ -76,13 +83,19 @@ export default async function importWorkspacesUploadUrl(context, req) {
     return respond(context, 400, { message: 'workspace_id_required' });
   }
 
+  attachErrorTracking(context, req, supabase, {
+    orgId,
+    userId,
+    metadata: { endpoint: 'import-workspaces-upload-url', workspaceId },
+  });
+
   // ── Membership + role gate ────────────────────────────────────────────────
   let role;
   try {
     role = await ensureMembership(supabase, orgId, userId);
   } catch (err) {
     context.log?.error?.('import-workspaces-upload-url: membership error', { message: err?.message });
-    return respond(context, 500, { message: 'failed_to_verify_membership' });
+    return respondUploadUrlError(context, 500, 'failed_to_verify_membership', err, { action: 'verify_membership' });
   }
   if (!role) {
     return respond(context, 403, { message: 'forbidden' });
@@ -116,7 +129,7 @@ export default async function importWorkspacesUploadUrl(context, req) {
     uploadUrl = await driver.getUploadUrl(objectKey, contentType, PRESIGNED_TTL_SECONDS);
   } catch (err) {
     context.log?.error?.('import-workspaces-upload-url: presign failed', { message: err?.message });
-    return respond(context, 500, { message: 'storage_unavailable' });
+    return respondUploadUrlError(context, 500, 'storage_unavailable', err, { action: 'presign_upload_url' });
   }
 
   return respond(context, 200, { uploadUrl, objectKey });

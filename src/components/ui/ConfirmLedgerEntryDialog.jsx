@@ -50,10 +50,11 @@ export default function ConfirmLedgerEntryDialog({
   saving = false,
   entry = null,
 }) {
+  const confirmButtonRef = useRef(null);
+
   if (!entry) return null;
 
   const isDebit = entry.type === 'debit';
-  const confirmButtonRef = useRef(null);
 
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>

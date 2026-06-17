@@ -595,6 +595,9 @@ export default function WaitingListPage() {
     }
   }, [canFetch, session, activeOrgId, statusFilter]);
 
+  const selectedPreferredDaysKey = selectedEntry?.preferred_days?.join(',') ?? '';
+  const selectedPreferredTimesKey = JSON.stringify(selectedEntry?.preferred_times ?? []);
+
   useEffect(() => {
     void loadReferenceData();
   }, [loadReferenceData]);
@@ -695,7 +698,7 @@ export default function WaitingListPage() {
     return () => {
       cancelled = true;
     };
-  }, [canFetch, selectedEntry?.id, selectedEntry?.status, selectedEntry?.desired_service_id, selectedEntry?.preferred_days?.join(','), JSON.stringify(selectedEntry?.preferred_times), suggestionMode, session, activeOrgId]);
+  }, [canFetch, selectedEntry?.id, selectedEntry?.status, selectedEntry?.desired_service_id, selectedPreferredDaysKey, selectedPreferredTimesKey, suggestionMode, session, activeOrgId]);
 
   const openCreateDialog = () => {
     setFormValues(buildInitialForm(null, studentOptionMap));

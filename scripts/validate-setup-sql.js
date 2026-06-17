@@ -294,7 +294,7 @@ function validateOrgIdOnTenantTables() {
     if (!headerMatch) continue; // SQL006 already errors when the CREATE TABLE is absent.
 
     const startIdx = headerMatch.index + headerMatch[0].length;
-    // Find the closing ");" of this CREATE TABLE block.
+    // Find the closing ");" of this CREATE TABLE block.
     const closingIdx = sql.indexOf(');', startIdx);
     const block = closingIdx !== -1 ? sql.slice(startIdx, closingIdx) : sql.slice(startIdx, startIdx + 4000);
 
@@ -452,7 +452,7 @@ function collectFrontendRpcNames() {
   });
 
   const names = new Set();
-  const rpcPattern = /\.rpc\(\s*['\"](?:public\.)?([a-zA-Z_][a-zA-Z0-9_]*)['\"]/g;
+  const rpcPattern = /\.rpc\(\s*['"](?:public\.)?([a-zA-Z_][a-zA-Z0-9_]*)['"]/g;
 
   for (const filePath of files) {
     let content = '';

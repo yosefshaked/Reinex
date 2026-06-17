@@ -15,6 +15,13 @@ import {
   respond,
   withOrgScope,
 } from '../_shared/org-bff.js';
+import { attachErrorTracking, respondTracked } from '../_shared/error-events.js';
+
+// Internal (500-level) failures persist an error_events row and return the
+// support code; validation/auth/not-found stay on plain respond().
+function respondRowsBulkError(context, status, message, error, metadata = {}) {
+  return respondTracked(context, status, { message }, undefined, { error, metadata });
+}
 
 // Hard cap enforced at the API boundary: keeps each request well within the
 // 30-second Azure SWA timeout and prevents client-side misconfiguration.
@@ -72,12 +79,18 @@ export default async function importWorkspacesRowsBulk(context, req) {
     return respond(context, 400, { message: 'workspace_id_required' });
   }
 
+  attachErrorTracking(context, req, supabase, {
+    orgId,
+    userId,
+    metadata: { endpoint: 'import-workspaces-rows-bulk', workspaceId },
+  });
+
   let role;
   try {
     role = await ensureMembership(supabase, orgId, userId);
   } catch (err) {
     context.log?.error?.('import-workspaces-rows-bulk: membership check failed', { message: err?.message });
-    return respond(context, 500, { message: 'failed_to_verify_membership' });
+    return respondRowsBulkError(context, 500, 'failed_to_verify_membership', err, { action: 'verify_membership' });
   }
   if (!role) {
     return respond(context, 403, { message: 'forbidden' });
@@ -92,7 +105,7 @@ export default async function importWorkspacesRowsBulk(context, req) {
     .maybeSingle();
   if (workspaceError) {
     context.log?.error?.('import-workspaces-rows-bulk: workspace lookup failed', { message: workspaceError.message });
-    return respond(context, 500, { message: 'failed_to_verify_workspace' });
+    return respondRowsBulkError(context, 500, 'failed_to_verify_workspace', workspaceError, { action: 'verify_workspace' });
   }
   if (!workspace) {
     return respond(context, 404, { message: 'workspace_not_found' });
@@ -151,7 +164,7 @@ export default async function importWorkspacesRowsBulk(context, req) {
 
   if (upsertError) {
     context.log?.error?.('import-workspaces-rows-bulk: upsert failed', { message: upsertError.message });
-    return respond(context, 500, { message: 'row_upsert_failed' });
+    return respondRowsBulkError(context, 500, 'row_upsert_failed', upsertError, { action: 'upsert_rows' });
   }
 
   return respond(context, 200, { inserted: records.length });

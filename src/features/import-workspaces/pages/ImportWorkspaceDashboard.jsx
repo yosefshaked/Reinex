@@ -216,6 +216,7 @@ function ProcessStep({ ingestion, analysis, uploadHook, workspace }) {
       <ProgressOrchestrator
         ingestion={hasRows || ingestDone ? ingestion : { ...ingestion, status: 'idle' }}
         analysis={analysis}
+        ingestDoneFromConfig={ingestDone}
       />
       {totalRows > 0 && (
         <p className="text-xs text-muted-foreground text-end">

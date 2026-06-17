@@ -74,7 +74,9 @@ export default function OrganizationsView() {
 
   React.useEffect(() => { load(''); }, [load]);
 
-  const organizations = Array.isArray(payload?.organizations) ? payload.organizations : [];
+  const organizations = React.useMemo(() => (
+    Array.isArray(payload?.organizations) ? payload.organizations : []
+  ), [payload?.organizations]);
   const filtered = React.useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return organizations;

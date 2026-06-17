@@ -1,5 +1,4 @@
 /* eslint-env node */
-/* global process */
 /**
  * Storage Configuration Validation Tests
  * 

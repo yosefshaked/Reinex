@@ -118,7 +118,7 @@ export default function StudentDetailPage() {
       setStudentError(error?.message || 'טעינת פרטי התלמיד נכשלה.');
       return null;
     }
-  }, [canFetch, studentId, activeOrgId, session]);
+  }, [canFetch, studentId, activeOrgId, session, loadCompliance]);
 
   useEffect(() => {
     let isMounted = true;

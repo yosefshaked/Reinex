@@ -63,6 +63,7 @@ function profileSheet(headers, rows) {
     totalRows: rows.length,
     headers,
     likelyEntityType: detectEntityType(headers),
+    sampleRow: rows.find((row) => Object.values(row).some((value) => value !== null)) ?? {},
   };
 }
 
@@ -71,10 +72,18 @@ function profileSheet(headers, rows) {
 // ---------------------------------------------------------------------------
 
 const PHONE_HEADER_RE = /phone|tel|mobile|טלפון|נייד|פלאפון/i;
-const ID_HEADER_RE = /id|ת\.?ז|תעודת|identity/i;
+const ID_HEADER_RE = /\bid\b|\bidentity\b|ת\.?ז|תעודת|מספר זהות/i;
 
 function normaliseValue(raw, header) {
   if (raw === null || raw === undefined || raw === '') return null;
+
+  if (typeof raw === 'object' && !(raw instanceof Date)) {
+    raw = raw.result ??
+      raw.text ??
+      (Array.isArray(raw.richText) ? raw.richText.map((part) => part.text ?? '').join('') : undefined);
+
+    if (raw === null || raw === undefined || raw === '') return null;
+  }
 
   // ExcelJS returns Date objects for date cells
   if (raw instanceof Date) {
@@ -118,8 +127,12 @@ async function parseExcel(buffer) {
   // Row 1 = headers
   const headerRow = sheet.getRow(1);
   const headers = [];
-  headerRow.eachCell({ includeEmpty: false }, (cell) => {
-    headers.push(String(cell.value ?? '').trim());
+  const headerColumns = [];
+  headerRow.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+    const header = normaliseValue(cell.value, '') ?? '';
+    if (!header) return;
+    headers.push(header);
+    headerColumns.push({ colNumber, header });
   });
 
   if (headers.length === 0) throw new Error('excel_no_headers');
@@ -132,9 +145,9 @@ async function parseExcel(buffer) {
   sheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
     if (rowNumber === 1) return; // skip header row
     const obj = {};
-    headers.forEach((h, idx) => {
-      const cell = row.getCell(idx + 1);
-      obj[h] = cell.value;
+    headerColumns.forEach(({ colNumber, header }) => {
+      const cell = row.getCell(colNumber);
+      obj[header] = cell.value;
     });
     rows.push(normaliseRow(obj, headers));
 

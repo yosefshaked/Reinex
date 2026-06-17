@@ -76,7 +76,6 @@ async function performLogin(page, role, ctx) {
   const hash = await page.evaluate(() => window.location.hash);
   if (hash.startsWith('#/select-org')) {
     if (ctx.vars.TEST_ORG_ID) {
-      const btn = page.locator(`button`).filter({ hasText: '' }).first();
       // Try clicking a button that contains the org id as data attribute
       const orgButton = page.locator(`[data-org-id="${ctx.vars.TEST_ORG_ID}"]`);
       const count = await orgButton.count();
@@ -481,8 +480,8 @@ async function executeStep(page, rawStep, ctx) {
       // Clear storage, then force a full page reload to reinitialise the Supabase client
       // (clearing localStorage alone does not invalidate the in-memory session)
       await page.evaluate(() => {
-        try { window.localStorage.clear(); } catch {}
-        try { window.sessionStorage.clear(); } catch {}
+        try { window.localStorage.clear(); } catch { /* ignore storage access errors */ }
+        try { window.sessionStorage.clear(); } catch { /* ignore storage access errors */ }
       });
       // Navigate to root (no hash) to guarantee a full document + JS reload
       await page.goto(ctx.vars.BASE_URL + '/', { waitUntil: 'load' });
@@ -493,8 +492,8 @@ async function executeStep(page, rawStep, ctx) {
     }
     case 'clearStorage': {
       await page.evaluate(() => {
-        try { window.localStorage.clear(); } catch {}
-        try { window.sessionStorage.clear(); } catch {}
+        try { window.localStorage.clear(); } catch { /* ignore storage access errors */ }
+        try { window.sessionStorage.clear(); } catch { /* ignore storage access errors */ }
       });
       break;
     }

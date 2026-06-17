@@ -32,7 +32,9 @@ const TARGET_FIELDS_BY_ENTITY = {
   ],
   guardian_link: [
     { value: 'student_identity_number', label: 'ת.ז. תלמיד/ה', required: true },
-    { value: 'guardian_identity_number', label: 'ת.ז. הורה',    required: false },
+    { value: 'guardian_phone',           label: 'טלפון הורה',   required: true },
+    { value: 'relationship',             label: 'קרבה',          required: false },
+    { value: 'is_primary',               label: 'הורה ראשי',     required: false },
   ],
   service: [
     { value: 'name',        label: 'שם השירות',   required: true },

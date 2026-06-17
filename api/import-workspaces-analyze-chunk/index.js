@@ -22,6 +22,13 @@ import {
   coerceEmail,
   coerceOptionalText,
 } from '../_shared/student-validation.js';
+import { attachErrorTracking, respondTracked } from '../_shared/error-events.js';
+
+// Internal (500-level) failures persist an error_events row and return the
+// support code; validation/auth/not-found stay on plain respond().
+function respondAnalyzeError(context, status, message, error, metadata = {}) {
+  return respondTracked(context, status, { message }, undefined, { error, metadata });
+}
 
 const MAX_ROWS_PER_ANALYSIS_CHUNK = 100;
 
@@ -43,7 +50,7 @@ const ENTITY_SCHEMA = {
     warnings: ['phone', 'email'],
   },
   guardian_link: {
-    blockers: ['student_identity_number'],
+    blockers: ['student_identity_number', 'guardian_phone'],
     warnings: [],
   },
   service: {
@@ -117,6 +124,14 @@ function normalizeCandidateData(mapped, entityType) {
     data.phone = phoneResult.valid ? phoneResult.value : null;
   }
 
+  if (data.guardian_phone !== null && data.guardian_phone !== undefined) {
+    const phoneResult = validateIsraeliPhone(data.guardian_phone);
+    if (!phoneResult.valid && data.guardian_phone !== '') {
+      fieldIssues.push({ code: 'invalid_field_format', severity: 'warning', field: 'guardian_phone' });
+    }
+    data.guardian_phone = phoneResult.valid ? phoneResult.value : null;
+  }
+
   // Email
   if (data.email !== null && data.email !== undefined) {
     const emailResult = coerceEmail(data.email);
@@ -167,6 +182,12 @@ function normalizeUuid(value) {
   return UUID_PATTERN.test(normalized) ? normalized : '';
 }
 
+function hasResolvedDuplicateIdentityDecision(decisions) {
+  const action = normalizeString(decisions?.action);
+  if (action === 'create_as_new' || action === 'skip') return true;
+  return action === 'link_to_existing' && Boolean(normalizeUuid(decisions?.linked_id));
+}
+
 export default async function importWorkspacesAnalyzeChunk(context, req) {
   const env = readEnv(context);
 
@@ -199,12 +220,18 @@ export default async function importWorkspacesAnalyzeChunk(context, req) {
     return respond(context, 400, { message: 'workspace_id_required' });
   }
 
+  attachErrorTracking(context, req, supabase, {
+    orgId,
+    userId,
+    metadata: { endpoint: 'import-workspaces-analyze-chunk', workspaceId },
+  });
+
   let role;
   try {
     role = await ensureMembership(supabase, orgId, userId);
   } catch (err) {
     context.log?.error?.('import-workspaces-analyze-chunk: membership check failed', { message: err?.message });
-    return respond(context, 500, { message: 'failed_to_verify_membership' });
+    return respondAnalyzeError(context, 500, 'failed_to_verify_membership', err, { action: 'verify_membership' });
   }
   if (!role) {
     return respond(context, 403, { message: 'forbidden' });
@@ -237,7 +264,7 @@ export default async function importWorkspacesAnalyzeChunk(context, req) {
 
   // --- Load workspace config for mappings ---
   const { data: workspace, error: workspaceErr } = await withOrgScope(supabase, 'import_workspaces', orgId)
-    .select('id, config')
+    .select('id, status, config')
     .eq('id', workspaceId)
     .single();
 
@@ -264,7 +291,7 @@ export default async function importWorkspacesAnalyzeChunk(context, req) {
 
   if (rowsErr) {
     context.log?.error?.('import-workspaces-analyze-chunk: failed to load rows', { message: rowsErr.message });
-    return respond(context, 500, { message: 'failed_to_load_rows' });
+    return respondAnalyzeError(context, 500, 'failed_to_load_rows', rowsErr, { action: 'load_rows' });
   }
 
   if (!rows || rows.length === 0) {
@@ -273,7 +300,7 @@ export default async function importWorkspacesAnalyzeChunk(context, req) {
 
   const rowIds = rows.map((row) => row.id);
   const { data: existingCandidates, error: existingCandidatesErr } = await withOrgScope(supabase, 'import_candidates', orgId)
-    .select('source_row_id, decisions')
+    .select('source_row_id, decisions, status')
     .eq('workspace_id', workspaceId)
     .in('source_row_id', rowIds);
 
@@ -281,7 +308,7 @@ export default async function importWorkspacesAnalyzeChunk(context, req) {
     context.log?.error?.('import-workspaces-analyze-chunk: failed to load existing decisions', {
       message: existingCandidatesErr.message,
     });
-    return respond(context, 500, { message: 'failed_to_load_existing_decisions' });
+    return respondAnalyzeError(context, 500, 'failed_to_load_existing_decisions', existingCandidatesErr, { action: 'load_existing_decisions' });
   }
 
   const existingDecisionsByRowId = new Map(
@@ -291,12 +318,23 @@ export default async function importWorkspacesAnalyzeChunk(context, req) {
     ]),
   );
 
+  const existingStatusByRowId = new Map(
+    (existingCandidates || []).map((candidate) => [
+      candidate.source_row_id,
+      normalizeString(candidate.status),
+    ]),
+  );
+  const preservedStatuses = new Set(['committed', 'skipped']);
+
   // --- Apply mappings + normalize all rows ---
-  const normalized = rows.map((row) => {
+  const normalized = rows
+    .filter((row) => !preservedStatuses.has(existingStatusByRowId.get(row.id)))
+    .map((row) => {
     const mapped = applyMappings(row.raw_data || {}, fieldMap);
     const { data: candidateData, fieldIssues } = normalizeCandidateData(mapped, entityType);
     return { rowId: row.id, rowIndex: row.row_index, candidateData, fieldIssues };
   });
+  const candidatesPreserved = rows.length - normalized.length;
 
   // --- Bulk duplicate detection (Performance: single query per field type) ---
   const identityNumbers = [...new Set(
@@ -332,7 +370,7 @@ export default async function importWorkspacesAnalyzeChunk(context, req) {
   const now = new Date().toISOString();
   const candidates = normalized.map(({ rowId, candidateData, fieldIssues }) => {
     const existingDecisions = existingDecisionsByRowId.get(rowId) || {};
-    const hasResolvedDuplicateDecision = Boolean(normalizeString(existingDecisions?.action));
+    const hasResolvedDuplicateDecision = hasResolvedDuplicateIdentityDecision(existingDecisions);
     const issues = [...fieldIssues, ...generateStructuralIssues(candidateData, entityType)];
 
     // Duplicate identity number check
@@ -379,18 +417,36 @@ export default async function importWorkspacesAnalyzeChunk(context, req) {
     };
   });
 
-  // --- Upsert candidates (idempotent via workspace_id, source_row_id) ---
-  const { data: upserted, error: upsertErr } = await withOrgScope(supabase, 'import_candidates', orgId)
-    .upsert(candidates, { onConflict: 'workspace_id,source_row_id' })
-    .select('id');
+  let upserted = [];
+  if (candidates.length > 0) {
+    // --- Upsert candidates (idempotent via workspace_id, source_row_id) ---
+    const { data, error: upsertErr } = await withOrgScope(supabase, 'import_candidates', orgId)
+      .upsert(candidates, { onConflict: 'workspace_id,source_row_id' })
+      .select('id');
 
-  if (upsertErr) {
-    context.log?.error?.('import-workspaces-analyze-chunk: upsert failed', { message: upsertErr.message });
-    return respond(context, 500, { message: 'failed_to_upsert_candidates' });
+    if (upsertErr) {
+      context.log?.error?.('import-workspaces-analyze-chunk: upsert failed', { message: upsertErr.message });
+      return respondAnalyzeError(context, 500, 'failed_to_upsert_candidates', upsertErr, { action: 'upsert_candidates' });
+    }
+    upserted = data || [];
+
+    if (workspace.status === 'committed') {
+      const { error: reopenErr } = await withOrgScope(supabase, 'import_workspaces', orgId)
+        .update({ status: 'needs_review', updated_at: now })
+        .eq('id', workspaceId);
+
+      if (reopenErr) {
+        context.log?.error?.('import-workspaces-analyze-chunk: failed to reopen committed workspace', {
+          message: reopenErr.message,
+        });
+        return respondAnalyzeError(context, 500, 'failed_to_reopen_workspace', reopenErr, { action: 'reopen_workspace' });
+      }
+    }
   }
 
   return respond(context, 200, {
     analyzed: rows.length,
+    candidates_preserved: candidatesPreserved,
     candidates_created: upserted?.length ?? candidates.length,
     candidates_updated: 0, // Supabase upsert doesn't distinguish create vs update
   });

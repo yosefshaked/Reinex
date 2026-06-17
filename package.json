@@ -10,7 +10,7 @@
   },
   "scripts": {
     "dev": "vite",
-    "build": "npm run lint:api && npm run lint:api-responses:strict-ux && npm run lint:sql && vite build",
+    "build": "npm run lint:api && npm run lint:api-responses:strict-ux && npm run lint:error-tracking && npm run lint:sql && vite build",
     "dep:check": "madge --circular src --ts-config jsconfig.json",
     "check:schema": "node scripts/checkSchema.js",
     "lint": "eslint .",
@@ -20,6 +20,8 @@
     "lint:sql:json": "node scripts/validate-setup-sql.js --format=json",
     "lint:sql:github": "node scripts/validate-setup-sql.js --format=github",
     "lint:upsert-conflicts": "node scripts/validate-upsert-conflicts.js",
+    "lint:error-tracking": "node scripts/validate-error-tracking.js",
+    "lint:error-tracking:strict": "node scripts/validate-error-tracking.js --strict",
     "lint:api-responses": "node scripts/validate-api-response-contracts.js",
     "lint:api-responses:strict-ux": "node scripts/validate-api-response-contracts.js --strict-ux",
     "lint:fix": "eslint . --fix",

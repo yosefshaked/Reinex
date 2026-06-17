@@ -18,7 +18,7 @@ import { authenticatedFetch } from '../../../lib/api-client.js';
  */
 export async function getUploadUrl(workspaceId, filename, contentType) {
   const params = new URLSearchParams({
-    filename: encodeURIComponent(filename),
+    filename,
     contentType,
   });
   const payload = await authenticatedFetch(

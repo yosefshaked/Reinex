@@ -15,9 +15,9 @@
  * Returns: { valid: boolean, issues: string[], warnings: string[] }
  */
 
-import { existsSync, statSync, readdirSync } from 'fs';
+import { existsSync, statSync } from 'fs';
 import { readFile } from 'fs/promises';
-import { join, resolve } from 'path';
+import { join } from 'path';
 
 // ─── Route check ──────────────────────────────────────────────────────────
 
