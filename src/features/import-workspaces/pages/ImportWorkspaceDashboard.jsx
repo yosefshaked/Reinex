@@ -9,7 +9,7 @@ import { Separator } from '@/components/ui/separator';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { ArrowRight, UploadCloud, RefreshCcw, Zap, Loader2, CheckCircle2, AlertCircle, Download, Info } from 'lucide-react';
 
-import { getImportWorkspace, patchWorkspaceConfig, listCandidates, runDryRunChunk, commitChunk } from '../api/importWorkspacesApi.js';
+import { getImportWorkspace, patchWorkspaceConfig, listCandidates, runDryRunChunk, commitChunk, getUploadStatus } from '../api/importWorkspacesApi.js';
 import { useImportFileUpload } from '../hooks/useImportFileUpload.js';
 import { useImportRowIngestion } from '../hooks/useImportRowIngestion.js';
 import { useImportAnalysis } from '../hooks/useImportAnalysis.js';
@@ -76,6 +76,7 @@ function UploadStep({ hook, workspace, onDone, onCreateNew }) {
   const { fileState, uploadState, parseState, parsedRows, selectFile, upload, parse } = hook;
 
   const fileInputRef = useRef(null);
+  const [backupStatus, setBackupStatus] = useState({ status: 'idle', data: null, error: null });
   const config = workspace?.config || {};
   const existingFileName = config.fileName || config.sourceReference || '';
   const hasServerBackup = Boolean(config.objectKey);
@@ -88,6 +89,27 @@ function UploadStep({ hook, workspace, onDone, onCreateNew }) {
   const isParsing   = ['reading', 'parsing', 'saving_profile'].includes(parseState.status);
   const uploadFailedNonblocking = uploadState.status === 'failed_nonblocking';
   const shouldShowExistingParsedFile = hasParsedProfile && !hasCurrentFile;
+  const backupExpiresAt = config.backupExpiresAt ||
+    (config.uploadedAt ? new Date(new Date(config.uploadedAt).getTime() + 30 * 24 * 60 * 60 * 1000).toISOString() : null);
+
+  useEffect(() => {
+    if (!workspace?.id || !config.objectKey) {
+      setBackupStatus({ status: 'idle', data: null, error: null });
+      return;
+    }
+    let cancelled = false;
+    setBackupStatus({ status: 'loading', data: null, error: null });
+    getUploadStatus(workspace.id)
+      .then((data) => {
+        if (!cancelled) setBackupStatus({ status: 'done', data, error: null });
+      })
+      .catch((err) => {
+        if (!cancelled) setBackupStatus({ status: 'error', data: null, error: err });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [workspace?.id, config.objectKey]);
 
   return (
     <div className="space-y-4">
@@ -136,6 +158,32 @@ function UploadStep({ hook, workspace, onDone, onCreateNew }) {
       {hasServerBackup && !hasParsedProfile && !hasCurrentFile && (
         <div className="rounded-lg border bg-muted/40 px-4 py-3 text-sm text-muted-foreground">
           הגיבוי לשרת כבר קיים. כדי לנתח את הנתונים צריך לבחור את הקובץ מהמחשב, בלי להעלות אותו שוב.
+        </div>
+      )}
+
+      {hasServerBackup && (
+        <div className="rounded-lg border bg-background px-4 py-3 text-sm">
+          <p className="font-medium text-foreground">מצב הגיבוי הזמני</p>
+          {backupStatus.status === 'loading' ? (
+            <p className="mt-1 text-muted-foreground">בודק אם קובץ הגיבוי עדיין קיים בשרת…</p>
+          ) : backupStatus.data?.status === 'available' ? (
+            <p className="mt-1 text-emerald-700 dark:text-emerald-300">
+              הגיבוי הזמני עדיין קיים בשרת
+              {backupExpiresAt ? `, והוא צפוי להימחק סביב ${new Date(backupExpiresAt).toLocaleDateString('he-IL')}.` : '.'}
+            </p>
+          ) : backupStatus.data?.status === 'missing_or_expired' ? (
+            <p className="mt-1 text-amber-700 dark:text-amber-300">
+              הגיבוי הזמני נמחק או פג תוקף. אם הקובץ כבר נותח, אפשר להמשיך כרגיל; אם לא, צריך לבחור את הקובץ מהמחשב שוב.
+            </p>
+          ) : backupStatus.status === 'error' ? (
+            <p className="mt-1 text-muted-foreground">
+              לא הצלחנו לבדוק כרגע את מצב הגיבוי. זה לא חוסם את הייבוא, כי הנתונים השמורים נשענים על השורות שכבר נותחו.
+            </p>
+          ) : (
+            <p className="mt-1 text-muted-foreground">
+              הגיבוי הוא זמני בלבד ונמחק אוטומטית לפי מדיניות השרת.
+            </p>
+          )}
         </div>
       )}
 

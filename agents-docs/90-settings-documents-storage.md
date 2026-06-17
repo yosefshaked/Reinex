@@ -30,7 +30,7 @@
 - `fetchSettings`, `fetchSettingsValue`, `fetchSettingsValueWithMeta`, `upsertSettings`, `upsertSetting`
 - `fetchStorageConfiguration`, `saveStorageConfiguration`, `deleteStorageConfiguration`, `reconnectStorageConfiguration`, `testStorageConnection`
 - `useDocuments` for document flows
-- `getStorageDriver` and provider adapters under [`../api/cross-platform/storage-drivers/`](../api/cross-platform/storage-drivers/)
+- `getStorageDriver` and provider adapters under [`../api/cross-platform/storage-drivers/`](../api/cross-platform/storage-drivers/). S3/R2 drivers expose `exists(path)` for cheap server-side object availability checks without downloading the file.
 - Backup helpers in [`../api/_shared/backup-utils.js`](../api/_shared/backup-utils.js)
 - Local export/import helpers in [`../api/_shared/local-export-import.js`](../api/_shared/local-export-import.js); use the explicit table allow-list and import sanitizer rather than ad hoc table iteration.
 - `ensureCapacity`, `computeApproxEntryBytes` in [`../api/_shared/history-quota.js`](../api/_shared/history-quota.js) — call before appending to versioned Settings keys; currently observe-only (logs when quota would be exceeded, never blocks)

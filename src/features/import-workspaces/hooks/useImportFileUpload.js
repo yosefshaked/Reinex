@@ -182,12 +182,15 @@ export function useImportFileUpload(workspaceId, existingSourceReference = null)
     setUploadState({ status: 'saving_metadata', progress: 90, objectKey, error: null });
 
     try {
+      const uploadedAt = new Date();
+      const backupExpiresAt = new Date(uploadedAt.getTime() + 30 * 24 * 60 * 60 * 1000);
       await patchWorkspaceConfig(workspaceId, {
         objectKey,
         fileName: file['name'],
         fileSize: file.size,
         contentType: file.type,
-        uploadedAt: new Date().toISOString(),
+        uploadedAt: uploadedAt.toISOString(),
+        backupExpiresAt: backupExpiresAt.toISOString(),
       });
     } catch (err) {
       // Upload succeeded but metadata patch failed — expose partial state

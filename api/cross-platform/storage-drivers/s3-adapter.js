@@ -6,7 +6,7 @@
  * Uses AWS SDK v3 for S3 operations.
  */
 
-import { S3Client, PutObjectCommand, DeleteObjectCommand, GetObjectCommand, ListObjectsV2Command, DeleteObjectsCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, DeleteObjectCommand, GetObjectCommand, ListObjectsV2Command, DeleteObjectsCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 /**
@@ -157,6 +157,34 @@ export function createS3Driver(config) {
       }
       
       return Buffer.concat(chunks);
+    },
+
+    /**
+     * Check whether a file exists without downloading it.
+     *
+     * @param {string} path - File path within bucket
+     * @returns {Promise<{ exists: boolean, size?: number, lastModified?: string|null }>}
+     */
+    async exists(path) {
+      const command = new HeadObjectCommand({
+        Bucket: bucket,
+        Key: path,
+      });
+
+      try {
+        const response = await s3Client.send(command);
+        return {
+          exists: true,
+          size: response.ContentLength || 0,
+          lastModified: response.LastModified ? new Date(response.LastModified).toISOString() : null,
+        };
+      } catch (error) {
+        const statusCode = error?.$metadata?.httpStatusCode;
+        if (statusCode === 404 || error?.name === 'NotFound' || error?.name === 'NoSuchKey') {
+          return { exists: false };
+        }
+        throw error;
+      }
     },
 
           /**

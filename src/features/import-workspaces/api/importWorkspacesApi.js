@@ -158,6 +158,19 @@ export async function listCandidates(workspaceId, opts = {}) {
 }
 
 /**
+ * Check whether the optional temporary R2 backup file still exists.
+ *
+ * @param {string} workspaceId
+ * @returns {Promise<{ status: 'available'|'missing_or_expired'|'not_uploaded'|'unknown', object_key?: string|null }>}
+ */
+export async function getUploadStatus(workspaceId) {
+  const payload = await authenticatedFetch(
+    `/api/import-workspaces/${encodeURIComponent(workspaceId)}/upload-status`,
+  );
+  return payload;
+}
+
+/**
  * Patch decisions and/or status on an import candidate.
  *
  * @param {string} candidateId

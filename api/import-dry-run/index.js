@@ -338,6 +338,19 @@ async function simulateCandidate(supabase, orgId, candidate) {
     };
   }
 
+  if (decisions?.action === 'link_to_existing' && !decisions?.linked_id) {
+    return {
+      outcome: 'blocked',
+      is_blocked: true,
+      action_description: 'נבחר קישור לרשומה קיימת, אבל לא נבחרה רשומה קיימת במערכת. אם הרשומה עדיין לא קיימת, בחר/י יצירה כרשומה חדשה.',
+      target_table: null,
+      matched_record_id: null,
+      matched_record_summary: null,
+      fields_that_would_change: [],
+      simulated_at: nowIso(),
+    };
+  }
+
   if (!['ready', 'skipped'].includes(status)) {
     return {
       outcome: 'blocked',

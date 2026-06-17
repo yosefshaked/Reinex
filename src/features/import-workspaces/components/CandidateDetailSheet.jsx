@@ -61,6 +61,28 @@ const DRY_RUN_OUTCOME_CLASSES = {
   error:          'bg-destructive/10 text-destructive',
 };
 
+const DECISION_LABELS = {
+  link_to_existing: 'קישור לרשומה קיימת',
+  create_as_new: 'יצירת רשומה חדשה',
+  skip: 'דילוג על השורה',
+};
+
+function describeDecision(decisions) {
+  if (!decisions?.action) return '';
+  if (decisions.action === 'link_to_existing') {
+    return decisions.linked_id
+      ? 'הרשומה הזו תתחבר לאדם שכבר קיים במערכת.'
+      : 'נבחר קישור לרשומה קיימת, אבל עדיין לא נבחרה רשומה קיימת. אם האדם עדיין לא קיים במערכת, צריך לבחור יצירת רשומה חדשה.';
+  }
+  if (decisions.action === 'create_as_new') {
+    return 'הרשומה הזו תיצור אדם חדש במערכת, גם אם נמצא דמיון לפרטים קיימים.';
+  }
+  if (decisions.action === 'skip') {
+    return 'השורה הזו לא תיובא למערכת.';
+  }
+  return '';
+}
+
 function DryRunOutcomeBadge({ outcome }) {
   return (
     <span className={cn(
@@ -269,7 +291,12 @@ export function CandidateDetailSheet({ candidate, workspaceId, open, onClose, on
               <Separator />
               <section>
                 <h3 className="text-sm font-semibold mb-1">החלטה קיימת</h3>
-                <Badge variant="outline">{decisions.action}</Badge>
+                <Badge variant="outline">{DECISION_LABELS[decisions.action] || decisions.action}</Badge>
+                {describeDecision(decisions) && (
+                  <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                    {describeDecision(decisions)}
+                  </p>
+                )}
               </section>
             </>
           )}
@@ -320,6 +347,9 @@ export function CandidateDetailSheet({ candidate, workspaceId, open, onClose, on
                   <Link2 className="h-4 w-4" />
                   קשר לאדם שכבר קיים במערכת
                 </Button>
+                <p className="text-[11px] leading-5 text-muted-foreground">
+                  מתאים רק אם האדם כבר קיים במערכת ואפשר לבחור את הרשומה שלו. בלי בחירת רשומה קיימת, הייבוא יישאר חסום.
+                </p>
 
                 <Button
                   variant="outline"
@@ -330,6 +360,9 @@ export function CandidateDetailSheet({ candidate, workspaceId, open, onClose, on
                   <PlusCircle className="h-4 w-4" />
                   צור אדם חדש למרות הדמיון
                 </Button>
+                <p className="text-[11px] leading-5 text-muted-foreground">
+                  מתאים אם זו לא אותה רשומה קיימת, או אם האדם עדיין לא קיים במערכת.
+                </p>
 
                 <Button
                   variant="ghost"
