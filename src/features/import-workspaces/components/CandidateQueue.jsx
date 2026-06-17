@@ -42,6 +42,7 @@ function CandidateRow({ candidate, onSelect }) {
     candidate.candidate_data?.first_name,
     candidate.candidate_data?.last_name,
   ].filter(Boolean).join(' ')
+    || candidate.candidate_data?.service_name
     || candidate.candidate_data?.name
     || candidate.candidate_data?.note_text?.slice(0, 30)
     || '—';

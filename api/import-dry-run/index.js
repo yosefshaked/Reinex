@@ -172,7 +172,7 @@ async function simulateGuardian(supabase, orgId, candidateData) {
 async function simulateGuardianLink(supabase, orgId, candidateData) {
   // Resolve student side
   const studentIdentity = normalizeString(
-    candidateData?.student_identity_number ?? candidateData?.student_identity,
+    candidateData?.identity_number ?? candidateData?.student_identity_number ?? candidateData?.student_identity,
   );
   const guardianPhone = normalizeString(candidateData?.guardian_phone ?? candidateData?.phone);
 
@@ -259,8 +259,8 @@ async function simulateGuardianLink(supabase, orgId, candidateData) {
 }
 
 async function simulateService(supabase, orgId, candidateData) {
-  const name = normalizeString(candidateData?.name);
-  if (!name) {
+  const serviceName = normalizeString(candidateData?.service_name ?? candidateData?.name);
+  if (!serviceName) {
     return {
       outcome: 'blocked',
       action_description: 'שם שירות חסר',
@@ -287,7 +287,7 @@ async function simulateService(supabase, orgId, candidateData) {
     };
   }
 
-  const normalizedName = name.trim().toLowerCase();
+  const normalizedName = serviceName.trim().toLowerCase();
   const existing = (services || []).find((service) => (
     normalizeString(service?.name).trim().toLowerCase() === normalizedName
   ));

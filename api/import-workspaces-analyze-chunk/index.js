@@ -50,15 +50,15 @@ const ENTITY_SCHEMA = {
     warnings: ['phone', 'email'],
   },
   guardian_link: {
-    blockers: ['student_identity_number', 'guardian_phone'],
+    blockers: ['identity_number', 'guardian_phone'],
     warnings: [],
   },
   service: {
-    blockers: ['name'],
+    blockers: ['service_name'],
     warnings: ['description'],
   },
   student_note: {
-    blockers: ['note_text', 'student_identity_number'],
+    blockers: ['note_text', 'identity_number'],
     warnings: [],
   },
 };
@@ -66,13 +66,12 @@ const ENTITY_SCHEMA = {
 const FIELD_LABELS = {
   first_name: 'שם פרטי',
   last_name: 'שם משפחה',
-  identity_number: 'תעודת זהות',
-  student_identity_number: 'תעודת זהות תלמיד/ה',
+  identity_number: 'תעודת זהות התלמיד',
   guardian_phone: 'טלפון הורה',
   phone: 'טלפון',
   email: 'אימייל',
   date_of_birth: 'תאריך לידה',
-  name: 'שם',
+  service_name: 'שם השירות',
   description: 'תיאור',
   note_text: 'טקסט הערה',
 };
@@ -91,9 +90,13 @@ function issueMessage(issue) {
     case 'invalid_field_format':
       return `${label} בפורמט לא תקין.`;
     case 'duplicate_identity_number':
-      return 'קיימת כבר רשומה עם אותה תעודת זהות. יש לבחור האם לקשר לרשומה קיימת, ליצור כרשומה חדשה, או לדלג.';
+      return 'קיימת כבר רשומה במערכת עם אותה תעודת זהות. אי אפשר ליצור שתי רשומות עם אותו מספר; יש לקשר לרשומה הקיימת, לתקן את המספר, או לדלג.';
+    case 'duplicate_identity_in_file':
+      return 'אותה תעודת זהות מופיעה יותר מפעם אחת בקובץ או במרחב הייבוא. יש לאחד, לתקן או לדלג על הכפילות לפני הייבוא.';
     case 'duplicate_email':
       return 'קיימת כבר רשומה עם אותו אימייל. בדוק/י אם מדובר באותו אדם.';
+    case 'missing_contact_path':
+      return 'לתלמיד/ה פעיל/ה חייב להיות לפחות טלפון או אימייל כדי שלא תיווצר רשומה בלי דרך יצירת קשר.';
     default:
       return issue?.severity === 'blocker'
         ? `${label} חוסם את הייבוא ויש לטפל בו.`
@@ -118,25 +121,57 @@ function applyMappings(rawData, fieldMap) {
   return out;
 }
 
-// Date normalization — handles ISO strings, DD/MM/YYYY, and Excel serials.
+function isValidDateParts(year, month, day) {
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCFullYear() === year
+    && date.getUTCMonth() === month - 1
+    && date.getUTCDate() === day;
+}
+
+function toIsoDate(year, month, day) {
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+// Date normalization — handles ISO strings, DD/MM/YYYY, Date objects, and Excel serials.
 function normalizeDate(raw) {
-  if (raw === null || raw === undefined || raw === '') return null;
+  if (raw === null || raw === undefined || raw === '') {
+    return { provided: false, valid: true, value: null };
+  }
+  if (raw instanceof Date) {
+    if (isNaN(raw.getTime())) return { provided: true, valid: false, value: null };
+    return { provided: true, valid: true, value: raw.toISOString().slice(0, 10) };
+  }
   // Excel serial date (number of days since 1900-01-01 with leap-year bug)
   if (typeof raw === 'number') {
     const date = new Date((raw - 25569) * 86400 * 1000);
-    return isNaN(date.getTime()) ? null : date.toISOString().slice(0, 10);
+    return isNaN(date.getTime())
+      ? { provided: true, valid: false, value: null }
+      : { provided: true, valid: true, value: date.toISOString().slice(0, 10) };
   }
   const str = String(raw).trim();
-  if (!str) return null;
+  if (!str) return { provided: false, valid: true, value: null };
   // DD/MM/YYYY — common format in Israeli spreadsheets
   const ddmmyyyy = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
   if (ddmmyyyy) {
     const [, d, m, y] = ddmmyyyy;
-    const date = new Date(`${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`);
-    return isNaN(date.getTime()) ? null : date.toISOString().slice(0, 10);
+    const day = Number(d);
+    const month = Number(m);
+    const year = Number(y);
+    return isValidDateParts(year, month, day)
+      ? { provided: true, valid: true, value: toIsoDate(year, month, day) }
+      : { provided: true, valid: false, value: null };
   }
-  const parsed = new Date(str);
-  return isNaN(parsed.getTime()) ? null : parsed.toISOString().slice(0, 10);
+  const iso = str.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (iso) {
+    const [, y, m, d] = iso;
+    const year = Number(y);
+    const month = Number(m);
+    const day = Number(d);
+    return isValidDateParts(year, month, day)
+      ? { provided: true, valid: true, value: toIsoDate(year, month, day) }
+      : { provided: true, valid: false, value: null };
+  }
+  return { provided: true, valid: false, value: null };
 }
 
 // Normalize all known candidate fields. Returns { data, fieldIssues } where
@@ -144,6 +179,16 @@ function normalizeDate(raw) {
 function normalizeCandidateData(mapped, entityType) {
   const data = { ...mapped };
   const fieldIssues = [];
+
+  if (!data.identity_number && data.student_identity_number) {
+    data.identity_number = data.student_identity_number;
+  }
+  delete data.student_identity_number;
+
+  if (entityType === 'service' && !data.service_name && data.name) {
+    data.service_name = data.name;
+  }
+  delete data.name;
 
   // Names
   const firstName = coerceOptionalText(data.first_name);
@@ -189,13 +234,17 @@ function normalizeCandidateData(mapped, entityType) {
 
   // Date of birth
   if (data.date_of_birth !== null && data.date_of_birth !== undefined) {
-    data.date_of_birth = normalizeDate(data.date_of_birth);
+    const dateResult = normalizeDate(data.date_of_birth);
+    if (dateResult.provided && !dateResult.valid) {
+      fieldIssues.push({ code: 'invalid_field_format', severity: 'warning', field: 'date_of_birth' });
+    }
+    data.date_of_birth = dateResult.value;
   }
 
   // Service name coercion
-  if (entityType === 'service' && data.name !== null && data.name !== undefined) {
-    const nameResult = coerceOptionalText(data.name);
-    Object.assign(data, { name: nameResult.value });
+  if (entityType === 'service' && data.service_name !== null && data.service_name !== undefined) {
+    const nameResult = coerceOptionalText(data.service_name);
+    Object.assign(data, { service_name: nameResult.value });
   }
 
   return { data, fieldIssues };
@@ -219,6 +268,9 @@ function generateStructuralIssues(candidateData, entityType) {
       issues.push({ code: 'missing_recommended_field', severity: 'warning', field });
     }
   }
+  if (entityType === 'active_student' && !candidateData.phone && !candidateData.email) {
+    issues.push({ code: 'missing_contact_path', severity: 'blocker', field: 'phone' });
+  }
   return issues;
 }
 
@@ -230,7 +282,7 @@ function normalizeUuid(value) {
 
 function hasResolvedDuplicateIdentityDecision(decisions) {
   const action = normalizeString(decisions?.action);
-  if (action === 'create_as_new' || action === 'skip') return true;
+  if (action === 'skip') return true;
   return action === 'link_to_existing' && Boolean(normalizeUuid(decisions?.linked_id));
 }
 
@@ -386,12 +438,19 @@ export default async function importWorkspacesAnalyzeChunk(context, req) {
   const identityNumbers = [...new Set(
     normalized.map((n) => n.candidateData.identity_number).filter(Boolean),
   )];
+  const identityNumberCounts = normalized.reduce((counts, n) => {
+    const identityNumber = n.candidateData.identity_number;
+    if (identityNumber) counts.set(identityNumber, (counts.get(identityNumber) || 0) + 1);
+    return counts;
+  }, new Map());
 
   const emails = [...new Set(
     normalized.map((n) => n.candidateData.email).filter(Boolean),
   )];
 
-  const [duplicateIdResult, duplicateEmailResult] = await Promise.all([
+  const currentRowIdSet = new Set(rowIds);
+
+  const [duplicateIdResult, duplicateEmailResult, importIdentityResult] = await Promise.all([
     identityNumbers.length > 0
       ? withOrgScope(supabase, 'client_profiles', orgId)
           .select('id, identity_number')
@@ -402,7 +461,49 @@ export default async function importWorkspacesAnalyzeChunk(context, req) {
           .select('id, email')
           .in('email', emails)
       : Promise.resolve({ data: [], error: null }),
+    identityNumbers.length > 0
+      ? withOrgScope(supabase, 'import_candidates', orgId)
+          .select('source_row_id, candidate_data, status')
+          .eq('workspace_id', workspaceId)
+          .in('entity_type', ['active_student', 'inactive_student'])
+      : Promise.resolve({ data: [], error: null }),
   ]);
+
+  if (duplicateIdResult.error) {
+    context.log?.error?.('import-workspaces-analyze-chunk: duplicate identity lookup failed', {
+      message: duplicateIdResult.error.message,
+    });
+    return respondAnalyzeError(context, 500, 'failed_to_check_duplicate_identity_numbers', duplicateIdResult.error, {
+      action: 'check_duplicate_identity_numbers',
+    });
+  }
+
+  if (duplicateEmailResult.error) {
+    context.log?.error?.('import-workspaces-analyze-chunk: duplicate email lookup failed', {
+      message: duplicateEmailResult.error.message,
+    });
+    return respondAnalyzeError(context, 500, 'failed_to_check_duplicate_emails', duplicateEmailResult.error, {
+      action: 'check_duplicate_emails',
+    });
+  }
+
+  if (importIdentityResult.error) {
+    context.log?.error?.('import-workspaces-analyze-chunk: import identity lookup failed', {
+      message: importIdentityResult.error.message,
+    });
+    return respondAnalyzeError(context, 500, 'failed_to_check_import_identity_duplicates', importIdentityResult.error, {
+      action: 'check_import_identity_duplicates',
+    });
+  }
+
+  for (const existingCandidate of importIdentityResult.data || []) {
+    if (currentRowIdSet.has(existingCandidate.source_row_id)) continue;
+    if (normalizeString(existingCandidate.status) === 'skipped') continue;
+    const identityNumber = normalizeString(existingCandidate.candidate_data?.identity_number);
+    if (identityNumber && identityNumberCounts.has(identityNumber)) {
+      identityNumberCounts.set(identityNumber, (identityNumberCounts.get(identityNumber) || 0) + 1);
+    }
+  }
 
   // Build lookup maps for O(1) access
   const existingByIdNum = new Map(
@@ -421,6 +522,13 @@ export default async function importWorkspacesAnalyzeChunk(context, req) {
 
     // Duplicate identity number check
     if (candidateData.identity_number) {
+      if ((identityNumberCounts.get(candidateData.identity_number) || 0) > 1) {
+        issues.push({
+          code: 'duplicate_identity_in_file',
+          severity: 'blocker',
+          field: 'identity_number',
+        });
+      }
       const existingId = existingByIdNum.get(candidateData.identity_number);
       if (existingId && !hasResolvedDuplicateDecision) {
         issues.push({

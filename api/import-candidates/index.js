@@ -16,6 +16,14 @@ import {
   withOrgScope,
 } from '../_shared/org-bff.js';
 import { attachErrorTracking, respondTracked } from '../_shared/error-events.js';
+import {
+  validateIsraeliPhone,
+  coerceIdentityNumber,
+  coerceEmail,
+  coerceOptionalText,
+  coerceOptionalDate,
+  coerceBooleanFlag,
+} from '../_shared/student-validation.js';
 
 // Internal (500-level) failures persist an error_events row and return the
 // support code; validation/auth/not-found/conflict stay on plain respond().
@@ -39,6 +47,24 @@ const ALLOWED_ENTITY_TYPES = new Set([
   'guardian_link', 'service', 'student_note',
 ]);
 
+const EDITABLE_FIELDS_BY_ENTITY = {
+  active_student: ['first_name', 'last_name', 'identity_number', 'phone', 'email', 'date_of_birth'],
+  inactive_student: ['first_name', 'last_name', 'identity_number', 'phone', 'email', 'date_of_birth'],
+  guardian: ['first_name', 'last_name', 'phone', 'email'],
+  guardian_link: ['identity_number', 'guardian_phone', 'relationship', 'is_primary'],
+  service: ['service_name', 'description'],
+  student_note: ['note_text', 'identity_number'],
+};
+
+const REQUIRED_FIELDS_BY_ENTITY = {
+  active_student: ['first_name', 'last_name', 'identity_number'],
+  inactive_student: ['first_name', 'last_name', 'identity_number'],
+  guardian: ['first_name', 'last_name'],
+  guardian_link: ['identity_number', 'guardian_phone'],
+  service: ['service_name'],
+  student_note: ['note_text', 'identity_number'],
+};
+
 function normalizeUuid(value) {
   const normalized = normalizeString(value);
   if (!normalized) return '';
@@ -51,7 +77,182 @@ function countBlockingIssues(issues) {
 
 function shouldClearDuplicateIdentityIssue(decisionsPatch) {
   const action = normalizeString(decisionsPatch?.action);
-  return action === 'create_as_new' || action === 'link_to_existing';
+  return action === 'skip' || (action === 'link_to_existing' && Boolean(normalizeUuid(decisionsPatch?.linked_id)));
+}
+
+function hasResolvedDuplicateIdentityDecision(decisions) {
+  const action = normalizeString(decisions?.action);
+  if (action === 'skip') return true;
+  return action === 'link_to_existing' && Boolean(normalizeUuid(decisions?.linked_id));
+}
+
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function issue(code, severity, field, extra = {}) {
+  return {
+    code,
+    severity,
+    field,
+    is_blocking: severity === 'blocker',
+    ...extra,
+  };
+}
+
+function normalizeRelationship(raw) {
+  const value = coerceOptionalText(raw).value;
+  if (!value) return { value: null, valid: true };
+  const normalized = value.trim().toLowerCase();
+  const map = {
+    אבא: 'father',
+    אב: 'father',
+    father: 'father',
+    אמא: 'mother',
+    אם: 'mother',
+    mother: 'mother',
+    עצמי: 'self',
+    self: 'self',
+    מטפל: 'caretaker',
+    caretaker: 'caretaker',
+    אחר: 'other',
+    other: 'other',
+  };
+  if (map[normalized]) return { value: map[normalized], valid: true };
+  return { value: 'other', valid: false };
+}
+
+function normalizeCandidateDataPatch(entityType, existingData, patch) {
+  const editableFields = new Set(EDITABLE_FIELDS_BY_ENTITY[entityType] || []);
+  const nextData = { ...(existingData || {}) };
+  if (!nextData.identity_number && nextData.student_identity_number) {
+    nextData.identity_number = nextData.student_identity_number;
+  }
+  delete nextData.student_identity_number;
+  if (entityType === 'service' && !nextData.service_name && nextData.name) {
+    nextData.service_name = nextData.name;
+  }
+  delete nextData.name;
+  delete nextData.dry_run_summary;
+  const fieldIssues = [];
+  const changedFields = [];
+
+  for (const [field, rawValue] of Object.entries(patch || {})) {
+    if (!editableFields.has(field)) continue;
+
+    let normalizedValue = rawValue;
+    let valid = true;
+    let invalidSeverity = 'warning';
+
+    if (['first_name', 'last_name', 'service_name', 'description', 'note_text'].includes(field)) {
+      const result = coerceOptionalText(rawValue);
+      normalizedValue = result.value;
+      valid = result.valid;
+    } else if (field === 'identity_number') {
+      const result = coerceIdentityNumber(rawValue);
+      normalizedValue = result.valid ? result.value : null;
+      valid = result.valid;
+      invalidSeverity = 'blocker';
+    } else if (['phone', 'guardian_phone'].includes(field)) {
+      const result = validateIsraeliPhone(rawValue);
+      normalizedValue = result.valid ? result.value : null;
+      valid = result.valid;
+    } else if (field === 'email') {
+      const result = coerceEmail(rawValue);
+      normalizedValue = result.valid ? result.value : null;
+      valid = result.valid;
+    } else if (field === 'date_of_birth') {
+      const result = coerceOptionalDate(rawValue);
+      normalizedValue = result.valid ? result.value : null;
+      valid = result.valid;
+    } else if (field === 'is_primary') {
+      const result = coerceBooleanFlag(rawValue, { defaultValue: null, allowUndefined: true });
+      normalizedValue = result.valid ? result.value : null;
+      valid = result.valid;
+    } else if (field === 'relationship') {
+      const result = normalizeRelationship(rawValue);
+      normalizedValue = result.value;
+      valid = result.valid;
+    }
+
+    if (!valid) {
+      fieldIssues.push(issue('invalid_field_format', invalidSeverity, field));
+    }
+
+    const oldValue = nextData[field] ?? null;
+    const newValue = normalizedValue ?? null;
+    if (String(oldValue ?? '') !== String(newValue ?? '')) {
+      changedFields.push({ field, from: oldValue, to: newValue });
+    }
+    nextData[field] = newValue;
+  }
+
+  return { nextData, fieldIssues, changedFields };
+}
+
+function generateStructuralIssues(candidateData, entityType) {
+  const requiredFields = REQUIRED_FIELDS_BY_ENTITY[entityType] || [];
+  const issues = [];
+  for (const field of requiredFields) {
+    const value = candidateData?.[field];
+    if (value === null || value === undefined || value === '') {
+      issues.push(issue('missing_required_field', 'blocker', field));
+    }
+  }
+  if (entityType === 'active_student' && !candidateData?.phone && !candidateData?.email) {
+    issues.push(issue('missing_contact_path', 'blocker', 'phone'));
+  }
+  return issues;
+}
+
+async function generateDuplicateIssues(supabase, orgId, candidateData, decisions, { workspaceId, candidateId } = {}) {
+  const issues = [];
+  const identityNumber = normalizeString(candidateData?.identity_number);
+  const email = normalizeString(candidateData?.email);
+
+  if (identityNumber && !hasResolvedDuplicateIdentityDecision(decisions)) {
+    const { data, error } = await withOrgScope(supabase, 'client_profiles', orgId)
+      .select('id')
+      .eq('identity_number', identityNumber)
+      .maybeSingle();
+    if (error) throw error;
+    if (data?.id) {
+      issues.push(issue('duplicate_identity_number', 'blocker', 'identity_number', {
+        existing_client_profile_id: data.id,
+      }));
+    }
+
+    if (workspaceId) {
+      const { data: importCandidates, error: importError } = await withOrgScope(supabase, 'import_candidates', orgId)
+        .select('id, candidate_data, status')
+        .eq('workspace_id', workspaceId)
+        .in('entity_type', ['active_student', 'inactive_student']);
+      if (importError) throw importError;
+      const hasImportDuplicate = (importCandidates || []).some((candidate) => (
+        candidate.id !== candidateId
+        && normalizeString(candidate.status) !== 'skipped'
+        && normalizeString(candidate.candidate_data?.identity_number) === identityNumber
+      ));
+      if (hasImportDuplicate) {
+        issues.push(issue('duplicate_identity_in_file', 'blocker', 'identity_number'));
+      }
+    }
+  }
+
+  if (email) {
+    const { data, error } = await withOrgScope(supabase, 'client_profiles', orgId)
+      .select('id')
+      .eq('email', email)
+      .maybeSingle();
+    if (error) throw error;
+    if (data?.id) {
+      issues.push(issue('duplicate_email', 'warning', 'email', {
+        existing_client_profile_id: data.id,
+      }));
+    }
+  }
+
+  return issues;
 }
 
 export default async function importCandidates(context, req) {
@@ -166,9 +367,9 @@ export default async function importCandidates(context, req) {
       return respond(context, 400, { message: 'candidate_id_required' });
     }
 
-    // Fetch existing record first so we can merge decisions
+    // Fetch existing record first so we can merge decisions and preserve provenance.
     const { data: existing, error: fetchErr } = await withOrgScope(supabase, 'import_candidates', orgId)
-      .select('id, decisions, status, issues')
+      .select('id, workspace_id, source_row_id, entity_type, candidate_data, decisions, status, issues')
       .eq('id', candidateId)
       .single();
 
@@ -177,16 +378,95 @@ export default async function importCandidates(context, req) {
     }
 
     const updates = {};
+    let nextDecisions = existing.decisions && typeof existing.decisions === 'object'
+      ? { ...existing.decisions }
+      : {};
 
     // Merge decision patch into existing decisions (non-destructive)
     if (body?.decisions_patch && typeof body.decisions_patch === 'object') {
-      updates.decisions = { ...(existing.decisions || {}), ...body.decisions_patch };
+      nextDecisions = { ...nextDecisions, ...body.decisions_patch };
+      updates.decisions = nextDecisions;
       if (shouldClearDuplicateIdentityIssue(body.decisions_patch)) {
         const filteredIssues = (Array.isArray(existing.issues) ? existing.issues : [])
           .filter((issue) => issue?.code !== 'duplicate_identity_number');
         updates.issues = filteredIssues;
         updates.blocking_issues_count = countBlockingIssues(filteredIssues);
       }
+    }
+
+    if (body?.candidate_data_patch !== undefined) {
+      if (!isPlainObject(body.candidate_data_patch)) {
+        return respond(context, 400, { message: 'candidate_data_patch_must_be_object' });
+      }
+      if (existing.status === 'committed') {
+        return respond(context, 409, { message: 'candidate_already_committed' });
+      }
+
+      const { data: workspace, error: workspaceError } = await withOrgScope(supabase, 'import_workspaces', orgId)
+        .select('id, config')
+        .eq('id', existing.workspace_id)
+        .maybeSingle();
+      if (workspaceError || !workspace) {
+        context.log?.error?.('import-candidates: workspace fetch for edit failed', { message: workspaceError?.message });
+        return respondCandidatesError(context, 500, 'failed_to_load_workspace', workspaceError || new Error('workspace_not_found'), {
+          action: 'load_workspace_for_candidate_edit',
+          candidateId,
+        });
+      }
+
+      const { nextData, fieldIssues, changedFields } = normalizeCandidateDataPatch(
+        existing.entity_type,
+        existing.candidate_data || {},
+        body.candidate_data_patch,
+      );
+
+      if (changedFields.length > 0) {
+        const fieldMap = workspace.config?.mappings?.field_map || {};
+        const now = new Date().toISOString();
+        const existingChanges = isPlainObject(nextDecisions.field_changes)
+          ? { ...nextDecisions.field_changes }
+          : {};
+        for (const change of changedFields) {
+          existingChanges[change.field] = {
+            from: change.from,
+            to: change.to,
+            source_row_id: existing.source_row_id,
+            source_column: fieldMap[change.field] || null,
+            updated_at: now,
+            updated_by: userId,
+          };
+        }
+        nextDecisions = {
+          ...nextDecisions,
+          field_changes: existingChanges,
+        };
+      }
+
+      let duplicateIssues = [];
+      try {
+        duplicateIssues = await generateDuplicateIssues(supabase, orgId, nextData, nextDecisions, {
+          workspaceId: existing.workspace_id,
+          candidateId: existing.id,
+        });
+      } catch (err) {
+        context.log?.error?.('import-candidates: duplicate validation after edit failed', { message: err?.message });
+        return respondCandidatesError(context, 500, 'failed_to_validate_candidate_edit', err, {
+          action: 'validate_candidate_edit',
+          candidateId,
+        });
+      }
+
+      const nextIssues = [
+        ...fieldIssues,
+        ...generateStructuralIssues(nextData, existing.entity_type),
+        ...duplicateIssues,
+      ];
+      const blockingCount = countBlockingIssues(nextIssues);
+      updates.candidate_data = nextData;
+      updates.decisions = nextDecisions;
+      updates.issues = nextIssues;
+      updates.blocking_issues_count = blockingCount;
+      updates.status = blockingCount > 0 ? 'blocked' : 'ready';
     }
 
     // Status update — validate against allowed values
@@ -198,7 +478,16 @@ export default async function importCandidates(context, req) {
       if (!PATCH_ALLOWED_CANDIDATE_STATUSES.has(newStatus)) {
         return respond(context, 400, { message: 'status_not_allowed' });
       }
-      updates.status = newStatus;
+      if (newStatus === 'ready') {
+        const effectiveIssues = updates.issues || existing.issues || [];
+        if (countBlockingIssues(effectiveIssues) > 0) {
+          updates.status = 'blocked';
+        } else {
+          updates.status = newStatus;
+        }
+      } else {
+        updates.status = newStatus;
+      }
     }
 
     if (Object.keys(updates).length === 0) {

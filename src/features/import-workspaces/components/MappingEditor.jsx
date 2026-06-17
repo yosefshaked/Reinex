@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
@@ -10,7 +10,7 @@ const TARGET_FIELDS_BY_ENTITY = {
   active_student: [
     { value: 'first_name',       label: 'שם פרטי',        required: true },
     { value: 'last_name',        label: 'שם משפחה',       required: true },
-    { value: 'identity_number',  label: 'תעודת זהות',      required: true },
+    { value: 'identity_number',  label: 'תעודת זהות התלמיד', required: true },
     { value: 'phone',            label: 'טלפון',           required: false },
     { value: 'email',            label: 'אימייל',          required: false },
     { value: 'date_of_birth',    label: 'תאריך לידה',      required: false },
@@ -18,7 +18,7 @@ const TARGET_FIELDS_BY_ENTITY = {
   inactive_student: [
     { value: 'first_name',       label: 'שם פרטי',        required: true },
     { value: 'last_name',        label: 'שם משפחה',       required: true },
-    { value: 'identity_number',  label: 'תעודת זהות',      required: true },
+    { value: 'identity_number',  label: 'תעודת זהות התלמיד', required: true },
     { value: 'phone',            label: 'טלפון',           required: false },
     { value: 'email',            label: 'אימייל',          required: false },
     { value: 'date_of_birth',    label: 'תאריך לידה',      required: false },
@@ -28,21 +28,20 @@ const TARGET_FIELDS_BY_ENTITY = {
     { value: 'last_name',               label: 'שם משפחה',      required: true },
     { value: 'phone',                   label: 'טלפון',          required: false },
     { value: 'email',                   label: 'אימייל',         required: false },
-    { value: 'student_identity_number', label: 'ת.ז. תלמיד/ה', required: false },
   ],
   guardian_link: [
-    { value: 'student_identity_number', label: 'ת.ז. תלמיד/ה', required: true },
+    { value: 'identity_number',         label: 'תעודת זהות התלמיד', required: true },
     { value: 'guardian_phone',           label: 'טלפון הורה',   required: true },
     { value: 'relationship',             label: 'קרבה',          required: false },
     { value: 'is_primary',               label: 'הורה ראשי',     required: false },
   ],
   service: [
-    { value: 'name',        label: 'שם השירות',   required: true },
+    { value: 'service_name', label: 'שם השירות',   required: true },
     { value: 'description', label: 'תיאור',        required: false },
   ],
   student_note: [
     { value: 'note_text',            label: 'טקסט הערה',    required: true },
-    { value: 'student_identity_number', label: 'ת.ז. תלמיד/ה', required: true },
+    { value: 'identity_number',      label: 'תעודת זהות התלמיד', required: true },
   ],
 };
 
@@ -55,7 +54,29 @@ const ENTITY_TYPE_LABELS = {
   student_note:     'הערה',
 };
 
+const ENTITY_TYPE_ORDER = [
+  'active_student',
+  'inactive_student',
+  'guardian',
+  'guardian_link',
+  'service',
+  'student_note',
+];
+
 const SKIP_VALUE = '__skip__';
+
+function normalizeFieldMapForEntity(entityType, fieldMap = {}) {
+  const next = { ...fieldMap };
+  if ((entityType === 'guardian_link' || entityType === 'student_note') && !next.identity_number && next.student_identity_number) {
+    next.identity_number = next.student_identity_number;
+  }
+  if (entityType === 'service' && !next.service_name && next.name) {
+    next.service_name = next.name;
+  }
+  delete next.student_identity_number;
+  delete next.name;
+  return next;
+}
 
 /**
  * @param {{
@@ -78,12 +99,17 @@ export function MappingEditor({
   saving = false,
 }) {
   // fieldMap: targetField -> sourceColumn
-  const [fieldMap, setFieldMap] = useState(() => initialFieldMap);
+  const [fieldMap, setFieldMap] = useState(() => normalizeFieldMapForEntity(entityType, initialFieldMap));
+  const initialFieldMapSignature = JSON.stringify(initialFieldMap || {});
 
   const targetFields = useMemo(
     () => TARGET_FIELDS_BY_ENTITY[entityType] || [],
     [entityType],
   );
+
+  useEffect(() => {
+    setFieldMap(normalizeFieldMapForEntity(entityType, JSON.parse(initialFieldMapSignature)));
+  }, [entityType, initialFieldMapSignature]);
 
   function handleFieldMapping(targetField, sourceColumn) {
     setFieldMap(prev => {
@@ -98,7 +124,13 @@ export function MappingEditor({
   }
 
   function handleSave() {
-    onSave?.(fieldMap);
+    const canonicalFieldMap = {};
+    for (const field of targetFields) {
+      if (fieldMap[field.value]) {
+        canonicalFieldMap[field.value] = fieldMap[field.value];
+      }
+    }
+    onSave?.(canonicalFieldMap);
   }
 
   const requiredMappedCount = targetFields
@@ -111,21 +143,31 @@ export function MappingEditor({
   return (
     <div className="space-y-4">
       {/* Entity type selector */}
-      <div className="flex items-center gap-3 flex-wrap">
-        <span className="text-sm font-medium text-muted-foreground">סוג ישות:</span>
-        <Select value={entityType} onValueChange={onEntityTypeChange} dir="rtl">
-          <SelectTrigger className="w-44">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {Object.entries(ENTITY_TYPE_LABELS).map(([k, v]) => (
-              <SelectItem key={k} value={k}>{v}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <span className="text-xs text-muted-foreground me-auto">
-          {requiredMappedCount}/{requiredTotal} שדות חובה ממופים
-        </span>
+      <div className="space-y-2">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <span className="text-sm font-medium">איזה חלק בקובץ ממפים עכשיו?</span>
+            <p className="text-xs text-muted-foreground mt-1">
+              תעודת זהות התלמיד היא אותו שדה בכל החלקים: אצל תלמיד זו הזהות שלו, ובקישור הורה או הערה היא אומרת לאיזה תלמיד לחבר את המידע.
+            </p>
+          </div>
+          <span className="text-xs text-muted-foreground">
+            {requiredMappedCount}/{requiredTotal} שדות חובה ממופים
+          </span>
+        </div>
+        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+          {ENTITY_TYPE_ORDER.map((type) => (
+            <Button
+              key={type}
+              type="button"
+              variant={entityType === type ? 'default' : 'outline'}
+              className="justify-start h-auto py-2 text-start"
+              onClick={() => onEntityTypeChange?.(type)}
+            >
+              {ENTITY_TYPE_LABELS[type]}
+            </Button>
+          ))}
+        </div>
       </div>
 
       {/* Mapping table */}

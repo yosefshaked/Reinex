@@ -566,7 +566,9 @@ export default function ImportWorkspaceDashboard() {
     const header = ['entity_type', 'status', 'source_name', 'blocking_issues_count', 'issues'].join(',');
     const rows = problematic.map(c => {
       const name = [c.candidate_data?.first_name, c.candidate_data?.last_name].filter(Boolean).join(' ')
-        || c.candidate_data?.name || '';
+        || c.candidate_data?.service_name
+        || c.candidate_data?.name
+        || '';
       return [
         escape(c.entity_type),
         escape(c.status),

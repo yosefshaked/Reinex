@@ -152,6 +152,21 @@ export default async function importCommitChunk(context, req) {
     if (msg.includes('candidate_has_blockers')) {
       return respond(context, 409, { message: 'candidate_has_blockers' });
     }
+    if (msg.includes('candidate_duplicate_identity_number')) {
+      return respond(context, 409, { message: 'duplicate_identity_number' });
+    }
+    if (msg.includes('active_student_missing_identity')) {
+      return respond(context, 422, { message: 'active_student_missing_identity' });
+    }
+    if (msg.includes('active_student_missing_first_name')) {
+      return respond(context, 422, { message: 'active_student_missing_first_name' });
+    }
+    if (msg.includes('active_student_missing_last_name')) {
+      return respond(context, 422, { message: 'active_student_missing_last_name' });
+    }
+    if (msg.includes('active_student_missing_contact_path')) {
+      return respond(context, 422, { message: 'active_student_missing_contact_path' });
+    }
     if (msg.includes('inactive_student_missing_identity')) {
       return respond(context, 422, { message: 'inactive_student_missing_identity' });
     }

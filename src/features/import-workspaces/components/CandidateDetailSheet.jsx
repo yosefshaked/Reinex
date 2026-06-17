@@ -3,6 +3,9 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
 import { AlertCircle, AlertTriangle, Link2, PlusCircle, XCircle, Zap } from 'lucide-react';
 import { patchCandidate, runDryRunChunk } from '../api/importWorkspacesApi.js';
@@ -10,15 +13,15 @@ import { patchCandidate, runDryRunChunk } from '../api/importWorkspacesApi.js';
 const FIELD_LABELS = {
   first_name:               'שם פרטי',
   last_name:                'שם משפחה',
-  identity_number:          'תעודת זהות',
+  identity_number:          'תעודת זהות התלמיד',
   phone:                    'טלפון',
   guardian_phone:           'טלפון הורה',
   email:                    'אימייל',
   date_of_birth:            'תאריך לידה',
-  student_identity_number:  'ת.ז. תלמיד/ה',
   guardian_identity_number: 'ת.ז. הורה',
   note_text:                'טקסט הערה',
-  name:                     'שם',
+  service_name:             'שם השירות',
+  name:                     'שם השירות',
   description:              'תיאור',
 };
 
@@ -26,8 +29,10 @@ const ISSUE_MESSAGES = {
   missing_required_field: 'שדה חובה חסר.',
   missing_recommended_field: 'שדה מומלץ חסר.',
   invalid_field_format: 'פורמט השדה לא תקין.',
-  duplicate_identity_number: 'קיימת כבר רשומה עם אותה תעודת זהות. יש לבחור איך לטפל בכפילות.',
+  duplicate_identity_number: 'קיימת כבר רשומה במערכת עם אותה תעודת זהות. אי אפשר ליצור שתי רשומות עם אותו מספר; יש לקשר לרשומה הקיימת, לתקן את המספר, או לדלג.',
+  duplicate_identity_in_file: 'אותה תעודת זהות מופיעה יותר מפעם אחת בקובץ או במרחב הייבוא. יש לתקן או לדלג על הכפילות.',
   duplicate_email: 'קיימת כבר רשומה עם אותו אימייל. מומלץ לבדוק אם זו אותה רשומה.',
+  missing_contact_path: 'לתלמיד/ה פעיל/ה חייב להיות לפחות טלפון או אימייל כדי שלא תיווצר רשומה בלי דרך יצירת קשר.',
 };
 
 const ENTITY_LABELS = {
@@ -38,6 +43,17 @@ const ENTITY_LABELS = {
   service:          'שירות',
   student_note:     'הערה',
 };
+
+const EDITABLE_FIELDS_BY_ENTITY = {
+  active_student: ['first_name', 'last_name', 'identity_number', 'phone', 'email', 'date_of_birth'],
+  inactive_student: ['first_name', 'last_name', 'identity_number', 'phone', 'email', 'date_of_birth'],
+  guardian: ['first_name', 'last_name', 'phone', 'email'],
+  guardian_link: ['identity_number', 'guardian_phone', 'relationship', 'is_primary'],
+  service: ['service_name', 'description'],
+  student_note: ['note_text', 'identity_number'],
+};
+
+const MULTILINE_FIELDS = new Set(['description', 'note_text']);
 
 const DRY_RUN_OUTCOME_LABELS = {
   create:         'יצירה חדשה',
@@ -75,12 +91,36 @@ function describeDecision(decisions) {
       : 'נבחר קישור לרשומה קיימת, אבל עדיין לא נבחרה רשומה קיימת. אם האדם עדיין לא קיים במערכת, צריך לבחור יצירת רשומה חדשה.';
   }
   if (decisions.action === 'create_as_new') {
-    return 'הרשומה הזו תיצור אדם חדש במערכת, גם אם נמצא דמיון לפרטים קיימים.';
+    return 'הרשומה הזו תיצור אדם חדש רק אם אין חסימה כמו תעודת זהות שכבר קיימת. במקרה כזה צריך לתקן את המספר, לקשר לרשומה קיימת או לדלג.';
   }
   if (decisions.action === 'skip') {
     return 'השורה הזו לא תיובא למערכת.';
   }
   return '';
+}
+
+function getEditableFields(entityType, candidateData) {
+  const canonical = EDITABLE_FIELDS_BY_ENTITY[entityType] || [];
+  const extra = Object.keys(candidateData || {})
+    .filter((field) => !['dry_run_summary', 'student_identity_number', 'name'].includes(field) && !canonical.includes(field));
+  return [...canonical, ...extra];
+}
+
+function valueToInputValue(value) {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'boolean') return value;
+  return String(value);
+}
+
+function canonicalizeCandidateData(candidateData = {}) {
+  const data = {
+    ...candidateData,
+    identity_number: candidateData.identity_number || candidateData.student_identity_number,
+    service_name: candidateData.service_name || candidateData.name,
+  };
+  delete data.student_identity_number;
+  delete data.name;
+  return data;
 }
 
 function DryRunOutcomeBadge({ outcome }) {
@@ -139,19 +179,29 @@ export function CandidateDetailSheet({ candidate, workspaceId, open, onClose, on
   const [dryRunSummary, setDryRunSummary] = useState(null);
   const [runningDryRun, setRunningDryRun] = useState(false);
   const [dryRunError, setDryRunError] = useState(null);
+  const [editValues, setEditValues] = useState({});
+  const [savingEdits, setSavingEdits] = useState(false);
 
   // Sync dry-run summary with the candidate prop (resets when a different candidate is opened).
   useEffect(() => {
     setDryRunSummary(candidate?.candidate_data?.dry_run_summary ?? null);
     setDryRunError(null);
+    const data = canonicalizeCandidateData(candidate?.candidate_data || {});
+    const fields = getEditableFields(candidate?.entity_type, data);
+    setEditValues(Object.fromEntries(fields.map((field) => [field, valueToInputValue(data[field])])));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [candidate?.id]);
 
   if (!candidate) return null;
 
-  const { candidate_data = {}, issues = [], entity_type, status, decisions = {} } = candidate;
+  const candidate_data = canonicalizeCandidateData(candidate.candidate_data || {});
+  const { issues = [], entity_type, status, decisions = {} } = candidate;
   const blockers = issues.filter(i => i.severity === 'blocker');
   const warnings = issues.filter(i => i.severity === 'warning');
+  const editableFields = getEditableFields(entity_type, candidate_data);
+  const fieldChanges = decisions.field_changes && typeof decisions.field_changes === 'object'
+    ? decisions.field_changes
+    : {};
 
   async function applyDecision(decisionsPatch, newStatus) {
     setSaving(true);
@@ -184,6 +234,42 @@ export function CandidateDetailSheet({ candidate, workspaceId, open, onClose, on
     applyDecision({ action: 'skip' }, 'skipped');
   }
 
+  function handleEditValueChange(field, value) {
+    setEditValues((prev) => ({ ...prev, [field]: value }));
+  }
+
+  async function handleSaveEdits() {
+    const patch = {};
+    for (const field of editableFields) {
+      const currentValue = candidate_data[field];
+      const nextValue = editValues[field];
+      const normalizedNextForCompare = typeof nextValue === 'boolean' ? nextValue : String(nextValue ?? '').trim();
+      const normalizedCurrentForCompare = typeof currentValue === 'boolean' ? currentValue : String(currentValue ?? '').trim();
+      if (normalizedNextForCompare !== normalizedCurrentForCompare) {
+        patch[field] = nextValue === '' ? null : nextValue;
+      }
+    }
+
+    if (Object.keys(patch).length === 0) {
+      setSaveError('לא נמצאו שינויים לשמירה');
+      return;
+    }
+
+    setSavingEdits(true);
+    setSaveError(null);
+    try {
+      const result = await patchCandidate(candidate.id, {
+        candidate_data_patch: patch,
+      });
+      onDecisionSaved?.(result.candidate);
+      onClose();
+    } catch (err) {
+      setSaveError(err.message || 'שגיאה בשמירת הפרטים');
+    } finally {
+      setSavingEdits(false);
+    }
+  }
+
   async function handleRunDryRun() {
     if (!workspaceId) return;
     setRunningDryRun(true);
@@ -214,7 +300,7 @@ export function CandidateDetailSheet({ candidate, workspaceId, open, onClose, on
         <SheetHeader>
           <SheetTitle>
             {[candidate_data.first_name, candidate_data.last_name].filter(Boolean).join(' ')
-              || candidate_data.name
+              || candidate_data.service_name
               || 'רשומה'}
           </SheetTitle>
           <SheetDescription>
@@ -231,13 +317,87 @@ export function CandidateDetailSheet({ candidate, workspaceId, open, onClose, on
                 if (!v) return null;
                 return (
                   <div key={k}>
-                    <dt className="text-xs text-muted-foreground">{FIELD_LABELS[k] || k}</dt>
+                    <dt className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                      <span>{FIELD_LABELS[k] || k}</span>
+                      {fieldChanges[k] ? (
+                        <Badge variant="secondary" className="px-1.5 py-0 text-[10px]">נערך ידנית</Badge>
+                      ) : null}
+                    </dt>
                     <dd className="font-medium">{String(v)}</dd>
+                    {fieldChanges[k]?.from !== undefined && (
+                      <dd className="mt-0.5 text-[11px] text-muted-foreground">
+                        ערך קודם: {String(fieldChanges[k].from ?? 'ריק')}
+                      </dd>
+                    )}
                   </div>
                 );
               })}
             </dl>
           </section>
+
+          {status !== 'committed' && (
+            <>
+              <Separator />
+              <section className="space-y-3">
+                <div>
+                  <h3 className="text-sm font-semibold">עריכת פרטים לפני ייבוא</h3>
+                  <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                    השדות כאן הם הנתונים שיועברו למערכת. שינוי נשמר רק ברשומת הייבוא ומסומן כעריכה ידנית.
+                  </p>
+                </div>
+                <div className="grid gap-3">
+                  {editableFields.map((field) => (
+                    <div key={field} className="space-y-1.5">
+                      <Label htmlFor={`candidate-edit-${candidate.id}-${field}`} className="text-xs">
+                        {FIELD_LABELS[field] || field}
+                        {fieldChanges[field] ? (
+                          <span className="ms-2 text-[11px] font-normal text-muted-foreground">
+                            נערך ידנית
+                          </span>
+                        ) : null}
+                      </Label>
+                      {field === 'is_primary' ? (
+                        <label className="flex items-center gap-2 rounded-md border px-3 py-2 text-sm">
+                          <input
+                            id={`candidate-edit-${candidate.id}-${field}`}
+                            type="checkbox"
+                            checked={Boolean(editValues[field])}
+                            onChange={(event) => handleEditValueChange(field, event.target.checked)}
+                            disabled={savingEdits || saving}
+                          />
+                          הורה ראשי
+                        </label>
+                      ) : MULTILINE_FIELDS.has(field) ? (
+                        <Textarea
+                          id={`candidate-edit-${candidate.id}-${field}`}
+                          value={editValues[field] ?? ''}
+                          onChange={(event) => handleEditValueChange(field, event.target.value)}
+                          disabled={savingEdits || saving}
+                          rows={3}
+                        />
+                      ) : (
+                        <Input
+                          id={`candidate-edit-${candidate.id}-${field}`}
+                          type={field === 'date_of_birth' ? 'date' : 'text'}
+                          value={editValues[field] ?? ''}
+                          onChange={(event) => handleEditValueChange(field, event.target.value)}
+                          disabled={savingEdits || saving}
+                        />
+                      )}
+                    </div>
+                  ))}
+                </div>
+                <Button
+                  variant="outline"
+                  className="w-full"
+                  onClick={handleSaveEdits}
+                  disabled={savingEdits || saving}
+                >
+                  {savingEdits ? 'שומר פרטים…' : 'שמור ובדוק מחדש'}
+                </Button>
+              </section>
+            </>
+          )}
 
           {/* Dry-run simulation result */}
           {dryRunSummary && (
@@ -358,7 +518,7 @@ export function CandidateDetailSheet({ candidate, workspaceId, open, onClose, on
                   disabled={saving}
                 >
                   <PlusCircle className="h-4 w-4" />
-                  צור אדם חדש למרות הדמיון
+                  צור אדם חדש אפילו אם זוהה כקיים
                 </Button>
                 <p className="text-[11px] leading-5 text-muted-foreground">
                   מתאים אם זו לא אותה רשומה קיימת, או אם האדם עדיין לא קיים במערכת.

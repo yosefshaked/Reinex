@@ -6683,6 +6683,46 @@ BEGIN
           USING ERRCODE = 'P0002';
       END IF;
 
+      IF v_candidate.entity_type = 'active_student' THEN
+        IF v_candidate.candidate_data->>'identity_number' IS NULL
+            OR trim(v_candidate.candidate_data->>'identity_number') = '' THEN
+          RAISE EXCEPTION 'active_student_missing_identity: %', v_candidate.id
+            USING ERRCODE = 'P0002';
+        END IF;
+        IF v_candidate.candidate_data->>'first_name' IS NULL
+            OR trim(v_candidate.candidate_data->>'first_name') = '' THEN
+          RAISE EXCEPTION 'active_student_missing_first_name: %', v_candidate.id
+            USING ERRCODE = 'P0002';
+        END IF;
+        IF v_candidate.candidate_data->>'last_name' IS NULL
+            OR trim(v_candidate.candidate_data->>'last_name') = '' THEN
+          RAISE EXCEPTION 'active_student_missing_last_name: %', v_candidate.id
+            USING ERRCODE = 'P0002';
+        END IF;
+        IF (v_candidate.candidate_data->>'phone' IS NULL
+              OR trim(v_candidate.candidate_data->>'phone') = '')
+            AND (v_candidate.candidate_data->>'email' IS NULL
+              OR trim(v_candidate.candidate_data->>'email') = '') THEN
+          RAISE EXCEPTION 'active_student_missing_contact_path: %', v_candidate.id
+            USING ERRCODE = 'P0002';
+        END IF;
+      END IF;
+
+      IF v_candidate.entity_type IN ('active_student', 'inactive_student')
+          AND v_candidate.decisions IS NOT NULL
+          AND v_candidate.decisions->>'action' = 'create_as_new'
+          AND v_candidate.candidate_data->>'identity_number' IS NOT NULL
+          AND trim(v_candidate.candidate_data->>'identity_number') <> '' THEN
+        PERFORM 1
+          FROM public.client_profiles
+          WHERE org_id = p_org_id
+            AND identity_number = trim(v_candidate.candidate_data->>'identity_number');
+        IF FOUND THEN
+          RAISE EXCEPTION 'candidate_duplicate_identity_number: %', v_candidate.id
+            USING ERRCODE = 'P0002';
+        END IF;
+      END IF;
+
       -- Invariant: inactive_student must carry identity + at least one name
       IF v_candidate.entity_type = 'inactive_student' THEN
         IF v_candidate.candidate_data->>'identity_number' IS NULL
@@ -6792,7 +6832,7 @@ BEGIN
           p_org_id,
           CASE WHEN v_first_name = '' THEN 'לא ידוע' ELSE v_first_name END,
           CASE WHEN v_last_name  = '' THEN 'לא ידוע' ELSE v_last_name  END,
-          NULL,
+          CASE WHEN v_identity   = '' THEN NULL       ELSE v_identity   END,
           CASE WHEN v_phone      = '' THEN NULL       ELSE v_phone      END,
           CASE WHEN v_email      = '' THEN NULL       ELSE v_email      END,
           v_candidate.entity_type <> 'inactive_student',
@@ -6934,6 +6974,7 @@ BEGIN
     -- ── GUARDIAN LINK ────────────────────────────────────────────────────────
     IF v_candidate.entity_type = 'guardian_link' THEN
       v_identity := trim(coalesce(
+        v_candidate_data->>'identity_number',
         v_candidate_data->>'student_identity_number',
         v_candidate_data->>'student_identity',
         ''
@@ -7021,7 +7062,11 @@ BEGIN
       SELECT id INTO v_service_id
         FROM public."Services"
         WHERE org_id = p_org_id
-          AND lower(trim(coalesce(name, ''))) = lower(trim(coalesce(v_candidate_data->>'name', '')))
+          AND lower(trim(coalesce(name, ''))) = lower(trim(coalesce(
+            v_candidate_data->>'service_name',
+            v_candidate_data->>'name',
+            ''
+          )))
         LIMIT 1;
 
       IF v_service_id IS NOT NULL THEN
@@ -7031,7 +7076,11 @@ BEGIN
         INSERT INTO public."Services" (org_id, name, is_active, metadata)
           VALUES (
             p_org_id,
-            trim(coalesce(v_candidate_data->>'name', '')),
+            trim(coalesce(
+              v_candidate_data->>'service_name',
+              v_candidate_data->>'name',
+              ''
+            )),
             true,
             jsonb_build_object('import', v_import_provenance)
           )
@@ -7053,8 +7102,8 @@ BEGIN
     -- ── STUDENT NOTE ─────────────────────────────────────────────────────────
     IF v_candidate.entity_type = 'student_note' THEN
       v_identity := trim(coalesce(
-        v_candidate_data->>'student_identity_number',
         v_candidate_data->>'identity_number',
+        v_candidate_data->>'student_identity_number',
         ''
       ));
       v_student_id := NULL;
