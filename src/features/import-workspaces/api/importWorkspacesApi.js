@@ -144,13 +144,14 @@ export async function analyzeChunk(workspaceId, sourceReference, rowIndexFrom, r
  * List import_candidates for a workspace with optional filters.
  *
  * @param {string} workspaceId
- * @param {{ entityType?: string, status?: string, page?: number }} opts
+ * @param {{ entityType?: string, status?: string, page?: number, sourceReference?: string }} opts
  * @returns {Promise<{ candidates: object[], total: number, page: number, pageSize: number }>}
  */
 export async function listCandidates(workspaceId, opts = {}) {
   const params = new URLSearchParams({ workspace_id: workspaceId });
   if (opts.entityType) params.set('entity_type', opts.entityType);
   if (opts.status) params.set('status', opts.status);
+  if (opts.sourceReference) params.set('source_reference', opts.sourceReference);
   if (opts.page) params.set('page', String(opts.page));
 
   return authenticatedFetch(`/api/import-candidates?${params}`);

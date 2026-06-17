@@ -6,7 +6,8 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Separator } from '@/components/ui/separator';
-import { ArrowRight, UploadCloud, RefreshCcw, Zap, Loader2, CheckCircle2, AlertCircle, Download } from 'lucide-react';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { ArrowRight, UploadCloud, RefreshCcw, Zap, Loader2, CheckCircle2, AlertCircle, Download, Info } from 'lucide-react';
 
 import { getImportWorkspace, patchWorkspaceConfig, listCandidates, runDryRunChunk, commitChunk } from '../api/importWorkspacesApi.js';
 import { useImportFileUpload } from '../hooks/useImportFileUpload.js';
@@ -71,24 +72,75 @@ function deriveCurrentStep(ws, ingestionStatus, analysisStatus) {
 }
 
 // ── Upload Step ────────────────────────────────────────────────────────────
-function UploadStep({ hook, onDone }) {
+function UploadStep({ hook, workspace, onDone, onCreateNew }) {
   const { fileState, uploadState, parseState, parsedRows, selectFile, upload, parse } = hook;
 
   const fileInputRef = useRef(null);
+  const config = workspace?.config || {};
+  const existingFileName = config.fileName || config.sourceReference || '';
+  const hasServerBackup = Boolean(config.objectKey);
+  const hasParsedProfile = Boolean(config.sourceReference && (config.profile?.headers?.length || config.headers?.length));
+  const hasCurrentFile = Boolean(fileState.file);
 
-  const isUploaded  = uploadState.status === 'done';
-  const isParsed    = parseState.status === 'done' && parsedRows !== null;
+  const isUploaded  = uploadState.status === 'done' || hasServerBackup;
+  const isParsed    = (parseState.status === 'done' && parsedRows !== null) || hasParsedProfile;
   const isUploading = ['requesting_url', 'uploading', 'saving_metadata'].includes(uploadState.status);
   const isParsing   = ['reading', 'parsing', 'saving_profile'].includes(parseState.status);
   const uploadFailedNonblocking = uploadState.status === 'failed_nonblocking';
+  const shouldShowExistingParsedFile = hasParsedProfile && !hasCurrentFile;
 
   return (
     <div className="space-y-4">
-      <p className="text-sm text-muted-foreground">
-        בחר קובץ Excel או CSV להעלאה. הקובץ יישמר בשרת ל-30 יום.
-      </p>
+      <div className="rounded-lg border bg-muted/35 px-4 py-3 text-sm">
+        <div className="flex items-start gap-2">
+          <TooltipProvider delayDuration={150}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  className="mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border bg-background text-muted-foreground"
+                  aria-label="מה ההבדל בין העלאה לשרת לבין ניתוח קובץ?"
+                >
+                  <Info className="h-3.5 w-3.5" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" className="max-w-xs leading-relaxed">
+                העלאה לשרת היא גיבוי זמני שעוזר לנו לבדוק תקלות. ניתוח קובץ קורא את הקובץ אצלך במחשב וממנו ממשיכים לייבוא.
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+          <p className="text-muted-foreground">
+            אפשר להעלות גיבוי זמני לשרת ל-30 יום, אבל זה לא חובה. גם אם הגיבוי נכשל, אפשר להמשיך לנתח את הקובץ מהמחשב.
+          </p>
+        </div>
+      </div>
+
+      {shouldShowExistingParsedFile && (
+        <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900 dark:border-emerald-900/70 dark:bg-emerald-950/30 dark:text-emerald-200">
+          <p className="font-medium">קובץ כבר נותח בסביבת הייבוא הזו</p>
+          <p className="mt-1 text-emerald-800/80 dark:text-emerald-200/80">
+            {existingFileName ? `קובץ: ${existingFileName}` : 'אפשר להמשיך למיפוי בלי להעלות שוב.'}
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Button onClick={onDone} className="gap-2">
+              <CheckCircle2 className="h-4 w-4" />
+              המשך למיפוי
+            </Button>
+            <Button variant="outline" onClick={onCreateNew}>
+              ייבוא קובץ אחר בסביבה חדשה
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {hasServerBackup && !hasParsedProfile && !hasCurrentFile && (
+        <div className="rounded-lg border bg-muted/40 px-4 py-3 text-sm text-muted-foreground">
+          הגיבוי לשרת כבר קיים. כדי לנתח את הנתונים צריך לבחור את הקובץ מהמחשב, בלי להעלות אותו שוב.
+        </div>
+      )}
 
       {/* File picker */}
+      {!shouldShowExistingParsedFile && (
       <div className="flex items-center gap-3 flex-wrap">
         <input
           ref={fileInputRef}
@@ -109,7 +161,7 @@ function UploadStep({ hook, onDone }) {
           className="gap-2"
         >
           <UploadCloud className="h-4 w-4" />
-          {fileState.file ? fileState.file.name : 'בחר קובץ'}
+          {fileState.file ? fileState.file.name : existingFileName || 'בחר קובץ'}
         </Button>
 
         {fileState.file && !isUploaded && (
@@ -134,6 +186,7 @@ function UploadStep({ hook, onDone }) {
           </Button>
         )}
       </div>
+      )}
 
       {/* Status messages */}
       {fileState.error && (
@@ -157,8 +210,8 @@ function UploadStep({ hook, onDone }) {
         <div className="rounded-lg bg-muted/50 px-4 py-3 text-sm space-y-1">
           <p className="font-medium text-green-700 dark:text-green-400">הקובץ נותח בהצלחה</p>
           <p className="text-muted-foreground">
-            {hook.parsedRows.length.toLocaleString()} שורות •{' '}
-            {(hook.profile?.headers?.length ?? 0)} עמודות
+            {(hook.parsedRows?.length ?? config.profile?.rowCount ?? config.profile?.totalRows ?? 0).toLocaleString()} שורות •{' '}
+            {(hook.profile?.headers?.length ?? config.profile?.headers?.length ?? config.headers?.length ?? 0)} עמודות
           </p>
         </div>
       )}
@@ -196,7 +249,7 @@ function MapStep({ workspace, onSaved }) {
   return (
     <div className="space-y-3">
       <p className="text-sm text-muted-foreground">
-        מפה כל עמודת מקור לשדה מטרה מתאים.
+        בחר איזו עמודה בקובץ מתאימה לכל שדה במערכת. אפשר להשתמש באותה עמודה בכמה סוגי רשומות, למשל תעודת זהות לקישור בין תלמיד, הורה והערה.
       </p>
       {saveError && <p className="text-xs text-destructive">{saveError}</p>}
       <MappingEditor
@@ -222,6 +275,9 @@ function ProcessStep({ ingestion, analysis, uploadHook, workspace }) {
 
   return (
     <div className="space-y-4">
+      <p className="text-sm text-muted-foreground">
+        בשלב הזה שומרים את השורות שנקראו מהקובץ, ואז בודקים אותן מול כללי המערכת: שדות חובה, כפילויות וקשרים בין תלמידים, הורים והערות.
+      </p>
       {/* Warn if parsedRows lost but ingestion not done */}
       {!hasRows && !ingestDone && (
         <div className="rounded-lg border border-yellow-200 bg-yellow-50 dark:border-yellow-800 dark:bg-yellow-900/20 px-4 py-3 text-sm text-yellow-800 dark:text-yellow-300">
@@ -243,11 +299,11 @@ function ProcessStep({ ingestion, analysis, uploadHook, workspace }) {
 }
 
 // Collect all candidates of a given status by paginating through listCandidates.
-async function fetchAllCandidates(workspaceId, status) {
+async function fetchAllCandidates(workspaceId, status, sourceReference) {
   const candidates = [];
   let page = 1;
   while (true) {
-    const result = await listCandidates(workspaceId, { status, page });
+    const result = await listCandidates(workspaceId, { status, sourceReference, page });
     const batch = result.candidates ?? [];
     candidates.push(...batch);
     if (batch.length < (result.pageSize ?? 50)) break;
@@ -265,7 +321,7 @@ const COMMIT_WAVES = [
 ];
 
 // ── Commit Step ────────────────────────────────────────────────────────────
-function CommitStep({ workspaceId }) {
+function CommitStep({ workspaceId, sourceReference }) {
   const [phase, setPhase]       = useState('idle'); // 'idle' | 'running' | 'done' | 'error'
   const [progress, setProgress] = useState({ done: 0, total: 0, waveLabel: '' });
   const [errorMsg, setErrorMsg] = useState('');
@@ -278,8 +334,8 @@ function CommitStep({ workspaceId }) {
 
     try {
       // Collect all ready + skipped candidates
-      const readyCandidates  = await fetchAllCandidates(workspaceId, 'ready');
-      const skippedCandidates = await fetchAllCandidates(workspaceId, 'skipped');
+      const readyCandidates  = await fetchAllCandidates(workspaceId, 'ready', sourceReference);
+      const skippedCandidates = await fetchAllCandidates(workspaceId, 'skipped', sourceReference);
       const all = [...readyCandidates, ...skippedCandidates];
 
       if (all.length === 0) {
@@ -391,14 +447,14 @@ export default function ImportWorkspaceDashboard() {
   const [isDryRunning, setIsDryRunning]   = useState(false);
   const [dryRunProgress, setDryRunProgress] = useState({ done: 0, total: 0 });
 
+  const config        = workspace?.config || {};
+
   // Phase 2: file upload
-  const uploadHook = useImportFileUpload(workspaceId);
+  const uploadHook = useImportFileUpload(workspaceId, workspace?.config?.sourceReference ?? null);
 
   // Phase 3: ingestion — parsedRows from upload hook
-  const config        = workspace?.config || {};
   const sourceRef     = config.sourceReference ?? uploadHook.sourceReference ?? null;
   const totalRows     = getWorkspaceTotalRows(config) || uploadHook.profile?.rowCount || uploadHook.profile?.totalRows || uploadHook.parsedRows?.length || 0;
-
   const ingestionHook = useImportRowIngestion(workspaceId, sourceRef, uploadHook.parsedRows);
   const analysisHook  = useImportAnalysis(workspaceId, sourceRef, totalRows);
 
@@ -448,7 +504,7 @@ export default function ImportWorkspaceDashboard() {
     const problematic = [];
     let pg = 1;
     while (true) {
-      const result = await listCandidates(workspaceId, { page: pg });
+      const result = await listCandidates(workspaceId, { sourceReference: sourceRef || undefined, page: pg });
       const batch = result.candidates ?? [];
       for (const c of batch) {
         if (c.blocking_issues_count > 0 || c.status === 'failed') problematic.push(c);
@@ -492,7 +548,7 @@ export default function ImportWorkspaceDashboard() {
       let total = null;
       let done = 0;
       while (true) {
-        const result = await listCandidates(workspaceId, { page });
+        const result = await listCandidates(workspaceId, { sourceReference: sourceRef || undefined, page });
         const candidates = result.candidates ?? [];
         if (total === null) {
           total = result.total ?? candidates.length;
@@ -576,6 +632,8 @@ export default function ImportWorkspaceDashboard() {
           {currentStep === 'upload' && (
             <UploadStep
               hook={uploadHook}
+              workspace={workspace}
+              onCreateNew={() => navigate('/import-workspaces')}
               onDone={async () => {
                 await load();
                 setCurrentStep('map');
@@ -605,18 +663,27 @@ export default function ImportWorkspaceDashboard() {
           {currentStep === 'review' && (
             <>
               <div className="mb-3 flex items-center gap-3">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="gap-2"
-                  onClick={handleDryRunAll}
-                  disabled={isDryRunning}
-                >
-                  <Zap className="h-4 w-4" />
-                  {isDryRunning
-                    ? `סימולציה… ${dryRunProgress.done}/${dryRunProgress.total}`
-                    : 'Dry Run לכולם'}
-                </Button>
+                <TooltipProvider delayDuration={150}>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="gap-2"
+                        onClick={handleDryRunAll}
+                        disabled={isDryRunning}
+                      >
+                        <Zap className="h-4 w-4" />
+                        {isDryRunning
+                          ? `בודק… ${dryRunProgress.done}/${dryRunProgress.total}`
+                          : 'בדיקת ניסיון לכולם'}
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom" className="max-w-xs leading-relaxed">
+                      בדיקה בלי לבצע ייבוא בפועל. כדאי להריץ לפני ביצוע סופי כדי לראות מה ייווצר, מה יעודכן ומה עדיין חסום.
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
                 <Button
                   variant="outline"
                   size="sm"
@@ -637,12 +704,13 @@ export default function ImportWorkspaceDashboard() {
               <CandidateQueue
                 key={queueKey}
                 workspaceId={workspaceId}
+                sourceReference={sourceRef}
                 onCandidateSelect={handleCandidateSelect}
               />
             </>
           )}
 
-          {currentStep === 'commit' && <CommitStep workspaceId={workspaceId} />}
+          {currentStep === 'commit' && <CommitStep workspaceId={workspaceId} sourceReference={sourceRef} />}
         </CardContent>
       </Card>
 

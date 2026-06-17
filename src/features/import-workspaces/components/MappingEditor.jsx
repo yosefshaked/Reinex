@@ -85,12 +85,6 @@ export function MappingEditor({
     [entityType],
   );
 
-  // Reverse map: sourceColumn -> targetField (to detect conflicts)
-  const usedColumns = useMemo(() => {
-    const set = new Set(Object.values(fieldMap).filter(Boolean).filter(v => v !== SKIP_VALUE));
-    return set;
-  }, [fieldMap]);
-
   function handleFieldMapping(targetField, sourceColumn) {
     setFieldMap(prev => {
       const next = { ...prev };
@@ -175,7 +169,6 @@ export function MappingEditor({
                           <SelectItem
                             key={col}
                             value={col}
-                            disabled={usedColumns.has(col) && fieldMap[field.value] !== col}
                           >
                             {col}
                           </SelectItem>

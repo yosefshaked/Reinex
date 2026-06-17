@@ -180,7 +180,7 @@ export function CandidateDetailSheet({ candidate, workspaceId, open, onClose, on
         });
       }
     } catch (err) {
-      setDryRunError(err.message || 'שגיאה בהרצת הסימולציה');
+      setDryRunError(err.message || 'שגיאה בהרצת הבדיקה');
     } finally {
       setRunningDryRun(false);
     }
@@ -222,7 +222,7 @@ export function CandidateDetailSheet({ candidate, workspaceId, open, onClose, on
             <>
               <Separator />
               <section>
-                <h3 className="text-sm font-semibold mb-2">תוצאת סימולציה</h3>
+                <h3 className="text-sm font-semibold mb-2">תוצאת בדיקה ללא ייבוא</h3>
                 <div className="rounded-lg border bg-muted/40 px-3 py-3 space-y-2 text-sm">
                   <div className="flex items-center justify-between">
                     <span className="text-muted-foreground">תוצאה</span>
@@ -285,7 +285,7 @@ export function CandidateDetailSheet({ candidate, workspaceId, open, onClose, on
           <section className="space-y-2">
             <h3 className="text-sm font-semibold">פעולה</h3>
 
-            {/* Simulation button */}
+            {/* Preflight check button */}
             {status !== 'committed' && workspaceId && (
               <>
                 <Button
@@ -295,8 +295,11 @@ export function CandidateDetailSheet({ candidate, workspaceId, open, onClose, on
                   disabled={runningDryRun || saving}
                 >
                   <Zap className="h-4 w-4" />
-                  {runningDryRun ? 'מריץ סימולציה…' : dryRunSummary ? 'הרץ סימולציה מחדש' : 'הרץ סימולציה'}
+                  {runningDryRun ? 'בודק ללא ייבוא…' : dryRunSummary ? 'בדוק שוב ללא ייבוא' : 'בדוק ללא ייבוא'}
                 </Button>
+                <p className="text-xs text-muted-foreground">
+                  הבדיקה מראה מה יקרה בייבוא הסופי, בלי ליצור או לעדכן נתונים בפועל.
+                </p>
                 {dryRunError && (
                   <p className="text-xs text-destructive">{dryRunError}</p>
                 )}
@@ -305,6 +308,9 @@ export function CandidateDetailSheet({ candidate, workspaceId, open, onClose, on
 
             {status !== 'committed' && status !== 'skipped' && (
               <>
+                <p className="text-xs text-muted-foreground">
+                  אם זו אותה רשומה שכבר קיימת במערכת, קשר אותה לרשומה הקיימת. אם זה אדם אחר עם פרט דומה, צור רשומה חדשה. אם לא רוצים לייבא את השורה, דלג עליה.
+                </p>
                 <Button
                   variant="outline"
                   className="w-full justify-start gap-2"
@@ -312,7 +318,7 @@ export function CandidateDetailSheet({ candidate, workspaceId, open, onClose, on
                   disabled={saving}
                 >
                   <Link2 className="h-4 w-4" />
-                  קשר לרשומה קיימת
+                  קשר לאדם שכבר קיים במערכת
                 </Button>
 
                 <Button
@@ -322,7 +328,7 @@ export function CandidateDetailSheet({ candidate, workspaceId, open, onClose, on
                   disabled={saving}
                 >
                   <PlusCircle className="h-4 w-4" />
-                  צור כרשומה חדשה
+                  צור אדם חדש למרות הדמיון
                 </Button>
 
                 <Button

@@ -20,6 +20,7 @@ import { PlayCircle, RefreshCcw, Square } from 'lucide-react';
  *   onResume?: () => void,
  *   onCancel: () => void,
  *   disabled?: boolean,
+ *   disabledReason?: string,
  * }} props
  */
 function OperationCard({
@@ -34,6 +35,7 @@ function OperationCard({
   onResume,
   onCancel,
   disabled = false,
+  disabledReason,
 }) {
   const pct = Math.round((progress || 0) * 100);
 
@@ -63,6 +65,9 @@ function OperationCard({
           <p className="text-sm font-medium">{title}</p>
           {description && (
             <p className="text-xs text-muted-foreground mt-0.5">{description}</p>
+          )}
+          {disabled && disabledReason && (
+            <p className="text-xs text-muted-foreground mt-1">{disabledReason}</p>
           )}
         </div>
         <Badge variant={statusVariant} className="shrink-0">{statusLabel}</Badge>
@@ -139,8 +144,8 @@ export function ProgressOrchestrator({ ingestion, analysis, ingestDoneFromConfig
   return (
     <div className="grid gap-4 sm:grid-cols-2">
       <OperationCard
-        title="קליטת שורות"
-        description="שמירת שורות הגולמיות בשרת"
+        title="שמירת השורות לבדיקה"
+        description="שומר את השורות שזוהו כדי שאפשר יהיה להמשיך גם אחרי רענון או חזרה מאוחר יותר."
         status={toDisplayStatus(ingestionStatus)}
         progress={ingestion.progress}
         processedRows={ingestion.uploadedRows ?? 0}
@@ -151,8 +156,8 @@ export function ProgressOrchestrator({ ingestion, analysis, ingestDoneFromConfig
         onCancel={ingestion.cancel}
       />
       <OperationCard
-        title="ניתוח וזיהוי"
-        description="יצירת ועדכון רשומות מועמדות"
+        title="בדיקת נתונים וזיהוי בעיות"
+        description="בודק שדות חובה, כפילויות וקשרים לפני שהנתונים עוברים למערכת הפעילה."
         status={toDisplayStatus(analysis.status)}
         progress={analysis.progress}
         processedRows={analysis.analyzedRows ?? 0}
@@ -162,6 +167,7 @@ export function ProgressOrchestrator({ ingestion, analysis, ingestDoneFromConfig
         onResume={analysis.resume}
         onCancel={analysis.cancel}
         disabled={analysisLocked}
+        disabledReason="אפשר להתחיל אחרי שמירת השורות לבדיקה."
       />
     </div>
   );

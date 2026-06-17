@@ -45,8 +45,9 @@ const IDLE_PARSE = { status: 'idle', pct: 0, stage: null, error: null };
 
 /**
  * @param {string} workspaceId  - the import workspace to attach files to
+ * @param {string|null} existingSourceReference - current workspace source, reused on re-parse
  */
-export function useImportFileUpload(workspaceId) {
+export function useImportFileUpload(workspaceId, existingSourceReference = null) {
   const [fileState, setFileState] = useState(IDLE_FILE);
   const [encodingState, setEncodingState] = useState(IDLE_ENCODING);
   const [uploadState, setUploadState] = useState(IDLE_UPLOAD);
@@ -254,7 +255,8 @@ export function useImportFileUpload(workspaceId) {
           worker.terminate();
           workerRef.current = null;
 
-          const { headers, rows, sourceReference, profile: prof } = payload;
+          const { headers, rows, sourceReference: parsedSourceReference, profile: prof } = payload;
+          const sourceReference = existingSourceReference || parsedSourceReference;
           setParsedRows(rows);
           setProfile(prof);
           setSourceReference(sourceReference);
@@ -307,7 +309,7 @@ export function useImportFileUpload(workspaceId) {
     };
 
     reader.readAsArrayBuffer(file);
-  }, [fileState.file, workspaceId]);
+  }, [existingSourceReference, fileState.file, workspaceId]);
 
   // -------------------------------------------------------------------------
   // Public API

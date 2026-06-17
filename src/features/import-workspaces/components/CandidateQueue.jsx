@@ -89,10 +89,11 @@ function CandidateRow({ candidate, onSelect }) {
 /**
  * @param {{
  *   workspaceId: string,
+ *   sourceReference?: string|null,
  *   onCandidateSelect: (candidate: object) => void,
  * }} props
  */
-export function CandidateQueue({ workspaceId, onCandidateSelect }) {
+export function CandidateQueue({ workspaceId, sourceReference = null, onCandidateSelect }) {
   const [entityType, setEntityType]  = useState('');
   const [status, setStatus]          = useState('');
   const [page, setPage]              = useState(1);
@@ -108,6 +109,7 @@ export function CandidateQueue({ workspaceId, onCandidateSelect }) {
       const result = await listCandidates(workspaceId, {
         entityType: entityType || undefined,
         status: status || undefined,
+        sourceReference: sourceReference || undefined,
         page,
       });
       setData(result);
@@ -116,7 +118,7 @@ export function CandidateQueue({ workspaceId, onCandidateSelect }) {
     } finally {
       setLoading(false);
     }
-  }, [workspaceId, entityType, status, page]);
+  }, [workspaceId, sourceReference, entityType, status, page]);
 
   useEffect(() => {
     load();

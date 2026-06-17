@@ -112,17 +112,24 @@ export default async function importCandidates(context, req) {
 
     const entityType = normalizeString(req.query?.entity_type);
     const status = normalizeString(req.query?.status);
+    const sourceReference = normalizeString(req.query?.source_reference);
     const page = Math.max(1, Number.parseInt(req.query?.page || '1', 10));
 
     const from = (page - 1) * PAGE_SIZE;
     const to = from + PAGE_SIZE - 1;
+    const selectColumns = sourceReference
+      ? 'id, entity_type, status, candidate_data, issues, blocking_issues_count, decisions, source_row_id, depends_on_candidate_id, created_at, updated_at, import_rows!inner(source_reference)'
+      : 'id, entity_type, status, candidate_data, issues, blocking_issues_count, decisions, source_row_id, depends_on_candidate_id, created_at, updated_at';
 
     let query = withOrgScope(supabase, 'import_candidates', orgId)
-      .select('id, entity_type, status, candidate_data, issues, blocking_issues_count, decisions, source_row_id, depends_on_candidate_id, created_at, updated_at', { count: 'exact' })
+      .select(selectColumns, { count: 'exact' })
       .eq('workspace_id', workspaceId)
       .order('created_at', { ascending: true })
       .range(from, to);
 
+    if (sourceReference) {
+      query = query.eq('import_rows.source_reference', sourceReference);
+    }
     if (entityType && ALLOWED_ENTITY_TYPES.has(entityType)) {
       query = query.eq('entity_type', entityType);
     }
@@ -137,8 +144,15 @@ export default async function importCandidates(context, req) {
       return respondCandidatesError(context, 500, 'failed_to_list_candidates', error, { action: 'list' });
     }
 
+    const candidates = (data || []).map((candidate) => {
+      if (!candidate.import_rows) return candidate;
+      const clean = { ...candidate };
+      delete clean.import_rows;
+      return clean;
+    });
+
     return respond(context, 200, {
-      candidates: data || [],
+      candidates,
       total: count ?? 0,
       page,
       pageSize: PAGE_SIZE,

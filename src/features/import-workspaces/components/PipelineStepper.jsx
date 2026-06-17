@@ -4,8 +4,7 @@ import { Check } from 'lucide-react';
 const STEPS = [
   { id: 'upload',  label: 'העלאה' },
   { id: 'map',     label: 'מיפוי' },
-  { id: 'ingest',  label: 'קליטה' },
-  { id: 'analyze', label: 'ניתוח' },
+  { id: 'process', label: 'קליטה וניתוח', aliases: ['ingest', 'analyze'], target: 'ingest' },
   { id: 'review',  label: 'סקירה' },
   { id: 'commit',  label: 'ביצוע' },
 ];
@@ -18,8 +17,11 @@ export function PipelineStepper({ currentStep, completedSteps = [], onStepClick 
     <nav aria-label="שלבי ייבוא" className="w-full">
       <ol className="flex items-center justify-between gap-0 overflow-x-auto">
         {STEPS.map((step, idx) => {
-          const isDone    = completedSteps.includes(step.id);
-          const isCurrent = currentStep === step.id;
+          const stepIds = [step.id, ...(step.aliases ?? [])];
+          const isDone    = step.id === 'process'
+            ? completedSteps.includes('analyze')
+            : stepIds.some(id => completedSteps.includes(id));
+          const isCurrent = stepIds.includes(currentStep);
           const isLast    = idx === STEPS.length - 1;
 
           return (
@@ -27,7 +29,7 @@ export function PipelineStepper({ currentStep, completedSteps = [], onStepClick 
               {/* Step circle + label */}
               <button
                 type="button"
-                onClick={() => isDone && onStepClick?.(step.id)}
+                onClick={() => isDone && onStepClick?.(step.target ?? step.id)}
                 disabled={!isDone && !isCurrent}
                 aria-current={isCurrent ? 'step' : undefined}
                 className={cn(
