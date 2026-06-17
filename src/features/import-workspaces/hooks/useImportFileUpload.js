@@ -53,6 +53,7 @@ export function useImportFileUpload(workspaceId) {
   const [parseState, setParseState] = useState(IDLE_PARSE);
   const [parsedRows, setParsedRows] = useState(null);
   const [profile, setProfile] = useState(null);
+  const [sourceReference, setSourceReference] = useState(null);
 
   const workerRef = useRef(null);
 
@@ -68,6 +69,7 @@ export function useImportFileUpload(workspaceId) {
       setParseState(IDLE_PARSE);
       setParsedRows(null);
       setProfile(null);
+      setSourceReference(null);
       return;
     }
 
@@ -86,6 +88,7 @@ export function useImportFileUpload(workspaceId) {
     setParseState(IDLE_PARSE);
     setParsedRows(null);
     setProfile(null);
+    setSourceReference(null);
 
     // Quick encoding sniff: read first 8 KB on main thread (fast, <1 ms)
     const isCsv =
@@ -254,6 +257,7 @@ export function useImportFileUpload(workspaceId) {
           const { headers, rows, sourceReference, profile: prof } = payload;
           setParsedRows(rows);
           setProfile(prof);
+          setSourceReference(sourceReference);
 
           setParseState({ status: 'saving_profile', pct: 98, stage: 'saving_profile', error: null });
 
@@ -317,6 +321,7 @@ export function useImportFileUpload(workspaceId) {
     parseState,
     parsedRows,
     profile,
+    sourceReference,
     selectFile,
     upload,
     parse,

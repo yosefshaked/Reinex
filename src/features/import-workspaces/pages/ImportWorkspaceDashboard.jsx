@@ -18,16 +18,27 @@ import { ProgressOrchestrator } from '../components/ProgressOrchestrator.jsx';
 import { CandidateQueue } from '../components/CandidateQueue.jsx';
 import { CandidateDetailSheet } from '../components/CandidateDetailSheet.jsx';
 
+function getWorkspaceTotalRows(config) {
+  const progress = config?.operationProgress || {};
+  return Number(
+    config?.profile?.rowCount ??
+    config?.profile?.totalRows ??
+    progress.totalRows ??
+    progress.uploadedRows ??
+    0
+  );
+}
+
 // ── Step derivation ────────────────────────────────────────────────────────
 function deriveCompletedSteps(ws, ingestionStatus, analysisStatus) {
   const config   = ws?.config || {};
   const progress = config.operationProgress || {};
-  const totalRows = config.profile?.rowCount ?? progress.uploadedRows ?? 0;
+  const totalRows = getWorkspaceTotalRows(config);
   const completed = [];
 
   const hasMappings = config.mappings?.field_map &&
     Object.keys(config.mappings.field_map).length > 0;
-  const ingestDone   = ingestionStatus === 'done' || progress.uploadedRows >= totalRows;
+  const ingestDone   = ingestionStatus === 'done' || (totalRows > 0 && progress.uploadedRows >= totalRows);
   const analyzeDone  = analysisStatus === 'done'  || (progress.analyzedRows >= totalRows && totalRows > 0);
 
   if (config.sourceReference) completed.push('upload');
@@ -42,7 +53,7 @@ function deriveCompletedSteps(ws, ingestionStatus, analysisStatus) {
 function deriveCurrentStep(ws, ingestionStatus, analysisStatus) {
   const config   = ws?.config || {};
   const progress = config.operationProgress || {};
-  const totalRows = config.profile?.rowCount ?? progress.uploadedRows ?? 0;
+  const totalRows = getWorkspaceTotalRows(config);
 
   if (!config.sourceReference) return 'upload';
 
@@ -50,7 +61,7 @@ function deriveCurrentStep(ws, ingestionStatus, analysisStatus) {
     Object.keys(config.mappings.field_map).length > 0;
   if (!hasMappings) return 'map';
 
-  const ingestDone  = ingestionStatus === 'done' || progress.uploadedRows >= totalRows;
+  const ingestDone  = ingestionStatus === 'done' || (totalRows > 0 && progress.uploadedRows >= totalRows);
   if (!ingestDone) return 'ingest';
 
   const analyzeDone = analysisStatus === 'done' || (progress.analyzedRows >= totalRows && totalRows > 0);
@@ -114,7 +125,11 @@ function UploadStep({ hook, onDone }) {
         )}
 
         {isParsed && (
-          <Button onClick={onDone} className="gap-2">
+          <Button
+            onClick={onDone}
+            className="gap-2 bg-emerald-600 text-white shadow-lg shadow-emerald-600/25 ring-2 ring-emerald-300 animate-pulse hover:bg-emerald-700 dark:bg-emerald-500 dark:hover:bg-emerald-600"
+          >
+            <CheckCircle2 className="h-4 w-4" />
             המשך למיפוי
           </Button>
         )}
@@ -200,7 +215,7 @@ function MapStep({ workspace, onSaved }) {
 // ── Ingest + Analyze Step ──────────────────────────────────────────────────
 function ProcessStep({ ingestion, analysis, uploadHook, workspace }) {
   const config    = workspace.config || {};
-  const totalRows = config.profile?.rowCount ?? config.operationProgress?.uploadedRows ?? 0;
+  const totalRows = getWorkspaceTotalRows(config) || uploadHook.profile?.rowCount || uploadHook.profile?.totalRows || uploadHook.parsedRows?.length || 0;
   const hasRows   = !!uploadHook.parsedRows;
   const ingestDone = ingestion.status === 'done' ||
     (config.operationProgress?.uploadedRows >= totalRows && totalRows > 0);
@@ -210,7 +225,7 @@ function ProcessStep({ ingestion, analysis, uploadHook, workspace }) {
       {/* Warn if parsedRows lost but ingestion not done */}
       {!hasRows && !ingestDone && (
         <div className="rounded-lg border border-yellow-200 bg-yellow-50 dark:border-yellow-800 dark:bg-yellow-900/20 px-4 py-3 text-sm text-yellow-800 dark:text-yellow-300">
-          הקבצים המנותחים לא קיימים בזיכרון. חזור לשלב ה<strong>העלאה</strong> ובצע ניתוח קובץ שוב כדי להמשיך בקליטה.
+          השורות המנותחות לא קיימות בזיכרון. חזור לשלב בחירת הקובץ ובצע ניתוח מקומי שוב כדי להמשיך בקליטה. אין צורך שהעלאת הגיבוי לשרת תצליח.
         </div>
       )}
       <ProgressOrchestrator
@@ -219,7 +234,7 @@ function ProcessStep({ ingestion, analysis, uploadHook, workspace }) {
         ingestDoneFromConfig={ingestDone}
       />
       {totalRows > 0 && (
-        <p className="text-xs text-muted-foreground text-end">
+        <p className="text-xs text-muted-foreground">
           סה"כ שורות: {totalRows.toLocaleString()}
         </p>
       )}
@@ -339,7 +354,7 @@ function CommitStep({ workspaceId }) {
             style={{ width: `${pct}%` }}
           />
         </div>
-        <p className="text-xs text-muted-foreground text-end">
+        <p className="text-xs text-muted-foreground">
           {progress.done} / {progress.total} רשומות
         </p>
       </div>
@@ -381,21 +396,23 @@ export default function ImportWorkspaceDashboard() {
 
   // Phase 3: ingestion — parsedRows from upload hook
   const config        = workspace?.config || {};
-  const sourceRef     = config.sourceReference ?? null;
-  const totalRows     = config.profile?.rowCount ?? config.operationProgress?.uploadedRows ?? 0;
+  const sourceRef     = config.sourceReference ?? uploadHook.sourceReference ?? null;
+  const totalRows     = getWorkspaceTotalRows(config) || uploadHook.profile?.rowCount || uploadHook.profile?.totalRows || uploadHook.parsedRows?.length || 0;
 
   const ingestionHook = useImportRowIngestion(workspaceId, sourceRef, uploadHook.parsedRows);
   const analysisHook  = useImportAnalysis(workspaceId, sourceRef, totalRows);
 
   const load = useCallback(async () => {
-    if (!workspaceId) return;
+    if (!workspaceId) return null;
     setLoading(true);
     setError(null);
     try {
       const ws = await getImportWorkspace(workspaceId);
       setWorkspace(ws);
+      return ws;
     } catch (err) {
       setError(err.message || 'שגיאה בטעינת סביבת הייבוא');
+      return null;
     } finally {
       setLoading(false);
     }
@@ -559,7 +576,10 @@ export default function ImportWorkspaceDashboard() {
           {currentStep === 'upload' && (
             <UploadStep
               hook={uploadHook}
-              onDone={() => setCurrentStep('map')}
+              onDone={async () => {
+                await load();
+                setCurrentStep('map');
+              }}
             />
           )}
 

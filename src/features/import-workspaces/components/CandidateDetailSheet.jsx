@@ -12,6 +12,7 @@ const FIELD_LABELS = {
   last_name:                'שם משפחה',
   identity_number:          'תעודת זהות',
   phone:                    'טלפון',
+  guardian_phone:           'טלפון הורה',
   email:                    'אימייל',
   date_of_birth:            'תאריך לידה',
   student_identity_number:  'ת.ז. תלמיד/ה',
@@ -19,6 +20,14 @@ const FIELD_LABELS = {
   note_text:                'טקסט הערה',
   name:                     'שם',
   description:              'תיאור',
+};
+
+const ISSUE_MESSAGES = {
+  missing_required_field: 'שדה חובה חסר.',
+  missing_recommended_field: 'שדה מומלץ חסר.',
+  invalid_field_format: 'פורמט השדה לא תקין.',
+  duplicate_identity_number: 'קיימת כבר רשומה עם אותה תעודת זהות. יש לבחור איך לטפל בכפילות.',
+  duplicate_email: 'קיימת כבר רשומה עם אותו אימייל. מומלץ לבדוק אם זו אותה רשומה.',
 };
 
 const ENTITY_LABELS = {
@@ -74,6 +83,8 @@ function formatMatchedRecordSummary(summary) {
 
 function IssueItem({ issue }) {
   const isBlocker = issue.severity === 'blocker';
+  const fieldPrefix = FIELD_LABELS[issue.field] ? `${FIELD_LABELS[issue.field]}: ` : '';
+  const message = issue.message || ISSUE_MESSAGES[issue.code] || issue.code || 'נדרשת בדיקה.';
   return (
     <li className={cn(
       'flex items-start gap-2 text-sm rounded px-2.5 py-1.5',
@@ -84,8 +95,8 @@ function IssueItem({ issue }) {
         : <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
       }
       <span>
-        {FIELD_LABELS[issue.field] ? `${FIELD_LABELS[issue.field]}: ` : ''}
-        {issue.message || issue.code}
+        {fieldPrefix}
+        {message}
       </span>
     </li>
   );
@@ -178,13 +189,13 @@ export function CandidateDetailSheet({ candidate, workspaceId, open, onClose, on
   return (
     <Sheet open={open} onOpenChange={v => !v && onClose()}>
       <SheetContent side="left" className="w-full sm:max-w-lg overflow-y-auto" dir="rtl">
-        <SheetHeader className="text-end">
+        <SheetHeader>
           <SheetTitle>
             {[candidate_data.first_name, candidate_data.last_name].filter(Boolean).join(' ')
               || candidate_data.name
               || 'רשומה'}
           </SheetTitle>
-          <SheetDescription className="text-end">
+          <SheetDescription>
             {ENTITY_LABELS[entity_type] ?? entity_type}
           </SheetDescription>
         </SheetHeader>

@@ -37,7 +37,7 @@ const MAX_ROWS_PER_ANALYSIS_CHUNK = 100;
 // warnings → missing field generates a 'warning' issue only.
 const ENTITY_SCHEMA = {
   active_student: {
-    blockers: ['first_name', 'last_name'],
+    blockers: ['first_name', 'last_name', 'identity_number'],
     warnings: ['phone', 'email', 'date_of_birth'],
   },
   inactive_student: {
@@ -62,6 +62,52 @@ const ENTITY_SCHEMA = {
     warnings: [],
   },
 };
+
+const FIELD_LABELS = {
+  first_name: 'שם פרטי',
+  last_name: 'שם משפחה',
+  identity_number: 'תעודת זהות',
+  student_identity_number: 'תעודת זהות תלמיד/ה',
+  guardian_phone: 'טלפון הורה',
+  phone: 'טלפון',
+  email: 'אימייל',
+  date_of_birth: 'תאריך לידה',
+  name: 'שם',
+  description: 'תיאור',
+  note_text: 'טקסט הערה',
+};
+
+function fieldLabel(field) {
+  return FIELD_LABELS[field] || field || 'שדה';
+}
+
+function issueMessage(issue) {
+  const label = fieldLabel(issue?.field);
+  switch (issue?.code) {
+    case 'missing_required_field':
+      return `${label} הוא שדה חובה.`;
+    case 'missing_recommended_field':
+      return `מומלץ למלא ${label}.`;
+    case 'invalid_field_format':
+      return `${label} בפורמט לא תקין.`;
+    case 'duplicate_identity_number':
+      return 'קיימת כבר רשומה עם אותה תעודת זהות. יש לבחור האם לקשר לרשומה קיימת, ליצור כרשומה חדשה, או לדלג.';
+    case 'duplicate_email':
+      return 'קיימת כבר רשומה עם אותו אימייל. בדוק/י אם מדובר באותו אדם.';
+    default:
+      return issue?.severity === 'blocker'
+        ? `${label} חוסם את הייבוא ויש לטפל בו.`
+        : `${label} דורש בדיקה.`;
+  }
+}
+
+function withIssuePresentation(issue) {
+  return {
+    ...issue,
+    is_blocking: issue?.severity === 'blocker',
+    message: issue?.message || issueMessage(issue),
+  };
+}
 
 // Apply the user-configured field mapping (sourceColumn → canonicalField) to a raw row.
 function applyMappings(rawData, fieldMap) {
@@ -399,7 +445,8 @@ export default async function importWorkspacesAnalyzeChunk(context, req) {
       }
     }
 
-    const blockingIssuesCount = issues.filter((i) => i.severity === 'blocker').length;
+    const presentedIssues = issues.map(withIssuePresentation);
+    const blockingIssuesCount = presentedIssues.filter((i) => i.severity === 'blocker').length;
     const status = blockingIssuesCount > 0 ? 'blocked' : 'ready';
 
     return {
@@ -410,7 +457,7 @@ export default async function importWorkspacesAnalyzeChunk(context, req) {
       status,
       candidate_data: candidateData,
       merged_from_row_ids: [rowId],
-      issues,
+      issues: presentedIssues,
       blocking_issues_count: blockingIssuesCount,
       decisions: existingDecisions,
       updated_at: now,

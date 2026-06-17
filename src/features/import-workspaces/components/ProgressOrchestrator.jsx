@@ -77,7 +77,7 @@ function OperationCard({
               style={{ width: `${pct}%` }}
             />
           </div>
-          <p className="text-xs text-muted-foreground text-end">
+          <p className="text-xs text-muted-foreground">
             {processedRows.toLocaleString()} / {totalRows.toLocaleString()} שורות ({pct}%)
           </p>
         </div>

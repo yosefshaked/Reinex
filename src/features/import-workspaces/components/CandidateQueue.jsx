@@ -173,10 +173,10 @@ export function CandidateQueue({ workspaceId, onCandidateSelect }) {
         <table className="w-full text-sm">
           <thead className="bg-muted/50 text-muted-foreground">
             <tr>
-              <th className="text-end px-3 py-2 font-medium">שם</th>
-              <th className="text-end px-3 py-2 font-medium">סוג</th>
-              <th className="text-end px-3 py-2 font-medium">סטטוס</th>
-              <th className="text-end px-3 py-2 font-medium">בעיות</th>
+              <th className="px-3 py-2 font-medium">שם</th>
+              <th className="px-3 py-2 font-medium">סוג</th>
+              <th className="px-3 py-2 font-medium">סטטוס</th>
+              <th className="px-3 py-2 font-medium">בעיות</th>
               <th className="w-8" />
             </tr>
           </thead>

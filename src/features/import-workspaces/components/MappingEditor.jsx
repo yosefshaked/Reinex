@@ -10,7 +10,7 @@ const TARGET_FIELDS_BY_ENTITY = {
   active_student: [
     { value: 'first_name',       label: 'שם פרטי',        required: true },
     { value: 'last_name',        label: 'שם משפחה',       required: true },
-    { value: 'identity_number',  label: 'תעודת זהות',      required: false },
+    { value: 'identity_number',  label: 'תעודת זהות',      required: true },
     { value: 'phone',            label: 'טלפון',           required: false },
     { value: 'email',            label: 'אימייל',          required: false },
     { value: 'date_of_birth',    label: 'תאריך לידה',      required: false },
@@ -139,9 +139,9 @@ export function MappingEditor({
         <table className="w-full text-sm">
           <thead className="bg-muted/50">
             <tr>
-              <th className="text-end px-4 py-2 font-medium w-1/3">שדה מטרה</th>
-              <th className="text-end px-4 py-2 font-medium w-1/3">עמודת מקור</th>
-              <th className="text-end px-4 py-2 font-medium text-muted-foreground">דוגמה</th>
+              <th className="px-4 py-2 font-medium w-1/3">שדה מטרה</th>
+              <th className="px-4 py-2 font-medium w-1/3">עמודת מקור</th>
+              <th className="px-4 py-2 font-medium text-muted-foreground">דוגמה</th>
             </tr>
           </thead>
           <tbody className="divide-y">
@@ -150,7 +150,7 @@ export function MappingEditor({
               const sampleValue = mapped ? sampleRow[mapped] ?? '' : '';
               return (
                 <tr key={field.value} className="hover:bg-muted/20 transition-colors">
-                  <td className="px-4 py-2 text-end">
+                  <td className="px-4 py-2">
                     <span className={cn('font-medium', field.required && 'text-foreground')}>
                       {field.label}
                     </span>
@@ -183,7 +183,7 @@ export function MappingEditor({
                       </SelectContent>
                     </Select>
                   </td>
-                  <td className="px-4 py-2 text-muted-foreground truncate max-w-xs text-end">
+                  <td className="px-4 py-2 text-muted-foreground truncate max-w-xs">
                     {sampleValue ? (
                       <Badge variant="secondary" className="font-mono text-xs max-w-full truncate">{sampleValue}</Badge>
                     ) : (

@@ -329,7 +329,7 @@ async function simulateCandidate(supabase, orgId, candidate) {
     return {
       outcome: 'blocked',
       is_blocked: true,
-      action_description: 'This candidate has unresolved blocking issues.',
+      action_description: 'לרשומה יש בעיות חוסמות שצריך לפתור לפני ייבוא.',
       target_table: null,
       matched_record_id: null,
       matched_record_summary: null,
@@ -342,7 +342,7 @@ async function simulateCandidate(supabase, orgId, candidate) {
     return {
       outcome: 'blocked',
       is_blocked: true,
-      action_description: `This candidate is not ready for import. Current status: ${status || 'unknown'}.`,
+      action_description: `הרשומה עדיין לא מוכנה לייבוא. סטטוס נוכחי: ${status || 'לא ידוע'}.`,
       target_table: null,
       matched_record_id: null,
       matched_record_summary: null,
@@ -359,7 +359,7 @@ async function simulateCandidate(supabase, orgId, candidate) {
       return {
         outcome: 'blocked',
         is_blocked: true,
-        action_description: 'This inactive student fails the minimum archive policy: identity number and at least one name are required.',
+        action_description: 'תלמיד/ה לא פעיל/ה חייב/ת לכלול תעודת זהות ולפחות שם אחד כדי להישמר בארכיון.',
         target_table: 'client_profiles',
         matched_record_id: null,
         matched_record_summary: null,
