@@ -364,15 +364,17 @@ async function simulateCandidate(supabase, orgId, candidate) {
     };
   }
 
-  if (entity_type === 'inactive_student') {
+  // identity_number is always required for person entities
+  const isPersonEntity = entity_type === 'active_student'
+    || entity_type === 'inactive_student'
+    || entity_type === 'customer';
+  if (isPersonEntity) {
     const identity = normalizeString(candidate_data?.identity_number);
-    const firstName = normalizeString(candidate_data?.first_name);
-    const lastName = normalizeString(candidate_data?.last_name);
-    if (!identity || (!firstName && !lastName)) {
+    if (!identity) {
       return {
         outcome: 'blocked',
         is_blocked: true,
-        action_description: 'תלמיד/ה לא פעיל/ה חייב/ת לכלול תעודת זהות ולפחות שם אחד כדי להישמר בארכיון.',
+        action_description: 'תעודת זהות חובה לכל לקוח/ה — היא מספקת זיהוי ייחודי ומונעת כפילויות.',
         target_table: 'client_profiles',
         matched_record_id: null,
         matched_record_summary: null,
@@ -409,6 +411,7 @@ async function simulateCandidate(supabase, orgId, candidate) {
   }
 
   switch (entity_type) {
+    case 'customer':
     case 'active_student':
     case 'inactive_student':
       return simulateClientProfile(supabase, orgId, candidate_data);

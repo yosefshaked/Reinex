@@ -6,13 +6,14 @@ import { Separator } from '@/components/ui/separator';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { AlertCircle, AlertTriangle, Check, Link2, Loader2, Pencil, Plus, PlusCircle, Search, X, XCircle, Zap } from 'lucide-react';
 import { patchCandidate, runDryRunChunk, searchLinkTargets } from '../api/importWorkspacesApi.js';
 
 const FIELD_LABELS = {
   first_name:               'שם פרטי',
   last_name:                'שם משפחה',
-  identity_number:          'תעודת זהות התלמיד',
+  identity_number:          'תעודת זהות',
   phone:                    'טלפון',
   guardian_phone:           'טלפון הורה',
   email:                    'אימייל',
@@ -20,10 +21,29 @@ const FIELD_LABELS = {
   guardian_identity_number: 'ת.ז. הורה',
   relationship:             'קרבה',
   is_primary:               'הורה ראשי',
+  is_active:                'פעיל/ה',
+  customer_type:            'סוג לקוח',
   note_text:                'טקסט הערה',
   service_name:             'שם השירות',
   name:                     'שם השירות',
   description:              'תיאור',
+};
+
+const CUSTOMER_TYPE_LABELS = {
+  student:            'תלמיד/ה',
+  one_time_customer:  'לקוח/ה חד-פעמי/ת',
+};
+
+const SELECT_FIELD_OPTIONS = {
+  customer_type: [
+    { value: 'student',           label: 'תלמיד/ה' },
+    { value: 'one_time_customer', label: 'לקוח/ה חד-פעמי/ת' },
+  ],
+};
+
+const BOOLEAN_FIELD_LABELS = {
+  is_primary: 'הורה ראשי',
+  is_active:  'פעיל/ה',
 };
 
 const ISSUE_MESSAGES = {
@@ -33,10 +53,11 @@ const ISSUE_MESSAGES = {
   duplicate_identity_number: 'קיימת כבר רשומה במערכת עם אותה תעודת זהות. אי אפשר ליצור שתי רשומות עם אותו מספר; יש לקשר לרשומה הקיימת, לתקן את המספר, או לדלג.',
   duplicate_identity_in_file: 'אותה תעודת זהות מופיעה יותר מפעם אחת בקובץ או במרחב הייבוא. יש לתקן או לדלג על הכפילות.',
   duplicate_email: 'קיימת כבר רשומה עם אותו אימייל. מומלץ לבדוק אם זו אותה רשומה.',
-  missing_contact_path: 'לתלמיד/ה פעיל/ה חייב להיות לפחות טלפון או אימייל כדי שלא תיווצר רשומה בלי דרך יצירת קשר.',
+  missing_contact_path: 'נדרש לפחות טלפון או אימייל — אחרת לא תהיה דרך יצירת קשר ברשומה.',
 };
 
 const ENTITY_LABELS = {
+  customer:         'לקוח/ה',
   active_student:   'תלמיד/ה פעיל/ה',
   inactive_student: 'תלמיד/ה לא פעיל/ה',
   guardian:         'הורה',
@@ -46,6 +67,7 @@ const ENTITY_LABELS = {
 };
 
 const EDITABLE_FIELDS_BY_ENTITY = {
+  customer: ['first_name', 'last_name', 'identity_number', 'customer_type', 'is_active', 'phone', 'email', 'date_of_birth'],
   active_student: ['first_name', 'last_name', 'identity_number', 'phone', 'email', 'date_of_birth'],
   inactive_student: ['first_name', 'last_name', 'identity_number', 'phone', 'email', 'date_of_birth'],
   guardian: ['first_name', 'last_name', 'phone', 'email'],
@@ -55,7 +77,7 @@ const EDITABLE_FIELDS_BY_ENTITY = {
 };
 
 const MULTILINE_FIELDS = new Set(['description', 'note_text']);
-const BOOLEAN_FIELDS = new Set(['is_primary']);
+const BOOLEAN_FIELDS = new Set(['is_primary', 'is_active']);
 
 const DRY_RUN_OUTCOME_LABELS = {
   create:         'יצירה חדשה',
@@ -128,6 +150,8 @@ function hasValue(field, data) {
 }
 
 function displayValue(field, value) {
+  if (field === 'customer_type') return CUSTOMER_TYPE_LABELS[value] || value || '—';
+  if (field === 'is_active') return value === true ? 'פעיל/ה' : value === false ? 'לא פעיל/ה' : '—';
   if (BOOLEAN_FIELDS.has(field)) return value ? 'כן' : 'לא';
   if (value === null || value === undefined || value === '') return '—';
   return String(value);
@@ -302,6 +326,7 @@ export function CandidateDetailSheet({ candidate, workspaceId, open, onClose, on
   const { issues = [], entity_type, status, decisions = {} } = active;
   const blockers = issues.filter(i => i.severity === 'blocker');
   const warnings = issues.filter(i => i.severity === 'warning');
+  const hasIdentityBlocker = blockers.some(b => b.code === 'duplicate_identity_number');
   const editableFields = getEditableFields(entity_type, candidate_data);
   const fieldChanges = decisions.field_changes && typeof decisions.field_changes === 'object'
     ? decisions.field_changes
@@ -461,6 +486,25 @@ export function CandidateDetailSheet({ candidate, workspaceId, open, onClose, on
 
   function renderEditor(field) {
     const editorId = `candidate-edit-${active.id}-${field}`;
+    if (SELECT_FIELD_OPTIONS[field]) {
+      return (
+        <Select
+          value={editingValue || ''}
+          onValueChange={(v) => setEditingValue(v)}
+          dir="rtl"
+          disabled={savingField !== null}
+        >
+          <SelectTrigger id={editorId} className="h-8 text-sm">
+            <SelectValue placeholder="— בחר —" />
+          </SelectTrigger>
+          <SelectContent>
+            {SELECT_FIELD_OPTIONS[field].map((opt) => (
+              <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      );
+    }
     if (BOOLEAN_FIELDS.has(field)) {
       return (
         <label className="flex items-center gap-2 text-sm">
@@ -471,7 +515,7 @@ export function CandidateDetailSheet({ candidate, workspaceId, open, onClose, on
             onChange={(e) => setEditingValue(e.target.checked)}
             disabled={savingField !== null}
           />
-          הורה ראשי
+          {BOOLEAN_FIELD_LABELS[field] || field}
         </label>
       );
     }
@@ -730,18 +774,22 @@ export function CandidateDetailSheet({ candidate, workspaceId, open, onClose, on
                   המערכת תחפש קודם רשומה קיימת לפי תעודת זהות. אם לא תימצא התאמה, אפשר לחפש לפי שם, טלפון, ת״ז או פרטי הורה.
                 </p>
 
-                <Button
-                  variant="outline"
-                  className="w-full justify-start gap-2"
-                  onClick={handleCreateAsNew}
-                  disabled={busy}
-                >
-                  <PlusCircle className="h-4 w-4" />
-                  צור אדם חדש אפילו אם זוהה כקיים
-                </Button>
-                <p className="text-[11px] leading-5 text-muted-foreground">
-                  מתאים אם זו לא אותה רשומה קיימת, או אם האדם עדיין לא קיים במערכת.
-                </p>
+                {!hasIdentityBlocker && (
+                  <>
+                    <Button
+                      variant="outline"
+                      className="w-full justify-start gap-2"
+                      onClick={handleCreateAsNew}
+                      disabled={busy}
+                    >
+                      <PlusCircle className="h-4 w-4" />
+                      צור אדם חדש אפילו אם זוהה כקיים
+                    </Button>
+                    <p className="text-[11px] leading-5 text-muted-foreground">
+                      מתאים אם זו לא אותה רשומה קיימת, או אם האדם עדיין לא קיים במערכת.
+                    </p>
+                  </>
+                )}
 
                 <Button
                   variant="ghost"
@@ -829,6 +877,17 @@ export function CandidateDetailSheet({ candidate, workspaceId, open, onClose, on
                 )}
 
                 {linkError && <p className="text-xs text-destructive">{linkError}</p>}
+
+                {/* Prefer-file placeholder — future feature */}
+                <div className="rounded-md border border-dashed px-3 py-2 opacity-60 select-none">
+                  <p className="text-xs font-medium text-muted-foreground">
+                    העדפת פרטי הקובץ על הקיים
+                    <span className="ms-1.5 inline-flex items-center rounded-full bg-muted px-1.5 py-0.5 text-[10px]">בקרוב</span>
+                  </p>
+                  <p className="text-[11px] text-muted-foreground mt-0.5">
+                    כרגע רק שדות ריקים מתמלאים. שדות קיימים אינם משתנים עד שהתכונה תהיה זמינה.
+                  </p>
+                </div>
               </div>
             )}
 

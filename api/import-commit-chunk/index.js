@@ -2,18 +2,17 @@
 /**
  * import-commit-chunk — POST /api/import-workspaces/:id/commit/chunk
  *
- * Atomically commits a batch of import_candidates to the live tables.
- * Delegates all logic to the commit_import_chunk PL/pgSQL RPC which
- * runs as a single transaction (all-or-rollback).
+ * JS-orchestrated commit engine. Calls the same domain helpers used by the rest of the
+ * product (createOrReuseClientProfile, ensureStudentForClientProfile, …) so the import
+ * follows identical business rules and fill-empty merge logic.
  *
- * Body: { candidate_ids: string[], org_id: string }
- * Returns: { committed: number, workspace_id: string, results: [...] }
+ * Per-row try/catch: a per-row failure does NOT abort the chunk. Failed candidates are
+ * marked 'failed' and returned in failures[]; the caller can retry only those IDs.
  *
- * Guards:
- *   - admin or office role only
- *   - workspace must belong to the org
- *   - workspace must not already be fully committed
- *   - max 50 candidates per call
+ * Commit wave order: customer → guardian / service → guardian_link / student_note
+ *
+ * Body:    { candidate_ids: string[], org_id: string }
+ * Returns: { committed, failed, workspace_id, results, failures }
  */
 import { resolveBearerAuthorization } from '../_shared/http.js';
 import {
@@ -28,15 +27,245 @@ import {
   respond,
   withOrgScope,
 } from '../_shared/org-bff.js';
-import { respondTrackedError } from '../_shared/error-events.js';
+import {
+  createOrReuseClientProfile,
+  ensureStudentForClientProfile,
+  createOrReuseGuardianByParts,
+  upsertClientGuardianLink,
+  findClientProfileByIdentityNumber,
+} from '../_shared/client-profiles.js';
+import { validateIsraeliPhone } from '../_shared/student-validation.js';
+import { attachErrorTracking, respondTracked } from '../_shared/error-events.js';
 
-const MAX_CANDIDATES_PER_CALL = 50;
+const MAX_CANDIDATES_PER_CALL = 25;
+
+const ENTITY_WAVE = {
+  customer:        0,
+  active_student:  0,
+  inactive_student: 0,
+  guardian:        1,
+  service:         1,
+  guardian_link:   2,
+  student_note:    2,
+};
 
 function normalizeUuid(value) {
   const normalized = normalizeString(value);
   if (!normalized) return '';
   return UUID_PATTERN.test(normalized) ? normalized : '';
 }
+
+function respondCommitError(context, status, message, error, metadata = {}) {
+  return respondTracked(context, status, { message }, undefined, { error, metadata });
+}
+
+async function writeLedgerRow(supabase, orgId, workspaceId, candidateId, resourceType, resourceId, actionTaken) {
+  const { error } = await withOrgScope(supabase, 'import_commit_ledger', orgId)
+    .insert({
+      org_id: orgId,
+      workspace_id: workspaceId,
+      candidate_id: candidateId,
+      live_resource_type: resourceType,
+      live_resource_id: resourceId,
+      action_taken: actionTaken,
+    });
+  if (error) {
+    // Ledger write is best-effort audit; real work already landed — do not abort
+  }
+}
+
+// ─── Per-entity commit helpers ────────────────────────────────────────────────
+
+async function commitCustomer(supabase, orgId, candidate) {
+  const { entity_type, candidate_data: data = {}, decisions = {} } = candidate;
+  const action = normalizeString(decisions?.action);
+
+  // customer_type — infer from legacy entity_type if not set (backward compat with old staging rows)
+  const customerType = normalizeString(data?.customer_type)
+    || (entity_type === 'active_student' || entity_type === 'inactive_student' ? 'student' : null);
+  if (!customerType || !['student', 'one_time_customer'].includes(customerType)) {
+    throw new Error('customer_type_required');
+  }
+
+  const isActive = data?.is_active !== undefined
+    ? data.is_active !== false
+    : entity_type !== 'inactive_student';
+
+  let clientProfileId;
+  let profileLedgerAction;
+
+  if (action === 'link_to_existing') {
+    const linkedId = normalizeUuid(String(decisions.linked_id || ''));
+    if (!linkedId) throw new Error('link_to_existing_missing_linked_id');
+
+    // Verify the target profile exists and belongs to this org
+    const { data: profile, error: profileError } = await withOrgScope(supabase, 'client_profiles', orgId)
+      .select('id, phone, email, date_of_birth')
+      .eq('id', linkedId)
+      .maybeSingle();
+    if (profileError) throw new Error(`failed_to_load_linked_profile:${profileError.message}`);
+    if (!profile) throw new Error('linked_profile_not_found');
+
+    // Fill-empty — only populate blank fields; is_active and customer_type are intentionally
+    // NOT updated on linked profiles until a future "prefer file" option is added
+    const safeUpdates = {};
+    if (!profile.phone && data.phone) safeUpdates.phone = data.phone;
+    if (!profile.email && data.email) safeUpdates.email = data.email;
+    if (!profile.date_of_birth && data.date_of_birth) safeUpdates.date_of_birth = data.date_of_birth;
+
+    if (Object.keys(safeUpdates).length) {
+      safeUpdates.updated_at = new Date().toISOString();
+      const { error: updateError } = await withOrgScope(supabase, 'client_profiles', orgId)
+        .update(safeUpdates)
+        .eq('id', linkedId);
+      if (updateError) throw new Error(`failed_to_fill_linked_profile:${updateError.message}`);
+      profileLedgerAction = 'update';
+    } else {
+      profileLedgerAction = 'link';
+    }
+    clientProfileId = linkedId;
+  } else {
+    // Default and create_as_new both go through create-or-reuse.
+    // A duplicate_identity_number blocker prevents a candidate from reaching 'ready',
+    // so if we arrive here the identity is either unique or the user corrected it.
+    const result = await createOrReuseClientProfile(supabase, {
+      org_id: orgId,
+      first_name: data.first_name,
+      last_name: data.last_name,
+      identity_number: data.identity_number,
+      phone: data.phone,
+      email: data.email,
+      date_of_birth: data.date_of_birth,
+      is_active: isActive,
+    });
+    clientProfileId = result.clientProfileId;
+    profileLedgerAction = result.action === 'created' ? 'create' : 'update';
+  }
+
+  let studentId = null;
+  let studentLedgerAction = null;
+  if (customerType === 'student') {
+    const { student, created, error: studentError } = await ensureStudentForClientProfile(supabase, clientProfileId);
+    if (studentError) throw new Error(`failed_to_ensure_student:${studentError}`);
+    if (student?.id) {
+      studentId = student.id;
+      studentLedgerAction = created ? 'create' : 'link';
+    }
+  }
+
+  return { clientProfileId, profileLedgerAction, studentId, studentLedgerAction };
+}
+
+async function commitGuardian(supabase, orgId, candidate) {
+  const { candidate_data: data = {} } = candidate;
+  const result = await createOrReuseGuardianByParts(supabase, {
+    orgId,
+    firstName: normalizeString(data.first_name),
+    lastName: normalizeString(data.last_name),
+    phone: data.phone,
+    email: data.email,
+  });
+  return {
+    guardianId: result.guardianId,
+    ledgerAction: result.action === 'created' ? 'create' : 'link',
+  };
+}
+
+async function commitGuardianLink(supabase, orgId, candidate, committedProfilesByIdentity) {
+  const { candidate_data: data = {} } = candidate;
+  const studentIdentity = normalizeString(data.identity_number);
+  const guardianPhone = normalizeString(data.guardian_phone);
+
+  if (!studentIdentity) throw new Error('student_identity_number_required');
+  if (!guardianPhone) throw new Error('guardian_phone_required');
+
+  // Try this batch first (student committed in wave 0), then fall back to DB
+  let clientProfileId = committedProfilesByIdentity.get(studentIdentity);
+  if (!clientProfileId) {
+    const { data: profile, error } = await findClientProfileByIdentityNumber(supabase, studentIdentity, { orgId });
+    if (error) throw new Error(`failed_to_find_student_profile:${error.message}`);
+    clientProfileId = profile?.id || null;
+  }
+  if (!clientProfileId) throw new Error('guardian_link_student_not_found');
+
+  const phoneResult = validateIsraeliPhone(guardianPhone);
+  if (!phoneResult.valid || !phoneResult.value) throw new Error('invalid_guardian_phone');
+
+  const { data: guardian, error: guardianError } = await withOrgScope(supabase, 'guardians', orgId)
+    .select('id')
+    .eq('phone', phoneResult.value)
+    .limit(1)
+    .maybeSingle();
+  if (guardianError) throw new Error(`failed_to_find_guardian:${guardianError.message}`);
+  if (!guardian?.id) throw new Error('guardian_link_guardian_not_found');
+
+  await upsertClientGuardianLink(supabase, {
+    orgId,
+    clientProfileId,
+    guardianId: guardian.id,
+    relationship: normalizeString(data.relationship) || null,
+  });
+
+  return { clientProfileId, guardianId: guardian.id };
+}
+
+async function commitService(supabase, orgId, candidate) {
+  const { candidate_data: data = {} } = candidate;
+  const serviceName = normalizeString(data.service_name);
+  if (!serviceName) throw new Error('service_name_required');
+
+  const { data: existing, error: lookupError } = await withOrgScope(supabase, 'Services', orgId)
+    .select('id')
+    .ilike('name', serviceName)
+    .limit(1)
+    .maybeSingle();
+  if (lookupError) throw new Error(`failed_to_lookup_service:${lookupError.message}`);
+  if (existing?.id) return { serviceId: existing.id, ledgerAction: 'link' };
+
+  const { data: created, error: createError } = await withOrgScope(supabase, 'Services', orgId)
+    .insert({ org_id: orgId, name: serviceName, is_active: true })
+    .select('id')
+    .single();
+  if (createError || !created?.id) throw new Error(`failed_to_create_service:${createError?.message || 'unknown_error'}`);
+
+  return { serviceId: created.id, ledgerAction: 'create' };
+}
+
+async function commitStudentNote(supabase, orgId, candidate, committedProfilesByIdentity) {
+  const { candidate_data: data = {} } = candidate;
+  const studentIdentity = normalizeString(data.identity_number);
+  const noteText = normalizeString(data.note_text);
+
+  if (!noteText) throw new Error('note_text_required');
+  if (!studentIdentity) throw new Error('student_identity_number_required');
+
+  let clientProfileId = committedProfilesByIdentity.get(studentIdentity);
+  if (!clientProfileId) {
+    const { data: profile, error } = await findClientProfileByIdentityNumber(supabase, studentIdentity, { orgId });
+    if (error) throw new Error(`failed_to_find_student_profile:${error.message}`);
+    clientProfileId = profile?.id || null;
+  }
+  if (!clientProfileId) throw new Error('student_note_student_not_found');
+
+  const { data: student, error: studentError } = await withOrgScope(supabase, 'students', orgId)
+    .select('id, notes_internal')
+    .eq('client_profile_id', clientProfileId)
+    .maybeSingle();
+  if (studentError) throw new Error(`failed_to_find_student_record:${studentError.message}`);
+  if (!student?.id) throw new Error('student_note_student_record_not_found');
+
+  const existingNotes = normalizeString(student.notes_internal);
+  const merged = existingNotes ? `${existingNotes}\n${noteText}` : noteText;
+
+  const { error: updateError } = await withOrgScope(supabase, 'students', orgId)
+    .update({ notes_internal: merged, updated_at: new Date().toISOString() })
+    .eq('id', student.id);
+  if (updateError) throw new Error(`failed_to_save_note:${updateError.message}`);
+
+  return { studentId: student.id };
+}
+
+// ─── Main handler ─────────────────────────────────────────────────────────────
 
 export default async function importCommitChunk(context, req) {
   const env = readEnv(context);
@@ -61,144 +290,223 @@ export default async function importCommitChunk(context, req) {
 
   const body = parseRequestBody(req);
   const orgId = resolveOrgId(req, body);
-  if (!orgId) {
-    return respond(context, 400, { message: 'invalid_org_id' });
-  }
+  if (!orgId) return respond(context, 400, { message: 'invalid_org_id' });
+
+  const workspaceId = normalizeUuid(req.params?.workspaceId);
+  if (!workspaceId) return respond(context, 400, { message: 'workspace_id_required' });
+
+  attachErrorTracking(context, req, supabase, {
+    orgId,
+    userId,
+    metadata: { endpoint: 'import-commit-chunk', workspaceId },
+  });
 
   let role;
   try {
     role = await ensureMembership(supabase, orgId, userId);
   } catch (err) {
     context.log?.error?.('import-commit-chunk: membership check failed', { message: err?.message });
-    return respondTrackedError(context, req, supabase, {
-      status: 500,
-      message: 'failed_to_verify_membership',
-      orgId,
-      userId,
-      error: err,
-      metadata: { endpoint: 'import-commit-chunk', action: 'verify_membership' },
-    });
+    return respondCommitError(context, 500, 'failed_to_verify_membership', err, { action: 'verify_membership' });
   }
   if (!role) return respond(context, 403, { message: 'forbidden' });
   if (!isAdminOrOffice(role)) return respond(context, 403, { message: 'forbidden' });
-
-  const workspaceId = normalizeUuid(req.params?.workspaceId);
-  if (!workspaceId) {
-    return respond(context, 400, { message: 'workspace_id_required' });
-  }
 
   const rawIds = body?.candidate_ids;
   if (!Array.isArray(rawIds) || rawIds.length === 0) {
     return respond(context, 400, { message: 'candidate_ids_required' });
   }
   if (rawIds.length > MAX_CANDIDATES_PER_CALL) {
-    return respond(context, 400, {
-      message: 'too_many_candidates',
-      max: MAX_CANDIDATES_PER_CALL,
-    });
+    return respond(context, 400, { message: 'too_many_candidates', max: MAX_CANDIDATES_PER_CALL });
   }
 
-  const candidateIds = rawIds
-    .map(id => normalizeUuid(String(id ?? '')))
-    .filter(Boolean);
+  const candidateIds = rawIds.map(id => normalizeUuid(String(id ?? ''))).filter(Boolean);
+  if (candidateIds.length === 0) return respond(context, 400, { message: 'no_valid_candidate_ids' });
 
-  if (candidateIds.length === 0) {
-    return respond(context, 400, { message: 'no_valid_candidate_ids' });
-  }
-
-  // Verify workspace belongs to this org
   const { data: workspace, error: wsError } = await withOrgScope(supabase, 'import_workspaces', orgId)
     .select('id, status')
     .eq('id', workspaceId)
     .maybeSingle();
   if (wsError) {
     context.log?.error?.('import-commit-chunk: workspace lookup failed', { message: wsError.message });
-    return respondTrackedError(context, req, supabase, {
-      status: 500,
-      message: 'failed_to_load_workspace',
-      orgId,
-      userId,
-      error: wsError,
-      metadata: { endpoint: 'import-commit-chunk', action: 'load_workspace', workspaceId },
+    return respondCommitError(context, 500, 'failed_to_load_workspace', wsError, {
+      action: 'load_workspace', workspaceId,
     });
   }
-  if (!workspace) {
-    return respond(context, 404, { message: 'workspace_not_found' });
-  }
+  if (!workspace) return respond(context, 404, { message: 'workspace_not_found' });
+  if (workspace.status === 'committed') return respond(context, 409, { message: 'workspace_already_committed' });
 
-  // Guard: re-committing a fully-committed workspace is a no-op conflict
-  if (workspace.status === 'committed') {
-    return respond(context, 409, { message: 'workspace_already_committed' });
+  const { data: candidates, error: candidatesError } = await withOrgScope(supabase, 'import_candidates', orgId)
+    .select('id, entity_type, status, candidate_data, decisions, blocking_issues_count, depends_on_candidate_id')
+    .eq('workspace_id', workspaceId)
+    .in('id', candidateIds);
+  if (candidatesError) {
+    context.log?.error?.('import-commit-chunk: candidates load failed', { message: candidatesError.message });
+    return respondCommitError(context, 500, 'failed_to_load_candidates', candidatesError, {
+      action: 'load_candidates', workspaceId,
+    });
   }
+  if (!candidates || candidates.length === 0) return respond(context, 404, { message: 'no_candidates_found' });
 
-  // Delegate to the atomic PL/pgSQL RPC
-  const { data: rpcResult, error: rpcError } = await supabase.rpc('commit_import_chunk', {
-    p_workspace_id:  workspaceId,
-    p_org_id:        orgId,
-    p_candidate_ids: candidateIds,
+  // Sort into wave order so customers/students always precede guardian_links/notes
+  const sorted = [...candidates].sort((a, b) => {
+    const wa = ENTITY_WAVE[a.entity_type] ?? 99;
+    const wb = ENTITY_WAVE[b.entity_type] ?? 99;
+    return wa - wb;
   });
 
-  if (rpcError) {
-    const msg = rpcError.message ?? '';
-    if (msg.includes('Mismatched candidates')) {
-      return respond(context, 409, { message: 'candidate_ids_stale' });
+  const now = new Date().toISOString();
+  const results = [];
+  const failures = [];
+  const committedProfilesByIdentity = new Map();
+  let committedCount = 0;
+
+  for (const candidate of sorted) {
+    const { entity_type, status, blocking_issues_count, decisions = {} } = candidate;
+    const action = normalizeString(decisions?.action);
+
+    // Skipped — mark and continue
+    if (status === 'skipped' || action === 'skip') {
+      await withOrgScope(supabase, 'import_candidates', orgId)
+        .update({ status: 'skipped', updated_at: now })
+        .eq('id', candidate.id);
+      results.push({ candidate_id: candidate.id, outcome: 'skipped' });
+      continue;
     }
-    if (msg.includes('candidate_dependency_not_committed')) {
-      return respond(context, 409, { message: 'candidate_dependency_not_committed' });
+
+    // Already committed (re-entrant call)
+    if (status === 'committed') {
+      results.push({ candidate_id: candidate.id, outcome: 'already_committed' });
+      committedCount++;
+      continue;
     }
-    if (msg.includes('candidate_not_ready')) {
-      return respond(context, 409, { message: 'candidate_not_ready' });
+
+    // Pre-flight: must be 'ready' (or 'failed' for retry) with no blockers
+    if (status !== 'ready' && status !== 'failed') {
+      const reason = `candidate_not_ready:${status}`;
+      await withOrgScope(supabase, 'import_candidates', orgId)
+        .update({ status: 'failed', updated_at: now })
+        .eq('id', candidate.id);
+      failures.push({ candidate_id: candidate.id, error: reason });
+      results.push({ candidate_id: candidate.id, outcome: 'failed', error: reason });
+      continue;
     }
-    if (msg.includes('candidate_has_blockers')) {
-      return respond(context, 409, { message: 'candidate_has_blockers' });
+    if (Number(blocking_issues_count) > 0) {
+      const reason = 'candidate_has_blockers';
+      await withOrgScope(supabase, 'import_candidates', orgId)
+        .update({ status: 'failed', updated_at: now })
+        .eq('id', candidate.id);
+      failures.push({ candidate_id: candidate.id, error: reason });
+      results.push({ candidate_id: candidate.id, outcome: 'failed', error: reason });
+      continue;
     }
-    if (msg.includes('candidate_duplicate_identity_number')) {
-      return respond(context, 409, { message: 'duplicate_identity_number' });
+
+    // Dependency check (guardian_link / student_note depend on a customer in this or a prior chunk)
+    if (candidate.depends_on_candidate_id) {
+      const depId = candidate.depends_on_candidate_id;
+      const batchDep = sorted.find(c => c.id === depId);
+      const committedInBatch = results.some(r => r.candidate_id === depId && r.outcome === 'committed');
+      const depReady = (batchDep?.status === 'committed') || committedInBatch;
+
+      if (!depReady) {
+        const { data: depRow } = await withOrgScope(supabase, 'import_candidates', orgId)
+          .select('status')
+          .eq('id', depId)
+          .maybeSingle();
+        if (depRow?.status !== 'committed') {
+          const reason = 'candidate_dependency_not_committed';
+          await withOrgScope(supabase, 'import_candidates', orgId)
+            .update({ status: 'failed', updated_at: now })
+            .eq('id', candidate.id);
+          failures.push({ candidate_id: candidate.id, error: reason });
+          results.push({ candidate_id: candidate.id, outcome: 'failed', error: reason });
+          continue;
+        }
+      }
     }
-    if (msg.includes('active_student_missing_identity')) {
-      return respond(context, 422, { message: 'active_student_missing_identity' });
+
+    try {
+      const ledgerEntries = [];
+
+      if (entity_type === 'customer' || entity_type === 'active_student' || entity_type === 'inactive_student') {
+        const result = await commitCustomer(supabase, orgId, candidate);
+        ledgerEntries.push({
+          resourceType: 'client_profiles',
+          resourceId: result.clientProfileId,
+          action: result.profileLedgerAction,
+        });
+        if (result.studentId) {
+          ledgerEntries.push({
+            resourceType: 'students',
+            resourceId: result.studentId,
+            action: result.studentLedgerAction,
+          });
+        }
+        const identity = normalizeString(candidate.candidate_data?.identity_number);
+        if (identity && result.clientProfileId) {
+          committedProfilesByIdentity.set(identity, result.clientProfileId);
+        }
+      } else if (entity_type === 'guardian') {
+        const result = await commitGuardian(supabase, orgId, candidate);
+        ledgerEntries.push({ resourceType: 'guardians', resourceId: result.guardianId, action: result.ledgerAction });
+      } else if (entity_type === 'guardian_link') {
+        const result = await commitGuardianLink(supabase, orgId, candidate, committedProfilesByIdentity);
+        ledgerEntries.push({ resourceType: 'client_guardians', resourceId: result.guardianId, action: 'link' });
+      } else if (entity_type === 'service') {
+        const result = await commitService(supabase, orgId, candidate);
+        ledgerEntries.push({ resourceType: 'Services', resourceId: result.serviceId, action: result.ledgerAction });
+      } else if (entity_type === 'student_note') {
+        const result = await commitStudentNote(supabase, orgId, candidate, committedProfilesByIdentity);
+        ledgerEntries.push({ resourceType: 'students', resourceId: result.studentId, action: 'update' });
+      } else {
+        throw new Error(`unsupported_entity_type:${entity_type}`);
+      }
+
+      for (const entry of ledgerEntries) {
+        await writeLedgerRow(
+          supabase, orgId, workspaceId, candidate.id,
+          entry.resourceType, entry.resourceId, entry.action,
+        );
+      }
+
+      await withOrgScope(supabase, 'import_candidates', orgId)
+        .update({ status: 'committed', updated_at: now })
+        .eq('id', candidate.id);
+
+      committedCount++;
+      results.push({ candidate_id: candidate.id, outcome: 'committed' });
+    } catch (err) {
+      context.log?.error?.('import-commit-chunk: candidate commit failed', {
+        candidateId: candidate.id,
+        entity_type,
+        message: err?.message,
+      });
+
+      await withOrgScope(supabase, 'import_candidates', orgId)
+        .update({ status: 'failed', updated_at: now })
+        .eq('id', candidate.id);
+
+      failures.push({ candidate_id: candidate.id, error: err?.message || 'unknown_error' });
+      results.push({ candidate_id: candidate.id, outcome: 'failed', error: err?.message });
     }
-    if (msg.includes('active_student_missing_first_name')) {
-      return respond(context, 422, { message: 'active_student_missing_first_name' });
-    }
-    if (msg.includes('active_student_missing_last_name')) {
-      return respond(context, 422, { message: 'active_student_missing_last_name' });
-    }
-    if (msg.includes('active_student_missing_contact_path')) {
-      return respond(context, 422, { message: 'active_student_missing_contact_path' });
-    }
-    if (msg.includes('inactive_student_missing_identity')) {
-      return respond(context, 422, { message: 'inactive_student_missing_identity' });
-    }
-    if (msg.includes('inactive_student_missing_name')) {
-      return respond(context, 422, { message: 'inactive_student_missing_name' });
-    }
-    if (msg.includes('linked_profile_not_found')) {
-      return respond(context, 422, { message: 'linked_profile_not_found' });
-    }
-    if (msg.includes('guardian_link_student_not_found')) {
-      return respond(context, 422, { message: 'guardian_link_student_not_found' });
-    }
-    if (msg.includes('guardian_link_guardian_not_found')) {
-      return respond(context, 422, { message: 'guardian_link_guardian_not_found' });
-    }
-    if (msg.includes('student_note_student_not_found')) {
-      return respond(context, 422, { message: 'student_note_student_not_found' });
-    }
-    context.log?.error?.('import-commit-chunk: rpc failed', { message: rpcError.message });
-    return respondTrackedError(context, req, supabase, {
-      status: 500,
-      message: 'The database transaction encountered an error while committing this chunk. The operation has been rolled back safely.',
-      orgId,
-      userId,
-      error: rpcError,
-      metadata: {
-        endpoint: 'import-commit-chunk',
-        workspaceId,
-        candidateCount: candidateIds.length,
-      },
-    });
   }
 
-  return respond(context, 200, rpcResult);
+  // Flip workspace status: 'committed' only when no non-terminal candidates remain
+  const nonTerminalStatuses = ['needs_review', 'ready', 'blocked', 'blocked_by_dependency', 'failed'];
+  const { count: remainingCount } = await withOrgScope(supabase, 'import_candidates', orgId)
+    .select('id', { count: 'exact', head: true })
+    .eq('workspace_id', workspaceId)
+    .in('status', nonTerminalStatuses);
+
+  const newWorkspaceStatus = (remainingCount ?? 1) === 0 ? 'committed' : 'needs_review';
+  await withOrgScope(supabase, 'import_workspaces', orgId)
+    .update({ status: newWorkspaceStatus, updated_at: now })
+    .eq('id', workspaceId);
+
+  return respond(context, 200, {
+    committed: committedCount,
+    failed: failures.length,
+    workspace_id: workspaceId,
+    results,
+    failures,
+  });
 }

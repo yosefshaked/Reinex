@@ -7,6 +7,7 @@ import { AlertCircle, AlertTriangle, ChevronLeft, ChevronRight } from 'lucide-re
 import { listCandidates } from '../api/importWorkspacesApi.js';
 
 const ENTITY_TYPE_LABELS = {
+  customer:         'לקוח/ה',
   active_student:   'תלמיד/ה פעיל/ה',
   inactive_student: 'תלמיד/ה לא פעיל/ה (ארכיון)',
   guardian:         'הורה',

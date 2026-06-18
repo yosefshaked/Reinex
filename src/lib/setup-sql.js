@@ -6419,6 +6419,44 @@ CREATE INDEX IF NOT EXISTS import_candidates_blocking_idx
 CREATE INDEX IF NOT EXISTS import_candidates_merged_rows_gin_idx
   ON public.import_candidates USING gin (merged_from_row_ids);
 
+-- Migration: add 'customer' umbrella entity type (replaces active_student/inactive_student
+-- long-term; old values kept in the constraint for backward-compat with un-re-analyzed workspaces).
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM pg_constraint
+     WHERE conname = 'import_candidates_entity_type_check'
+       AND conrelid = 'public.import_candidates'::regclass
+       AND pg_get_constraintdef(oid) NOT LIKE '%customer%'
+  ) THEN
+    ALTER TABLE public.import_candidates DROP CONSTRAINT import_candidates_entity_type_check;
+    ALTER TABLE public.import_candidates
+      ADD CONSTRAINT import_candidates_entity_type_check CHECK (
+        entity_type IN (
+          'customer',
+          'active_student',
+          'inactive_student',
+          'guardian',
+          'guardian_link',
+          'service',
+          'student_note'
+        )
+      );
+  END IF;
+END $$;
+
+-- One-shot idempotent data migration: convert legacy entity types to the new 'customer' umbrella.
+-- candidate_data gains customer_type ('student') and is_active (true for active, false for inactive).
+-- Safe to re-run: WHERE clause only matches unconverted rows.
+UPDATE public.import_candidates
+   SET entity_type    = 'customer',
+       candidate_data = candidate_data || jsonb_build_object(
+                          'customer_type', 'student',
+                          'is_active',     (entity_type = 'active_student')
+                        ),
+       updated_at     = now()
+ WHERE entity_type IN ('active_student', 'inactive_student');
+
 -- import_commit_ledger: immutable audit trail for every live record created, updated, or linked
 -- by an import commit. Workspace CASCADE handles bulk cleanup when a workspace is deleted.
 CREATE TABLE IF NOT EXISTS public.import_commit_ledger (

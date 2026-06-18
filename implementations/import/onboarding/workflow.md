@@ -59,6 +59,10 @@ User confirms or edits mappings.
 
 Mappings are saved per source reference. Switching from a student sheet to a parent sheet must never overwrite the first sheet's mapping. Parent sources expose first name, last name, phone, and email through the canonical `guardian` candidate fields.
 
+The mapping editor shows qualified choices from all uploaded sources at once, for example `students.xlsx · תעודת זהות` and `parents.xlsx · שם פרטי`. If one candidate uses more than one source, the user must choose a join column in every participating source. The system joins by the normalized shared value, records all source-row provenance, and blocks missing or ambiguous matches instead of joining by row number.
+
+A source used only to supply joined fields does not require a separate mapping or analysis pass. It must be ingested so its rows are available to the analyzer, but saving the cross-source mapping advances directly to ingestion instead of forcing the user through every uploaded file.
+
 Mapping features:
 - source column to target field
 - combine source columns into one target field

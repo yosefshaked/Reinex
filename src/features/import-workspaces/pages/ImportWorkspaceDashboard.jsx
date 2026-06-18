@@ -38,6 +38,20 @@ function getSourceTotalRows(source) {
   return Number(source?.profile?.rowCount ?? source?.profile?.totalRows ?? 0);
 }
 
+function getMappedSourceReferences(config = {}) {
+  const anchorReferences = [];
+  const participatingReferences = new Set();
+  for (const [anchorReference, mapping] of Object.entries(config.mappings?.by_source || {})) {
+    if (Object.keys(mapping?.field_map || {}).length === 0) continue;
+    anchorReferences.push(anchorReference);
+    participatingReferences.add(anchorReference);
+    Object.values(mapping.field_map).forEach((fieldSource) => {
+      if (fieldSource?.source_reference) participatingReferences.add(fieldSource.source_reference);
+    });
+  }
+  return { anchorReferences, participatingReferences };
+}
+
 function getWorkspaceSources(config = {}) {
   if (Array.isArray(config.sources) && config.sources.length > 0) return config.sources;
   if (!config.sourceReference) return [];
@@ -57,17 +71,22 @@ function deriveCompletedSteps(ws, ingestionStatus, analysisStatus) {
   const completed = [];
 
   const sources = getWorkspaceSources(config);
-  const hasMappings = sources.length > 0 && sources.every((source) => {
-    const mapping = config.mappings?.by_source?.[source.sourceReference]?.field_map;
-    return (mapping && Object.keys(mapping).length > 0)
-      || (sources.length === 1 && Object.keys(config.mappings?.field_map || {}).length > 0);
-  });
+  const hasMappings = Object.values(config.mappings?.by_source || {})
+    .some((mapping) => Object.keys(mapping?.field_map || {}).length > 0)
+    || Object.keys(config.mappings?.field_map || {}).length > 0;
   const sourceProgress = progress.by_source || {};
-  const sourcesIngested = sources.length > 0 && sources.every((source) => {
+  const { anchorReferences, participatingReferences } = getMappedSourceReferences(config);
+  const participatingSources = participatingReferences.size > 0
+    ? sources.filter((source) => participatingReferences.has(source.sourceReference))
+    : sources;
+  const analyzedSources = anchorReferences.length > 0
+    ? sources.filter((source) => anchorReferences.includes(source.sourceReference))
+    : sources;
+  const sourcesIngested = participatingSources.length > 0 && participatingSources.every((source) => {
     const count = getSourceTotalRows(source);
     return count > 0 && Number(sourceProgress[source.sourceReference]?.uploadedRows || 0) >= count;
   });
-  const sourcesAnalyzed = sources.length > 0 && sources.every((source) => {
+  const sourcesAnalyzed = analyzedSources.length > 0 && analyzedSources.every((source) => {
     const count = getSourceTotalRows(source);
     return count > 0 && Number(sourceProgress[source.sourceReference]?.analyzedRows || 0) >= count;
   });
@@ -95,15 +114,20 @@ function deriveCurrentStep(ws, ingestionStatus, analysisStatus) {
   if (!config.sourceReference) return 'upload';
 
   const sources = getWorkspaceSources(config);
-  const hasMappings = sources.length > 0 && sources.every((source) => {
-    const mapping = config.mappings?.by_source?.[source.sourceReference]?.field_map;
-    return (mapping && Object.keys(mapping).length > 0)
-      || (sources.length === 1 && Object.keys(config.mappings?.field_map || {}).length > 0);
-  });
+  const hasMappings = Object.values(config.mappings?.by_source || {})
+    .some((mapping) => Object.keys(mapping?.field_map || {}).length > 0)
+    || Object.keys(config.mappings?.field_map || {}).length > 0;
   if (!hasMappings) return 'map';
 
   const sourceProgress = progress.by_source || {};
-  const ingestDoneFromSources = sources.length > 0 && sources.every((source) => {
+  const { anchorReferences, participatingReferences } = getMappedSourceReferences(config);
+  const participatingSources = participatingReferences.size > 0
+    ? sources.filter((source) => participatingReferences.has(source.sourceReference))
+    : sources;
+  const analyzedSources = anchorReferences.length > 0
+    ? sources.filter((source) => anchorReferences.includes(source.sourceReference))
+    : sources;
+  const ingestDoneFromSources = participatingSources.length > 0 && participatingSources.every((source) => {
     const count = getSourceTotalRows(source);
     return count > 0 && Number(sourceProgress[source.sourceReference]?.uploadedRows || 0) >= count;
   });
@@ -112,7 +136,7 @@ function deriveCurrentStep(ws, ingestionStatus, analysisStatus) {
   ));
   if (!ingestDone) return 'ingest';
 
-  const analyzeDoneFromSources = sources.length > 0 && sources.every((source) => {
+  const analyzeDoneFromSources = analyzedSources.length > 0 && analyzedSources.every((source) => {
     const count = getSourceTotalRows(source);
     return count > 0 && Number(sourceProgress[source.sourceReference]?.analyzedRows || 0) >= count;
   });
@@ -355,7 +379,7 @@ function MapStep({ workspace, selectedSourceReference, onSourceChange, onSaved }
     setEntityType(savedSourceMapping.entity_type || config.entityType || 'active_student');
   }, [config.entityType, savedSourceMapping.entity_type, sourceReference]);
 
-  async function handleSave(fieldMap) {
+  async function handleSave(fieldMap, joinColumns, fixedValues) {
     setSaving(true);
     setSaveError(null);
     try {
@@ -364,7 +388,12 @@ function MapStep({ workspace, selectedSourceReference, onSourceChange, onSaved }
         entityType,
         mappings: {
           by_source: {
-            [sourceReference]: { entity_type: entityType, field_map: fieldMap },
+            [sourceReference]: {
+              entity_type: entityType,
+              field_map: fieldMap,
+              join_columns: joinColumns,
+              fixed_values: fixedValues || {},
+            },
           },
         },
       });
@@ -401,9 +430,13 @@ function MapStep({ workspace, selectedSourceReference, onSourceChange, onSaved }
       {saveError && <p className="text-xs text-destructive">{saveError}</p>}
       <MappingEditor
         sourceColumns={headers}
+        sources={sources}
+        anchorSourceReference={sourceReference}
         sampleRow={sampleRow}
         entityType={entityType}
         initialFieldMap={savedSourceMapping.field_map || (sources.length === 1 ? config.mappings?.field_map : {}) || {}}
+        initialJoinColumns={savedSourceMapping.join_columns || {}}
+        initialFixedValues={savedSourceMapping.fixed_values || {}}
         onEntityTypeChange={setEntityType}
         onSave={handleSave}
         saving={saving}
@@ -418,6 +451,15 @@ function ProcessStep({ ingestion, analysis, uploadHook, workspace, sourceReferen
   const sources = getWorkspaceSources(config);
   const selectedSource = sources.find((source) => source.sourceReference === sourceReference) || sources[0];
   const sourceProgress = config.operationProgress?.by_source?.[sourceReference] || {};
+  const sourceMapping = config.mappings?.by_source?.[sourceReference] || {};
+  const hasSourceMapping = Object.keys(sourceMapping.field_map || {}).length > 0
+    || (sources.length === 1 && Object.keys(config.mappings?.field_map || {}).length > 0);
+  const referencedSources = [...new Set([
+    sourceReference,
+    ...Object.values(sourceMapping.field_map || {})
+      .map((mapping) => mapping?.source_reference)
+      .filter(Boolean),
+  ].filter(Boolean))];
   const totalRows = getSourceTotalRows(selectedSource) || uploadHook.profile?.rowCount || uploadHook.profile?.totalRows || uploadHook.parsedRows?.length || 0;
   const hasRows   = !!uploadHook.parsedRows;
   const ingestDone = ingestion.status === 'done' ||
@@ -426,6 +468,13 @@ function ProcessStep({ ingestion, analysis, uploadHook, workspace, sourceReferen
   const analysisDone = analysis.status === 'done' ||
     (sourceProgress.analyzedRows >= totalRows && totalRows > 0) ||
     (sources.length === 1 && config.operationProgress?.analyzedRows >= totalRows && totalRows > 0);
+  const joinedSourcesReady = hasSourceMapping && referencedSources.every((reference) => {
+    if (reference === sourceReference) return ingestDone;
+    const referencedSource = sources.find((source) => source.sourceReference === reference);
+    const referencedTotal = getSourceTotalRows(referencedSource);
+    return referencedTotal > 0
+      && Number(config.operationProgress?.by_source?.[reference]?.uploadedRows || 0) >= referencedTotal;
+  });
 
   return (
     <div className="space-y-4">
@@ -463,7 +512,18 @@ function ProcessStep({ ingestion, analysis, uploadHook, workspace, sourceReferen
           progress: 1,
         } : analysis}
         ingestDoneFromConfig={ingestDone}
+        analysisPrerequisitesDone={joinedSourcesReady}
       />
+      {!joinedSourcesReady && referencedSources.length > 1 && (
+        <p className="text-xs text-amber-700 dark:text-amber-300">
+          לפני בדיקת הנתונים צריך לשמור גם את השורות מהמקורות הנוספים שמשתתפים במיפוי.
+        </p>
+      )}
+      {!hasSourceMapping && (
+        <p className="text-xs text-muted-foreground">
+          המקור הזה משמש להשלמת פרטים במיפוי אחר. צריך לשמור את השורות שלו, אבל אין צורך למפות או לנתח אותו בנפרד.
+        </p>
+      )}
       {totalRows > 0 && (
         <p className="text-xs text-muted-foreground">
           סה"כ שורות: {totalRows.toLocaleString()}
@@ -489,59 +549,69 @@ async function fetchAllCandidates(workspaceId, status, sourceReference) {
 
 // Topological commit waves: each wave depends on the previous one completing first.
 const COMMIT_WAVES = [
-  { label: 'תלמידים',         types: ['active_student', 'inactive_student'] },
-  { label: 'הורים ושירותים', types: ['guardian', 'service'] },
-  { label: 'קישורי הורים',   types: ['guardian_link'] },
-  { label: 'הערות',          types: ['student_note'] },
+  { label: 'לקוחות ותלמידים', types: ['customer', 'active_student', 'inactive_student'] },
+  { label: 'הורים ושירותים',  types: ['guardian', 'service'] },
+  { label: 'קישורי הורים',    types: ['guardian_link'] },
+  { label: 'הערות',           types: ['student_note'] },
 ];
 
 // ── Commit Step ────────────────────────────────────────────────────────────
 function CommitStep({ workspaceId, sourceReference }) {
-  const [phase, setPhase]       = useState('idle'); // 'idle' | 'running' | 'done' | 'error'
+  const [phase, setPhase]       = useState('idle'); // 'idle' | 'running' | 'done' | 'partial' | 'error'
   const [progress, setProgress] = useState({ done: 0, total: 0, waveLabel: '' });
+  const [summary, setSummary]   = useState({ committed: 0, failed: 0 });
   const [errorMsg, setErrorMsg] = useState('');
 
-  async function handleCommit() {
+  async function runCommit(mode = 'full') {
     if (phase === 'running') return;
     setPhase('running');
     setErrorMsg('');
     setProgress({ done: 0, total: 0, waveLabel: '' });
+    setSummary({ committed: 0, failed: 0 });
 
     try {
-      // Collect all ready + skipped candidates
-      const readyCandidates  = await fetchAllCandidates(workspaceId, 'ready', sourceReference);
-      const skippedCandidates = await fetchAllCandidates(workspaceId, 'skipped', sourceReference);
-      const all = [...readyCandidates, ...skippedCandidates];
+      let candidates;
+      if (mode === 'retry') {
+        candidates = await fetchAllCandidates(workspaceId, 'failed', sourceReference);
+      } else {
+        const ready   = await fetchAllCandidates(workspaceId, 'ready', sourceReference);
+        const skipped = await fetchAllCandidates(workspaceId, 'skipped', sourceReference);
+        candidates = [...ready, ...skipped];
+      }
 
-      if (all.length === 0) {
+      if (candidates.length === 0) {
         setPhase('done');
         return;
       }
 
-      // Group by entity_type
       const grouped = {};
-      for (const c of all) {
+      for (const c of candidates) {
         if (!grouped[c.entity_type]) grouped[c.entity_type] = [];
         grouped[c.entity_type].push(c.id);
       }
 
-      const total = all.length;
+      const total = candidates.length;
       setProgress({ done: 0, total, waveLabel: '' });
       let done = 0;
+      let totalCommitted = 0;
+      let totalFailed = 0;
 
       for (const wave of COMMIT_WAVES) {
         const idsInWave = wave.types.flatMap(t => grouped[t] ?? []);
         if (idsInWave.length === 0) continue;
         setProgress({ done, total, waveLabel: wave.label });
-        for (let i = 0; i < idsInWave.length; i += 50) {
-          const chunk = idsInWave.slice(i, i + 50);
-          await commitChunk(workspaceId, chunk);
+        for (let i = 0; i < idsInWave.length; i += 25) {
+          const chunk  = idsInWave.slice(i, i + 25);
+          const result = await commitChunk(workspaceId, chunk);
+          totalCommitted += result.committed ?? chunk.length;
+          totalFailed    += result.failed    ?? 0;
           done += chunk.length;
           setProgress({ done, total, waveLabel: wave.label });
         }
       }
 
-      setPhase('done');
+      setSummary({ committed: totalCommitted, failed: totalFailed });
+      setPhase(totalFailed > 0 ? 'partial' : 'done');
     } catch (err) {
       setErrorMsg(err.message || 'commit_failed');
       setPhase('error');
@@ -553,7 +623,33 @@ function CommitStep({ workspaceId, sourceReference }) {
       <div className="py-8 text-center space-y-2">
         <CheckCircle2 className="h-10 w-10 text-green-500 mx-auto" />
         <p className="text-sm font-medium">הייבוא הושלם בהצלחה</p>
-        <p className="text-xs text-muted-foreground">כל הרשומות הועברו לטבלאות הפעילות.</p>
+        {summary.committed > 0 && (
+          <p className="text-xs text-muted-foreground">{summary.committed} רשומות הועברו לטבלאות הפעילות.</p>
+        )}
+      </div>
+    );
+  }
+
+  if (phase === 'partial') {
+    return (
+      <div className="py-8 text-center space-y-3">
+        <AlertCircle className="h-10 w-10 text-yellow-500 mx-auto" />
+        <p className="text-sm font-medium">הייבוא הושלם חלקית</p>
+        <p className="text-xs text-muted-foreground">
+          {summary.committed} הועברו בהצלחה, {summary.failed} נכשלו.
+        </p>
+        <p className="text-xs text-muted-foreground">
+          ניתן לפתוח את הכרטיסים שנכשלו, לתקן את הבעיה ואז לנסות שוב.
+        </p>
+        <div className="flex gap-2 justify-center">
+          <Button variant="outline" size="sm" onClick={() => runCommit('retry')} className="gap-2">
+            <RefreshCcw className="h-4 w-4" />
+            נסה שנית על הנכשלים
+          </Button>
+          <Button variant="ghost" size="sm" onClick={() => setPhase('done')}>
+            סיים ממילא
+          </Button>
+        </div>
       </div>
     );
   }
@@ -597,9 +693,9 @@ function CommitStep({ workspaceId, sourceReference }) {
       <p className="text-sm text-muted-foreground">
         לחץ על &ldquo;בצע ייבוא&rdquo; כדי להעביר את כל המועמדים המאושרים לטבלאות הפעילות.
         <br />
-        הפעולה אטומית — או שהכל יתבצע, או שלא יתבצע כלום.
+        שורות שנכשלות לא מונעות את השאר — ניתן לתקן ולנסות שנית.
       </p>
-      <Button onClick={handleCommit} className="gap-2">
+      <Button onClick={() => runCommit('full')} className="gap-2">
         <UploadCloud className="h-4 w-4" />
         בצע ייבוא
       </Button>
@@ -858,19 +954,8 @@ export default function ImportWorkspaceDashboard() {
               selectedSourceReference={sourceRef}
               onSourceChange={handleSourceChange}
               onSaved={async (savedSourceReference) => {
-                const refreshed = await load();
-                const refreshedConfig = refreshed?.config || {};
-                const refreshedSources = getWorkspaceSources(refreshedConfig);
-                const nextUnmapped = refreshedSources.find((source) => (
-                  !refreshedConfig.mappings?.by_source?.[source.sourceReference]?.field_map
-                ));
-                if (nextUnmapped) {
-                  handleSourceChange(nextUnmapped.sourceReference);
-                  setCurrentStep('map');
-                } else {
-                  handleSourceChange(savedSourceReference);
-                  setCurrentStep('ingest');
-                }
+                await handleSourceChange(savedSourceReference);
+                setCurrentStep('ingest');
               }}
             />
           )}

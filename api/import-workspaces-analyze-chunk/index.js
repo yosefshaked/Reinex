@@ -36,12 +36,17 @@ const MAX_ROWS_PER_ANALYSIS_CHUNK = 100;
 // blockers → missing field sets status to 'blocked' and increments blocking_issues_count.
 // warnings → missing field generates a 'warning' issue only.
 const ENTITY_SCHEMA = {
+  customer: {
+    // identity_number is always required — it is the duplicate blocker regardless of is_active.
+    // customer_type (student | one_time_customer) must be explicitly chosen; there is no default.
+    blockers: ['first_name', 'last_name', 'identity_number', 'customer_type'],
+    warnings: ['phone', 'email', 'date_of_birth'],
+  },
   active_student: {
     blockers: ['first_name', 'last_name', 'identity_number'],
     warnings: ['phone', 'email', 'date_of_birth'],
   },
   inactive_student: {
-    // Invariant: inactive_student archive requires name + identity_number
     blockers: ['first_name', 'last_name', 'identity_number'],
     warnings: ['phone', 'email', 'date_of_birth'],
   },
@@ -67,6 +72,8 @@ const FIELD_LABELS = {
   first_name: 'שם פרטי',
   last_name: 'שם משפחה',
   identity_number: 'תעודת זהות התלמיד',
+  customer_type: 'סוג לקוח',
+  is_active: 'פעיל/לא פעיל',
   guardian_phone: 'טלפון הורה',
   phone: 'טלפון',
   email: 'אימייל',
@@ -97,6 +104,10 @@ function issueMessage(issue) {
       return 'קיימת כבר רשומה עם אותו אימייל. בדוק/י אם מדובר באותו אדם.';
     case 'missing_contact_path':
       return 'לתלמיד/ה פעיל/ה חייב להיות לפחות טלפון או אימייל כדי שלא תיווצר רשומה בלי דרך יצירת קשר.';
+    case 'source_join_not_found':
+      return `לא נמצאה רשומה תואמת במקור הנוסף עבור ${label}. בדוק/י את עמודות הקישור שנבחרו.`;
+    case 'ambiguous_source_join':
+      return `נמצאו כמה רשומות תואמות במקור הנוסף עבור ${label}. ערך הקישור חייב לזהות רשומה אחת בלבד.`;
     default:
       return issue?.severity === 'blocker'
         ? `${label} חוסם את הייבוא ויש לטפל בו.`
@@ -112,13 +123,53 @@ function withIssuePresentation(issue) {
   };
 }
 
-// Apply the user-configured field mapping (sourceColumn → canonicalField) to a raw row.
-function applyMappings(rawData, fieldMap) {
-  const out = {};
-  for (const [canonicalField, sourceColumn] of Object.entries(fieldMap || {})) {
-    out[canonicalField] = rawData[sourceColumn] ?? null;
+function normalizeFieldSource(value, anchorSourceReference) {
+  if (value && typeof value === 'object') {
+    const sourceReference = normalizeString(value.source_reference);
+    const column = normalizeString(value.column);
+    return sourceReference && column ? { sourceReference, column } : null;
   }
-  return out;
+  const column = normalizeString(value);
+  return column ? { sourceReference: anchorSourceReference, column } : null;
+}
+
+function normalizeJoinValue(value) {
+  const normalized = normalizeString(value).toLocaleLowerCase('he-IL').replace(/\s+/g, '');
+  const digits = normalized.replace(/\D/g, '');
+  return digits.length >= 5 ? digits : normalized;
+}
+
+// Apply source-qualified mappings to one anchor row. Cross-source values are
+// resolved through explicit join columns; row position is never used.
+function applyMappings(rawData, fieldMap, anchorSourceReference, joinColumns, externalRowsBySourceAndKey) {
+  const out = {};
+  const mergedRowIds = [];
+  const joinIssues = [];
+  for (const [canonicalField, configuredSource] of Object.entries(fieldMap || {})) {
+    const source = normalizeFieldSource(configuredSource, anchorSourceReference);
+    if (!source) continue;
+    if (source.sourceReference === anchorSourceReference) {
+      out[canonicalField] = rawData[source.column] ?? null;
+      continue;
+    }
+
+    const anchorJoinColumn = normalizeString(joinColumns?.[anchorSourceReference]);
+    const anchorJoinValue = normalizeJoinValue(rawData[anchorJoinColumn]);
+    const matches = externalRowsBySourceAndKey.get(source.sourceReference)?.get(anchorJoinValue) || [];
+    if (matches.length === 1) {
+      out[canonicalField] = matches[0].raw_data?.[source.column] ?? null;
+      mergedRowIds.push(matches[0].id);
+    } else {
+      out[canonicalField] = null;
+      joinIssues.push({
+        code: matches.length > 1 ? 'ambiguous_source_join' : 'source_join_not_found',
+        severity: 'blocker',
+        field: canonicalField,
+        source_reference: source.sourceReference,
+      });
+    }
+  }
+  return { mapped: out, mergedRowIds: [...new Set(mergedRowIds)], joinIssues };
 }
 
 function isValidDateParts(year, month, day) {
@@ -247,6 +298,45 @@ function normalizeCandidateData(mapped, entityType) {
     Object.assign(data, { service_name: nameResult.value });
   }
 
+  // customer_type: must be 'student' or 'one_time_customer' when provided
+  const VALID_CUSTOMER_TYPES = new Set(['student', 'one_time_customer']);
+  if (entityType === 'customer') {
+    const rawCt = data.customer_type;
+    if (rawCt !== null && rawCt !== undefined && rawCt !== '') {
+      const ct = normalizeString(String(rawCt)).toLowerCase().replace(/\s+/g, '_');
+      if (!VALID_CUSTOMER_TYPES.has(ct)) {
+        fieldIssues.push({ code: 'invalid_field_format', severity: 'blocker', field: 'customer_type' });
+        data.customer_type = null; // null → generateStructuralIssues fires missing_required_field too
+      } else {
+        data.customer_type = ct;
+      }
+    } else {
+      data.customer_type = null;
+    }
+  }
+
+  // is_active: boolean with lenient coercion; defaults to true when not provided
+  if (entityType === 'customer') {
+    const rawActive = data.is_active;
+    if (rawActive === null || rawActive === undefined || rawActive === '') {
+      data.is_active = true;
+    } else if (typeof rawActive === 'boolean') {
+      // keep as-is
+    } else {
+      const str = normalizeString(String(rawActive)).toLowerCase();
+      const trueSet = new Set(['true', '1', 'yes', 'כן', 'active', 'פעיל', 'y']);
+      const falseSet = new Set(['false', '0', 'no', 'לא', 'inactive', 'לא פעיל', 'n']);
+      if (trueSet.has(str)) {
+        data.is_active = true;
+      } else if (falseSet.has(str)) {
+        data.is_active = false;
+      } else {
+        fieldIssues.push({ code: 'invalid_field_format', severity: 'warning', field: 'is_active' });
+        data.is_active = true;
+      }
+    }
+  }
+
   return { data, fieldIssues };
 }
 
@@ -268,7 +358,9 @@ function generateStructuralIssues(candidateData, entityType) {
       issues.push({ code: 'missing_recommended_field', severity: 'warning', field });
     }
   }
-  if (entityType === 'active_student' && !candidateData.phone && !candidateData.email) {
+  const isStudentEntity = entityType === 'active_student'
+    || (entityType === 'customer' && candidateData.customer_type === 'student');
+  if (isStudentEntity && !candidateData.phone && !candidateData.email) {
     issues.push({ code: 'missing_contact_path', severity: 'blocker', field: 'phone' });
   }
   return issues;
@@ -377,6 +469,19 @@ export default async function importWorkspacesAnalyzeChunk(context, req) {
   const entityType = normalizeString(sourceMapping?.entity_type || sourceConfig?.entityType || config.entityType)
     || 'active_student';
   const fieldMap = sourceMapping?.field_map || sourceConfig?.mapping?.field_map || config.mappings?.field_map || {};
+  // fixed_values: literal values set for all rows in this source (e.g. customer_type = 'student').
+  // Applied as defaults after column mappings — a mapped column wins if it has a non-empty value.
+  const fixedValues = sourceMapping?.fixed_values || {};
+  const joinColumns = sourceMapping?.join_columns || {};
+  const externalSourceReferences = [...new Set(Object.values(fieldMap)
+    .map((value) => normalizeFieldSource(value, sourceReference)?.sourceReference)
+    .filter((mappedSourceReference) => mappedSourceReference && mappedSourceReference !== sourceReference))];
+
+  if (externalSourceReferences.some((externalReference) => (
+    !normalizeString(joinColumns[sourceReference]) || !normalizeString(joinColumns[externalReference])
+  ))) {
+    return respond(context, 400, { message: 'cross_source_join_columns_required' });
+  }
 
   if (!ENTITY_SCHEMA[entityType]) {
     return respond(context, 400, { message: 'unsupported_entity_type', entityType });
@@ -398,6 +503,41 @@ export default async function importWorkspacesAnalyzeChunk(context, req) {
 
   if (!rows || rows.length === 0) {
     return respond(context, 200, { analyzed: 0, candidates_created: 0, candidates_updated: 0 });
+  }
+
+  const externalRowsBySourceAndKey = new Map();
+  for (const externalReference of externalSourceReferences) {
+    const allExternalRows = [];
+    for (let from = 0; ; from += 1000) {
+      const { data: externalRows, error: externalRowsErr } = await withOrgScope(supabase, 'import_rows', orgId)
+        .select('id, source_reference, row_index, raw_data')
+        .eq('workspace_id', workspaceId)
+        .eq('source_reference', externalReference)
+        .order('row_index', { ascending: true })
+        .range(from, from + 999);
+      if (externalRowsErr) {
+        context.log?.error?.('import-workspaces-analyze-chunk: failed to load joined source rows', {
+          message: externalRowsErr.message,
+        });
+        return respondAnalyzeError(context, 500, 'failed_to_load_joined_source_rows', externalRowsErr, {
+          action: 'load_joined_source_rows',
+          sourceReference: externalReference,
+        });
+      }
+      allExternalRows.push(...(externalRows || []));
+      if (!externalRows || externalRows.length < 1000) break;
+    }
+
+    const joinColumn = joinColumns[externalReference];
+    const rowsByKey = new Map();
+    for (const externalRow of allExternalRows) {
+      const key = normalizeJoinValue(externalRow.raw_data?.[joinColumn]);
+      if (!key) continue;
+      const matchingRows = rowsByKey.get(key) || [];
+      matchingRows.push(externalRow);
+      rowsByKey.set(key, matchingRows);
+    }
+    externalRowsBySourceAndKey.set(externalReference, rowsByKey);
   }
 
   const rowIds = rows.map((row) => row.id);
@@ -432,9 +572,27 @@ export default async function importWorkspacesAnalyzeChunk(context, req) {
   const normalized = rows
     .filter((row) => !preservedStatuses.has(existingStatusByRowId.get(row.id)))
     .map((row) => {
-    const mapped = applyMappings(row.raw_data || {}, fieldMap);
+    const { mapped, mergedRowIds, joinIssues } = applyMappings(
+      row.raw_data || {},
+      fieldMap,
+      sourceReference,
+      joinColumns,
+      externalRowsBySourceAndKey,
+    );
+    // Apply fixed values as defaults for fields not resolved (or empty) from column mappings
+    for (const [field, fixedVal] of Object.entries(fixedValues)) {
+      if (mapped[field] === null || mapped[field] === undefined || mapped[field] === '') {
+        mapped[field] = fixedVal;
+      }
+    }
     const { data: candidateData, fieldIssues } = normalizeCandidateData(mapped, entityType);
-    return { rowId: row.id, rowIndex: row.row_index, candidateData, fieldIssues };
+    return {
+      rowId: row.id,
+      rowIndex: row.row_index,
+      candidateData,
+      fieldIssues: [...fieldIssues, ...joinIssues],
+      mergedRowIds,
+    };
   });
   const candidatesPreserved = rows.length - normalized.length;
 
@@ -469,7 +627,7 @@ export default async function importWorkspacesAnalyzeChunk(context, req) {
       ? withOrgScope(supabase, 'import_candidates', orgId)
           .select('source_row_id, candidate_data, status')
           .eq('workspace_id', workspaceId)
-          .in('entity_type', ['active_student', 'inactive_student'])
+          .in('entity_type', ['active_student', 'inactive_student', 'customer'])
       : Promise.resolve({ data: [], error: null }),
   ]);
 
@@ -519,7 +677,7 @@ export default async function importWorkspacesAnalyzeChunk(context, req) {
 
   // --- Build candidates ---
   const now = new Date().toISOString();
-  const candidates = normalized.map(({ rowId, candidateData, fieldIssues }) => {
+  const candidates = normalized.map(({ rowId, candidateData, fieldIssues, mergedRowIds }) => {
     const existingDecisions = existingDecisionsByRowId.get(rowId) || {};
     const hasResolvedDuplicateDecision = hasResolvedDuplicateIdentityDecision(existingDecisions);
     const issues = [...fieldIssues, ...generateStructuralIssues(candidateData, entityType)];
@@ -568,7 +726,7 @@ export default async function importWorkspacesAnalyzeChunk(context, req) {
       entity_type: entityType,
       status,
       candidate_data: candidateData,
-      merged_from_row_ids: [rowId],
+      merged_from_row_ids: [rowId, ...mergedRowIds],
       issues: presentedIssues,
       blocking_issues_count: blockingIssuesCount,
       decisions: existingDecisions,

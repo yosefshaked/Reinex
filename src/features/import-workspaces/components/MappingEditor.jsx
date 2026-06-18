@@ -7,6 +7,16 @@ import { Save } from 'lucide-react';
 
 // Canonical fields per entity type
 const TARGET_FIELDS_BY_ENTITY = {
+  customer: [
+    { value: 'first_name',      label: 'שם פרטי',        required: true },
+    { value: 'last_name',       label: 'שם משפחה',       required: true },
+    { value: 'identity_number', label: 'תעודת זהות',     required: true },
+    { value: 'customer_type',   label: 'סוג לקוח',       required: true },
+    { value: 'is_active',       label: 'פעיל/לא פעיל',   required: false },
+    { value: 'phone',           label: 'טלפון',           required: false },
+    { value: 'email',           label: 'אימייל',          required: false },
+    { value: 'date_of_birth',   label: 'תאריך לידה',      required: false },
+  ],
   active_student: [
     { value: 'first_name',       label: 'שם פרטי',        required: true },
     { value: 'last_name',        label: 'שם משפחה',       required: true },
@@ -46,6 +56,7 @@ const TARGET_FIELDS_BY_ENTITY = {
 };
 
 const ENTITY_TYPE_LABELS = {
+  customer:         'לקוח/ה',
   active_student:   'תלמיד/ה פעיל/ה',
   inactive_student: 'תלמיד/ה לא פעיל/ה',
   guardian:         'הורה / אפוטרופוס',
@@ -55,6 +66,7 @@ const ENTITY_TYPE_LABELS = {
 };
 
 const ENTITY_TYPE_ORDER = [
+  'customer',
   'active_student',
   'inactive_student',
   'guardian',
@@ -64,6 +76,26 @@ const ENTITY_TYPE_ORDER = [
 ];
 
 const SKIP_VALUE = '__skip__';
+
+function encodeSourceField(sourceReference, column) {
+  return JSON.stringify([sourceReference, column]);
+}
+
+function decodeSourceField(value, fallbackSourceReference) {
+  if (!value) return null;
+  if (typeof value === 'object' && value.source_reference && value.column) return value;
+  if (typeof value === 'string' && value.startsWith('[')) {
+    try {
+      const [sourceReference, column] = JSON.parse(value);
+      if (sourceReference && column) return { source_reference: sourceReference, column };
+    } catch {
+      return null;
+    }
+  }
+  return fallbackSourceReference && typeof value === 'string'
+    ? { source_reference: fallbackSourceReference, column: value }
+    : null;
+}
 
 function normalizeFieldMapForEntity(entityType, fieldMap = {}) {
   const next = { ...fieldMap };
@@ -80,27 +112,48 @@ function normalizeFieldMapForEntity(entityType, fieldMap = {}) {
 
 /**
  * @param {{
- *   sourceColumns: string[],
+ *   sources?: { sourceReference:string, label?:string, headers?:string[], profile?:object }[],
+ *   anchorSourceReference?: string,
  *   sampleRow?: Record<string,string>,
  *   entityType: string,
- *   initialFieldMap?: Record<string,string>,
+ *   initialFieldMap?: Record<string,string|{source_reference:string,column:string}>,
+ *   initialJoinColumns?: Record<string,string>,
  *   onEntityTypeChange?: (type:string)=>void,
- *   onSave?: (fieldMap: Record<string,string>) => void,
+ *   onSave?: (fieldMap: Record<string,object>, joinColumns: Record<string,string>, fixedValues: Record<string,any>) => void,
  *   saving?: boolean,
  * }} props
  */
 export function MappingEditor({
   sourceColumns = [],
+  sources = [],
+  anchorSourceReference,
   sampleRow = {},
   entityType,
   initialFieldMap = {},
+  initialJoinColumns = {},
+  initialFixedValues = {},
   onEntityTypeChange,
   onSave,
   saving = false,
 }) {
   // fieldMap: targetField -> sourceColumn
   const [fieldMap, setFieldMap] = useState(() => normalizeFieldMapForEntity(entityType, initialFieldMap));
+  const [joinColumns, setJoinColumns] = useState(initialJoinColumns);
+  const [fixedValues, setFixedValues] = useState(initialFixedValues);
   const initialFieldMapSignature = JSON.stringify(initialFieldMap || {});
+  const initialJoinColumnsSignature = JSON.stringify(initialJoinColumns || {});
+  const initialFixedValuesSignature = JSON.stringify(initialFixedValues || {});
+
+  const availableSources = useMemo(() => (
+    sources.length > 0
+      ? sources
+      : [{
+          sourceReference: anchorSourceReference,
+          label: 'הקובץ הנוכחי',
+          headers: sourceColumns,
+          profile: { sampleRow },
+        }]
+  ), [anchorSourceReference, sampleRow, sourceColumns, sources]);
 
   const targetFields = useMemo(
     () => TARGET_FIELDS_BY_ENTITY[entityType] || [],
@@ -111,13 +164,21 @@ export function MappingEditor({
     setFieldMap(normalizeFieldMapForEntity(entityType, JSON.parse(initialFieldMapSignature)));
   }, [entityType, initialFieldMapSignature]);
 
-  function handleFieldMapping(targetField, sourceColumn) {
+  useEffect(() => {
+    setJoinColumns(JSON.parse(initialJoinColumnsSignature));
+  }, [initialJoinColumnsSignature]);
+
+  useEffect(() => {
+    setFixedValues(JSON.parse(initialFixedValuesSignature));
+  }, [entityType, initialFixedValuesSignature]);
+
+  function handleFieldMapping(targetField, encodedSourceField) {
     setFieldMap(prev => {
       const next = { ...prev };
-      if (!sourceColumn || sourceColumn === SKIP_VALUE) {
+      if (!encodedSourceField || encodedSourceField === SKIP_VALUE) {
         delete next[targetField];
       } else {
-        next[targetField] = sourceColumn;
+        next[targetField] = decodeSourceField(encodedSourceField, anchorSourceReference);
       }
       return next;
     });
@@ -130,15 +191,28 @@ export function MappingEditor({
         canonicalFieldMap[field.value] = fieldMap[field.value];
       }
     }
-    onSave?.(canonicalFieldMap);
+    onSave?.(canonicalFieldMap, joinColumns, fixedValues);
   }
+
+  const mappedSourceReferences = [...new Set(Object.values(fieldMap)
+    .map((value) => decodeSourceField(value, anchorSourceReference)?.source_reference)
+    .filter(Boolean))];
+  const isCrossSource = mappedSourceReferences.some((sourceReference) => sourceReference !== anchorSourceReference);
+  const requiredJoinSources = isCrossSource
+    ? [...new Set([anchorSourceReference, ...mappedSourceReferences].filter(Boolean))]
+    : [];
 
   const requiredMappedCount = targetFields
     .filter(f => f.required)
-    .filter(f => fieldMap[f.value])
+    .filter(f => {
+      if (fieldMap[f.value]) return true;
+      const fv = fixedValues[f.value];
+      return fv !== undefined && fv !== null && fv !== '';
+    })
     .length;
   const requiredTotal = targetFields.filter(f => f.required).length;
-  const canSave = requiredMappedCount === requiredTotal && requiredTotal > 0;
+  const joinsComplete = requiredJoinSources.every((sourceReference) => joinColumns[sourceReference]);
+  const canSave = requiredMappedCount === requiredTotal && requiredTotal > 0 && joinsComplete;
 
   return (
     <div className="space-y-4">
@@ -182,8 +256,10 @@ export function MappingEditor({
           </thead>
           <tbody className="divide-y">
             {targetFields.map(field => {
-              const mapped = fieldMap[field.value] || '';
-              const sampleValue = mapped ? sampleRow[mapped] ?? '' : '';
+              const mapped = decodeSourceField(fieldMap[field.value], anchorSourceReference);
+              const mappedSource = availableSources.find((source) => source.sourceReference === mapped?.source_reference);
+              const mappedValue = mapped ? encodeSourceField(mapped.source_reference, mapped.column) : SKIP_VALUE;
+              const sampleValue = mapped ? mappedSource?.profile?.sampleRow?.[mapped.column] ?? '' : '';
               return (
                 <tr key={field.value} className="hover:bg-muted/20 transition-colors">
                   <td className="px-4 py-2">
@@ -196,7 +272,7 @@ export function MappingEditor({
                   </td>
                   <td className="px-4 py-2">
                     <Select
-                      value={mapped || SKIP_VALUE}
+                      value={mappedValue}
                       onValueChange={val => handleFieldMapping(field.value, val)}
                       dir="rtl"
                     >
@@ -207,13 +283,15 @@ export function MappingEditor({
                         <SelectItem value={SKIP_VALUE}>
                           <span className="text-muted-foreground">— לא ממופה —</span>
                         </SelectItem>
-                        {sourceColumns.map(col => (
-                          <SelectItem
-                            key={col}
-                            value={col}
-                          >
-                            {col}
-                          </SelectItem>
+                        {availableSources.flatMap((source) => (
+                          (source.headers || source.profile?.headers || []).map((column) => (
+                            <SelectItem
+                              key={encodeSourceField(source.sourceReference, column)}
+                              value={encodeSourceField(source.sourceReference, column)}
+                            >
+                              {source.label || source.sheetName || source.filename || 'מקור'} · {column}
+                            </SelectItem>
+                          ))
                         ))}
                       </SelectContent>
                     </Select>
@@ -231,6 +309,82 @@ export function MappingEditor({
           </tbody>
         </table>
       </div>
+
+      {/* Fixed values — "set all as X" (customer entity only) */}
+      {entityType === 'customer' && (
+        <div className="rounded-lg border p-4 space-y-3">
+          <div>
+            <p className="text-sm font-medium">ערכים קבועים לכל השורות</p>
+            <p className="text-xs text-muted-foreground mt-1">
+              שדה שאין לו עמודת מקור ייקח ערך זה. אם עמודה ממופה — הערך הממופה ינצח.
+            </p>
+          </div>
+          <div className="flex items-center gap-3">
+            <span className="text-sm w-24 shrink-0">
+              סוג לקוח
+              <span className="text-destructive ms-0.5" aria-label="חובה">*</span>
+            </span>
+            <Select
+              value={fixedValues.customer_type || SKIP_VALUE}
+              onValueChange={(v) => setFixedValues((prev) => {
+                const next = { ...prev };
+                if (!v || v === SKIP_VALUE) { delete next.customer_type; } else { next.customer_type = v; }
+                return next;
+              })}
+              dir="rtl"
+            >
+              <SelectTrigger className="h-8 text-sm flex-1">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={SKIP_VALUE}>
+                  <span className="text-muted-foreground">— לא מוגדר —</span>
+                </SelectItem>
+                <SelectItem value="student">תלמיד/ה</SelectItem>
+                <SelectItem value="one_time_customer">לקוח/ה חד-פעמי/ת</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+      )}
+
+      {isCrossSource && (
+        <div className="space-y-3 rounded-lg border p-4">
+          <div>
+            <p className="text-sm font-medium">איך מחברים בין המקורות?</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              בחר בכל מקור עמודה שמכילה את אותו מזהה, למשל תעודת הזהות של התלמיד. החיבור נעשה לפי הערך הזה, לעולם לא לפי מספר השורה.
+            </p>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {requiredJoinSources.map((sourceReference) => {
+              const source = availableSources.find((item) => item.sourceReference === sourceReference);
+              const headers = source?.headers || source?.profile?.headers || [];
+              return (
+                <div key={sourceReference} className="space-y-1.5">
+                  <span className="text-xs font-medium">{source?.label || sourceReference}</span>
+                  <Select
+                    value={joinColumns[sourceReference] || SKIP_VALUE}
+                    onValueChange={(value) => setJoinColumns((current) => ({
+                      ...current,
+                      [sourceReference]: value === SKIP_VALUE ? '' : value,
+                    }))}
+                    dir="rtl"
+                  >
+                    <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={SKIP_VALUE}>— בחר עמודת קישור —</SelectItem>
+                      {headers.map((column) => (
+                        <SelectItem key={column} value={column}>{column}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       <div className="flex justify-end">
         <Button onClick={handleSave} disabled={!canSave || saving} className="gap-2">

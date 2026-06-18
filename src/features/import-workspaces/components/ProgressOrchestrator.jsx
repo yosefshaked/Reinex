@@ -133,13 +133,21 @@ function toDisplayStatus(hookStatus) {
  *   ingestion: object,  // return value of useImportRowIngestion
  *   analysis: object,   // return value of useImportAnalysis
  *   ingestDoneFromConfig?: boolean,
+ *   analysisPrerequisitesDone?: boolean|null,
  * }} props
  */
-export function ProgressOrchestrator({ ingestion, analysis, ingestDoneFromConfig = false }) {
+export function ProgressOrchestrator({
+  ingestion,
+  analysis,
+  ingestDoneFromConfig = false,
+  analysisPrerequisitesDone = null,
+}) {
   const ingestionStatus = ingestion.status === 'done' || ingestDoneFromConfig
     ? 'done'
     : ingestion.status;
-  const analysisLocked = !(ingestion.status === 'done' || ingestDoneFromConfig);
+  const analysisLocked = analysisPrerequisitesDone === null
+    ? !(ingestion.status === 'done' || ingestDoneFromConfig)
+    : !analysisPrerequisitesDone;
 
   return (
     <div className="grid gap-4 sm:grid-cols-2">
