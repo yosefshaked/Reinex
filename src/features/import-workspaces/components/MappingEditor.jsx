@@ -65,6 +65,15 @@ function encodeSourceField(sourceReference, column) {
 function decodeSourceField(value, fallbackSourceReference) {
   if (!value) return null;
   if (typeof value === 'object' && value.source_reference && value.column) return value;
+  // Select values are produced by encodeSourceField → JSON.stringify([sourceRef, column]).
+  if (typeof value === 'string' && value.startsWith('[')) {
+    try {
+      const [sourceReference, column] = JSON.parse(value);
+      if (sourceReference && column) return { source_reference: sourceReference, column };
+    } catch {
+      return null;
+    }
+  }
   return fallbackSourceReference && typeof value === 'string'
     ? { source_reference: fallbackSourceReference, column: value }
     : null;
