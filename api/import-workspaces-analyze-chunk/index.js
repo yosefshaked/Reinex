@@ -42,17 +42,9 @@ const ENTITY_SCHEMA = {
     blockers: ['first_name', 'last_name', 'identity_number', 'customer_type'],
     warnings: ['phone', 'email', 'date_of_birth'],
   },
-  active_student: {
-    blockers: ['first_name', 'last_name', 'identity_number'],
-    warnings: ['phone', 'email', 'date_of_birth'],
-  },
-  inactive_student: {
-    blockers: ['first_name', 'last_name', 'identity_number'],
-    warnings: ['phone', 'email', 'date_of_birth'],
-  },
   guardian: {
-    blockers: ['first_name', 'last_name'],
-    warnings: ['phone', 'email'],
+    blockers: ['guardian_first_name', 'guardian_last_name'],
+    warnings: ['guardian_phone', 'guardian_email'],
   },
   guardian_link: {
     blockers: ['identity_number', 'guardian_phone'],
@@ -61,10 +53,6 @@ const ENTITY_SCHEMA = {
   service: {
     blockers: ['service_name'],
     warnings: ['description'],
-  },
-  student_note: {
-    blockers: ['note_text', 'identity_number'],
-    warnings: [],
   },
 };
 
@@ -236,15 +224,19 @@ function normalizeCandidateData(mapped, entityType) {
   const data = { ...mapped };
   const fieldIssues = [];
 
+  // Guardian fields keep their guardian_* names end-to-end (no flattening to
+  // first_name/last_name), so a single source row can map a student and a guardian
+  // without their columns colliding.
   if (entityType === 'guardian') {
-    data.first_name = data.guardian_first_name ?? data.first_name;
-    data.last_name = data.guardian_last_name ?? data.last_name;
-    data.phone = data.guardian_phone ?? data.phone;
-    data.email = data.guardian_email ?? data.email;
-    delete data.guardian_first_name;
-    delete data.guardian_last_name;
-    delete data.guardian_phone;
-    delete data.guardian_email;
+    data.guardian_first_name = coerceOptionalText(data.guardian_first_name).value;
+    data.guardian_last_name = coerceOptionalText(data.guardian_last_name).value;
+    if (data.guardian_email !== null && data.guardian_email !== undefined) {
+      const guardianEmailResult = coerceEmail(data.guardian_email);
+      if (!guardianEmailResult.valid) {
+        fieldIssues.push({ code: 'invalid_field_format', severity: 'warning', field: 'guardian_email' });
+      }
+      data.guardian_email = guardianEmailResult.valid ? guardianEmailResult.value : null;
+    }
   }
 
   if (!data.identity_number && data.student_identity_number) {
@@ -378,8 +370,7 @@ function generateStructuralIssues(candidateData, entityType) {
       issues.push({ code: 'missing_recommended_field', severity: 'warning', field });
     }
   }
-  const isStudentEntity = entityType === 'active_student'
-    || (entityType === 'customer' && candidateData.customer_type === 'student');
+  const isStudentEntity = entityType === 'customer' && candidateData.customer_type === 'student';
   if (isStudentEntity && !candidateData.phone && !candidateData.email) {
     issues.push({ code: 'missing_contact_path', severity: 'blocker', field: 'phone' });
   }
@@ -396,6 +387,17 @@ function hasResolvedDuplicateIdentityDecision(decisions) {
   const action = normalizeString(decisions?.action);
   if (action === 'skip') return true;
   return action === 'link_to_existing' && Boolean(normalizeUuid(decisions?.linked_id));
+}
+
+// In-file duplicates (same identity twice in the workspace) are resolved by any
+// deliberate choice about this row — including create_as_new, which means "keep
+// this copy". Whichever copies the user keeps still de-duplicate at commit via
+// createOrReuseClientProfile, so a single client_profile is created either way.
+function hasResolvedInFileDuplicateDecision(decisions) {
+  const action = normalizeString(decisions?.action);
+  return action === 'skip'
+    || action === 'create_as_new'
+    || (action === 'link_to_existing' && Boolean(normalizeUuid(decisions?.linked_id)));
 }
 
 export default async function importWorkspacesAnalyzeChunk(context, req) {
@@ -508,7 +510,7 @@ export default async function importWorkspacesAnalyzeChunk(context, req) {
   }
 
   for (const mapping of configuredEntities) {
-    if (!ENTITY_SCHEMA[mapping.entityType] || mapping.entityType === 'student_note') {
+    if (!ENTITY_SCHEMA[mapping.entityType]) {
       return respond(context, 400, { message: 'unsupported_entity_type', entityType: mapping.entityType });
     }
     const externalReferences = Object.values(mapping.field_map || {})
@@ -696,7 +698,7 @@ export default async function importWorkspacesAnalyzeChunk(context, req) {
       ? withOrgScope(supabase, 'import_candidates', orgId)
           .select('source_row_id, candidate_data, status')
           .eq('workspace_id', workspaceId)
-          .in('entity_type', ['active_student', 'inactive_student', 'customer'])
+          .eq('entity_type', 'customer')
       : Promise.resolve({ data: [], error: null }),
   ]);
 
@@ -757,7 +759,8 @@ export default async function importWorkspacesAnalyzeChunk(context, req) {
 
     // Duplicate identity number check
     if (entityType === 'customer' && candidateData.identity_number) {
-      if ((identityNumberCounts.get(candidateData.identity_number) || 0) > 1) {
+      if ((identityNumberCounts.get(candidateData.identity_number) || 0) > 1
+        && !hasResolvedInFileDuplicateDecision(existingDecisions)) {
         issues.push({
           code: 'duplicate_identity_in_file',
           severity: 'blocker',

@@ -9,7 +9,7 @@
  * Per-row try/catch: a per-row failure does NOT abort the chunk. Failed candidates are
  * marked 'failed' and returned in failures[]; the caller can retry only those IDs.
  *
- * Commit wave order: customer → guardian / service → guardian_link / student_note
+ * Commit wave order: customer → guardian / service → guardian_link
  *
  * Body:    { candidate_ids: string[], org_id: string }
  * Returns: { committed, failed, workspace_id, results, failures }
@@ -41,13 +41,10 @@ import { mergeMetadata } from '../_shared/metadata-utils.js';
 const MAX_CANDIDATES_PER_CALL = 25;
 
 const ENTITY_WAVE = {
-  customer:        0,
-  active_student:  0,
-  inactive_student: 0,
-  guardian:        1,
-  service:         1,
-  guardian_link:   2,
-  student_note:    2,
+  customer:      0,
+  guardian:      1,
+  service:       1,
+  guardian_link: 2,
 };
 
 function normalizeUuid(value) {
@@ -78,19 +75,15 @@ async function writeLedgerRow(supabase, orgId, workspaceId, candidateId, resourc
 // ─── Per-entity commit helpers ────────────────────────────────────────────────
 
 async function commitCustomer(supabase, orgId, candidate) {
-  const { entity_type, candidate_data: data = {}, decisions = {} } = candidate;
+  const { candidate_data: data = {}, decisions = {} } = candidate;
   const action = normalizeString(decisions?.action);
 
-  // customer_type — infer from legacy entity_type if not set (backward compat with old staging rows)
-  const customerType = normalizeString(data?.customer_type)
-    || (entity_type === 'active_student' || entity_type === 'inactive_student' ? 'student' : null);
+  const customerType = normalizeString(data?.customer_type);
   if (!customerType || !['student', 'one_time_customer'].includes(customerType)) {
     throw new Error('customer_type_required');
   }
 
-  const isActive = data?.is_active !== undefined
-    ? data.is_active !== false
-    : entity_type !== 'inactive_student';
+  const isActive = data?.is_active !== false;
 
   let clientProfileId;
   let profileLedgerAction;
@@ -190,10 +183,10 @@ async function commitGuardian(supabase, orgId, candidate) {
   const { candidate_data: data = {} } = candidate;
   const result = await createOrReuseGuardianByParts(supabase, {
     orgId,
-    firstName: normalizeString(data.first_name),
-    lastName: normalizeString(data.last_name),
-    phone: data.phone,
-    email: data.email,
+    firstName: normalizeString(data.guardian_first_name),
+    lastName: normalizeString(data.guardian_last_name),
+    phone: data.guardian_phone,
+    email: data.guardian_email,
   });
   return {
     guardianId: result.guardianId,
@@ -259,40 +252,6 @@ async function commitService(supabase, orgId, candidate) {
   if (createError || !created?.id) throw new Error(`failed_to_create_service:${createError?.message || 'unknown_error'}`);
 
   return { serviceId: created.id, ledgerAction: 'create' };
-}
-
-async function commitStudentNote(supabase, orgId, candidate, committedProfilesByIdentity) {
-  const { candidate_data: data = {} } = candidate;
-  const studentIdentity = normalizeString(data.identity_number);
-  const noteText = normalizeString(data.note_text);
-
-  if (!noteText) throw new Error('note_text_required');
-  if (!studentIdentity) throw new Error('student_identity_number_required');
-
-  let clientProfileId = committedProfilesByIdentity.get(studentIdentity);
-  if (!clientProfileId) {
-    const { data: profile, error } = await findClientProfileByIdentityNumber(supabase, studentIdentity, { orgId });
-    if (error) throw new Error(`failed_to_find_student_profile:${error.message}`);
-    clientProfileId = profile?.id || null;
-  }
-  if (!clientProfileId) throw new Error('student_note_student_not_found');
-
-  const { data: student, error: studentError } = await withOrgScope(supabase, 'students', orgId)
-    .select('id, notes_internal')
-    .eq('client_profile_id', clientProfileId)
-    .maybeSingle();
-  if (studentError) throw new Error(`failed_to_find_student_record:${studentError.message}`);
-  if (!student?.id) throw new Error('student_note_student_record_not_found');
-
-  const existingNotes = normalizeString(student.notes_internal);
-  const merged = existingNotes ? `${existingNotes}\n${noteText}` : noteText;
-
-  const { error: updateError } = await withOrgScope(supabase, 'students', orgId)
-    .update({ notes_internal: merged, updated_at: new Date().toISOString() })
-    .eq('id', student.id);
-  if (updateError) throw new Error(`failed_to_save_note:${updateError.message}`);
-
-  return { studentId: student.id };
 }
 
 // ─── Main handler ─────────────────────────────────────────────────────────────
@@ -366,7 +325,7 @@ export default async function importCommitChunk(context, req) {
   if (workspace.status === 'committed') return respond(context, 409, { message: 'workspace_already_committed' });
 
   const { data: candidates, error: candidatesError } = await withOrgScope(supabase, 'import_candidates', orgId)
-    .select('id, entity_type, status, candidate_data, decisions, blocking_issues_count, depends_on_candidate_id')
+    .select('id, entity_type, status, candidate_data, decisions, blocking_issues_count')
     .eq('workspace_id', workspaceId)
     .in('id', candidateIds);
   if (candidatesError) {
@@ -377,7 +336,7 @@ export default async function importCommitChunk(context, req) {
   }
   if (!candidates || candidates.length === 0) return respond(context, 404, { message: 'no_candidates_found' });
 
-  // Sort into wave order so customers/students always precede guardian_links/notes
+  // Sort into wave order so customers always precede guardians/links
   const sorted = [...candidates].sort((a, b) => {
     const wa = ENTITY_WAVE[a.entity_type] ?? 99;
     const wb = ENTITY_WAVE[b.entity_type] ?? 99;
@@ -430,34 +389,16 @@ export default async function importCommitChunk(context, req) {
       continue;
     }
 
-    // Dependency check (guardian_link / student_note depend on a customer in this or a prior chunk)
-    if (candidate.depends_on_candidate_id) {
-      const depId = candidate.depends_on_candidate_id;
-      const batchDep = sorted.find(c => c.id === depId);
-      const committedInBatch = results.some(r => r.candidate_id === depId && r.outcome === 'committed');
-      const depReady = (batchDep?.status === 'committed') || committedInBatch;
-
-      if (!depReady) {
-        const { data: depRow } = await withOrgScope(supabase, 'import_candidates', orgId)
-          .select('status')
-          .eq('id', depId)
-          .maybeSingle();
-        if (depRow?.status !== 'committed') {
-          const reason = 'candidate_dependency_not_committed';
-          await withOrgScope(supabase, 'import_candidates', orgId)
-            .update({ status: 'failed', updated_at: now })
-            .eq('id', candidate.id);
-          failures.push({ candidate_id: candidate.id, error: reason });
-          results.push({ candidate_id: candidate.id, outcome: 'failed', error: reason });
-          continue;
-        }
-      }
-    }
+    // Dependency resolution: guardian_link depends on its customer/student and
+    // guardian already existing. Enforced structurally by the commit wave order
+    // (customers in wave 0, guardians in wave 1) plus per-row identity/phone
+    // lookup in commitGuardianLink. A missing dependency surfaces as a per-row
+    // failure, not a pre-flight block.
 
     try {
       const ledgerEntries = [];
 
-      if (entity_type === 'customer' || entity_type === 'active_student' || entity_type === 'inactive_student') {
+      if (entity_type === 'customer') {
         const result = await commitCustomer(supabase, orgId, candidate);
         ledgerEntries.push({
           resourceType: 'client_profiles',
@@ -484,9 +425,6 @@ export default async function importCommitChunk(context, req) {
       } else if (entity_type === 'service') {
         const result = await commitService(supabase, orgId, candidate);
         ledgerEntries.push({ resourceType: 'Services', resourceId: result.serviceId, action: result.ledgerAction });
-      } else if (entity_type === 'student_note') {
-        const result = await commitStudentNote(supabase, orgId, candidate, committedProfilesByIdentity);
-        ledgerEntries.push({ resourceType: 'students', resourceId: result.studentId, action: 'update' });
       } else {
         throw new Error(`unsupported_entity_type:${entity_type}`);
       }

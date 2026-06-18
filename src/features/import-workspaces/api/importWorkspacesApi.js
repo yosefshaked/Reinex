@@ -234,7 +234,7 @@ export async function runDryRunChunk(workspaceId, candidateIds) {
  * Max 50 candidates per call; call multiple times for larger batches.
  *
  * Topological order must be enforced by the caller:
- *   active_student / inactive_student → guardian / service → guardian_link → student_note
+ *   customer → guardian / service → guardian_link
  *
  * @param {string} workspaceId
  * @param {string[]} candidateIds  — max 50 UUIDs

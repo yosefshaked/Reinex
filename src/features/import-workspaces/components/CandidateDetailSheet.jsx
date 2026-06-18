@@ -15,7 +15,10 @@ const FIELD_LABELS = {
   last_name:                'שם משפחה',
   identity_number:          'תעודת זהות',
   phone:                    'טלפון',
+  guardian_first_name:      'שם פרטי של ההורה',
+  guardian_last_name:       'שם משפחה של ההורה',
   guardian_phone:           'טלפון הורה',
+  guardian_email:           'אימייל הורה',
   email:                    'אימייל',
   date_of_birth:            'תאריך לידה',
   guardian_identity_number: 'ת.ז. הורה',
@@ -58,22 +61,16 @@ const ISSUE_MESSAGES = {
 
 const ENTITY_LABELS = {
   customer:         'לקוח/ה',
-  active_student:   'תלמיד/ה פעיל/ה',
-  inactive_student: 'תלמיד/ה לא פעיל/ה',
   guardian:         'הורה',
   guardian_link:    'קישור הורה-תלמיד',
   service:          'שירות',
-  student_note:     'הערה',
 };
 
 const EDITABLE_FIELDS_BY_ENTITY = {
   customer: ['first_name', 'last_name', 'identity_number', 'customer_type', 'is_active', 'phone', 'email', 'date_of_birth', 'note_text'],
-  active_student: ['first_name', 'last_name', 'identity_number', 'phone', 'email', 'date_of_birth'],
-  inactive_student: ['first_name', 'last_name', 'identity_number', 'phone', 'email', 'date_of_birth'],
-  guardian: ['first_name', 'last_name', 'phone', 'email'],
+  guardian: ['guardian_first_name', 'guardian_last_name', 'guardian_phone', 'guardian_email'],
   guardian_link: ['identity_number', 'guardian_phone', 'relationship', 'is_primary'],
   service: ['service_name', 'description'],
-  student_note: ['note_text', 'identity_number'],
 };
 
 const MULTILINE_FIELDS = new Set(['description', 'note_text']);
@@ -553,6 +550,7 @@ export function CandidateDetailSheet({ candidate, workspaceId, open, onClose, on
         <SheetHeader>
           <SheetTitle>
             {[candidate_data.first_name, candidate_data.last_name].filter(Boolean).join(' ')
+              || [candidate_data.guardian_first_name, candidate_data.guardian_last_name].filter(Boolean).join(' ')
               || candidate_data.service_name
               || 'רשומה'}
           </SheetTitle>

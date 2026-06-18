@@ -43,30 +43,23 @@ const PATCH_ALLOWED_CANDIDATE_STATUSES = new Set([
 ]);
 
 const ALLOWED_ENTITY_TYPES = new Set([
-  'customer', 'active_student', 'inactive_student', 'guardian',
-  'guardian_link', 'service', 'student_note',
+  'customer', 'guardian', 'guardian_link', 'service',
 ]);
 
 const VALID_CUSTOMER_TYPES = new Set(['student', 'one_time_customer']);
 
 const EDITABLE_FIELDS_BY_ENTITY = {
   customer: ['first_name', 'last_name', 'identity_number', 'customer_type', 'is_active', 'phone', 'email', 'date_of_birth', 'note_text'],
-  active_student: ['first_name', 'last_name', 'identity_number', 'phone', 'email', 'date_of_birth'],
-  inactive_student: ['first_name', 'last_name', 'identity_number', 'phone', 'email', 'date_of_birth'],
-  guardian: ['guardian_first_name', 'guardian_last_name', 'phone', 'email'],
+  guardian: ['guardian_first_name', 'guardian_last_name', 'guardian_phone', 'guardian_email'],
   guardian_link: ['identity_number', 'guardian_phone', 'relationship', 'is_primary'],
   service: ['service_name', 'description'],
-  student_note: ['note_text', 'identity_number'],
 };
 
 const REQUIRED_FIELDS_BY_ENTITY = {
   customer: ['first_name', 'last_name', 'identity_number', 'customer_type'],
-  active_student: ['first_name', 'last_name', 'identity_number'],
-  inactive_student: ['first_name', 'last_name', 'identity_number'],
   guardian: ['guardian_first_name', 'guardian_last_name'],
   guardian_link: ['identity_number', 'guardian_phone'],
   service: ['service_name'],
-  student_note: ['note_text', 'identity_number'],
 };
 
 function normalizeUuid(value) {
@@ -79,15 +72,33 @@ function countBlockingIssues(issues) {
   return (Array.isArray(issues) ? issues : []).filter((issue) => issue?.severity === 'blocker').length;
 }
 
+// DB duplicate (duplicate_identity_number) is resolved only by skipping or linking
+// to the existing record — never by create_as_new (see decision #4).
 function shouldClearDuplicateIdentityIssue(decisionsPatch) {
   const action = normalizeString(decisionsPatch?.action);
   return action === 'skip' || (action === 'link_to_existing' && Boolean(normalizeUuid(decisionsPatch?.linked_id)));
+}
+
+// In-file duplicate (same identity twice in this workspace) is resolved by any
+// deliberate choice about the row, including create_as_new ("keep this copy").
+function shouldClearInFileDuplicateIssue(decisionsPatch) {
+  const action = normalizeString(decisionsPatch?.action);
+  return action === 'skip'
+    || action === 'create_as_new'
+    || (action === 'link_to_existing' && Boolean(normalizeUuid(decisionsPatch?.linked_id)));
 }
 
 function hasResolvedDuplicateIdentityDecision(decisions) {
   const action = normalizeString(decisions?.action);
   if (action === 'skip') return true;
   return action === 'link_to_existing' && Boolean(normalizeUuid(decisions?.linked_id));
+}
+
+function hasResolvedInFileDuplicateDecision(decisions) {
+  const action = normalizeString(decisions?.action);
+  return action === 'skip'
+    || action === 'create_as_new'
+    || (action === 'link_to_existing' && Boolean(normalizeUuid(decisions?.linked_id)));
 }
 
 function isPlainObject(value) {
@@ -148,7 +159,7 @@ function normalizeCandidateDataPatch(entityType, existingData, patch) {
     let valid = true;
     let invalidSeverity = 'warning';
 
-    if (['first_name', 'last_name', 'service_name', 'description', 'note_text'].includes(field)) {
+    if (['first_name', 'last_name', 'guardian_first_name', 'guardian_last_name', 'service_name', 'description', 'note_text'].includes(field)) {
       const result = coerceOptionalText(rawValue);
       normalizedValue = result.value;
       valid = result.valid;
@@ -161,7 +172,7 @@ function normalizeCandidateDataPatch(entityType, existingData, patch) {
       const result = validateIsraeliPhone(rawValue);
       normalizedValue = result.valid ? result.value : null;
       valid = result.valid;
-    } else if (field === 'email') {
+    } else if (['email', 'guardian_email'].includes(field)) {
       const result = coerceEmail(rawValue);
       normalizedValue = result.valid ? result.value : null;
       valid = result.valid;
@@ -220,19 +231,25 @@ function generateStructuralIssues(candidateData, entityType) {
       issues.push(issue('missing_required_field', 'blocker', field));
     }
   }
-  const isStudentEntity = entityType === 'active_student'
-    || (entityType === 'customer' && candidateData?.customer_type === 'student');
+  const isStudentEntity = entityType === 'customer' && candidateData?.customer_type === 'student';
   if (isStudentEntity && !candidateData?.phone && !candidateData?.email) {
     issues.push(issue('missing_contact_path', 'blocker', 'phone'));
   }
   return issues;
 }
 
-async function generateDuplicateIssues(supabase, orgId, candidateData, decisions, { workspaceId, candidateId } = {}) {
+async function generateDuplicateIssues(supabase, orgId, candidateData, decisions, { workspaceId, candidateId, entityType } = {}) {
   const issues = [];
+  // Only the customer entity creates a client_profile, so it is the only one whose
+  // identity_number can be a duplicate. For guardian_link the identity_number is a
+  // *reference* to an existing student and must never be flagged. Mirrors the entity
+  // gating in import-workspaces-analyze-chunk.
+  if (entityType !== 'customer') return issues;
+
   const identityNumber = normalizeString(candidateData?.identity_number);
   const email = normalizeString(candidateData?.email);
 
+  // DB duplicate — only cleared by skip / link_to_existing.
   if (identityNumber && !hasResolvedDuplicateIdentityDecision(decisions)) {
     const { data, error } = await withOrgScope(supabase, 'client_profiles', orgId)
       .select('id')
@@ -244,21 +261,23 @@ async function generateDuplicateIssues(supabase, orgId, candidateData, decisions
         existing_client_profile_id: data.id,
       }));
     }
+  }
 
-    if (workspaceId) {
-      const { data: importCandidates, error: importError } = await withOrgScope(supabase, 'import_candidates', orgId)
-        .select('id, candidate_data, status')
-        .eq('workspace_id', workspaceId)
-        .in('entity_type', ['active_student', 'inactive_student', 'customer']);
-      if (importError) throw importError;
-      const hasImportDuplicate = (importCandidates || []).some((candidate) => (
-        candidate.id !== candidateId
-        && normalizeString(candidate.status) !== 'skipped'
-        && normalizeString(candidate.candidate_data?.identity_number) === identityNumber
-      ));
-      if (hasImportDuplicate) {
-        issues.push(issue('duplicate_identity_in_file', 'blocker', 'identity_number'));
-      }
+  // In-file duplicate — also cleared by create_as_new ("keep this copy"). The user
+  // picks which copy to keep; commit de-duplicates so only one client is created.
+  if (identityNumber && workspaceId && !hasResolvedInFileDuplicateDecision(decisions)) {
+    const { data: importCandidates, error: importError } = await withOrgScope(supabase, 'import_candidates', orgId)
+      .select('id, candidate_data, status')
+      .eq('workspace_id', workspaceId)
+      .eq('entity_type', 'customer');
+    if (importError) throw importError;
+    const hasImportDuplicate = (importCandidates || []).some((candidate) => (
+      candidate.id !== candidateId
+      && normalizeString(candidate.status) !== 'skipped'
+      && normalizeString(candidate.candidate_data?.identity_number) === identityNumber
+    ));
+    if (hasImportDuplicate) {
+      issues.push(issue('duplicate_identity_in_file', 'blocker', 'identity_number'));
     }
   }
 
@@ -409,9 +428,12 @@ export default async function importCandidates(context, req) {
     if (body?.decisions_patch && typeof body.decisions_patch === 'object') {
       nextDecisions = { ...nextDecisions, ...body.decisions_patch };
       updates.decisions = nextDecisions;
-      if (shouldClearDuplicateIdentityIssue(body.decisions_patch)) {
+      const clearedCodes = new Set();
+      if (shouldClearDuplicateIdentityIssue(body.decisions_patch)) clearedCodes.add('duplicate_identity_number');
+      if (shouldClearInFileDuplicateIssue(body.decisions_patch)) clearedCodes.add('duplicate_identity_in_file');
+      if (clearedCodes.size > 0) {
         const filteredIssues = (Array.isArray(existing.issues) ? existing.issues : [])
-          .filter((issue) => issue?.code !== 'duplicate_identity_number');
+          .filter((issue) => !clearedCodes.has(issue?.code));
         updates.issues = filteredIssues;
         updates.blocking_issues_count = countBlockingIssues(filteredIssues);
       }
@@ -470,6 +492,7 @@ export default async function importCandidates(context, req) {
         duplicateIssues = await generateDuplicateIssues(supabase, orgId, nextData, nextDecisions, {
           workspaceId: existing.workspace_id,
           candidateId: existing.id,
+          entityType: existing.entity_type,
         });
       } catch (err) {
         context.log?.error?.('import-candidates: duplicate validation after edit failed', { message: err?.message });

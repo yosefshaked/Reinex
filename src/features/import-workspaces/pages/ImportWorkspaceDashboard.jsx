@@ -548,14 +548,13 @@ async function fetchAllCandidates(workspaceId, status, sourceReference) {
 
 // Topological commit waves: each wave depends on the previous one completing first.
 const COMMIT_WAVES = [
-  { label: 'לקוחות ותלמידים', types: ['customer', 'active_student', 'inactive_student'] },
+  { label: 'לקוחות ותלמידים', types: ['customer'] },
   { label: 'הורים ושירותים',  types: ['guardian', 'service'] },
   { label: 'קישורי הורים',    types: ['guardian_link'] },
-  { label: 'הערות',           types: ['student_note'] },
 ];
 
 // ── Commit Step ────────────────────────────────────────────────────────────
-function CommitStep({ workspaceId, sourceReference }) {
+function CommitStep({ workspaceId, sourceReference, onBackToReview }) {
   const [phase, setPhase]       = useState('idle'); // 'idle' | 'running' | 'done' | 'partial' | 'error'
   const [progress, setProgress] = useState({ done: 0, total: 0, waveLabel: '' });
   const [summary, setSummary]   = useState({ committed: 0, failed: 0 });
@@ -640,7 +639,13 @@ function CommitStep({ workspaceId, sourceReference }) {
         <p className="text-xs text-muted-foreground">
           ניתן לפתוח את הכרטיסים שנכשלו, לתקן את הבעיה ואז לנסות שוב.
         </p>
-        <div className="flex gap-2 justify-center">
+        <div className="flex flex-wrap gap-2 justify-center">
+          {onBackToReview && (
+            <Button variant="outline" size="sm" onClick={onBackToReview} className="gap-2">
+              <ArrowRight className="h-4 w-4" />
+              חזרה לסקירה ותיקון
+            </Button>
+          )}
           <Button variant="outline" size="sm" onClick={() => runCommit('retry')} className="gap-2">
             <RefreshCcw className="h-4 w-4" />
             נסה שנית על הנכשלים
@@ -1020,7 +1025,13 @@ export default function ImportWorkspaceDashboard() {
             </>
           )}
 
-          {currentStep === 'commit' && <CommitStep workspaceId={workspaceId} sourceReference={sourceRef} />}
+          {currentStep === 'commit' && (
+            <CommitStep
+              workspaceId={workspaceId}
+              sourceReference={sourceRef}
+              onBackToReview={() => { setQueueKey(k => k + 1); setCurrentStep('review'); }}
+            />
+          )}
         </CardContent>
       </Card>
 

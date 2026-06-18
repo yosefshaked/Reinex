@@ -58,6 +58,12 @@ async function simulateClientProfile(supabase, orgId, candidateData) {
   );
   const identityResult = coerceIdentityNumber(rawIdentity);
 
+  // A customer of type 'student' can carry an inline note that commit appends to
+  // students.notes_internal. Surface it so the preview matches the commit outcome.
+  const willAddNote = candidateData?.customer_type === 'student'
+    && Boolean(normalizeString(candidateData?.note_text));
+  const noteSuffix = willAddNote ? ' • הערה פנימית תתווסף לתלמיד/ה' : '';
+
   if (identityResult.valid && identityResult.value) {
     const { data: existing, error } = await findClientProfileByIdentityNumber(
       supabase, identityResult.value, { orgId },
@@ -85,18 +91,19 @@ async function simulateClientProfile(supabase, orgId, candidateData) {
         fieldsChanged.push('tags');
       }
 
+      const changedWithNote = willAddNote ? [...fieldsChanged, 'notes_internal'] : fieldsChanged;
       return {
-        outcome: fieldsChanged.length ? 'update' : 'reuse_existing',
-        action_description: fieldsChanged.length
+        outcome: changedWithNote.length ? 'update' : 'reuse_existing',
+        action_description: (fieldsChanged.length
           ? `עדכון פרופיל קיים (${fieldsChanged.join(', ')})`
-          : 'שימוש חוזר בפרופיל קיים ללא שינויים',
+          : 'שימוש חוזר בפרופיל קיים ללא שינויים') + noteSuffix,
         target_table: 'client_profiles',
         matched_record_id: existing.id,
         matched_record_summary: {
           name: [existing.first_name, existing.last_name].filter(Boolean).join(' '),
           identity_number: existing.identity_number,
         },
-        fields_that_would_change: fieldsChanged,
+        fields_that_would_change: changedWithNote,
         simulated_at: nowIso(),
       };
     }
@@ -104,18 +111,18 @@ async function simulateClientProfile(supabase, orgId, candidateData) {
 
   return {
     outcome: 'create',
-    action_description: 'יצירת פרופיל לקוח חדש',
+    action_description: 'יצירת פרופיל לקוח חדש' + noteSuffix,
     target_table: 'client_profiles',
     matched_record_id: null,
     matched_record_summary: null,
-    fields_that_would_change: [],
+    fields_that_would_change: willAddNote ? ['notes_internal'] : [],
     simulated_at: nowIso(),
   };
 }
 
 async function simulateGuardian(supabase, orgId, candidateData) {
-  const phoneResult = validateIsraeliPhone(candidateData?.phone);
-  const emailResult = coerceEmail(candidateData?.email);
+  const phoneResult = validateIsraeliPhone(candidateData?.guardian_phone);
+  const emailResult = coerceEmail(candidateData?.guardian_email);
 
   let existing = null;
 
@@ -258,73 +265,6 @@ async function simulateGuardianLink(supabase, orgId, candidateData) {
   };
 }
 
-async function simulateStudentNote(supabase, orgId, candidateData) {
-  const studentIdentity = normalizeString(
-    candidateData?.identity_number ?? candidateData?.student_identity_number,
-  );
-  const noteText = normalizeString(candidateData?.note_text);
-  const identityResult = coerceIdentityNumber(studentIdentity);
-
-  if (!identityResult.valid || !identityResult.value) {
-    return {
-      outcome: 'blocked',
-      action_description: 'תעודת זהות תקינה חסרה — לא ניתן לשייך את ההערה לתלמיד/ה.',
-      target_table: 'students',
-      matched_record_id: null,
-      matched_record_summary: null,
-      fields_that_would_change: [],
-      simulated_at: nowIso(),
-    };
-  }
-
-  const { data: profile } = await findClientProfileByIdentityNumber(
-    supabase, identityResult.value, { orgId },
-  );
-  if (!profile?.id) {
-    return {
-      outcome: 'blocked',
-      action_description: 'תלמיד/ה לא נמצא/ה בפרופילי לקוח — צריך לייבא את הלקוח/ה תחילה.',
-      target_table: 'students',
-      matched_record_id: null,
-      matched_record_summary: null,
-      fields_that_would_change: [],
-      simulated_at: nowIso(),
-    };
-  }
-
-  const { data: student } = await withOrgScope(supabase, 'students', orgId)
-    .select('id')
-    .eq('client_profile_id', profile.id)
-    .maybeSingle();
-  if (!student?.id) {
-    return {
-      outcome: 'blocked',
-      action_description: 'נמצא פרופיל לקוח אך אין רשומת תלמיד/ה — ההערה תתווסף רק לאחר שתיווצר רשומת תלמיד/ה.',
-      target_table: 'students',
-      matched_record_id: profile.id,
-      matched_record_summary: {
-        name: [profile.first_name, profile.last_name].filter(Boolean).join(' '),
-      },
-      fields_that_would_change: [],
-      simulated_at: nowIso(),
-    };
-  }
-
-  return {
-    outcome: 'update',
-    action_description: noteText
-      ? 'ההערה תתווסף להערות הפנימיות של התלמיד/ה (notes_internal).'
-      : 'אין טקסט הערה — לא יבוצע שינוי.',
-    target_table: 'students',
-    matched_record_id: student.id,
-    matched_record_summary: {
-      name: [profile.first_name, profile.last_name].filter(Boolean).join(' '),
-    },
-    fields_that_would_change: noteText ? ['notes_internal'] : [],
-    simulated_at: nowIso(),
-  };
-}
-
 async function simulateService(supabase, orgId, candidateData) {
   const serviceName = normalizeString(candidateData?.service_name ?? candidateData?.name);
   if (!serviceName) {
@@ -431,10 +371,8 @@ async function simulateCandidate(supabase, orgId, candidate) {
     };
   }
 
-  // identity_number is always required for person entities
-  const isPersonEntity = entity_type === 'active_student'
-    || entity_type === 'inactive_student'
-    || entity_type === 'customer';
+  // identity_number is always required for the customer (person) entity
+  const isPersonEntity = entity_type === 'customer';
   if (isPersonEntity) {
     const identity = normalizeString(candidate_data?.identity_number);
     if (!identity) {
@@ -479,8 +417,6 @@ async function simulateCandidate(supabase, orgId, candidate) {
 
   switch (entity_type) {
     case 'customer':
-    case 'active_student':
-    case 'inactive_student':
       return simulateClientProfile(supabase, orgId, candidate_data);
 
     case 'guardian':
@@ -491,17 +427,6 @@ async function simulateCandidate(supabase, orgId, candidate) {
 
     case 'service':
       return simulateService(supabase, orgId, candidate_data);
-
-    case 'student_note':
-      return {
-        outcome: 'create',
-        action_description: 'יצירת הערה חדשה',
-        target_table: 'student_notes',
-        matched_record_id: null,
-        matched_record_summary: null,
-        fields_that_would_change: [],
-        simulated_at: nowIso(),
-      };
 
     default:
       return {

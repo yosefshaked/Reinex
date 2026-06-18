@@ -8,12 +8,9 @@ import { listCandidates } from '../api/importWorkspacesApi.js';
 
 const ENTITY_TYPE_LABELS = {
   customer:         'לקוח/ה',
-  active_student:   'תלמיד/ה פעיל/ה',
-  inactive_student: 'תלמיד/ה לא פעיל/ה (ארכיון)',
   guardian:         'הורה',
   guardian_link:    'קישור הורה-תלמיד',
   service:          'שירות',
-  student_note:     'הערה',
 };
 
 const STATUS_LABELS = {
@@ -43,9 +40,12 @@ function CandidateRow({ candidate, onSelect }) {
     candidate.candidate_data?.first_name,
     candidate.candidate_data?.last_name,
   ].filter(Boolean).join(' ')
+    || [
+      candidate.candidate_data?.guardian_first_name,
+      candidate.candidate_data?.guardian_last_name,
+    ].filter(Boolean).join(' ')
     || candidate.candidate_data?.service_name
     || candidate.candidate_data?.name
-    || candidate.candidate_data?.note_text?.slice(0, 30)
     || '—';
 
   return (

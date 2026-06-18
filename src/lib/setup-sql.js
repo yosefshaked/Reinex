@@ -6361,12 +6361,10 @@ CREATE TABLE IF NOT EXISTS public.import_candidates (
   updated_at timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT import_candidates_entity_type_check CHECK (
     entity_type IN (
-      'active_student',
-      'inactive_student',
+      'customer',
       'guardian',
       'guardian_link',
-      'service',
-      'student_note'
+      'service'
     )
   ),
   CONSTRAINT import_candidates_status_check CHECK (
@@ -6422,43 +6420,66 @@ CREATE INDEX IF NOT EXISTS import_candidates_blocking_idx
 CREATE INDEX IF NOT EXISTS import_candidates_merged_rows_gin_idx
   ON public.import_candidates USING gin (merged_from_row_ids);
 
--- Migration: add 'customer' umbrella entity type (replaces active_student/inactive_student
--- long-term; old values kept in the constraint for backward-compat with un-re-analyzed workspaces).
+-- ── Migration: collapse legacy import entity types into the canonical four ──────
+-- The import pipeline now uses exactly: customer, guardian, guardian_link, service.
+-- Legacy staging rows (active_student / inactive_student / student_note) and the old
+-- guardian candidate_data shape are converted in-place so no backward-compat code is
+-- needed. Every step is idempotent — each WHERE clause only matches un-migrated rows.
+
+-- 1. active_student / inactive_student → customer (type 'student'), preserving the active flag.
+UPDATE public.import_candidates
+   SET entity_type    = 'customer',
+       candidate_data = candidate_data
+                          || jsonb_build_object('customer_type', 'student')
+                          || jsonb_build_object('is_active', (entity_type = 'active_student')),
+       updated_at     = now()
+ WHERE entity_type IN ('active_student', 'inactive_student');
+
+-- 2. Guardian candidate_data: the old analyzer flattened guardian columns into the
+--    student-style keys. Rename them back to the canonical guardian_* keys so a single
+--    source row can carry both a student and a guardian without colliding.
+UPDATE public.import_candidates
+   SET candidate_data = (candidate_data - 'first_name' - 'last_name' - 'phone' - 'email')
+                          || jsonb_strip_nulls(jsonb_build_object(
+                               'guardian_first_name', candidate_data -> 'first_name',
+                               'guardian_last_name',  candidate_data -> 'last_name',
+                               'guardian_phone',      candidate_data -> 'phone',
+                               'guardian_email',      candidate_data -> 'email'
+                             )),
+       updated_at     = now()
+ WHERE entity_type = 'guardian'
+   AND (candidate_data ? 'first_name' OR candidate_data ? 'last_name'
+        OR candidate_data ? 'phone' OR candidate_data ? 'email');
+
+-- 3. student_note candidates: notes now live on the customer (candidate_data.note_text),
+--    so standalone, un-committed legacy student_note rows are dropped. Committed rows are
+--    left untouched as historical record.
+DELETE FROM public.import_candidates
+ WHERE entity_type = 'student_note'
+   AND status <> 'committed';
+
+-- 4. Once the data conforms, tighten the entity_type CHECK to the canonical four.
+--    Guarded so it only fires when the old (legacy-permitting) constraint is still in
+--    place AND no row would violate the tighter rule (e.g. a committed student_note).
 DO $$
 BEGIN
   IF EXISTS (
     SELECT 1 FROM pg_constraint
      WHERE conname = 'import_candidates_entity_type_check'
        AND conrelid = 'public.import_candidates'::regclass
-       AND pg_get_constraintdef(oid) NOT LIKE '%customer%'
+       AND pg_get_constraintdef(oid) LIKE '%active_student%'
+  )
+  AND NOT EXISTS (
+    SELECT 1 FROM public.import_candidates
+     WHERE entity_type NOT IN ('customer', 'guardian', 'guardian_link', 'service')
   ) THEN
     ALTER TABLE public.import_candidates DROP CONSTRAINT import_candidates_entity_type_check;
     ALTER TABLE public.import_candidates
       ADD CONSTRAINT import_candidates_entity_type_check CHECK (
-        entity_type IN (
-          'customer',
-          'active_student',
-          'inactive_student',
-          'guardian',
-          'guardian_link',
-          'service',
-          'student_note'
-        )
+        entity_type IN ('customer', 'guardian', 'guardian_link', 'service')
       );
   END IF;
 END $$;
-
--- One-shot idempotent data migration: convert legacy entity types to the new 'customer' umbrella.
--- candidate_data gains customer_type ('student') and is_active (true for active, false for inactive).
--- Safe to re-run: WHERE clause only matches unconverted rows.
-UPDATE public.import_candidates
-   SET entity_type    = 'customer',
-       candidate_data = candidate_data || jsonb_build_object(
-                          'customer_type', 'student',
-                          'is_active',     (entity_type = 'active_student')
-                        ),
-       updated_at     = now()
- WHERE entity_type IN ('active_student', 'inactive_student');
 
 -- import_commit_ledger: immutable audit trail for every live record created, updated, or linked
 -- by an import commit. Workspace CASCADE handles bulk cleanup when a workspace is deleted.

@@ -242,6 +242,28 @@ function SectionMapping({ section, value, sources, anchorSourceReference, onChan
                   </SelectContent>
                 </Select>
               </div>
+              <div className="flex items-center gap-3">
+                <span className="w-28 text-sm">פעיל/לא פעיל</span>
+                <Select
+                  value={
+                    value.fixed_values?.is_active === true ? 'true'
+                      : value.fixed_values?.is_active === false ? 'false'
+                      : SKIP_VALUE
+                  }
+                  onValueChange={(selected) => updateFixed(
+                    'is_active',
+                    selected === SKIP_VALUE ? SKIP_VALUE : selected === 'true',
+                  )}
+                  dir="rtl"
+                >
+                  <SelectTrigger className="h-8 flex-1"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={SKIP_VALUE}>— ברירת מחדל: פעיל —</SelectItem>
+                    <SelectItem value="true">כולם פעילים</SelectItem>
+                    <SelectItem value="false">כולם לא פעילים (ארכיון)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
           )}
 
