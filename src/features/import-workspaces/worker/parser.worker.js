@@ -29,15 +29,17 @@ function postError(message) {
 
 /**
  * Derive a stable, filesystem-safe source reference from the filename.
- * Format: <sanitized-basename>_<unix-seconds>
+ * The caller appends one shared timestamp so every sheet in a workbook can
+ * be grouped as one upload while retaining its own source reference.
  */
-function generateSourceReference(filename) {
+function generateSourceReference(filename, sheetName = '') {
   const basename = filename.replace(/\.[^.]+$/, ''); // strip extension
-  const safe = basename
+  const sourceName = sheetName ? `${basename}_${sheetName}` : basename;
+  const safe = sourceName
     .replace(/[^a-zA-Z0-9_\u0590-\u05FF\s-]/g, '') // keep alphanum, Hebrew, hyphens, spaces
     .replace(/\s+/g, '_')
     .slice(0, 80);
-  return `${safe || 'file'}_${Math.floor(Date.now() / 1000)}`;
+  return safe || 'file';
 }
 
 /**
@@ -74,6 +76,16 @@ function profileSheet(headers, rows) {
 const PHONE_HEADER_RE = /phone|tel|mobile|טלפון|נייד|פלאפון/i;
 const ID_HEADER_RE = /\bid\b|\bidentity\b|ת\.?ז|תעודת|מספר זהות/i;
 
+function formatSpreadsheetDate(raw) {
+  if (isNaN(raw.getTime())) return null;
+  // Spreadsheet dates have no timezone. Reading local calendar components
+  // avoids toISOString() shifting local midnight to the previous UTC day.
+  const year = raw.getFullYear();
+  const month = String(raw.getMonth() + 1).padStart(2, '0');
+  const day = String(raw.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 function normaliseValue(raw, header) {
   if (raw === null || raw === undefined || raw === '') return null;
 
@@ -87,7 +99,7 @@ function normaliseValue(raw, header) {
 
   // ExcelJS returns Date objects for date cells
   if (raw instanceof Date) {
-    return isNaN(raw.getTime()) ? null : raw.toISOString().slice(0, 10);
+    return formatSpreadsheetDate(raw);
   }
 
   const str = String(raw).trim();
@@ -113,18 +125,7 @@ function normaliseRow(rawObj, headers) {
 // Format-specific parsers
 // ---------------------------------------------------------------------------
 
-async function parseExcel(buffer) {
-  postProgress(10, 'loading_excel');
-
-  const workbook = new ExcelJS.Workbook();
-  await workbook.xlsx.load(buffer);
-
-  const sheet = workbook.worksheets[0];
-  if (!sheet) throw new Error('excel_no_worksheets');
-
-  postProgress(30, 'reading_sheet');
-
-  // Row 1 = headers
+function parseExcelSheet(sheet) {
   const headerRow = sheet.getRow(1);
   const headers = [];
   const headerColumns = [];
@@ -135,29 +136,38 @@ async function parseExcel(buffer) {
     headerColumns.push({ colNumber, header });
   });
 
-  if (headers.length === 0) throw new Error('excel_no_headers');
-
-  postProgress(50, 'extracting_rows');
+  if (headers.length === 0) return null;
 
   const rows = [];
-  const rowCount = sheet.rowCount;
-
   sheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
-    if (rowNumber === 1) return; // skip header row
+    if (rowNumber === 1) return;
     const obj = {};
     headerColumns.forEach(({ colNumber, header }) => {
-      const cell = row.getCell(colNumber);
-      obj[header] = cell.value;
+      obj[header] = row.getCell(colNumber).value;
     });
-    rows.push(normaliseRow(obj, headers));
-
-    if (rowNumber % 1000 === 0) {
-      const pct = 50 + Math.min(40, Math.round((rowNumber / rowCount) * 40));
-      postProgress(pct, 'extracting_rows');
-    }
+    const normalized = normaliseRow(obj, headers);
+    if (Object.values(normalized).some((value) => value !== null)) rows.push(normalized);
   });
 
-  return { headers, rows };
+  return { headers, rows, sheetName: sheet.name };
+}
+
+async function parseExcel(buffer) {
+  postProgress(10, 'loading_excel');
+
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(buffer);
+
+  if (workbook.worksheets.length === 0) throw new Error('excel_no_worksheets');
+
+  postProgress(30, 'reading_sheet');
+
+  postProgress(50, 'extracting_rows');
+  const sources = workbook.worksheets
+    .map(parseExcelSheet)
+    .filter((source) => source && source.rows.length > 0);
+  if (sources.length === 0) throw new Error('excel_no_headers');
+  return sources;
 }
 
 async function parseCsv(buffer) {
@@ -226,25 +236,40 @@ self.addEventListener('message', async (event) => {
       lowerName.endsWith('.xls') ||
       lowerName.endsWith('.xlsm');
 
-    let headers;
-    let rows;
+    let parsedSources;
 
     if (isExcel) {
-      ({ headers, rows } = await parseExcel(buffer));
+      parsedSources = await parseExcel(buffer);
     } else {
-      ({ headers, rows } = await parseCsv(buffer));
+      const { headers, rows } = await parseCsv(buffer);
+      parsedSources = [{ headers, rows, sheetName: null }];
     }
 
     postProgress(95, 'profiling');
 
-    const sourceReference = generateSourceReference(filename);
-    const profile = profileSheet(headers, rows);
+    const timestamp = Math.floor(Date.now() / 1000);
+    const sources = parsedSources.map(({ headers, rows, sheetName }) => ({
+      filename,
+      sheetName,
+      label: sheetName ? `${filename} — ${sheetName}` : filename,
+      headers,
+      rows,
+      sourceReference: `${generateSourceReference(filename, sheetName)}_${timestamp}`,
+      profile: profileSheet(headers, rows),
+    }));
+    const first = sources[0];
 
     postProgress(100, 'done');
 
     self.postMessage({
       type: 'PARSE_COMPLETE',
-      payload: { headers, rows, sourceReference, profile },
+      payload: {
+        sources,
+        headers: first.headers,
+        rows: first.rows,
+        sourceReference: first.sourceReference,
+        profile: first.profile,
+      },
     });
   } catch (err) {
     postError(err?.message ?? 'unknown_parse_error');

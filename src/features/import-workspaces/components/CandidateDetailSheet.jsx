@@ -5,10 +5,9 @@ import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
-import { AlertCircle, AlertTriangle, Link2, PlusCircle, XCircle, Zap } from 'lucide-react';
-import { patchCandidate, runDryRunChunk } from '../api/importWorkspacesApi.js';
+import { AlertCircle, AlertTriangle, Check, Link2, Loader2, Pencil, Plus, PlusCircle, Search, X, XCircle, Zap } from 'lucide-react';
+import { patchCandidate, runDryRunChunk, searchLinkTargets } from '../api/importWorkspacesApi.js';
 
 const FIELD_LABELS = {
   first_name:               'שם פרטי',
@@ -19,6 +18,8 @@ const FIELD_LABELS = {
   email:                    'אימייל',
   date_of_birth:            'תאריך לידה',
   guardian_identity_number: 'ת.ז. הורה',
+  relationship:             'קרבה',
+  is_primary:               'הורה ראשי',
   note_text:                'טקסט הערה',
   service_name:             'שם השירות',
   name:                     'שם השירות',
@@ -54,6 +55,7 @@ const EDITABLE_FIELDS_BY_ENTITY = {
 };
 
 const MULTILINE_FIELDS = new Set(['description', 'note_text']);
+const BOOLEAN_FIELDS = new Set(['is_primary']);
 
 const DRY_RUN_OUTCOME_LABELS = {
   create:         'יצירה חדשה',
@@ -106,12 +108,6 @@ function getEditableFields(entityType, candidateData) {
   return [...canonical, ...extra];
 }
 
-function valueToInputValue(value) {
-  if (value === null || value === undefined) return '';
-  if (typeof value === 'boolean') return value;
-  return String(value);
-}
-
 function canonicalizeCandidateData(candidateData = {}) {
   const data = {
     ...candidateData,
@@ -121,6 +117,26 @@ function canonicalizeCandidateData(candidateData = {}) {
   delete data.student_identity_number;
   delete data.name;
   return data;
+}
+
+// A field is "present" (shown as a value row) when it holds a meaningful value.
+// Empty editable fields are offered under the "add missing field" menu instead.
+function hasValue(field, data) {
+  const v = data?.[field];
+  if (BOOLEAN_FIELDS.has(field)) return v === true || v === false;
+  return v !== null && v !== undefined && v !== '';
+}
+
+function displayValue(field, value) {
+  if (BOOLEAN_FIELDS.has(field)) return value ? 'כן' : 'לא';
+  if (value === null || value === undefined || value === '') return '—';
+  return String(value);
+}
+
+function seedEditValue(field, value) {
+  if (BOOLEAN_FIELDS.has(field)) return Boolean(value);
+  if (value === null || value === undefined) return '';
+  return String(value);
 }
 
 function DryRunOutcomeBadge({ outcome }) {
@@ -164,6 +180,44 @@ function IssueItem({ issue }) {
   );
 }
 
+function guardianSummary(guardians) {
+  if (!Array.isArray(guardians) || guardians.length === 0) return '';
+  return guardians
+    .map((g) => [`${g.first_name || ''} ${g.last_name || ''}`.trim(), g.phone].filter(Boolean).join(' · '))
+    .filter(Boolean)
+    .join(' | ');
+}
+
+function ProfileResultCard({ profile, onLink, disabled }) {
+  const name = [profile.first_name, profile.middle_name, profile.last_name].filter(Boolean).join(' ') || 'ללא שם';
+  const parents = guardianSummary(profile.guardians);
+  return (
+    <div className="rounded-md border px-3 py-2 text-sm">
+      <div className="flex items-center justify-between gap-2">
+        <span className="font-medium">{name}</span>
+        {!profile.is_active && (
+          <Badge variant="secondary" className="px-1.5 py-0 text-[10px]">לא פעיל</Badge>
+        )}
+      </div>
+      <div className="mt-0.5 space-y-0.5 text-xs text-muted-foreground">
+        {profile.identity_number && <div>ת״ז: {profile.identity_number}</div>}
+        {profile.phone && <div>טלפון: {profile.phone}</div>}
+        {parents && <div>הורה: {parents}</div>}
+      </div>
+      <Button
+        size="sm"
+        variant="outline"
+        className="mt-2 w-full gap-1.5"
+        onClick={() => onLink(profile.client_profile_id)}
+        disabled={disabled}
+      >
+        <Link2 className="h-3.5 w-3.5" />
+        קשר לרשומה זו
+      </Button>
+    </div>
+  );
+}
+
 /**
  * @param {{
  *   candidate: object | null,
@@ -171,43 +225,102 @@ function IssueItem({ issue }) {
  *   open: boolean,
  *   onClose: () => void,
  *   onDecisionSaved?: (updated: object) => void,
+ *   onCandidateUpdated?: (updated: object) => void,
  * }} props
  */
-export function CandidateDetailSheet({ candidate, workspaceId, open, onClose, onDecisionSaved }) {
+export function CandidateDetailSheet({ candidate, workspaceId, open, onClose, onDecisionSaved, onCandidateUpdated }) {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState(null);
   const [dryRunSummary, setDryRunSummary] = useState(null);
   const [runningDryRun, setRunningDryRun] = useState(false);
   const [dryRunError, setDryRunError] = useState(null);
-  const [editValues, setEditValues] = useState({});
-  const [savingEdits, setSavingEdits] = useState(false);
 
-  // Sync dry-run summary with the candidate prop (resets when a different candidate is opened).
+  // Live copy of the candidate so a per-field edit can update the drawer in
+  // place (issues/blockers recompute server-side) without closing it.
+  const [liveCandidate, setLiveCandidate] = useState(candidate);
+  const [editingField, setEditingField] = useState(null);
+  const [editingValue, setEditingValue] = useState('');
+  const [savingField, setSavingField] = useState(null);
+  const [addOpen, setAddOpen] = useState(false);
+
+  // Link-to-existing flow state.
+  const [linkMode, setLinkMode] = useState(false);
+  const [linkStep, setLinkStep] = useState('search'); // 'auto' | 'search'
+  const [linkLoading, setLinkLoading] = useState(false);
+  const [linkError, setLinkError] = useState(null);
+  const [linkResults, setLinkResults] = useState([]);
+  const [linkQuery, setLinkQuery] = useState('');
+  const [linking, setLinking] = useState(false);
+
   useEffect(() => {
+    setLiveCandidate(candidate);
     setDryRunSummary(candidate?.candidate_data?.dry_run_summary ?? null);
     setDryRunError(null);
-    const data = canonicalizeCandidateData(candidate?.candidate_data || {});
-    const fields = getEditableFields(candidate?.entity_type, data);
-    setEditValues(Object.fromEntries(fields.map((field) => [field, valueToInputValue(data[field])])));
+    setSaveError(null);
+    setEditingField(null);
+    setEditingValue('');
+    setAddOpen(false);
+    setLinkMode(false);
+    setLinkStep('search');
+    setLinkLoading(false);
+    setLinkError(null);
+    setLinkResults([]);
+    setLinkQuery('');
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [candidate?.id]);
 
-  if (!candidate) return null;
+  // Debounced free-text search while the link panel is in search mode.
+  useEffect(() => {
+    if (!linkMode || linkStep !== 'search') return undefined;
+    const q = linkQuery.trim();
+    if (q.length < 2) {
+      setLinkResults([]);
+      setLinkLoading(false);
+      return undefined;
+    }
+    let cancelled = false;
+    setLinkLoading(true);
+    setLinkError(null);
+    const handle = setTimeout(async () => {
+      try {
+        const data = await searchLinkTargets({ query: q });
+        if (!cancelled) setLinkResults(data?.results || []);
+      } catch (err) {
+        if (!cancelled) setLinkError(err.message || 'שגיאה בחיפוש');
+      } finally {
+        if (!cancelled) setLinkLoading(false);
+      }
+    }, 300);
+    return () => { cancelled = true; clearTimeout(handle); };
+  }, [linkMode, linkStep, linkQuery]);
 
-  const candidate_data = canonicalizeCandidateData(candidate.candidate_data || {});
-  const { issues = [], entity_type, status, decisions = {} } = candidate;
+  // Prefer the live copy once it matches the opened candidate.
+  const active = liveCandidate && liveCandidate.id === candidate?.id ? liveCandidate : candidate;
+  if (!active) return null;
+
+  const candidate_data = canonicalizeCandidateData(active.candidate_data || {});
+  const { issues = [], entity_type, status, decisions = {} } = active;
   const blockers = issues.filter(i => i.severity === 'blocker');
   const warnings = issues.filter(i => i.severity === 'warning');
   const editableFields = getEditableFields(entity_type, candidate_data);
   const fieldChanges = decisions.field_changes && typeof decisions.field_changes === 'object'
     ? decisions.field_changes
     : {};
+  const editable = status !== 'committed';
+  const busy = saving || savingField !== null;
+
+  // Rows shown with a value (plus whatever field is currently being edited).
+  const valueFields = editableFields.filter((f) => hasValue(f, candidate_data));
+  const shownFields = editingField && !valueFields.includes(editingField)
+    ? [...valueFields, editingField]
+    : valueFields;
+  const missingFields = editableFields.filter((f) => !hasValue(f, candidate_data) && f !== editingField);
 
   async function applyDecision(decisionsPatch, newStatus) {
     setSaving(true);
     setSaveError(null);
     try {
-      const result = await patchCandidate(candidate.id, {
+      const result = await patchCandidate(active.id, {
         decisions_patch: decisionsPatch,
         status: newStatus,
       });
@@ -220,10 +333,61 @@ export function CandidateDetailSheet({ candidate, workspaceId, open, onClose, on
     }
   }
 
-  function handleLinkToExisting() {
-    // For a full implementation this would open an entity-search dialog.
-    // For now we record intent and require the user to supply existing_client_profile_id separately.
-    applyDecision({ action: 'link_to_existing' }, 'needs_review');
+  async function runIdentityLookup(identity) {
+    setLinkStep('auto');
+    setLinkLoading(true);
+    setLinkError(null);
+    try {
+      const data = await searchLinkTargets({ identityNumber: identity });
+      const results = data?.results || [];
+      setLinkResults(results);
+      // No identity match → fall straight through to manual search.
+      if (results.length === 0) {
+        setLinkStep('search');
+      }
+    } catch (err) {
+      setLinkError(err.message || 'שגיאה בחיפוש לפי תעודת זהות');
+      setLinkStep('search');
+    } finally {
+      setLinkLoading(false);
+    }
+  }
+
+  function openLinkPanel() {
+    setLinkMode(true);
+    setLinkError(null);
+    setLinkResults([]);
+    setLinkQuery('');
+    const identity = candidate_data.identity_number;
+    if (identity) {
+      runIdentityLookup(identity);
+    } else {
+      setLinkStep('search');
+    }
+  }
+
+  function closeLinkPanel() {
+    setLinkMode(false);
+    setLinkError(null);
+    setLinkResults([]);
+    setLinkQuery('');
+  }
+
+  async function confirmLink(profileId) {
+    setLinking(true);
+    setLinkError(null);
+    try {
+      const result = await patchCandidate(active.id, {
+        decisions_patch: { action: 'link_to_existing', linked_id: profileId },
+        status: 'ready',
+      });
+      onDecisionSaved?.(result.candidate);
+      onClose();
+    } catch (err) {
+      setLinkError(err.message || 'שגיאה בקישור הרשומה');
+    } finally {
+      setLinking(false);
+    }
   }
 
   function handleCreateAsNew() {
@@ -234,39 +398,40 @@ export function CandidateDetailSheet({ candidate, workspaceId, open, onClose, on
     applyDecision({ action: 'skip' }, 'skipped');
   }
 
-  function handleEditValueChange(field, value) {
-    setEditValues((prev) => ({ ...prev, [field]: value }));
+  function startEdit(field) {
+    setSaveError(null);
+    setEditingField(field);
+    setEditingValue(seedEditValue(field, candidate_data[field]));
+    setAddOpen(false);
   }
 
-  async function handleSaveEdits() {
-    const patch = {};
-    for (const field of editableFields) {
-      const currentValue = candidate_data[field];
-      const nextValue = editValues[field];
-      const normalizedNextForCompare = typeof nextValue === 'boolean' ? nextValue : String(nextValue ?? '').trim();
-      const normalizedCurrentForCompare = typeof currentValue === 'boolean' ? currentValue : String(currentValue ?? '').trim();
-      if (normalizedNextForCompare !== normalizedCurrentForCompare) {
-        patch[field] = nextValue === '' ? null : nextValue;
-      }
-    }
+  function cancelEdit() {
+    setEditingField(null);
+    setEditingValue('');
+  }
 
-    if (Object.keys(patch).length === 0) {
-      setSaveError('לא נמצאו שינויים לשמירה');
-      return;
-    }
+  async function confirmEdit() {
+    if (!editingField) return;
+    const field = editingField;
+    const raw = editingValue;
+    const value = typeof raw === 'boolean'
+      ? raw
+      : (String(raw ?? '').trim() === '' ? null : raw);
 
-    setSavingEdits(true);
+    setSavingField(field);
     setSaveError(null);
     try {
-      const result = await patchCandidate(candidate.id, {
-        candidate_data_patch: patch,
+      const result = await patchCandidate(active.id, {
+        candidate_data_patch: { [field]: value },
       });
-      onDecisionSaved?.(result.candidate);
-      onClose();
+      setLiveCandidate(result.candidate);
+      onCandidateUpdated?.(result.candidate);
+      setEditingField(null);
+      setEditingValue('');
     } catch (err) {
-      setSaveError(err.message || 'שגיאה בשמירת הפרטים');
+      setSaveError(err.message || 'שגיאה בשמירת השדה');
     } finally {
-      setSavingEdits(false);
+      setSavingField(null);
     }
   }
 
@@ -275,16 +440,16 @@ export function CandidateDetailSheet({ candidate, workspaceId, open, onClose, on
     setRunningDryRun(true);
     setDryRunError(null);
     try {
-      const data = await runDryRunChunk(workspaceId, [candidate.id]);
+      const data = await runDryRunChunk(workspaceId, [active.id]);
       const firstResult = data.results?.[0];
       if (firstResult) {
         setDryRunSummary({
-          outcome:                firstResult.outcome,
-          action_description:     firstResult.action_description,
-          matched_record_id:      firstResult.matched_record_id,
-          matched_record_summary: firstResult.matched_record_summary,
+          outcome:                  firstResult.outcome,
+          action_description:       firstResult.action_description,
+          matched_record_id:        firstResult.matched_record_id,
+          matched_record_summary:   firstResult.matched_record_summary,
           fields_that_would_change: firstResult.fields_that_would_change,
-          simulated_at:           new Date().toISOString(),
+          simulated_at:             new Date().toISOString(),
         });
       }
     } catch (err) {
@@ -292,6 +457,50 @@ export function CandidateDetailSheet({ candidate, workspaceId, open, onClose, on
     } finally {
       setRunningDryRun(false);
     }
+  }
+
+  function renderEditor(field) {
+    const editorId = `candidate-edit-${active.id}-${field}`;
+    if (BOOLEAN_FIELDS.has(field)) {
+      return (
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            id={editorId}
+            type="checkbox"
+            checked={Boolean(editingValue)}
+            onChange={(e) => setEditingValue(e.target.checked)}
+            disabled={savingField !== null}
+          />
+          הורה ראשי
+        </label>
+      );
+    }
+    if (MULTILINE_FIELDS.has(field)) {
+      return (
+        <Textarea
+          id={editorId}
+          value={editingValue ?? ''}
+          onChange={(e) => setEditingValue(e.target.value)}
+          disabled={savingField !== null}
+          rows={3}
+          autoFocus
+        />
+      );
+    }
+    return (
+      <Input
+        id={editorId}
+        type={field === 'date_of_birth' ? 'date' : 'text'}
+        value={editingValue ?? ''}
+        onChange={(e) => setEditingValue(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') { e.preventDefault(); confirmEdit(); }
+          if (e.key === 'Escape') { e.preventDefault(); cancelEdit(); }
+        }}
+        disabled={savingField !== null}
+        autoFocus
+      />
+    );
   }
 
   return (
@@ -309,95 +518,110 @@ export function CandidateDetailSheet({ candidate, workspaceId, open, onClose, on
         </SheetHeader>
 
         <div className="mt-4 space-y-5">
-          {/* Candidate data fields */}
-          <section>
-            <h3 className="text-sm font-semibold mb-2">נתוני רשומה</h3>
-            <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
-              {Object.entries(candidate_data).filter(([k]) => k !== 'dry_run_summary').map(([k, v]) => {
-                if (!v) return null;
+          {/* Candidate data — read-only rows with per-field inline editing */}
+          <section className="space-y-2">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold">נתוני רשומה</h3>
+              {editable && (
+                <span className="text-[11px] text-muted-foreground">לחצו על העיפרון כדי לערוך שדה</span>
+              )}
+            </div>
+
+            <div className="space-y-1.5">
+              {shownFields.map((field) => {
+                const isEditing = editingField === field;
+                const changed = fieldChanges[field];
                 return (
-                  <div key={k}>
-                    <dt className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                      <span>{FIELD_LABELS[k] || k}</span>
-                      {fieldChanges[k] ? (
-                        <Badge variant="secondary" className="px-1.5 py-0 text-[10px]">נערך ידנית</Badge>
-                      ) : null}
-                    </dt>
-                    <dd className="font-medium">{String(v)}</dd>
-                    {fieldChanges[k]?.from !== undefined && (
-                      <dd className="mt-0.5 text-[11px] text-muted-foreground">
-                        ערך קודם: {String(fieldChanges[k].from ?? 'ריק')}
-                      </dd>
+                  <div key={field} className="rounded-md border px-3 py-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                        {FIELD_LABELS[field] || field}
+                        {changed ? (
+                          <Badge variant="secondary" className="px-1.5 py-0 text-[10px]">נערך ידנית</Badge>
+                        ) : null}
+                      </span>
+                      {editable && !isEditing && (
+                        <button
+                          type="button"
+                          onClick={() => startEdit(field)}
+                          disabled={busy}
+                          aria-label={`ערוך ${FIELD_LABELS[field] || field}`}
+                          className="text-muted-foreground hover:text-foreground disabled:opacity-50"
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                        </button>
+                      )}
+                    </div>
+
+                    {isEditing ? (
+                      <div className="mt-1.5 flex items-start gap-1.5">
+                        <div className="flex-1">{renderEditor(field)}</div>
+                        <button
+                          type="button"
+                          onClick={confirmEdit}
+                          disabled={savingField !== null}
+                          aria-label="אשר"
+                          className="mt-0.5 rounded-md border border-green-600/40 p-1.5 text-green-700 hover:bg-green-50 disabled:opacity-50 dark:text-green-400 dark:hover:bg-green-900/20"
+                        >
+                          <Check className="h-4 w-4" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={cancelEdit}
+                          disabled={savingField !== null}
+                          aria-label="בטל"
+                          className="mt-0.5 rounded-md border p-1.5 text-muted-foreground hover:bg-muted disabled:opacity-50"
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="text-sm font-medium">{displayValue(field, candidate_data[field])}</div>
+                    )}
+
+                    {!isEditing && changed?.from !== undefined && (
+                      <div className="mt-0.5 text-[11px] text-muted-foreground">
+                        ערך קודם: {displayValue(field, changed.from)}
+                      </div>
                     )}
                   </div>
                 );
               })}
-            </dl>
-          </section>
+            </div>
 
-          {status !== 'committed' && (
-            <>
-              <Separator />
-              <section className="space-y-3">
-                <div>
-                  <h3 className="text-sm font-semibold">עריכת פרטים לפני ייבוא</h3>
-                  <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                    השדות כאן הם הנתונים שיועברו למערכת. שינוי נשמר רק ברשומת הייבוא ומסומן כעריכה ידנית.
-                  </p>
-                </div>
-                <div className="grid gap-3">
-                  {editableFields.map((field) => (
-                    <div key={field} className="space-y-1.5">
-                      <Label htmlFor={`candidate-edit-${candidate.id}-${field}`} className="text-xs">
-                        {FIELD_LABELS[field] || field}
-                        {fieldChanges[field] ? (
-                          <span className="ms-2 text-[11px] font-normal text-muted-foreground">
-                            נערך ידנית
-                          </span>
-                        ) : null}
-                      </Label>
-                      {field === 'is_primary' ? (
-                        <label className="flex items-center gap-2 rounded-md border px-3 py-2 text-sm">
-                          <input
-                            id={`candidate-edit-${candidate.id}-${field}`}
-                            type="checkbox"
-                            checked={Boolean(editValues[field])}
-                            onChange={(event) => handleEditValueChange(field, event.target.checked)}
-                            disabled={savingEdits || saving}
-                          />
-                          הורה ראשי
-                        </label>
-                      ) : MULTILINE_FIELDS.has(field) ? (
-                        <Textarea
-                          id={`candidate-edit-${candidate.id}-${field}`}
-                          value={editValues[field] ?? ''}
-                          onChange={(event) => handleEditValueChange(field, event.target.value)}
-                          disabled={savingEdits || saving}
-                          rows={3}
-                        />
-                      ) : (
-                        <Input
-                          id={`candidate-edit-${candidate.id}-${field}`}
-                          type={field === 'date_of_birth' ? 'date' : 'text'}
-                          value={editValues[field] ?? ''}
-                          onChange={(event) => handleEditValueChange(field, event.target.value)}
-                          disabled={savingEdits || saving}
-                        />
-                      )}
-                    </div>
-                  ))}
-                </div>
-                <Button
-                  variant="outline"
-                  className="w-full"
-                  onClick={handleSaveEdits}
-                  disabled={savingEdits || saving}
+            {/* Add missing field */}
+            {editable && missingFields.length > 0 && (
+              <div>
+                <button
+                  type="button"
+                  onClick={() => setAddOpen((o) => !o)}
+                  disabled={busy}
+                  className="flex items-center gap-1.5 text-xs text-primary hover:underline disabled:opacity-50"
                 >
-                  {savingEdits ? 'שומר פרטים…' : 'שמור ובדוק מחדש'}
-                </Button>
-              </section>
-            </>
-          )}
+                  <Plus className="h-3.5 w-3.5" />
+                  הוסף שדה חסר
+                </button>
+                {addOpen && (
+                  <div className="mt-1.5 flex flex-wrap gap-1.5">
+                    {missingFields.map((field) => (
+                      <button
+                        key={field}
+                        type="button"
+                        onClick={() => startEdit(field)}
+                        className="rounded-full border px-2.5 py-1 text-xs text-muted-foreground hover:bg-muted"
+                      >
+                        {FIELD_LABELS[field] || field}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {saveError && (
+              <p className="text-xs text-destructive">{saveError}</p>
+            )}
+          </section>
 
           {/* Dry-run simulation result */}
           {dryRunSummary && (
@@ -461,11 +685,6 @@ export function CandidateDetailSheet({ candidate, workspaceId, open, onClose, on
             </>
           )}
 
-          {/* Save error */}
-          {saveError && (
-            <p className="text-xs text-destructive">{saveError}</p>
-          )}
-
           <Separator />
 
           {/* Decision buttons */}
@@ -479,7 +698,7 @@ export function CandidateDetailSheet({ candidate, workspaceId, open, onClose, on
                   variant="outline"
                   className="w-full justify-start gap-2"
                   onClick={handleRunDryRun}
-                  disabled={runningDryRun || saving}
+                  disabled={runningDryRun || busy}
                 >
                   <Zap className="h-4 w-4" />
                   {runningDryRun ? 'בודק ללא ייבוא…' : dryRunSummary ? 'בדוק שוב ללא ייבוא' : 'בדוק ללא ייבוא'}
@@ -493,7 +712,7 @@ export function CandidateDetailSheet({ candidate, workspaceId, open, onClose, on
               </>
             )}
 
-            {status !== 'committed' && status !== 'skipped' && (
+            {status !== 'committed' && status !== 'skipped' && !linkMode && (
               <>
                 <p className="text-xs text-muted-foreground">
                   אם זו אותה רשומה שכבר קיימת במערכת, קשר אותה לרשומה הקיימת. אם זה אדם אחר עם פרט דומה, צור רשומה חדשה. אם לא רוצים לייבא את השורה, דלג עליה.
@@ -501,21 +720,21 @@ export function CandidateDetailSheet({ candidate, workspaceId, open, onClose, on
                 <Button
                   variant="outline"
                   className="w-full justify-start gap-2"
-                  onClick={handleLinkToExisting}
-                  disabled={saving}
+                  onClick={openLinkPanel}
+                  disabled={busy}
                 >
                   <Link2 className="h-4 w-4" />
                   קשר לאדם שכבר קיים במערכת
                 </Button>
                 <p className="text-[11px] leading-5 text-muted-foreground">
-                  מתאים רק אם האדם כבר קיים במערכת ואפשר לבחור את הרשומה שלו. בלי בחירת רשומה קיימת, הייבוא יישאר חסום.
+                  המערכת תחפש קודם רשומה קיימת לפי תעודת זהות. אם לא תימצא התאמה, אפשר לחפש לפי שם, טלפון, ת״ז או פרטי הורה.
                 </p>
 
                 <Button
                   variant="outline"
                   className="w-full justify-start gap-2"
                   onClick={handleCreateAsNew}
-                  disabled={saving}
+                  disabled={busy}
                 >
                   <PlusCircle className="h-4 w-4" />
                   צור אדם חדש אפילו אם זוהה כקיים
@@ -528,12 +747,89 @@ export function CandidateDetailSheet({ candidate, workspaceId, open, onClose, on
                   variant="ghost"
                   className="w-full justify-start gap-2 text-muted-foreground"
                   onClick={handleSkip}
-                  disabled={saving}
+                  disabled={busy}
                 >
                   <XCircle className="h-4 w-4" />
                   דלג על שורה זו
                 </Button>
               </>
+            )}
+
+            {status !== 'committed' && status !== 'skipped' && linkMode && (
+              <div className="rounded-lg border p-3 space-y-3">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-sm font-semibold">קישור לרשומה קיימת</h4>
+                  <button
+                    type="button"
+                    onClick={closeLinkPanel}
+                    aria-label="סגור קישור"
+                    className="text-muted-foreground hover:text-foreground disabled:opacity-50"
+                    disabled={linking}
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+
+                {linkLoading && (
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    מחפש…
+                  </div>
+                )}
+
+                {linkStep === 'auto' && !linkLoading && linkResults.length > 0 && (
+                  <div className="space-y-2">
+                    <p className="text-xs text-muted-foreground">נמצאה רשומה תואמת לפי תעודת זהות:</p>
+                    {linkResults.map((profile) => (
+                      <ProfileResultCard
+                        key={profile.client_profile_id}
+                        profile={profile}
+                        onLink={confirmLink}
+                        disabled={linking}
+                      />
+                    ))}
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="w-full gap-1.5"
+                      onClick={() => { setLinkStep('search'); setLinkResults([]); setLinkQuery(''); }}
+                      disabled={linking}
+                    >
+                      <Search className="h-3.5 w-3.5" />
+                      שנה רשומה לקישור (חיפוש)
+                    </Button>
+                  </div>
+                )}
+
+                {linkStep === 'search' && (
+                  <div className="space-y-2">
+                    <div className="relative">
+                      <Search className="pointer-events-none absolute top-1/2 -translate-y-1/2 start-2.5 h-4 w-4 text-muted-foreground" />
+                      <Input
+                        value={linkQuery}
+                        onChange={(e) => setLinkQuery(e.target.value)}
+                        placeholder="חיפוש לפי שם, טלפון, ת״ז או הורה"
+                        className="ps-8"
+                        autoFocus
+                        disabled={linking}
+                      />
+                    </div>
+                    {!linkLoading && linkQuery.trim().length >= 2 && linkResults.length === 0 && (
+                      <p className="text-xs text-muted-foreground">לא נמצאו רשומות מתאימות.</p>
+                    )}
+                    {linkResults.map((profile) => (
+                      <ProfileResultCard
+                        key={profile.client_profile_id}
+                        profile={profile}
+                        onLink={confirmLink}
+                        disabled={linking}
+                      />
+                    ))}
+                  </div>
+                )}
+
+                {linkError && <p className="text-xs text-destructive">{linkError}</p>}
+              </div>
             )}
 
             {status === 'committed' && (

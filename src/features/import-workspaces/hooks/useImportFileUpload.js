@@ -45,9 +45,9 @@ const IDLE_PARSE = { status: 'idle', pct: 0, stage: null, error: null };
 
 /**
  * @param {string} workspaceId  - the import workspace to attach files to
- * @param {string|null} existingSourceReference - current workspace source, reused on re-parse
+ * @param {object[]} existingSources - source metadata already saved in workspace config
  */
-export function useImportFileUpload(workspaceId, existingSourceReference = null) {
+export function useImportFileUpload(workspaceId, existingSources = []) {
   const [fileState, setFileState] = useState(IDLE_FILE);
   const [encodingState, setEncodingState] = useState(IDLE_ENCODING);
   const [uploadState, setUploadState] = useState(IDLE_UPLOAD);
@@ -55,6 +55,7 @@ export function useImportFileUpload(workspaceId, existingSourceReference = null)
   const [parsedRows, setParsedRows] = useState(null);
   const [profile, setProfile] = useState(null);
   const [sourceReference, setSourceReference] = useState(null);
+  const [parsedSources, setParsedSources] = useState([]);
 
   const workerRef = useRef(null);
 
@@ -184,13 +185,23 @@ export function useImportFileUpload(workspaceId, existingSourceReference = null)
     try {
       const uploadedAt = new Date();
       const backupExpiresAt = new Date(uploadedAt.getTime() + 30 * 24 * 60 * 60 * 1000);
-      await patchWorkspaceConfig(workspaceId, {
-        objectKey,
+      const fileMetadata = {
         fileName: file['name'],
         fileSize: file.size,
         contentType: file.type,
+        objectKey,
         uploadedAt: uploadedAt.toISOString(),
         backupExpiresAt: backupExpiresAt.toISOString(),
+      };
+      const priorFiles = [...existingSources, ...parsedSources]
+        .map((source) => source.file)
+        .filter((item, index, all) => item && all.findIndex((candidate) => (
+          candidate?.objectKey === item.objectKey && candidate?.fileName === item.fileName
+        )) === index);
+      await patchWorkspaceConfig(workspaceId, {
+        objectKey,
+        ...fileMetadata,
+        files: [...priorFiles, fileMetadata],
       });
     } catch (err) {
       // Upload succeeded but metadata patch failed — expose partial state
@@ -204,7 +215,7 @@ export function useImportFileUpload(workspaceId, existingSourceReference = null)
     }
 
     setUploadState({ status: 'done', progress: 100, objectKey, error: null });
-  }, [fileState.file, workspaceId]);
+  }, [existingSources, fileState.file, parsedSources, workspaceId]);
 
   // -------------------------------------------------------------------------
   // parse
@@ -258,19 +269,50 @@ export function useImportFileUpload(workspaceId, existingSourceReference = null)
           worker.terminate();
           workerRef.current = null;
 
-          const { headers, rows, sourceReference: parsedSourceReference, profile: prof } = payload;
-          const sourceReference = existingSourceReference || parsedSourceReference;
-          setParsedRows(rows);
-          setProfile(prof);
-          setSourceReference(sourceReference);
+          const incomingSources = (payload.sources || []).map((source) => ({
+            ...source,
+            file: {
+              fileName: file['name'],
+              fileSize: file.size,
+              contentType: file.type,
+              objectKey: uploadState.objectKey || null,
+            },
+          }));
+          const firstSource = incomingSources[0];
+          if (!firstSource) {
+            setParseState({ status: 'error', pct: 0, stage: null, error: 'no_parsed_sources' });
+            return;
+          }
+          setParsedSources((previous) => {
+            const byReference = new Map(previous.map((source) => [source.sourceReference, source]));
+            incomingSources.forEach((source) => byReference.set(source.sourceReference, source));
+            return [...byReference.values()];
+          });
+          setParsedRows(firstSource.rows);
+          setProfile(firstSource.profile);
+          setSourceReference(firstSource.sourceReference);
 
           setParseState({ status: 'saving_profile', pct: 98, stage: 'saving_profile', error: null });
 
           try {
+            const durableIncoming = incomingSources.map((source) => {
+              const durableSource = { ...source };
+              delete durableSource.rows;
+              return durableSource;
+            });
+            const priorSources = [...(existingSources || []), ...parsedSources].map((source) => {
+              const durableSource = { ...source };
+              delete durableSource.rows;
+              return durableSource;
+            });
+            const knownSources = new Map(priorSources.map((source) => [source.sourceReference, source]));
+            durableIncoming.forEach((source) => knownSources.set(source.sourceReference, source));
             await patchWorkspaceConfig(workspaceId, {
-              sourceReference,
-              profile: prof,
-              headers,
+              sourceReference: firstSource.sourceReference,
+              activeSourceReference: firstSource.sourceReference,
+              profile: firstSource.profile,
+              headers: firstSource.headers,
+              sources: [...knownSources.values()],
             });
           } catch (err) {
             // Non-fatal: profile patch failure doesn't invalidate the parsed data
@@ -312,7 +354,15 @@ export function useImportFileUpload(workspaceId, existingSourceReference = null)
     };
 
     reader.readAsArrayBuffer(file);
-  }, [existingSourceReference, fileState.file, workspaceId]);
+  }, [existingSources, fileState.file, parsedSources, uploadState.objectKey, workspaceId]);
+
+  const selectParsedSource = useCallback((nextSourceReference) => {
+    const source = parsedSources.find((item) => item.sourceReference === nextSourceReference);
+    if (!source) return;
+    setSourceReference(source.sourceReference);
+    setParsedRows(source.rows);
+    setProfile(source.profile);
+  }, [parsedSources]);
 
   // -------------------------------------------------------------------------
   // Public API
@@ -327,6 +377,8 @@ export function useImportFileUpload(workspaceId, existingSourceReference = null)
     parsedRows,
     profile,
     sourceReference,
+    parsedSources,
+    selectParsedSource,
     selectFile,
     upload,
     parse,

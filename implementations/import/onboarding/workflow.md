@@ -33,6 +33,8 @@ The durable audit source of truth is `import_rows.raw_data`, not the temporary R
 
 When a user re-uploads a corrected file, the frontend must generate a new `source_reference` by appending a timestamp or content hash, for example `students.xlsx_1715694200` or `students.xlsx_sha256ab12`. This prevents collisions with the unique `(workspace_id, source_reference, row_index)` import row key.
 
+The upload step accepts multiple files. Every CSV is one source; every non-empty Excel sheet is a separate source labeled with its filename and sheet name. Users can therefore add a student file and a separate parent file, or use separate sheets in one workbook. Each source is mapped and processed independently inside the same workspace.
+
 ### 3. Profile Files
 System profiles each sheet/file:
 - row count
@@ -54,6 +56,8 @@ No live records are created during profiling.
 
 ### 4. Map Columns
 User confirms or edits mappings.
+
+Mappings are saved per source reference. Switching from a student sheet to a parent sheet must never overwrite the first sheet's mapping. Parent sources expose first name, last name, phone, and email through the canonical `guardian` candidate fields.
 
 Mapping features:
 - source column to target field

@@ -189,6 +189,23 @@ export async function patchCandidate(candidateId, patch) {
 }
 
 /**
+ * Search existing client profiles to link an import candidate to.
+ *
+ * Pass `identityNumber` for the exact-identity auto-lookup, or `query` for a
+ * free-text search across student name (any order), phone, national id, email,
+ * and linked parent/guardian info.
+ *
+ * @param {{ identityNumber?: string, query?: string }} opts
+ * @returns {Promise<{ results: object[], matched_by: string }>}
+ */
+export async function searchLinkTargets({ identityNumber, query } = {}) {
+  const params = new URLSearchParams();
+  if (identityNumber) params.set('identity_number', identityNumber);
+  if (query) params.set('query', query);
+  return authenticatedFetch(`/api/import-link-search?${params}`);
+}
+
+/**
  * Run the dry-run simulation engine for a chunk of candidates.
  *
  * The backend reads live tables (read-only) and writes dry_run_summary into

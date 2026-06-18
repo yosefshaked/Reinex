@@ -107,11 +107,15 @@ export function useImportAnalysis(workspaceId, sourceReference, totalRows) {
       try {
         await patchWorkspaceConfig(workspaceId, {
           operationProgress: {
-            analyzedRows,
-            totalRows,
-            currentChunk: chunkIdx,
-            totalChunks: chunks,
-            lastSuccessAt: new Date().toISOString(),
+            by_source: {
+              [sourceReference]: {
+                analyzedRows,
+                totalRows,
+                currentChunk: chunkIdx,
+                totalChunks: chunks,
+                lastSuccessAt: new Date().toISOString(),
+              },
+            },
           },
         });
       } catch (patchErr) {

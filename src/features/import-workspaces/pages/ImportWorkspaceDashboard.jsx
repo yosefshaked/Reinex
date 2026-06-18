@@ -20,6 +20,10 @@ import { CandidateQueue } from '../components/CandidateQueue.jsx';
 import { CandidateDetailSheet } from '../components/CandidateDetailSheet.jsx';
 
 function getWorkspaceTotalRows(config) {
+  const sources = getWorkspaceSources(config);
+  if (sources.length > 1) {
+    return sources.reduce((sum, source) => sum + Number(source.profile?.totalRows || source.profile?.rowCount || 0), 0);
+  }
   const progress = config?.operationProgress || {};
   return Number(
     config?.profile?.rowCount ??
@@ -30,6 +34,21 @@ function getWorkspaceTotalRows(config) {
   );
 }
 
+function getSourceTotalRows(source) {
+  return Number(source?.profile?.rowCount ?? source?.profile?.totalRows ?? 0);
+}
+
+function getWorkspaceSources(config = {}) {
+  if (Array.isArray(config.sources) && config.sources.length > 0) return config.sources;
+  if (!config.sourceReference) return [];
+  return [{
+    sourceReference: config.sourceReference,
+    label: config.fileName || config.sourceReference,
+    headers: config.profile?.headers || config.headers || [],
+    profile: config.profile || {},
+  }];
+}
+
 // ── Step derivation ────────────────────────────────────────────────────────
 function deriveCompletedSteps(ws, ingestionStatus, analysisStatus) {
   const config   = ws?.config || {};
@@ -37,10 +56,27 @@ function deriveCompletedSteps(ws, ingestionStatus, analysisStatus) {
   const totalRows = getWorkspaceTotalRows(config);
   const completed = [];
 
-  const hasMappings = config.mappings?.field_map &&
-    Object.keys(config.mappings.field_map).length > 0;
-  const ingestDone   = ingestionStatus === 'done' || (totalRows > 0 && progress.uploadedRows >= totalRows);
-  const analyzeDone  = analysisStatus === 'done'  || (progress.analyzedRows >= totalRows && totalRows > 0);
+  const sources = getWorkspaceSources(config);
+  const hasMappings = sources.length > 0 && sources.every((source) => {
+    const mapping = config.mappings?.by_source?.[source.sourceReference]?.field_map;
+    return (mapping && Object.keys(mapping).length > 0)
+      || (sources.length === 1 && Object.keys(config.mappings?.field_map || {}).length > 0);
+  });
+  const sourceProgress = progress.by_source || {};
+  const sourcesIngested = sources.length > 0 && sources.every((source) => {
+    const count = getSourceTotalRows(source);
+    return count > 0 && Number(sourceProgress[source.sourceReference]?.uploadedRows || 0) >= count;
+  });
+  const sourcesAnalyzed = sources.length > 0 && sources.every((source) => {
+    const count = getSourceTotalRows(source);
+    return count > 0 && Number(sourceProgress[source.sourceReference]?.analyzedRows || 0) >= count;
+  });
+  const ingestDone   = sourcesIngested || (sources.length === 1 && (
+    ingestionStatus === 'done' || (totalRows > 0 && progress.uploadedRows >= totalRows)
+  ));
+  const analyzeDone  = sourcesAnalyzed || (sources.length === 1 && (
+    analysisStatus === 'done' || (progress.analyzedRows >= totalRows && totalRows > 0)
+  ));
 
   if (config.sourceReference) completed.push('upload');
   if (hasMappings)            completed.push('map');
@@ -58,14 +94,31 @@ function deriveCurrentStep(ws, ingestionStatus, analysisStatus) {
 
   if (!config.sourceReference) return 'upload';
 
-  const hasMappings = config.mappings?.field_map &&
-    Object.keys(config.mappings.field_map).length > 0;
+  const sources = getWorkspaceSources(config);
+  const hasMappings = sources.length > 0 && sources.every((source) => {
+    const mapping = config.mappings?.by_source?.[source.sourceReference]?.field_map;
+    return (mapping && Object.keys(mapping).length > 0)
+      || (sources.length === 1 && Object.keys(config.mappings?.field_map || {}).length > 0);
+  });
   if (!hasMappings) return 'map';
 
-  const ingestDone  = ingestionStatus === 'done' || (totalRows > 0 && progress.uploadedRows >= totalRows);
+  const sourceProgress = progress.by_source || {};
+  const ingestDoneFromSources = sources.length > 0 && sources.every((source) => {
+    const count = getSourceTotalRows(source);
+    return count > 0 && Number(sourceProgress[source.sourceReference]?.uploadedRows || 0) >= count;
+  });
+  const ingestDone  = ingestDoneFromSources || (sources.length === 1 && (
+    ingestionStatus === 'done' || (totalRows > 0 && progress.uploadedRows >= totalRows)
+  ));
   if (!ingestDone) return 'ingest';
 
-  const analyzeDone = analysisStatus === 'done' || (progress.analyzedRows >= totalRows && totalRows > 0);
+  const analyzeDoneFromSources = sources.length > 0 && sources.every((source) => {
+    const count = getSourceTotalRows(source);
+    return count > 0 && Number(sourceProgress[source.sourceReference]?.analyzedRows || 0) >= count;
+  });
+  const analyzeDone = analyzeDoneFromSources || (sources.length === 1 && (
+    analysisStatus === 'done' || (progress.analyzedRows >= totalRows && totalRows > 0)
+  ));
   if (!analyzeDone) return 'analyze';
 
   return 'review';
@@ -78,13 +131,15 @@ function UploadStep({ hook, workspace, onDone, onCreateNew }) {
   const fileInputRef = useRef(null);
   const [backupStatus, setBackupStatus] = useState({ status: 'idle', data: null, error: null });
   const config = workspace?.config || {};
+  const savedSources = getWorkspaceSources(config);
   const existingFileName = config.fileName || config.sourceReference || '';
   const hasServerBackup = Boolean(config.objectKey);
   const hasParsedProfile = Boolean(config.sourceReference && (config.profile?.headers?.length || config.headers?.length));
   const hasCurrentFile = Boolean(fileState.file);
 
-  const isUploaded  = uploadState.status === 'done' || hasServerBackup;
-  const isParsed    = (parseState.status === 'done' && parsedRows !== null) || hasParsedProfile;
+  const isUploaded  = uploadState.status === 'done';
+  const isCurrentParsed = parseState.status === 'done' && parsedRows !== null;
+  const isParsed    = isCurrentParsed || (!hasCurrentFile && hasParsedProfile);
   const isUploading = ['requesting_url', 'uploading', 'saving_metadata'].includes(uploadState.status);
   const isParsing   = ['reading', 'parsing', 'saving_profile'].includes(parseState.status);
   const uploadFailedNonblocking = uploadState.status === 'failed_nonblocking';
@@ -188,7 +243,6 @@ function UploadStep({ hook, workspace, onDone, onCreateNew }) {
       )}
 
       {/* File picker */}
-      {!shouldShowExistingParsedFile && (
       <div className="flex items-center gap-3 flex-wrap">
         <input
           ref={fileInputRef}
@@ -209,7 +263,7 @@ function UploadStep({ hook, workspace, onDone, onCreateNew }) {
           className="gap-2"
         >
           <UploadCloud className="h-4 w-4" />
-          {fileState.file ? fileState.file.name : existingFileName || 'בחר קובץ'}
+          {fileState.file ? fileState.file.name : savedSources.length > 0 ? 'בחר קובץ נוסף' : existingFileName || 'בחר קובץ'}
         </Button>
 
         {fileState.file && !isUploaded && (
@@ -218,7 +272,7 @@ function UploadStep({ hook, workspace, onDone, onCreateNew }) {
           </Button>
         )}
 
-        {fileState.file && !isParsed && (
+        {fileState.file && !isCurrentParsed && (
           <Button onClick={parse} disabled={isParsing} className="gap-2">
             {isParsing ? `מנתח… ${parseState.pct}%` : 'נתח קובץ'}
           </Button>
@@ -234,6 +288,21 @@ function UploadStep({ hook, workspace, onDone, onCreateNew }) {
           </Button>
         )}
       </div>
+
+      {(savedSources.length > 0 || hook.parsedSources?.length > 0) && (
+        <div className="space-y-2 rounded-lg border p-3">
+          <p className="text-sm font-medium">מקורות שנוספו</p>
+          {[...new Map([
+            ...savedSources,
+            ...(hook.parsedSources || []),
+          ].map((source) => [source.sourceReference, source])).values()].map((source) => (
+            <div key={source.sourceReference} className="flex items-center justify-between gap-3 text-sm">
+              <span>{source.label || source.sheetName || source.filename || source.sourceReference}</span>
+              <Badge variant="secondary">{Number(source.profile?.totalRows || 0).toLocaleString()} שורות</Badge>
+            </div>
+          ))}
+          <p className="text-xs text-muted-foreground">כל גיליון נשמר כמקור נפרד, כדי שאפשר יהיה למפות תלמידים והורים באופן עצמאי.</p>
+        </div>
       )}
 
       {/* Status messages */}
@@ -268,25 +337,38 @@ function UploadStep({ hook, workspace, onDone, onCreateNew }) {
 }
 
 // ── Map Step ───────────────────────────────────────────────────────────────
-function MapStep({ workspace, onSaved }) {
+function MapStep({ workspace, selectedSourceReference, onSourceChange, onSaved }) {
   const config      = workspace.config || {};
-  const headers     = config.profile?.headers || config.headers || [];
-  const sampleRow   = config.profile?.sampleRow || {};
+  const sources     = getWorkspaceSources(config);
+  const selectedSource = sources.find((source) => source.sourceReference === selectedSourceReference) || sources[0];
+  const sourceReference = selectedSource?.sourceReference;
+  const headers     = selectedSource?.profile?.headers || selectedSource?.headers || [];
+  const sampleRow   = selectedSource?.profile?.sampleRow || {};
   const workspaceId = workspace.id;
 
-  const [entityType, setEntityType] = useState(config.entityType || 'active_student');
+  const savedSourceMapping = config.mappings?.by_source?.[sourceReference] || {};
+  const [entityType, setEntityType] = useState(savedSourceMapping.entity_type || config.entityType || 'active_student');
   const [saving, setSaving]         = useState(false);
   const [saveError, setSaveError]   = useState(null);
+
+  useEffect(() => {
+    setEntityType(savedSourceMapping.entity_type || config.entityType || 'active_student');
+  }, [config.entityType, savedSourceMapping.entity_type, sourceReference]);
 
   async function handleSave(fieldMap) {
     setSaving(true);
     setSaveError(null);
     try {
       await patchWorkspaceConfig(workspaceId, {
+        activeSourceReference: sourceReference,
         entityType,
-        mappings: { field_map: fieldMap },
+        mappings: {
+          by_source: {
+            [sourceReference]: { entity_type: entityType, field_map: fieldMap },
+          },
+        },
       });
-      onSaved?.();
+      onSaved?.(sourceReference);
     } catch (err) {
       setSaveError(err.message || 'שגיאה בשמירה');
     } finally {
@@ -299,12 +381,29 @@ function MapStep({ workspace, onSaved }) {
       <p className="text-sm text-muted-foreground">
         בחר איזו עמודה בקובץ מתאימה לכל שדה במערכת. אפשר להשתמש באותה עמודה בכמה סוגי רשומות, למשל תעודת זהות לקישור בין תלמיד, הורה והערה.
       </p>
+      {sources.length > 1 && (
+        <div className="space-y-2">
+          <p className="text-sm font-medium">בחר מקור למיפוי</p>
+          <div className="flex flex-wrap gap-2">
+            {sources.map((source) => (
+              <Button
+                key={source.sourceReference}
+                type="button"
+                variant={source.sourceReference === sourceReference ? 'default' : 'outline'}
+                onClick={() => onSourceChange?.(source.sourceReference)}
+              >
+                {source.label || source.sheetName || source.filename || source.sourceReference}
+              </Button>
+            ))}
+          </div>
+        </div>
+      )}
       {saveError && <p className="text-xs text-destructive">{saveError}</p>}
       <MappingEditor
         sourceColumns={headers}
         sampleRow={sampleRow}
         entityType={entityType}
-        initialFieldMap={config.mappings?.field_map || {}}
+        initialFieldMap={savedSourceMapping.field_map || (sources.length === 1 ? config.mappings?.field_map : {}) || {}}
         onEntityTypeChange={setEntityType}
         onSave={handleSave}
         saving={saving}
@@ -314,18 +413,40 @@ function MapStep({ workspace, onSaved }) {
 }
 
 // ── Ingest + Analyze Step ──────────────────────────────────────────────────
-function ProcessStep({ ingestion, analysis, uploadHook, workspace }) {
+function ProcessStep({ ingestion, analysis, uploadHook, workspace, sourceReference, onSourceChange }) {
   const config    = workspace.config || {};
-  const totalRows = getWorkspaceTotalRows(config) || uploadHook.profile?.rowCount || uploadHook.profile?.totalRows || uploadHook.parsedRows?.length || 0;
+  const sources = getWorkspaceSources(config);
+  const selectedSource = sources.find((source) => source.sourceReference === sourceReference) || sources[0];
+  const sourceProgress = config.operationProgress?.by_source?.[sourceReference] || {};
+  const totalRows = getSourceTotalRows(selectedSource) || uploadHook.profile?.rowCount || uploadHook.profile?.totalRows || uploadHook.parsedRows?.length || 0;
   const hasRows   = !!uploadHook.parsedRows;
   const ingestDone = ingestion.status === 'done' ||
-    (config.operationProgress?.uploadedRows >= totalRows && totalRows > 0);
+    (sourceProgress.uploadedRows >= totalRows && totalRows > 0) ||
+    (sources.length === 1 && config.operationProgress?.uploadedRows >= totalRows && totalRows > 0);
+  const analysisDone = analysis.status === 'done' ||
+    (sourceProgress.analyzedRows >= totalRows && totalRows > 0) ||
+    (sources.length === 1 && config.operationProgress?.analyzedRows >= totalRows && totalRows > 0);
 
   return (
     <div className="space-y-4">
       <p className="text-sm text-muted-foreground">
         בשלב הזה שומרים את השורות שנקראו מהקובץ, ואז בודקים אותן מול כללי המערכת: שדות חובה, כפילויות וקשרים בין תלמידים, הורים והערות.
       </p>
+      {sources.length > 1 && (
+        <div className="flex flex-wrap gap-2">
+          {sources.map((source) => (
+            <Button
+              key={source.sourceReference}
+              type="button"
+              size="sm"
+              variant={source.sourceReference === sourceReference ? 'default' : 'outline'}
+              onClick={() => onSourceChange?.(source.sourceReference)}
+            >
+              {source.label || source.sheetName || source.filename || source.sourceReference}
+            </Button>
+          ))}
+        </div>
+      )}
       {/* Warn if parsedRows lost but ingestion not done */}
       {!hasRows && !ingestDone && (
         <div className="rounded-lg border border-yellow-200 bg-yellow-50 dark:border-yellow-800 dark:bg-yellow-900/20 px-4 py-3 text-sm text-yellow-800 dark:text-yellow-300">
@@ -334,7 +455,13 @@ function ProcessStep({ ingestion, analysis, uploadHook, workspace }) {
       )}
       <ProgressOrchestrator
         ingestion={hasRows || ingestDone ? ingestion : { ...ingestion, status: 'idle' }}
-        analysis={analysis}
+        analysis={analysisDone ? {
+          ...analysis,
+          status: 'done',
+          analyzedRows: totalRows,
+          totalRows,
+          progress: 1,
+        } : analysis}
         ingestDoneFromConfig={ingestDone}
       />
       {totalRows > 0 && (
@@ -494,16 +621,22 @@ export default function ImportWorkspaceDashboard() {
   const [queueKey, setQueueKey]           = useState(0); // force re-mount queue on decision
   const [isDryRunning, setIsDryRunning]   = useState(false);
   const [dryRunProgress, setDryRunProgress] = useState({ done: 0, total: 0 });
+  const [selectedSourceReference, setSelectedSourceReference] = useState(null);
+  const completionRefreshRef = useRef('');
 
   const config        = workspace?.config || {};
 
   // Phase 2: file upload
-  const uploadHook = useImportFileUpload(workspaceId, workspace?.config?.sourceReference ?? null);
+  const uploadHook = useImportFileUpload(workspaceId, getWorkspaceSources(config));
 
   // Phase 3: ingestion — parsedRows from upload hook
-  const sourceRef     = config.sourceReference ?? uploadHook.sourceReference ?? null;
-  const totalRows     = getWorkspaceTotalRows(config) || uploadHook.profile?.rowCount || uploadHook.profile?.totalRows || uploadHook.parsedRows?.length || 0;
-  const ingestionHook = useImportRowIngestion(workspaceId, sourceRef, uploadHook.parsedRows);
+  const sources       = getWorkspaceSources(config);
+  const sourceRef     = selectedSourceReference || config.activeSourceReference || uploadHook.sourceReference || config.sourceReference || null;
+  const selectedSource = sources.find((source) => source.sourceReference === sourceRef);
+  const parsedSource = uploadHook.parsedSources?.find((source) => source.sourceReference === sourceRef);
+  const sourceRows = parsedSource?.rows || (uploadHook.sourceReference === sourceRef ? uploadHook.parsedRows : null);
+  const totalRows     = getSourceTotalRows(selectedSource) || parsedSource?.rows?.length || uploadHook.profile?.rowCount || uploadHook.profile?.totalRows || sourceRows?.length || 0;
+  const ingestionHook = useImportRowIngestion(workspaceId, sourceRef, sourceRows);
   const analysisHook  = useImportAnalysis(workspaceId, sourceRef, totalRows);
 
   const load = useCallback(async () => {
@@ -527,11 +660,32 @@ export default function ImportWorkspaceDashboard() {
   // Auto-navigate to the current step on first load
   useEffect(() => {
     if (!workspace) return;
+    const availableSources = getWorkspaceSources(workspace.config || {});
+    setSelectedSourceReference((current) => current
+      || workspace.config?.activeSourceReference
+      || availableSources[0]?.sourceReference
+      || null);
     const derived = deriveCurrentStep(workspace, ingestionHook.status, analysisHook.status);
     setCurrentStep(derived);
   // Only run on workspace load, not on every hook status change
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspace]);
+
+  const handleSourceChange = useCallback(async (nextSourceReference) => {
+    await load();
+    setSelectedSourceReference(nextSourceReference);
+    uploadHook.selectParsedSource(nextSourceReference);
+    ingestionHook.reset();
+    analysisHook.reset();
+  }, [analysisHook, ingestionHook, load, uploadHook]);
+
+  useEffect(() => {
+    if (analysisHook.status !== 'done' || !sourceRef) return;
+    const refreshKey = `${sourceRef}:done`;
+    if (completionRefreshRef.current === refreshKey) return;
+    completionRefreshRef.current = refreshKey;
+    load();
+  }, [analysisHook.status, load, sourceRef]);
 
   const completedSteps = workspace
     ? deriveCompletedSteps(workspace, ingestionHook.status, analysisHook.status)
@@ -545,6 +699,13 @@ export default function ImportWorkspaceDashboard() {
   function handleDecisionSaved() {
     setQueueKey(k => k + 1); // refresh queue
     setSheetOpen(false);
+  }
+
+  // A per-field edit recomputes issues server-side; refresh the queue in the
+  // background but keep the drawer open so the user can keep fixing fields.
+  function handleCandidateUpdated(updated) {
+    if (updated) setSelectedCandidate(updated);
+    setQueueKey(k => k + 1);
   }
 
   async function handleExportIssues() {
@@ -694,9 +855,22 @@ export default function ImportWorkspaceDashboard() {
           {currentStep === 'map' && workspace && (
             <MapStep
               workspace={workspace}
-              onSaved={() => {
-                load(); // refresh workspace to pick up saved mappings
-                setCurrentStep('ingest');
+              selectedSourceReference={sourceRef}
+              onSourceChange={handleSourceChange}
+              onSaved={async (savedSourceReference) => {
+                const refreshed = await load();
+                const refreshedConfig = refreshed?.config || {};
+                const refreshedSources = getWorkspaceSources(refreshedConfig);
+                const nextUnmapped = refreshedSources.find((source) => (
+                  !refreshedConfig.mappings?.by_source?.[source.sourceReference]?.field_map
+                ));
+                if (nextUnmapped) {
+                  handleSourceChange(nextUnmapped.sourceReference);
+                  setCurrentStep('map');
+                } else {
+                  handleSourceChange(savedSourceReference);
+                  setCurrentStep('ingest');
+                }
               }}
             />
           )}
@@ -707,6 +881,8 @@ export default function ImportWorkspaceDashboard() {
               analysis={analysisHook}
               uploadHook={uploadHook}
               workspace={workspace}
+              sourceReference={sourceRef}
+              onSourceChange={handleSourceChange}
             />
           )}
 
@@ -780,6 +956,7 @@ export default function ImportWorkspaceDashboard() {
         open={sheetOpen}
         onClose={() => setSheetOpen(false)}
         onDecisionSaved={handleDecisionSaved}
+        onCandidateUpdated={handleCandidateUpdated}
       />
     </PageLayout>
   );

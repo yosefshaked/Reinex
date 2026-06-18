@@ -50,9 +50,10 @@ Statuses:
 - `cancelled`
 
 `config` holds:
+- `sources`: one entry per CSV or non-empty workbook sheet, with a unique `sourceReference`, human-readable file/sheet label, headers, profile, and optional temporary R2 file metadata
 - files: names, sizes, hashes, encodings, sheet names, temporary R2 object keys, R2 expiry timestamps
 - sheet profiles: row counts, header rows, detected entity hints
-- mappings: column-to-field rules, fixed values, enum dictionaries, ignored columns
+- mappings: source-keyed column-to-field rules under `mappings.by_source[sourceReference]`, including that source's entity type, fixed values, enum dictionaries, and ignored columns
 - normalization settings: date locale, encoding override, phone/identity cleanup rules
 - operation progress: current chunk, total chunks, last error, resumable cursor
 - import policy: active/inactive lanes, inactive archive rules, chunk sizes
@@ -81,6 +82,8 @@ Columns:
 - `legacy.xlsx#Inactive Students_1715694200`
 
 The suffix is required. It must include a timestamp or content hash so corrected re-uploads of the same filename do not collide with the unique `(workspace_id, source_reference, row_index)` key.
+
+For Excel workbooks, every non-empty sheet is a separate source and its label/reference includes both filename and sheet name. This allows student and guardian sheets to retain independent profiles, mappings, ingestion progress, and analysis progress inside one workspace.
 
 `raw_data` stores:
 - decoded raw cell values

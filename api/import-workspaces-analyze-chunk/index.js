@@ -371,8 +371,12 @@ export default async function importWorkspacesAnalyzeChunk(context, req) {
   }
 
   const config = workspace.config || {};
-  const entityType = normalizeString(config.entityType) || 'active_student';
-  const fieldMap = config.mappings?.field_map || {};
+  const sourceConfig = (Array.isArray(config.sources) ? config.sources : [])
+    .find((source) => normalizeString(source?.sourceReference) === sourceReference);
+  const sourceMapping = config.mappings?.by_source?.[sourceReference];
+  const entityType = normalizeString(sourceMapping?.entity_type || sourceConfig?.entityType || config.entityType)
+    || 'active_student';
+  const fieldMap = sourceMapping?.field_map || sourceConfig?.mapping?.field_map || config.mappings?.field_map || {};
 
   if (!ENTITY_SCHEMA[entityType]) {
     return respond(context, 400, { message: 'unsupported_entity_type', entityType });

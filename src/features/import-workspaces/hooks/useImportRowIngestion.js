@@ -116,11 +116,15 @@ export function useImportRowIngestion(workspaceId, sourceReference, parsedRows) 
       try {
         await patchWorkspaceConfig(workspaceId, {
           operationProgress: {
-            uploadedRows,
-            totalRows,
-            currentChunk: chunkIdx,
-            totalChunks,
-            lastSuccessAt: new Date().toISOString(),
+            by_source: {
+              [sourceReference]: {
+                uploadedRows,
+                totalRows,
+                currentChunk: chunkIdx,
+                totalChunks,
+                lastSuccessAt: new Date().toISOString(),
+              },
+            },
           },
         });
       } catch (patchErr) {
