@@ -50,10 +50,10 @@ const ALLOWED_ENTITY_TYPES = new Set([
 const VALID_CUSTOMER_TYPES = new Set(['student', 'one_time_customer']);
 
 const EDITABLE_FIELDS_BY_ENTITY = {
-  customer: ['first_name', 'last_name', 'identity_number', 'customer_type', 'is_active', 'phone', 'email', 'date_of_birth'],
+  customer: ['first_name', 'last_name', 'identity_number', 'customer_type', 'is_active', 'phone', 'email', 'date_of_birth', 'note_text'],
   active_student: ['first_name', 'last_name', 'identity_number', 'phone', 'email', 'date_of_birth'],
   inactive_student: ['first_name', 'last_name', 'identity_number', 'phone', 'email', 'date_of_birth'],
-  guardian: ['first_name', 'last_name', 'phone', 'email'],
+  guardian: ['guardian_first_name', 'guardian_last_name', 'phone', 'email'],
   guardian_link: ['identity_number', 'guardian_phone', 'relationship', 'is_primary'],
   service: ['service_name', 'description'],
   student_note: ['note_text', 'identity_number'],
@@ -63,7 +63,7 @@ const REQUIRED_FIELDS_BY_ENTITY = {
   customer: ['first_name', 'last_name', 'identity_number', 'customer_type'],
   active_student: ['first_name', 'last_name', 'identity_number'],
   inactive_student: ['first_name', 'last_name', 'identity_number'],
-  guardian: ['first_name', 'last_name'],
+  guardian: ['guardian_first_name', 'guardian_last_name'],
   guardian_link: ['identity_number', 'guardian_phone'],
   service: ['service_name'],
   student_note: ['note_text', 'identity_number'],

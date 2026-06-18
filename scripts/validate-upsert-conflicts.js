@@ -15,7 +15,7 @@ const EXPECTED_CONFLICTS_BY_TABLE = {
   instructor_service_capabilities: ['org_id,employee_id,service_id'],
   instructor_profiles: ['employee_id'],
   import_rows: ['workspace_id,source_reference,row_index'],
-  import_candidates: ['workspace_id,source_row_id'],
+  import_candidates: ['workspace_id,source_row_id,entity_type'],
 };
 
 function normalizeConflictValue(value) {

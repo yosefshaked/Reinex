@@ -6409,8 +6409,11 @@ CREATE INDEX IF NOT EXISTS import_candidates_dependency_idx
 ALTER TABLE public.import_candidates
   ADD COLUMN IF NOT EXISTS source_row_id uuid REFERENCES public.import_rows(id) ON DELETE CASCADE;
 
-CREATE UNIQUE INDEX IF NOT EXISTS import_candidates_workspace_source_row_uidx
-  ON public.import_candidates (workspace_id, source_row_id);
+-- One source row may produce several entity candidates (customer, guardian,
+-- guardian_link, service). Replace the legacy one-candidate-per-row key.
+DROP INDEX IF EXISTS public.import_candidates_workspace_source_row_uidx;
+CREATE UNIQUE INDEX IF NOT EXISTS import_candidates_workspace_source_row_entity_uidx
+  ON public.import_candidates (workspace_id, source_row_id, entity_type);
 
 CREATE INDEX IF NOT EXISTS import_candidates_blocking_idx
   ON public.import_candidates (workspace_id, blocking_issues_count)

@@ -74,7 +74,10 @@ const FIELD_LABELS = {
   identity_number: 'תעודת זהות התלמיד',
   customer_type: 'סוג לקוח',
   is_active: 'פעיל/לא פעיל',
+  guardian_first_name: 'שם פרטי של ההורה',
+  guardian_last_name: 'שם משפחה של ההורה',
   guardian_phone: 'טלפון הורה',
+  guardian_email: 'אימייל הורה',
   phone: 'טלפון',
   email: 'אימייל',
   date_of_birth: 'תאריך לידה',
@@ -108,6 +111,8 @@ function issueMessage(issue) {
       return `לא נמצאה רשומה תואמת במקור הנוסף עבור ${label}. בדוק/י את עמודות הקישור שנבחרו.`;
     case 'ambiguous_source_join':
       return `נמצאו כמה רשומות תואמות במקור הנוסף עבור ${label}. ערך הקישור חייב לזהות רשומה אחת בלבד.`;
+    case 'note_requires_student':
+      return 'הערה פנימית נשמרת רק עבור לקוח/ה מסוג תלמיד/ה.';
     default:
       return issue?.severity === 'blocker'
         ? `${label} חוסם את הייבוא ויש לטפל בו.`
@@ -231,6 +236,17 @@ function normalizeCandidateData(mapped, entityType) {
   const data = { ...mapped };
   const fieldIssues = [];
 
+  if (entityType === 'guardian') {
+    data.first_name = data.guardian_first_name ?? data.first_name;
+    data.last_name = data.guardian_last_name ?? data.last_name;
+    data.phone = data.guardian_phone ?? data.phone;
+    data.email = data.guardian_email ?? data.email;
+    delete data.guardian_first_name;
+    delete data.guardian_last_name;
+    delete data.guardian_phone;
+    delete data.guardian_email;
+  }
+
   if (!data.identity_number && data.student_identity_number) {
     data.identity_number = data.student_identity_number;
   }
@@ -296,6 +312,10 @@ function normalizeCandidateData(mapped, entityType) {
   if (entityType === 'service' && data.service_name !== null && data.service_name !== undefined) {
     const nameResult = coerceOptionalText(data.service_name);
     Object.assign(data, { service_name: nameResult.value });
+  }
+
+  if (entityType === 'customer' && data.note_text !== null && data.note_text !== undefined) {
+    data.note_text = coerceOptionalText(data.note_text).value;
   }
 
   // customer_type: must be 'student' or 'one_time_customer' when provided
@@ -466,26 +486,47 @@ export default async function importWorkspacesAnalyzeChunk(context, req) {
   const sourceConfig = (Array.isArray(config.sources) ? config.sources : [])
     .find((source) => normalizeString(source?.sourceReference) === sourceReference);
   const sourceMapping = config.mappings?.by_source?.[sourceReference];
-  const entityType = normalizeString(sourceMapping?.entity_type || sourceConfig?.entityType || config.entityType)
-    || 'active_student';
-  const fieldMap = sourceMapping?.field_map || sourceConfig?.mapping?.field_map || config.mappings?.field_map || {};
-  // fixed_values: literal values set for all rows in this source (e.g. customer_type = 'student').
-  // Applied as defaults after column mappings — a mapped column wins if it has a non-empty value.
-  const fixedValues = sourceMapping?.fixed_values || {};
-  const joinColumns = sourceMapping?.join_columns || {};
-  const externalSourceReferences = [...new Set(Object.values(fieldMap)
-    .map((value) => normalizeFieldSource(value, sourceReference)?.sourceReference)
-    .filter((mappedSourceReference) => mappedSourceReference && mappedSourceReference !== sourceReference))];
-
-  if (externalSourceReferences.some((externalReference) => (
-    !normalizeString(joinColumns[sourceReference]) || !normalizeString(joinColumns[externalReference])
-  ))) {
-    return respond(context, 400, { message: 'cross_source_join_columns_required' });
+  const configuredEntities = sourceMapping?.entities && typeof sourceMapping.entities === 'object'
+    ? Object.entries(sourceMapping.entities)
+        .filter(([, mapping]) => mapping?.enabled)
+        .map(([entityType, mapping]) => ({ entityType, ...mapping }))
+    : [];
+  if (configuredEntities.length === 0) {
+    const legacyEntityType = normalizeString(sourceMapping?.entity_type || sourceConfig?.entityType || config.entityType)
+      || 'customer';
+    configuredEntities.push({
+      entityType: ['active_student', 'inactive_student'].includes(legacyEntityType) ? 'customer' : legacyEntityType,
+      field_map: sourceMapping?.field_map || sourceConfig?.mapping?.field_map || config.mappings?.field_map || {},
+      fixed_values: {
+        ...(sourceMapping?.fixed_values || {}),
+        ...(['active_student', 'inactive_student'].includes(legacyEntityType)
+          ? { customer_type: 'student', is_active: legacyEntityType === 'active_student' }
+          : {}),
+      },
+      join_columns: sourceMapping?.join_columns || {},
+    });
   }
 
-  if (!ENTITY_SCHEMA[entityType]) {
-    return respond(context, 400, { message: 'unsupported_entity_type', entityType });
+  for (const mapping of configuredEntities) {
+    if (!ENTITY_SCHEMA[mapping.entityType] || mapping.entityType === 'student_note') {
+      return respond(context, 400, { message: 'unsupported_entity_type', entityType: mapping.entityType });
+    }
+    const externalReferences = Object.values(mapping.field_map || {})
+      .map((value) => normalizeFieldSource(value, sourceReference)?.sourceReference)
+      .filter((reference) => reference && reference !== sourceReference);
+    if (externalReferences.some((externalReference) => (
+      !normalizeString(mapping.join_columns?.[sourceReference])
+      || !normalizeString(mapping.join_columns?.[externalReference])
+    ))) {
+      return respond(context, 400, { message: 'cross_source_join_columns_required', entityType: mapping.entityType });
+    }
   }
+
+  const externalSourceReferences = [...new Set(configuredEntities.flatMap((mapping) => (
+    Object.values(mapping.field_map || {})
+      .map((value) => normalizeFieldSource(value, sourceReference)?.sourceReference)
+      .filter((reference) => reference && reference !== sourceReference)
+  )))];
 
   // --- Load import rows for this chunk ---
   const { data: rows, error: rowsErr } = await withOrgScope(supabase, 'import_rows', orgId)
@@ -505,7 +546,7 @@ export default async function importWorkspacesAnalyzeChunk(context, req) {
     return respond(context, 200, { analyzed: 0, candidates_created: 0, candidates_updated: 0 });
   }
 
-  const externalRowsBySourceAndKey = new Map();
+  const externalRowsBySource = new Map();
   for (const externalReference of externalSourceReferences) {
     const allExternalRows = [];
     for (let from = 0; ; from += 1000) {
@@ -528,21 +569,12 @@ export default async function importWorkspacesAnalyzeChunk(context, req) {
       if (!externalRows || externalRows.length < 1000) break;
     }
 
-    const joinColumn = joinColumns[externalReference];
-    const rowsByKey = new Map();
-    for (const externalRow of allExternalRows) {
-      const key = normalizeJoinValue(externalRow.raw_data?.[joinColumn]);
-      if (!key) continue;
-      const matchingRows = rowsByKey.get(key) || [];
-      matchingRows.push(externalRow);
-      rowsByKey.set(key, matchingRows);
-    }
-    externalRowsBySourceAndKey.set(externalReference, rowsByKey);
+    externalRowsBySource.set(externalReference, allExternalRows);
   }
 
   const rowIds = rows.map((row) => row.id);
   const { data: existingCandidates, error: existingCandidatesErr } = await withOrgScope(supabase, 'import_candidates', orgId)
-    .select('source_row_id, decisions, status')
+    .select('id, source_row_id, entity_type, decisions, status')
     .eq('workspace_id', workspaceId)
     .in('source_row_id', rowIds);
 
@@ -553,61 +585,98 @@ export default async function importWorkspacesAnalyzeChunk(context, req) {
     return respondAnalyzeError(context, 500, 'failed_to_load_existing_decisions', existingCandidatesErr, { action: 'load_existing_decisions' });
   }
 
-  const existingDecisionsByRowId = new Map(
+  const configuredEntityTypes = new Set(configuredEntities.map((mapping) => mapping.entityType));
+  const staleCandidateIds = (existingCandidates || [])
+    .filter((candidate) => (
+      !configuredEntityTypes.has(candidate.entity_type)
+      && !['committed', 'skipped'].includes(normalizeString(candidate.status))
+    ))
+    .map((candidate) => candidate.id)
+    .filter(Boolean);
+  if (staleCandidateIds.length > 0) {
+    const { error: staleDeleteError } = await withOrgScope(supabase, 'import_candidates', orgId)
+      .delete()
+      .in('id', staleCandidateIds);
+    if (staleDeleteError) {
+      return respondAnalyzeError(context, 500, 'failed_to_remove_disabled_candidates', staleDeleteError, {
+        action: 'remove_disabled_candidates',
+      });
+    }
+  }
+
+  const existingDecisionsByKey = new Map(
     (existingCandidates || []).map((candidate) => [
-      candidate.source_row_id,
+      `${candidate.source_row_id}:${candidate.entity_type}`,
       candidate.decisions && typeof candidate.decisions === 'object' ? candidate.decisions : {},
     ]),
   );
 
-  const existingStatusByRowId = new Map(
+  const existingStatusByKey = new Map(
     (existingCandidates || []).map((candidate) => [
-      candidate.source_row_id,
+      `${candidate.source_row_id}:${candidate.entity_type}`,
       normalizeString(candidate.status),
     ]),
   );
   const preservedStatuses = new Set(['committed', 'skipped']);
 
-  // --- Apply mappings + normalize all rows ---
-  const normalized = rows
-    .filter((row) => !preservedStatuses.has(existingStatusByRowId.get(row.id)))
-    .map((row) => {
+  const indexesByEntity = new Map();
+  for (const mapping of configuredEntities) {
+    const indexes = new Map();
+    for (const externalReference of externalSourceReferences) {
+      const joinColumn = mapping.join_columns?.[externalReference];
+      if (!joinColumn) continue;
+      const rowsByKey = new Map();
+      for (const externalRow of externalRowsBySource.get(externalReference) || []) {
+        const key = normalizeJoinValue(externalRow.raw_data?.[joinColumn]);
+        if (!key) continue;
+        const matchingRows = rowsByKey.get(key) || [];
+        matchingRows.push(externalRow);
+        rowsByKey.set(key, matchingRows);
+      }
+      indexes.set(externalReference, rowsByKey);
+    }
+    indexesByEntity.set(mapping.entityType, indexes);
+  }
+
+  // Every enabled section can emit its own candidate from the same source row.
+  const normalized = rows.flatMap((row) => configuredEntities.flatMap((mapping) => {
+    const candidateKey = `${row.id}:${mapping.entityType}`;
+    if (preservedStatuses.has(existingStatusByKey.get(candidateKey))) return [];
     const { mapped, mergedRowIds, joinIssues } = applyMappings(
       row.raw_data || {},
-      fieldMap,
+      mapping.field_map || {},
       sourceReference,
-      joinColumns,
-      externalRowsBySourceAndKey,
+      mapping.join_columns || {},
+      indexesByEntity.get(mapping.entityType) || new Map(),
     );
-    // Apply fixed values as defaults for fields not resolved (or empty) from column mappings
-    for (const [field, fixedVal] of Object.entries(fixedValues)) {
-      if (mapped[field] === null || mapped[field] === undefined || mapped[field] === '') {
-        mapped[field] = fixedVal;
-      }
+    for (const [field, fixedValue] of Object.entries(mapping.fixed_values || {})) {
+      if (mapped[field] === null || mapped[field] === undefined || mapped[field] === '') mapped[field] = fixedValue;
     }
-    const { data: candidateData, fieldIssues } = normalizeCandidateData(mapped, entityType);
-    return {
+    const { data: candidateData, fieldIssues } = normalizeCandidateData(mapped, mapping.entityType);
+    return [{
       rowId: row.id,
       rowIndex: row.row_index,
+      entityType: mapping.entityType,
       candidateData,
       fieldIssues: [...fieldIssues, ...joinIssues],
       mergedRowIds,
-    };
-  });
-  const candidatesPreserved = rows.length - normalized.length;
+    }];
+  }));
+  const candidatesPreserved = (rows.length * configuredEntities.length) - normalized.length;
 
   // --- Bulk duplicate detection (Performance: single query per field type) ---
+  const customerCandidates = normalized.filter((item) => item.entityType === 'customer');
   const identityNumbers = [...new Set(
-    normalized.map((n) => n.candidateData.identity_number).filter(Boolean),
+    customerCandidates.map((n) => n.candidateData.identity_number).filter(Boolean),
   )];
-  const identityNumberCounts = normalized.reduce((counts, n) => {
+  const identityNumberCounts = customerCandidates.reduce((counts, n) => {
     const identityNumber = n.candidateData.identity_number;
     if (identityNumber) counts.set(identityNumber, (counts.get(identityNumber) || 0) + 1);
     return counts;
   }, new Map());
 
   const emails = [...new Set(
-    normalized.map((n) => n.candidateData.email).filter(Boolean),
+    customerCandidates.map((n) => n.candidateData.email).filter(Boolean),
   )];
 
   const currentRowIdSet = new Set(rowIds);
@@ -677,13 +746,17 @@ export default async function importWorkspacesAnalyzeChunk(context, req) {
 
   // --- Build candidates ---
   const now = new Date().toISOString();
-  const candidates = normalized.map(({ rowId, candidateData, fieldIssues, mergedRowIds }) => {
-    const existingDecisions = existingDecisionsByRowId.get(rowId) || {};
+  const candidates = normalized.map(({ rowId, entityType, candidateData, fieldIssues, mergedRowIds }) => {
+    const existingDecisions = existingDecisionsByKey.get(`${rowId}:${entityType}`) || {};
     const hasResolvedDuplicateDecision = hasResolvedDuplicateIdentityDecision(existingDecisions);
     const issues = [...fieldIssues, ...generateStructuralIssues(candidateData, entityType)];
 
+    if (entityType === 'customer' && candidateData.note_text && candidateData.customer_type !== 'student') {
+      issues.push({ code: 'note_requires_student', severity: 'warning', field: 'note_text' });
+    }
+
     // Duplicate identity number check
-    if (candidateData.identity_number) {
+    if (entityType === 'customer' && candidateData.identity_number) {
       if ((identityNumberCounts.get(candidateData.identity_number) || 0) > 1) {
         issues.push({
           code: 'duplicate_identity_in_file',
@@ -703,7 +776,7 @@ export default async function importWorkspacesAnalyzeChunk(context, req) {
     }
 
     // Duplicate email — warning only (email can be shared between guardian + student)
-    if (candidateData.email) {
+    if (entityType === 'customer' && candidateData.email) {
       const existingId = existingByEmail.get(candidateData.email);
       if (existingId) {
         issues.push({
@@ -736,9 +809,9 @@ export default async function importWorkspacesAnalyzeChunk(context, req) {
 
   let upserted = [];
   if (candidates.length > 0) {
-    // --- Upsert candidates (idempotent via workspace_id, source_row_id) ---
+    // --- Upsert candidates (idempotent per source row and entity section) ---
     const { data, error: upsertErr } = await withOrgScope(supabase, 'import_candidates', orgId)
-      .upsert(candidates, { onConflict: 'workspace_id,source_row_id' })
+      .upsert(candidates, { onConflict: 'workspace_id,source_row_id,entity_type' })
       .select('id');
 
     if (upsertErr) {

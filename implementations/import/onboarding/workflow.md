@@ -59,6 +59,10 @@ User confirms or edits mappings.
 
 Mappings are saved per source reference. Switching from a student sheet to a parent sheet must never overwrite the first sheet's mapping. Parent sources expose first name, last name, phone, and email through the canonical `guardian` candidate fields.
 
+The mapping UI exposes independently enabled collapsible sections for `customer`, `guardian`, `guardian_link`, and `service`. Any combination can be mapped in parallel, and one source row emits one candidate per enabled section. Customer type and active status are mapped or selected inside the customer section. The guardian section uses distinct mapping inputs (`guardian_first_name`, `guardian_last_name`, `guardian_phone`, `guardian_email`) so guardian data cannot be confused with customer fields; the analyzer normalizes these into the canonical guardian record shape.
+
+The customer section also exposes optional `note_text`. It is appended to `students.notes_internal` only after a student customer has been created or reused. The commit records the candidate id in student metadata so retrying a partially completed commit cannot append the same imported note twice. One-time customers do not have a student row, so their note is ignored with a warning. There is no standalone note mapping section for new imports.
+
 The mapping editor shows qualified choices from all uploaded sources at once, for example `students.xlsx · תעודת זהות` and `parents.xlsx · שם פרטי`. If one candidate uses more than one source, the user must choose a join column in every participating source. The system joins by the normalized shared value, records all source-row provenance, and blocks missing or ambiguous matches instead of joining by row number.
 
 A source used only to supply joined fields does not require a separate mapping or analysis pass. It must be ingested so its rows are available to the analyzer, but saving the cross-source mapping advances directly to ingestion instead of forcing the user through every uploaded file.
@@ -76,21 +80,17 @@ The mapping UI must show examples from actual rows next to each field.
 
 ### 5. Normalize Into Candidate Entities
 Mapped rows become candidate entities inside staging:
-- candidate client profile
-- candidate student
+- candidate customer (client profile, plus a student row when `customer_type = student`)
 - candidate guardian
 - candidate guardian link
 - candidate service mapping
-- candidate note
 
 Candidates have normalized fields and validation issues. They are not live rows.
 
 ### 6. Analyze And Group Issues
 The workspace groups rows into review queues:
-- ready active students
-- active students needing review
-- inactive archive ready
-- inactive archive blocked
+- ready customers
+- customers needing review
 - duplicate candidates
 - invalid identity numbers
 - invalid or missing phones
@@ -125,9 +125,7 @@ The dry run must be repeatable and must not mutate live tables.
 
 ### 9. Commit In Slices
 Commit buttons are scoped:
-- Commit ready active students
-- Commit resolved active students
-- Commit inactive archive slice
+- Commit ready customers
 - Commit guardian links for committed students
 - Commit service mappings
 
@@ -135,13 +133,11 @@ Each commit creates an audit trail and marks staged rows/candidates as committed
 
 Commit chunks must be orchestrated in topological entity order:
 
-1. `active_student`
-2. `inactive_student`
-3. `guardian`
-4. `guardian_link`
-5. `student_note`
+1. `customer`
+2. `guardian` and `service`
+3. `guardian_link`
 
-The frontend must fully finish all chunks of one entity type before starting the next dependent type. Guardian links and student notes must never be committed before their related student candidates are committed.
+The frontend must fully finish all chunks of one entity type before starting the next dependent type. Guardian links must never be committed before their related customer and guardian candidates are committed.
 
 ### 10. Continue Later
 The user can close the workspace at any point. On return, the workspace shows:

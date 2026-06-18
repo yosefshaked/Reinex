@@ -42,14 +42,26 @@ function getMappedSourceReferences(config = {}) {
   const anchorReferences = [];
   const participatingReferences = new Set();
   for (const [anchorReference, mapping] of Object.entries(config.mappings?.by_source || {})) {
-    if (Object.keys(mapping?.field_map || {}).length === 0) continue;
+    const entityMappings = mapping?.entities
+      ? Object.values(mapping.entities).filter((entity) => entity?.enabled)
+      : [mapping];
+    if (!entityMappings.some((entity) => Object.keys(entity?.field_map || {}).length > 0)) continue;
     anchorReferences.push(anchorReference);
     participatingReferences.add(anchorReference);
-    Object.values(mapping.field_map).forEach((fieldSource) => {
+    entityMappings.forEach((entity) => Object.values(entity?.field_map || {}).forEach((fieldSource) => {
       if (fieldSource?.source_reference) participatingReferences.add(fieldSource.source_reference);
-    });
+    }));
   }
   return { anchorReferences, participatingReferences };
+}
+
+function hasConfiguredMapping(mapping) {
+  if (mapping?.entities) {
+    return Object.values(mapping.entities).some((entity) => (
+      entity?.enabled && Object.keys(entity.field_map || {}).length > 0
+    ));
+  }
+  return Object.keys(mapping?.field_map || {}).length > 0;
 }
 
 function getWorkspaceSources(config = {}) {
@@ -72,7 +84,7 @@ function deriveCompletedSteps(ws, ingestionStatus, analysisStatus) {
 
   const sources = getWorkspaceSources(config);
   const hasMappings = Object.values(config.mappings?.by_source || {})
-    .some((mapping) => Object.keys(mapping?.field_map || {}).length > 0)
+    .some(hasConfiguredMapping)
     || Object.keys(config.mappings?.field_map || {}).length > 0;
   const sourceProgress = progress.by_source || {};
   const { anchorReferences, participatingReferences } = getMappedSourceReferences(config);
@@ -115,7 +127,7 @@ function deriveCurrentStep(ws, ingestionStatus, analysisStatus) {
 
   const sources = getWorkspaceSources(config);
   const hasMappings = Object.values(config.mappings?.by_source || {})
-    .some((mapping) => Object.keys(mapping?.field_map || {}).length > 0)
+    .some(hasConfiguredMapping)
     || Object.keys(config.mappings?.field_map || {}).length > 0;
   if (!hasMappings) return 'map';
 
@@ -366,33 +378,22 @@ function MapStep({ workspace, selectedSourceReference, onSourceChange, onSaved }
   const sources     = getWorkspaceSources(config);
   const selectedSource = sources.find((source) => source.sourceReference === selectedSourceReference) || sources[0];
   const sourceReference = selectedSource?.sourceReference;
-  const headers     = selectedSource?.profile?.headers || selectedSource?.headers || [];
-  const sampleRow   = selectedSource?.profile?.sampleRow || {};
   const workspaceId = workspace.id;
 
   const savedSourceMapping = config.mappings?.by_source?.[sourceReference] || {};
-  const [entityType, setEntityType] = useState(savedSourceMapping.entity_type || config.entityType || 'active_student');
   const [saving, setSaving]         = useState(false);
   const [saveError, setSaveError]   = useState(null);
 
-  useEffect(() => {
-    setEntityType(savedSourceMapping.entity_type || config.entityType || 'active_student');
-  }, [config.entityType, savedSourceMapping.entity_type, sourceReference]);
-
-  async function handleSave(fieldMap, joinColumns, fixedValues) {
+  async function handleSave(entities) {
     setSaving(true);
     setSaveError(null);
     try {
       await patchWorkspaceConfig(workspaceId, {
         activeSourceReference: sourceReference,
-        entityType,
         mappings: {
           by_source: {
             [sourceReference]: {
-              entity_type: entityType,
-              field_map: fieldMap,
-              join_columns: joinColumns,
-              fixed_values: fixedValues || {},
+              entities,
             },
           },
         },
@@ -408,7 +409,7 @@ function MapStep({ workspace, selectedSourceReference, onSourceChange, onSaved }
   return (
     <div className="space-y-3">
       <p className="text-sm text-muted-foreground">
-        בחר איזו עמודה בקובץ מתאימה לכל שדה במערכת. אפשר להשתמש באותה עמודה בכמה סוגי רשומות, למשל תעודת זהות לקישור בין תלמיד, הורה והערה.
+        הפעל את האזורים שברצונך לייבא ומפה אותם במקביל. כל שורה יכולה ליצור לקוח, הורה, חיבור להורה ושירות.
       </p>
       {sources.length > 1 && (
         <div className="space-y-2">
@@ -429,15 +430,10 @@ function MapStep({ workspace, selectedSourceReference, onSourceChange, onSaved }
       )}
       {saveError && <p className="text-xs text-destructive">{saveError}</p>}
       <MappingEditor
-        sourceColumns={headers}
         sources={sources}
         anchorSourceReference={sourceReference}
-        sampleRow={sampleRow}
-        entityType={entityType}
-        initialFieldMap={savedSourceMapping.field_map || (sources.length === 1 ? config.mappings?.field_map : {}) || {}}
-        initialJoinColumns={savedSourceMapping.join_columns || {}}
-        initialFixedValues={savedSourceMapping.fixed_values || {}}
-        onEntityTypeChange={setEntityType}
+        initialEntities={savedSourceMapping.entities || {}}
+        legacyMapping={savedSourceMapping.entity_type ? savedSourceMapping : null}
         onSave={handleSave}
         saving={saving}
       />
@@ -452,13 +448,16 @@ function ProcessStep({ ingestion, analysis, uploadHook, workspace, sourceReferen
   const selectedSource = sources.find((source) => source.sourceReference === sourceReference) || sources[0];
   const sourceProgress = config.operationProgress?.by_source?.[sourceReference] || {};
   const sourceMapping = config.mappings?.by_source?.[sourceReference] || {};
-  const hasSourceMapping = Object.keys(sourceMapping.field_map || {}).length > 0
+  const hasSourceMapping = hasConfiguredMapping(sourceMapping)
     || (sources.length === 1 && Object.keys(config.mappings?.field_map || {}).length > 0);
+  const enabledEntityMappings = sourceMapping.entities
+    ? Object.values(sourceMapping.entities).filter((entity) => entity?.enabled)
+    : [sourceMapping];
   const referencedSources = [...new Set([
     sourceReference,
-    ...Object.values(sourceMapping.field_map || {})
+    ...enabledEntityMappings.flatMap((entity) => Object.values(entity?.field_map || {})
       .map((mapping) => mapping?.source_reference)
-      .filter(Boolean),
+      .filter(Boolean)),
   ].filter(Boolean))];
   const totalRows = getSourceTotalRows(selectedSource) || uploadHook.profile?.rowCount || uploadHook.profile?.totalRows || uploadHook.parsedRows?.length || 0;
   const hasRows   = !!uploadHook.parsedRows;

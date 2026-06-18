@@ -36,6 +36,7 @@ import {
 } from '../_shared/client-profiles.js';
 import { validateIsraeliPhone } from '../_shared/student-validation.js';
 import { attachErrorTracking, respondTracked } from '../_shared/error-events.js';
+import { mergeMetadata } from '../_shared/metadata-utils.js';
 
 const MAX_CANDIDATES_PER_CALL = 25;
 
@@ -144,16 +145,45 @@ async function commitCustomer(supabase, orgId, candidate) {
 
   let studentId = null;
   let studentLedgerAction = null;
+  let noteSaved = false;
   if (customerType === 'student') {
     const { student, created, error: studentError } = await ensureStudentForClientProfile(supabase, clientProfileId);
     if (studentError) throw new Error(`failed_to_ensure_student:${studentError}`);
     if (student?.id) {
       studentId = student.id;
       studentLedgerAction = created ? 'create' : 'link';
+
+      const noteText = normalizeString(data.note_text);
+      if (noteText) {
+        const { data: currentStudent, error: currentStudentError } = await withOrgScope(supabase, 'students', orgId)
+          .select('id, notes_internal, metadata')
+          .eq('id', student.id)
+          .maybeSingle();
+        if (currentStudentError) throw new Error(`failed_to_load_student_note:${currentStudentError.message}`);
+
+        const importedNoteCandidates = Array.isArray(currentStudent?.metadata?.import_note_candidate_ids)
+          ? currentStudent.metadata.import_note_candidate_ids
+          : [];
+        if (!importedNoteCandidates.includes(candidate.id)) {
+          const existingNotes = normalizeString(currentStudent?.notes_internal);
+          const { error: noteError } = await withOrgScope(supabase, 'students', orgId)
+            .update({
+              notes_internal: existingNotes ? `${existingNotes}\n${noteText}` : noteText,
+              metadata: mergeMetadata(currentStudent?.metadata, {
+                import_note_candidate_ids: [...importedNoteCandidates, candidate.id],
+              }),
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', student.id);
+          if (noteError) throw new Error(`failed_to_save_student_note:${noteError.message}`);
+          noteSaved = true;
+          if (!created) studentLedgerAction = 'update';
+        }
+      }
     }
   }
 
-  return { clientProfileId, profileLedgerAction, studentId, studentLedgerAction };
+  return { clientProfileId, profileLedgerAction, studentId, studentLedgerAction, noteSaved };
 }
 
 async function commitGuardian(supabase, orgId, candidate) {

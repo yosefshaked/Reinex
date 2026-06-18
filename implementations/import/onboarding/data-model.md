@@ -71,6 +71,7 @@ Columns:
 - `id uuid primary key`
 - `org_id uuid not null`
 - `workspace_id uuid not null`
+- `source_row_id uuid not null`
 - `source_reference text not null`
 - `row_index integer not null`
 - `raw_data jsonb not null`
@@ -114,12 +115,12 @@ Columns:
 - `updated_at timestamptz not null`
 
 Entity types:
-- `active_student`
-- `inactive_student`
+- `customer`
 - `guardian`
 - `guardian_link`
 - `service`
-- `student_note`
+
+Legacy `active_student`, `inactive_student`, and `student_note` candidates remain readable/committable during migration, but new analysis does not emit them.
 
 Statuses:
 - `needs_review`
@@ -163,7 +164,9 @@ Statuses:
 - skip reasons
 - inactive archive approval metadata
 
-`depends_on_candidate_id` is the Phase 1 DAG simplification. It supports a single parent dependency per candidate, enough for guardian links and notes. More complex DAGs can be represented in `candidate_data.dependencies` later, but Phase 1 commit gating uses this scalar field.
+`depends_on_candidate_id` is the Phase 1 DAG simplification. It supports a single parent dependency per candidate, enough for guardian links. More complex DAGs can be represented in `candidate_data.dependencies` later, but Phase 1 commit gating uses this scalar field.
+
+The unique candidate key is `(workspace_id, source_row_id, entity_type)`. One parsed row can therefore emit any enabled combination of customer, guardian, guardian-link, and service candidates while re-analysis remains idempotent.
 
 ## Table 4: `import_commit_ledger`
 Tracks live records created/updated/linked by import commits.

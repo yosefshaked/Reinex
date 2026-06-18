@@ -67,7 +67,7 @@ const ENTITY_LABELS = {
 };
 
 const EDITABLE_FIELDS_BY_ENTITY = {
-  customer: ['first_name', 'last_name', 'identity_number', 'customer_type', 'is_active', 'phone', 'email', 'date_of_birth'],
+  customer: ['first_name', 'last_name', 'identity_number', 'customer_type', 'is_active', 'phone', 'email', 'date_of_birth', 'note_text'],
   active_student: ['first_name', 'last_name', 'identity_number', 'phone', 'email', 'date_of_birth'],
   inactive_student: ['first_name', 'last_name', 'identity_number', 'phone', 'email', 'date_of_birth'],
   guardian: ['first_name', 'last_name', 'phone', 'email'],
