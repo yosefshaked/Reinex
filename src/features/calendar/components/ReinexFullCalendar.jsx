@@ -1033,6 +1033,7 @@ export default function ReinexFullCalendar({
       return;
     }
 
+    setUpdatingEventId(b.id);
     try {
       await authenticatedFetch('instructor-breaks', {
         method: 'PUT',
@@ -1047,6 +1048,8 @@ export default function ReinexFullCalendar({
     } catch {
       info.revert();
       toast.error('שגיאה בעדכון ההפסקה.');
+    } finally {
+      setUpdatingEventId(null);
     }
   }, [activeOrgId, onBreakUpdated]);
 
@@ -1198,9 +1201,13 @@ export default function ReinexFullCalendar({
   }, [clearPendingDrop, pendingDropInfo]);
 
   const handleExternalDrop = useCallback((dropInfo) => {
+    const draggedEl = dropInfo?.draggedEl;
+    if (!draggedEl?.classList?.contains('calendar-service-drag-item')) {
+      return;
+    }
+
     const startDate = dropInfo?.date instanceof Date ? dropInfo.date : null;
     const resourceId = dropInfo?.resource?.id || null;
-    const draggedEl = dropInfo?.draggedEl;
     const serviceId = draggedEl?.getAttribute?.('data-service-id') || '';
     const durationMinutes = Number(draggedEl?.getAttribute?.('data-service-duration-minutes')) || 0;
 

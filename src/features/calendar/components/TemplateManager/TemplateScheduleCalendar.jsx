@@ -497,9 +497,13 @@ export function TemplateScheduleCalendar({
   const initialView = viewMode === 'day' ? 'resourceTimeGridDay' : 'resourceTimeGridWeek';
 
   function handleExternalDrop(dropInfo) {
+    const draggedEl = dropInfo?.draggedEl;
+    if (!draggedEl?.classList?.contains('calendar-service-drag-item')) {
+      return;
+    }
+
     const startDate = dropInfo?.date instanceof Date ? dropInfo.date : null;
     const resourceId = dropInfo?.resource?.id || null;
-    const draggedEl = dropInfo?.draggedEl;
     const serviceId = draggedEl?.getAttribute?.('data-service-id') || '';
     const durationMinutes = Number(draggedEl?.getAttribute?.('data-service-duration-minutes')) || 0;
     const dayOfWeek = normalizeDayToken(startDate?.getDay?.());
