@@ -485,8 +485,6 @@ export default async function importWorkspacesAnalyzeChunk(context, req) {
   }
 
   const config = workspace.config || {};
-  const sourceConfig = (Array.isArray(config.sources) ? config.sources : [])
-    .find((source) => normalizeString(source?.sourceReference) === sourceReference);
   const sourceMapping = config.mappings?.by_source?.[sourceReference];
   const configuredEntities = sourceMapping?.entities && typeof sourceMapping.entities === 'object'
     ? Object.entries(sourceMapping.entities)
@@ -494,19 +492,7 @@ export default async function importWorkspacesAnalyzeChunk(context, req) {
         .map(([entityType, mapping]) => ({ entityType, ...mapping }))
     : [];
   if (configuredEntities.length === 0) {
-    const legacyEntityType = normalizeString(sourceMapping?.entity_type || sourceConfig?.entityType || config.entityType)
-      || 'customer';
-    configuredEntities.push({
-      entityType: ['active_student', 'inactive_student'].includes(legacyEntityType) ? 'customer' : legacyEntityType,
-      field_map: sourceMapping?.field_map || sourceConfig?.mapping?.field_map || config.mappings?.field_map || {},
-      fixed_values: {
-        ...(sourceMapping?.fixed_values || {}),
-        ...(['active_student', 'inactive_student'].includes(legacyEntityType)
-          ? { customer_type: 'student', is_active: legacyEntityType === 'active_student' }
-          : {}),
-      },
-      join_columns: sourceMapping?.join_columns || {},
-    });
+    return respond(context, 400, { message: 'no_enabled_entities_for_source' });
   }
 
   for (const mapping of configuredEntities) {
