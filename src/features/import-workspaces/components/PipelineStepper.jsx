@@ -4,7 +4,7 @@ import { Check } from 'lucide-react';
 const STEPS = [
   { id: 'upload',  label: 'העלאה' },
   { id: 'map',     label: 'מיפוי' },
-  { id: 'process', label: 'קליטה וניתוח', aliases: ['ingest', 'analyze'], target: 'ingest' },
+  { id: 'process', label: 'עיבוד', aliases: ['ingest', 'analyze'], target: 'process' },
   { id: 'review',  label: 'סקירה' },
   { id: 'commit',  label: 'ביצוע' },
 ];

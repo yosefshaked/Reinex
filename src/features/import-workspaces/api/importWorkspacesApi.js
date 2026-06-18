@@ -171,6 +171,38 @@ export async function getUploadStatus(workspaceId) {
 }
 
 /**
+ * Count durable import rows for one workspace source.
+ *
+ * @param {string} workspaceId
+ * @param {string} sourceReference
+ * @returns {Promise<{ source_reference: string, ingested_rows: number }>}
+ */
+export async function getRowsStatus(workspaceId, sourceReference) {
+  const params = new URLSearchParams({ sourceReference });
+  return authenticatedFetch(
+    `/api/import-workspaces/${encodeURIComponent(workspaceId)}/rows-status?${params}`,
+  );
+}
+
+/**
+ * Request a pre-signed R2 GET URL to re-download a previously uploaded import
+ * file (recovery after a refresh, when the in-memory parsed rows are gone).
+ * Throws if the backup is missing/expired so callers can prompt a re-upload.
+ *
+ * @param {string} workspaceId
+ * @param {string} [objectKey]  - specific source file; defaults to the primary backup
+ * @returns {Promise<{ downloadUrl: string, objectKey: string, fileName: string|null }>}
+ */
+export async function getDownloadUrl(workspaceId, objectKey) {
+  const params = new URLSearchParams();
+  if (objectKey) params.set('objectKey', objectKey);
+  const qs = params.toString();
+  return authenticatedFetch(
+    `/api/import-workspaces/${encodeURIComponent(workspaceId)}/download-url${qs ? `?${qs}` : ''}`,
+  );
+}
+
+/**
  * Patch decisions and/or status on an import candidate.
  *
  * @param {string} candidateId

@@ -1,182 +1,66 @@
-import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { cn } from '@/lib/utils';
-import { PlayCircle, RefreshCcw, Square } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Loader2 } from 'lucide-react';
 
-/**
- * OperationCard — reusable progress block for a single multi-chunk operation
- * (ingestion or analysis). Derives its button / state display from
- * the hook's { status, progress, ... } return value.
- *
- * @param {{
- *   title: string,
- *   description?: string,
- *   status: 'idle'|'running'|'done'|'error'|'cancelled',
- *   progress: number,        // 0-1
- *   processedRows: number,
- *   totalRows: number,
- *   error?: string|null,
- *   onStart: () => void,
- *   onResume?: () => void,
- *   onCancel: () => void,
- *   disabled?: boolean,
- *   disabledReason?: string,
- * }} props
- */
-function OperationCard({
-  title,
-  description,
-  status,
-  progress,
-  processedRows,
-  totalRows,
-  error,
-  onStart,
-  onResume,
-  onCancel,
-  disabled = false,
-  disabledReason,
-}) {
-  const pct = Math.round((progress || 0) * 100);
+const PHASE_COPY = {
+  idle: 'מכין את הנתונים לעיבוד…',
+  ingest: 'שומר את הנתונים…',
+  analyze: 'בודק את הנתונים…',
+  done: 'העיבוד הושלם',
+};
 
-  const statusLabel = {
-    idle:       'ממתין',
-    running:    'מעבד…',
-    done:       'הושלם',
-    error:      'שגיאה',
-    cancelled:  'בוטל',
-  }[status] || status;
-
-  const statusVariant = {
-    idle:      'secondary',
-    running:   'default',
-    done:      'default',
-    error:     'destructive',
-    cancelled: 'secondary',
-  }[status] || 'secondary';
+export function ProgressOrchestrator({ processing, onRetry }) {
+  const pct = Math.round((processing.progress || 0) * 100);
+  const isRunning = processing.status === 'running';
+  const isDone = processing.status === 'done' && processing.phase === 'done';
+  const isError = processing.status === 'error';
+  const statusLabel = isError ? 'שגיאה' : isDone ? 'הושלם' : isRunning ? 'מעבד…' : 'ממתין';
+  const statusVariant = isError ? 'destructive' : isDone || isRunning ? 'default' : 'secondary';
 
   return (
-    <div className={cn(
-      'rounded-lg border p-4 space-y-3',
-      disabled && 'opacity-50 pointer-events-none',
-    )}>
-      <div className="flex items-center justify-between gap-2">
-        <div>
-          <p className="text-sm font-medium">{title}</p>
-          {description && (
-            <p className="text-xs text-muted-foreground mt-0.5">{description}</p>
+    <div className="rounded-lg border p-5 space-y-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-start gap-3">
+          {isError ? (
+            <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-destructive" />
+          ) : isDone ? (
+            <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" />
+          ) : (
+            <Loader2 className="mt-0.5 h-5 w-5 shrink-0 animate-spin text-primary" />
           )}
-          {disabled && disabledReason && (
-            <p className="text-xs text-muted-foreground mt-1">{disabledReason}</p>
-          )}
+          <div>
+            <p className="font-medium">{isError ? 'לא הצלחנו להשלים את העיבוד' : PHASE_COPY[processing.phase]}</p>
+            {processing.currentSourceLabel && !isError && (
+              <p className="mt-1 text-xs text-muted-foreground">
+                מקור נוכחי: {processing.currentSourceLabel}
+              </p>
+            )}
+          </div>
         </div>
         <Badge variant={statusVariant} className="shrink-0">{statusLabel}</Badge>
       </div>
 
-      {/* Progress bar — show when running or done */}
-      {(status === 'running' || status === 'done') && (
-        <div className="space-y-1">
-          <div className="h-2 rounded-full bg-muted overflow-hidden">
+      {processing.total > 0 && !isError && (
+        <div className="space-y-2">
+          <div className="h-2 overflow-hidden rounded-full bg-muted">
             <div
-              className="h-full bg-primary rounded-full transition-all duration-300"
+              className="h-full rounded-full bg-primary transition-all duration-300"
               style={{ width: `${pct}%` }}
             />
           </div>
           <p className="text-xs text-muted-foreground">
-            {processedRows.toLocaleString()} / {totalRows.toLocaleString()} שורות ({pct}%)
+            {processing.processed.toLocaleString()} / {processing.total.toLocaleString()} שורות ({pct}%)
           </p>
         </div>
       )}
 
-      {/* Error message */}
-      {status === 'error' && error && (
-        <p className="text-xs text-destructive bg-destructive/10 rounded px-2 py-1">{error}</p>
+      {isError && processing.error && (
+        <div className="space-y-2 rounded bg-destructive/10 px-3 py-2 text-xs text-destructive">
+          <p>{processing.error}</p>
+          <button type="button" className="font-medium underline underline-offset-2" onClick={onRetry}>
+            נסה שוב
+          </button>
+        </div>
       )}
-
-      {/* Actions */}
-      <div className="flex gap-2 justify-end">
-        {(status === 'idle' || status === 'error') && (
-          <Button size="sm" variant="default" onClick={onStart} className="gap-1.5">
-            <PlayCircle className="h-4 w-4" />
-            התחל
-          </Button>
-        )}
-        {status === 'cancelled' && onResume && (
-          <Button size="sm" variant="outline" onClick={onResume} className="gap-1.5">
-            <RefreshCcw className="h-4 w-4" />
-            המשך
-          </Button>
-        )}
-        {status === 'running' && (
-          <Button size="sm" variant="outline" onClick={onCancel} className="gap-1.5">
-            <Square className="h-4 w-4" />
-            עצור
-          </Button>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// Map hook-native status strings to OperationCard's display status
-function toDisplayStatus(hookStatus) {
-  if (hookStatus === 'ingesting' || hookStatus === 'analyzing') return 'running';
-  return hookStatus; // 'idle' | 'done' | 'error' pass through as-is
-}
-
-/**
- * ProgressOrchestrator — renders ingestion + analysis progress cards side by side.
- *
- * Ingestion (phase 3) must complete before analysis (phase 4) is enabled.
- *
- * @param {{
- *   ingestion: object,  // return value of useImportRowIngestion
- *   analysis: object,   // return value of useImportAnalysis
- *   ingestDoneFromConfig?: boolean,
- *   analysisPrerequisitesDone?: boolean|null,
- * }} props
- */
-export function ProgressOrchestrator({
-  ingestion,
-  analysis,
-  ingestDoneFromConfig = false,
-  analysisPrerequisitesDone = null,
-}) {
-  const ingestionStatus = ingestion.status === 'done' || ingestDoneFromConfig
-    ? 'done'
-    : ingestion.status;
-  const analysisLocked = analysisPrerequisitesDone === null
-    ? !(ingestion.status === 'done' || ingestDoneFromConfig)
-    : !analysisPrerequisitesDone;
-
-  return (
-    <div className="grid gap-4 sm:grid-cols-2">
-      <OperationCard
-        title="שמירת השורות לבדיקה"
-        description="שומר את השורות שזוהו כדי שאפשר יהיה להמשיך גם אחרי רענון או חזרה מאוחר יותר."
-        status={toDisplayStatus(ingestionStatus)}
-        progress={ingestion.progress}
-        processedRows={ingestion.uploadedRows ?? 0}
-        totalRows={ingestion.totalRows ?? 0}
-        error={typeof ingestion.error === 'string' ? ingestion.error : ingestion.error?.message}
-        onStart={ingestion.ingest}
-        onResume={ingestion.resume}
-        onCancel={ingestion.cancel}
-      />
-      <OperationCard
-        title="בדיקת נתונים וזיהוי בעיות"
-        description="בודק שדות חובה, כפילויות וקשרים לפני שהנתונים עוברים למערכת הפעילה."
-        status={toDisplayStatus(analysis.status)}
-        progress={analysis.progress}
-        processedRows={analysis.analyzedRows ?? 0}
-        totalRows={analysis.totalRows ?? 0}
-        error={typeof analysis.error === 'string' ? analysis.error : analysis.error?.message}
-        onStart={analysis.analyze}
-        onResume={analysis.resume}
-        onCancel={analysis.cancel}
-        disabled={analysisLocked}
-        disabledReason="אפשר להתחיל אחרי שמירת השורות לבדיקה."
-      />
     </div>
   );
 }

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import PageLayout from '@/components/ui/PageLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -9,10 +9,13 @@ import { Separator } from '@/components/ui/separator';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { ArrowRight, UploadCloud, RefreshCcw, Zap, Loader2, CheckCircle2, AlertCircle, Download, Info } from 'lucide-react';
 
-import { getImportWorkspace, patchWorkspaceConfig, listCandidates, runDryRunChunk, commitChunk, getUploadStatus } from '../api/importWorkspacesApi.js';
+import { getImportWorkspace, patchWorkspaceConfig, listCandidates, runDryRunChunk, commitChunk, getUploadStatus, getRowsStatus } from '../api/importWorkspacesApi.js';
 import { useImportFileUpload } from '../hooks/useImportFileUpload.js';
-import { useImportRowIngestion } from '../hooks/useImportRowIngestion.js';
-import { useImportAnalysis } from '../hooks/useImportAnalysis.js';
+import {
+  getMappedSourceReferences,
+  getSourceTotalRows,
+  useImportProcessing,
+} from '../hooks/useImportProcessing.js';
 import { PipelineStepper } from '../components/PipelineStepper.jsx';
 import { MappingEditor } from '../components/MappingEditor.jsx';
 import { ProgressOrchestrator } from '../components/ProgressOrchestrator.jsx';
@@ -32,27 +35,6 @@ function getWorkspaceTotalRows(config) {
     progress.uploadedRows ??
     0
   );
-}
-
-function getSourceTotalRows(source) {
-  return Number(source?.profile?.rowCount ?? source?.profile?.totalRows ?? 0);
-}
-
-function getMappedSourceReferences(config = {}) {
-  const anchorReferences = [];
-  const participatingReferences = new Set();
-  for (const [anchorReference, mapping] of Object.entries(config.mappings?.by_source || {})) {
-    const entityMappings = mapping?.entities
-      ? Object.values(mapping.entities).filter((entity) => entity?.enabled)
-      : [mapping];
-    if (!entityMappings.some((entity) => Object.keys(entity?.field_map || {}).length > 0)) continue;
-    anchorReferences.push(anchorReference);
-    participatingReferences.add(anchorReference);
-    entityMappings.forEach((entity) => Object.values(entity?.field_map || {}).forEach((fieldSource) => {
-      if (fieldSource?.source_reference) participatingReferences.add(fieldSource.source_reference);
-    }));
-  }
-  return { anchorReferences, participatingReferences };
 }
 
 function hasConfiguredMapping(mapping) {
@@ -76,7 +58,14 @@ function getWorkspaceSources(config = {}) {
 }
 
 // ── Step derivation ────────────────────────────────────────────────────────
-function deriveCompletedSteps(ws, ingestionStatus, analysisStatus) {
+function getUploadedRows(config, sourceReference, ingestedRowsBySource = {}) {
+  return Math.max(
+    Number(config.operationProgress?.by_source?.[sourceReference]?.uploadedRows || 0),
+    Number(ingestedRowsBySource[sourceReference] || 0),
+  );
+}
+
+function deriveCompletedSteps(ws, ingestionStatus, analysisStatus, ingestedRowsBySource = {}) {
   const config   = ws?.config || {};
   const progress = config.operationProgress || {};
   const totalRows = getWorkspaceTotalRows(config);
@@ -96,7 +85,7 @@ function deriveCompletedSteps(ws, ingestionStatus, analysisStatus) {
     : sources;
   const sourcesIngested = participatingSources.length > 0 && participatingSources.every((source) => {
     const count = getSourceTotalRows(source);
-    return count > 0 && Number(sourceProgress[source.sourceReference]?.uploadedRows || 0) >= count;
+    return count > 0 && getUploadedRows(config, source.sourceReference, ingestedRowsBySource) >= count;
   });
   const sourcesAnalyzed = analyzedSources.length > 0 && analyzedSources.every((source) => {
     const count = getSourceTotalRows(source);
@@ -118,7 +107,7 @@ function deriveCompletedSteps(ws, ingestionStatus, analysisStatus) {
   return completed;
 }
 
-function deriveCurrentStep(ws, ingestionStatus, analysisStatus) {
+function deriveCurrentStep(ws, ingestionStatus, analysisStatus, ingestedRowsBySource = {}) {
   const config   = ws?.config || {};
   const progress = config.operationProgress || {};
   const totalRows = getWorkspaceTotalRows(config);
@@ -141,12 +130,12 @@ function deriveCurrentStep(ws, ingestionStatus, analysisStatus) {
     : sources;
   const ingestDoneFromSources = participatingSources.length > 0 && participatingSources.every((source) => {
     const count = getSourceTotalRows(source);
-    return count > 0 && Number(sourceProgress[source.sourceReference]?.uploadedRows || 0) >= count;
+    return count > 0 && getUploadedRows(config, source.sourceReference, ingestedRowsBySource) >= count;
   });
   const ingestDone  = ingestDoneFromSources || (sources.length === 1 && (
     ingestionStatus === 'done' || (totalRows > 0 && progress.uploadedRows >= totalRows)
   ));
-  if (!ingestDone) return 'ingest';
+  if (!ingestDone) return 'process';
 
   const analyzeDoneFromSources = analyzedSources.length > 0 && analyzedSources.every((source) => {
     const count = getSourceTotalRows(source);
@@ -155,7 +144,7 @@ function deriveCurrentStep(ws, ingestionStatus, analysisStatus) {
   const analyzeDone = analyzeDoneFromSources || (sources.length === 1 && (
     analysisStatus === 'done' || (progress.analyzedRows >= totalRows && totalRows > 0)
   ));
-  if (!analyzeDone) return 'analyze';
+  if (!analyzeDone) return 'process';
 
   return 'review';
 }
@@ -397,6 +386,13 @@ function MapStep({ workspace, selectedSourceReference, onSourceChange, onSaved }
             },
           },
         },
+        operationProgress: {
+          by_source: {
+            [sourceReference]: {
+              analyzedRows: 0,
+            },
+          },
+        },
       });
       onSaved?.(sourceReference);
     } catch (err) {
@@ -441,44 +437,115 @@ function MapStep({ workspace, selectedSourceReference, onSourceChange, onSaved }
   );
 }
 
-// ── Ingest + Analyze Step ──────────────────────────────────────────────────
-function ProcessStep({ ingestion, analysis, uploadHook, workspace, sourceReference, onSourceChange }) {
+// Recover parsed rows that were lost (e.g. after a refresh): first try to
+// re-download + re-parse the server backup automatically, then fall back to
+// asking the user to re-select the same file from disk.
+function RowRecovery({ uploadHook, objectKey, fileName }) {
+  const { parseState, recoverFromBackup, recoverFromFile } = uploadHook;
+  const [phase, setPhase] = useState(objectKey ? 'recovering' : 'needs_reupload');
+  const [recoverError, setRecoverError] = useState(null);
+  const [pickedName, setPickedName] = useState(null);
+  const fileInputRef = useRef(null);
+  const attemptedRef = useRef(false);
+
+  const attemptRecover = useCallback(() => {
+    setRecoverError(null);
+    setPhase('recovering');
+    recoverFromBackup(objectKey, { fileName }).catch((err) => {
+      setRecoverError(err?.message || 'recover_failed');
+      setPhase('needs_reupload');
+    });
+  }, [objectKey, fileName, recoverFromBackup]);
+
+  useEffect(() => {
+    if (attemptedRef.current || !objectKey) return;
+    attemptedRef.current = true;
+    attemptRecover();
+  }, [objectKey, attemptRecover]);
+
+  const isBusy = ['reading', 'parsing', 'saving_profile'].includes(parseState.status);
+
+  function handlePick(file) {
+    if (!file) return;
+    setPickedName(file.name);
+    setRecoverError(null);
+    setPhase('recovering');
+    recoverFromFile(file, objectKey).catch((err) => {
+      setRecoverError(err?.message || 'parse_failed');
+      setPhase('needs_reupload');
+    });
+  }
+
+  if (phase === 'recovering') {
+    return (
+      <div className="flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800 dark:border-blue-900 dark:bg-blue-950/30 dark:text-blue-300">
+        <Loader2 className="h-4 w-4 animate-spin" />
+        <span>
+          {parseState.stage === 'downloading_backup'
+            ? 'משחזר את הקובץ מהגיבוי בשרת…'
+            : `מנתח מחדש את הקובץ… ${parseState.pct || 0}%`}
+        </span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3 rounded-lg border border-yellow-200 bg-yellow-50 px-4 py-3 text-sm text-yellow-800 dark:border-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-300">
+      <div>
+        <p className="font-medium">צריך לטעון מחדש את הקובץ</p>
+        <p className="mt-1 text-xs">
+          הנתונים נקראים מהקובץ בדפדפן ולא נשמרים אחרי רענון הדף.
+          {objectKey ? ' לא הצלחנו לשחזר את הקובץ מהגיבוי בשרת. ' : ' '}
+          בחר/י שוב את אותו קובץ כדי להמשיך בקליטה. הגיבוי בשרת הוא עותק בטיחות בלבד ואינו משמש לייבוא.
+        </p>
+      </div>
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".xlsx,.xls,.csv"
+        className="sr-only"
+        onChange={(e) => { handlePick(e.target.files?.[0]); e.target.value = ''; }}
+      />
+      <div className="flex flex-wrap gap-2">
+        <Button variant="outline" size="sm" className="gap-2" onClick={() => fileInputRef.current?.click()} disabled={isBusy}>
+          <UploadCloud className="h-4 w-4" />
+          {pickedName || 'בחר/י קובץ'}
+        </Button>
+        {objectKey && (
+          <Button variant="ghost" size="sm" className="gap-2" onClick={attemptRecover} disabled={isBusy}>
+            <RefreshCcw className="h-4 w-4" />
+            נסה לשחזר שוב מהשרת
+          </Button>
+        )}
+      </div>
+      {recoverError && (
+        <p className="text-xs text-muted-foreground">{`לא ניתן לשחזר (${recoverError}). נסה/י לבחור את הקובץ שוב.`}</p>
+      )}
+    </div>
+  );
+}
+
+// ── Processing Step ────────────────────────────────────────────────────────
+function ProcessStep({ processing, uploadHook, workspace, sourceReference, onSourceChange, onRetry }) {
   const config    = workspace.config || {};
   const sources = getWorkspaceSources(config);
-  const selectedSource = sources.find((source) => source.sourceReference === sourceReference) || sources[0];
-  const sourceProgress = config.operationProgress?.by_source?.[sourceReference] || {};
   const sourceMapping = config.mappings?.by_source?.[sourceReference] || {};
   const hasSourceMapping = hasConfiguredMapping(sourceMapping)
     || (sources.length === 1 && Object.keys(config.mappings?.field_map || {}).length > 0);
-  const enabledEntityMappings = sourceMapping.entities
-    ? Object.values(sourceMapping.entities).filter((entity) => entity?.enabled)
-    : [sourceMapping];
-  const referencedSources = [...new Set([
-    sourceReference,
-    ...enabledEntityMappings.flatMap((entity) => Object.values(entity?.field_map || {})
-      .map((mapping) => mapping?.source_reference)
-      .filter(Boolean)),
-  ].filter(Boolean))];
-  const totalRows = getSourceTotalRows(selectedSource) || uploadHook.profile?.rowCount || uploadHook.profile?.totalRows || uploadHook.parsedRows?.length || 0;
-  const hasRows   = !!uploadHook.parsedRows;
-  const ingestDone = ingestion.status === 'done' ||
-    (sourceProgress.uploadedRows >= totalRows && totalRows > 0) ||
-    (sources.length === 1 && config.operationProgress?.uploadedRows >= totalRows && totalRows > 0);
-  const analysisDone = analysis.status === 'done' ||
-    (sourceProgress.analyzedRows >= totalRows && totalRows > 0) ||
-    (sources.length === 1 && config.operationProgress?.analyzedRows >= totalRows && totalRows > 0);
-  const joinedSourcesReady = hasSourceMapping && referencedSources.every((reference) => {
-    if (reference === sourceReference) return ingestDone;
-    const referencedSource = sources.find((source) => source.sourceReference === reference);
-    const referencedTotal = getSourceTotalRows(referencedSource);
-    return referencedTotal > 0
-      && Number(config.operationProgress?.by_source?.[reference]?.uploadedRows || 0) >= referencedTotal;
+  const recoverySource = sources.find((source) => {
+    const reference = source.sourceReference;
+    const totalRows = getSourceTotalRows(source);
+    const hasRows = uploadHook.parsedSources?.some((parsedSource) => (
+      parsedSource.sourceReference === reference && Array.isArray(parsedSource.rows)
+    ));
+    const uploadedRows = Number(processing.sourceProgress?.[reference]?.uploadedRows || 0);
+    return totalRows > 0 && uploadedRows < totalRows && !hasRows;
   });
 
   return (
     <div className="space-y-4">
       <p className="text-sm text-muted-foreground">
-        בשלב הזה שומרים את השורות שנקראו מהקובץ, ואז בודקים אותן מול כללי המערכת: שדות חובה, כפילויות וקשרים בין תלמידים, הורים והערות.
+        מעבד את הקובץ — אפשר להמתין כאן. השורות נשמרות לבדיקה ולאחר מכן נבדקות מול כללי המערכת.
       </p>
       {sources.length > 1 && (
         <div className="flex flex-wrap gap-2">
@@ -495,37 +562,19 @@ function ProcessStep({ ingestion, analysis, uploadHook, workspace, sourceReferen
           ))}
         </div>
       )}
-      {/* Warn if parsedRows lost but ingestion not done */}
-      {!hasRows && !ingestDone && (
-        <div className="rounded-lg border border-yellow-200 bg-yellow-50 dark:border-yellow-800 dark:bg-yellow-900/20 px-4 py-3 text-sm text-yellow-800 dark:text-yellow-300">
-          השורות המנותחות לא קיימות בזיכרון. חזור לשלב בחירת הקובץ ובצע ניתוח מקומי שוב כדי להמשיך בקליטה. אין צורך שהעלאת הגיבוי לשרת תצליח.
-        </div>
+      {/* Parsed rows lost (e.g. after refresh): recover from backup or re-pick. */}
+      {recoverySource && (
+        <RowRecovery
+          key={recoverySource.sourceReference}
+          uploadHook={uploadHook}
+          objectKey={recoverySource.file?.objectKey || config.objectKey || null}
+          fileName={recoverySource.file?.fileName || config.fileName || null}
+        />
       )}
-      <ProgressOrchestrator
-        ingestion={hasRows || ingestDone ? ingestion : { ...ingestion, status: 'idle' }}
-        analysis={analysisDone ? {
-          ...analysis,
-          status: 'done',
-          analyzedRows: totalRows,
-          totalRows,
-          progress: 1,
-        } : analysis}
-        ingestDoneFromConfig={ingestDone}
-        analysisPrerequisitesDone={joinedSourcesReady}
-      />
-      {!joinedSourcesReady && referencedSources.length > 1 && (
-        <p className="text-xs text-amber-700 dark:text-amber-300">
-          לפני בדיקת הנתונים צריך לשמור גם את השורות מהמקורות הנוספים שמשתתפים במיפוי.
-        </p>
-      )}
+      <ProgressOrchestrator processing={processing} onRetry={onRetry} />
       {!hasSourceMapping && (
         <p className="text-xs text-muted-foreground">
           המקור הזה משמש להשלמת פרטים במיפוי אחר. צריך לשמור את השורות שלו, אבל אין צורך למפות או לנתח אותו בנפרד.
-        </p>
-      )}
-      {totalRows > 0 && (
-        <p className="text-xs text-muted-foreground">
-          סה"כ שורות: {totalRows.toLocaleString()}
         </p>
       )}
     </div>
@@ -722,22 +771,46 @@ export default function ImportWorkspaceDashboard() {
   const [isDryRunning, setIsDryRunning]   = useState(false);
   const [dryRunProgress, setDryRunProgress] = useState({ done: 0, total: 0 });
   const [selectedSourceReference, setSelectedSourceReference] = useState(null);
+  const [analysisRequest, setAnalysisRequest] = useState(null);
+  const [completedAnalysisRequestToken, setCompletedAnalysisRequestToken] = useState(0);
+  const [ingestedRowsBySource, setIngestedRowsBySource] = useState({});
+  const startedForcedAnalysisKeysRef = useRef(new Set());
   const completionRefreshRef = useRef('');
+  const initialStepDerivedRef = useRef(false);
 
-  const config        = workspace?.config || {};
+  const config = useMemo(() => workspace?.config || {}, [workspace]);
 
   // Phase 2: file upload
   const uploadHook = useImportFileUpload(workspaceId, getWorkspaceSources(config));
 
-  // Phase 3: ingestion — parsedRows from upload hook
-  const sources       = getWorkspaceSources(config);
+  const sources = useMemo(() => getWorkspaceSources(config), [config]);
   const sourceRef     = selectedSourceReference || config.activeSourceReference || uploadHook.sourceReference || config.sourceReference || null;
-  const selectedSource = sources.find((source) => source.sourceReference === sourceRef);
-  const parsedSource = uploadHook.parsedSources?.find((source) => source.sourceReference === sourceRef);
-  const sourceRows = parsedSource?.rows || (uploadHook.sourceReference === sourceRef ? uploadHook.parsedRows : null);
-  const totalRows     = getSourceTotalRows(selectedSource) || parsedSource?.rows?.length || uploadHook.profile?.rowCount || uploadHook.profile?.totalRows || sourceRows?.length || 0;
-  const ingestionHook = useImportRowIngestion(workspaceId, sourceRef, sourceRows);
-  const analysisHook  = useImportAnalysis(workspaceId, sourceRef, totalRows);
+  const processingSources = useMemo(() => {
+    const byReference = new Map(sources.map((source) => [source.sourceReference, source]));
+    for (const parsedSource of uploadHook.parsedSources || []) {
+      byReference.set(parsedSource.sourceReference, {
+        ...byReference.get(parsedSource.sourceReference),
+        ...parsedSource,
+      });
+    }
+    return [...byReference.values()];
+  }, [sources, uploadHook.parsedSources]);
+  const getParsedRows = useCallback((reference) => (
+    uploadHook.parsedSources?.find((source) => source.sourceReference === reference)?.rows || null
+  ), [uploadHook.parsedSources]);
+  const processing = useImportProcessing(workspaceId, {
+    sources: processingSources,
+    config,
+    getParsedRows,
+    ingestedRowsBySource,
+  });
+  const {
+    analyzeAll,
+    ingestAll,
+    resetAnalysisProgress,
+    sourceProgress: processingSourceProgress,
+    status: processingStatus,
+  } = processing;
 
   const load = useCallback(async () => {
     if (!workspaceId) return null;
@@ -745,6 +818,17 @@ export default function ImportWorkspaceDashboard() {
     setError(null);
     try {
       const ws = await getImportWorkspace(workspaceId);
+      const statusResults = await Promise.allSettled(
+        getWorkspaceSources(ws.config || {}).map((source) => (
+          getRowsStatus(workspaceId, source.sourceReference)
+        )),
+      );
+      const durableCounts = {};
+      statusResults.forEach((result) => {
+        if (result.status !== 'fulfilled') return;
+        durableCounts[result.value.source_reference] = Number(result.value.ingested_rows || 0);
+      });
+      setIngestedRowsBySource(durableCounts);
       setWorkspace(ws);
       return ws;
     } catch (err) {
@@ -765,31 +849,132 @@ export default function ImportWorkspaceDashboard() {
       || workspace.config?.activeSourceReference
       || availableSources[0]?.sourceReference
       || null);
-    const derived = deriveCurrentStep(workspace, ingestionHook.status, analysisHook.status);
+    if (initialStepDerivedRef.current) return;
+    initialStepDerivedRef.current = true;
+    const derived = deriveCurrentStep(workspace, 'idle', 'idle', ingestedRowsBySource);
     setCurrentStep(derived);
-  // Only run on workspace load, not on every hook status change
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workspace]);
+  }, [ingestedRowsBySource, workspace]);
 
   const handleSourceChange = useCallback(async (nextSourceReference) => {
     await load();
     setSelectedSourceReference(nextSourceReference);
     uploadHook.selectParsedSource(nextSourceReference);
-    ingestionHook.reset();
-    analysisHook.reset();
-  }, [analysisHook, ingestionHook, load, uploadHook]);
+  }, [load, uploadHook]);
 
   useEffect(() => {
-    if (analysisHook.status !== 'done' || !sourceRef) return;
-    const refreshKey = `${sourceRef}:done`;
-    if (completionRefreshRef.current === refreshKey) return;
+    if (
+      uploadHook.parseState.status !== 'done'
+      || uploadHook.parsedSources.length === 0
+      || processingStatus === 'running'
+      || processingStatus === 'error'
+    ) return;
+    const hasIncompleteSource = uploadHook.parsedSources.some((source) => (
+      Number(processingSourceProgress[source.sourceReference]?.uploadedRows || 0) < (source.rows?.length || 0)
+    ));
+    if (!hasIncompleteSource) return;
+    ingestAll();
+  }, [
+    ingestAll,
+    processingSourceProgress,
+    processingStatus,
+    uploadHook.parseState.status,
+    uploadHook.parsedSources,
+  ]);
+
+  useEffect(() => {
+    const { anchorReferences, requiredReferencesByAnchor } = getMappedSourceReferences(config);
+    const parsedIngestPending = uploadHook.parsedSources.some((source) => (
+      Number(processingSourceProgress[source.sourceReference]?.uploadedRows || 0) < (source.rows?.length || 0)
+    ));
+    if (
+      anchorReferences.length === 0
+      || parsedIngestPending
+      || processingStatus === 'running'
+      || processingStatus === 'error'
+    ) return;
+
+    const sourcesByReference = new Map(processingSources.map((source) => [source.sourceReference, source]));
+    const readyAnchors = anchorReferences.filter((anchorReference) => (
+      [...(requiredReferencesByAnchor.get(anchorReference) || [])].every((reference) => {
+        const requiredTotal = getSourceTotalRows(sourcesByReference.get(reference));
+        return requiredTotal > 0
+          && Number(processingSourceProgress[reference]?.uploadedRows || 0) >= requiredTotal;
+      })
+    ));
+    const forceKey = analysisRequest
+      ? `${analysisRequest.sourceReference}:${analysisRequest.token}`
+      : null;
+    const forceReference = analysisRequest
+      && readyAnchors.includes(analysisRequest.sourceReference)
+      && !startedForcedAnalysisKeysRef.current.has(forceKey)
+      ? analysisRequest.sourceReference
+      : null;
+    const hasIncompleteAnchor = readyAnchors.some((reference) => {
+      const total = getSourceTotalRows(sourcesByReference.get(reference));
+      return Number(processingSourceProgress[reference]?.analyzedRows || 0) < total;
+    });
+    if (!forceReference && !hasIncompleteAnchor) return;
+
+    if (forceReference) startedForcedAnalysisKeysRef.current.add(forceKey);
+    const requestToken = forceReference ? analysisRequest.token : null;
+    analyzeAll({ forceReferences: forceReference ? [forceReference] : [] }).then((completed) => {
+      if (completed && requestToken) setCompletedAnalysisRequestToken(requestToken);
+    });
+  }, [
+    analysisRequest,
+    analyzeAll,
+    config,
+    processingSourceProgress,
+    processingStatus,
+    processingSources,
+    uploadHook.parsedSources,
+  ]);
+
+  useEffect(() => {
+    if (processing.phase !== 'done' || processing.status !== 'done') return;
+    if (analysisRequest && completedAnalysisRequestToken < analysisRequest.token) return;
+    const { anchorReferences } = getMappedSourceReferences(config);
+    const refreshKey = `${anchorReferences.slice().sort().join('|')}:${analysisRequest?.token || 0}`;
+    if (!refreshKey || completionRefreshRef.current === refreshKey) return;
     completionRefreshRef.current = refreshKey;
-    load();
-  }, [analysisHook.status, load, sourceRef]);
+    load().then(() => {
+      setQueueKey((key) => key + 1);
+      setCurrentStep('review');
+    });
+  }, [
+    analysisRequest,
+    completedAnalysisRequestToken,
+    config,
+    load,
+    processing.phase,
+    processing.status,
+  ]);
 
   const completedSteps = workspace
-    ? deriveCompletedSteps(workspace, ingestionHook.status, analysisHook.status)
+    ? deriveCompletedSteps(workspace, 'idle', 'idle', ingestedRowsBySource)
     : [];
+
+  const handleProcessingRetry = useCallback(() => {
+    if (processing.phase === 'ingest') {
+      ingestAll();
+      return;
+    }
+    const pendingRequestToken = analysisRequest
+      && completedAnalysisRequestToken < analysisRequest.token
+      ? analysisRequest.token
+      : null;
+    analyzeAll().then((completed) => {
+      if (completed && pendingRequestToken) {
+        setCompletedAnalysisRequestToken(pendingRequestToken);
+      }
+    });
+  }, [
+    analysisRequest,
+    analyzeAll,
+    completedAnalysisRequestToken,
+    ingestAll,
+    processing.phase,
+  ]);
 
   function handleCandidateSelect(candidate) {
     setSelectedCandidate(candidate);
@@ -935,7 +1120,7 @@ export default function ImportWorkspaceDashboard() {
       <Card>
         <CardHeader>
           <CardTitle className="text-base">
-            {{ upload: 'העלאת קובץ', map: 'מיפוי עמודות', ingest: 'קליטה וניתוח', analyze: 'קליטה וניתוח', review: 'סקירת מועמדים', commit: 'ביצוע' }[currentStep]}
+            {{ upload: 'העלאת קובץ', map: 'מיפוי עמודות', process: 'עיבוד', ingest: 'עיבוד', analyze: 'עיבוד', review: 'סקירת מועמדים', commit: 'ביצוע' }[currentStep]}
           </CardTitle>
         </CardHeader>
         <Separator />
@@ -959,19 +1144,24 @@ export default function ImportWorkspaceDashboard() {
               onSourceChange={handleSourceChange}
               onSaved={async (savedSourceReference) => {
                 await handleSourceChange(savedSourceReference);
-                setCurrentStep('ingest');
+                resetAnalysisProgress(savedSourceReference);
+                setAnalysisRequest((previous) => ({
+                  token: Number(previous?.token || 0) + 1,
+                  sourceReference: savedSourceReference,
+                }));
+                setCurrentStep('process');
               }}
             />
           )}
 
-          {(currentStep === 'ingest' || currentStep === 'analyze') && (
+          {(currentStep === 'process' || currentStep === 'ingest' || currentStep === 'analyze') && (
             <ProcessStep
-              ingestion={ingestionHook}
-              analysis={analysisHook}
+              processing={processing}
               uploadHook={uploadHook}
               workspace={workspace}
               sourceReference={sourceRef}
               onSourceChange={handleSourceChange}
+              onRetry={handleProcessingRetry}
             />
           )}
 
@@ -1034,15 +1224,6 @@ export default function ImportWorkspaceDashboard() {
           )}
         </CardContent>
       </Card>
-
-      {/* Advance to next step when process completes */}
-      {(currentStep === 'ingest' || currentStep === 'analyze') && analysisHook.status === 'done' && (
-        <div className="mt-4 flex justify-end">
-          <Button onClick={() => setCurrentStep('review')}>
-            עבור לסקירה
-          </Button>
-        </div>
-      )}
 
       {/* Candidate detail sheet */}
       <CandidateDetailSheet
