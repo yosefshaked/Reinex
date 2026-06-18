@@ -43,11 +43,14 @@ const PATCH_ALLOWED_CANDIDATE_STATUSES = new Set([
 ]);
 
 const ALLOWED_ENTITY_TYPES = new Set([
-  'active_student', 'inactive_student', 'guardian',
+  'customer', 'active_student', 'inactive_student', 'guardian',
   'guardian_link', 'service', 'student_note',
 ]);
 
+const VALID_CUSTOMER_TYPES = new Set(['student', 'one_time_customer']);
+
 const EDITABLE_FIELDS_BY_ENTITY = {
+  customer: ['first_name', 'last_name', 'identity_number', 'customer_type', 'is_active', 'phone', 'email', 'date_of_birth'],
   active_student: ['first_name', 'last_name', 'identity_number', 'phone', 'email', 'date_of_birth'],
   inactive_student: ['first_name', 'last_name', 'identity_number', 'phone', 'email', 'date_of_birth'],
   guardian: ['first_name', 'last_name', 'phone', 'email'],
@@ -57,6 +60,7 @@ const EDITABLE_FIELDS_BY_ENTITY = {
 };
 
 const REQUIRED_FIELDS_BY_ENTITY = {
+  customer: ['first_name', 'last_name', 'identity_number', 'customer_type'],
   active_student: ['first_name', 'last_name', 'identity_number'],
   inactive_student: ['first_name', 'last_name', 'identity_number'],
   guardian: ['first_name', 'last_name'],
@@ -165,6 +169,23 @@ function normalizeCandidateDataPatch(entityType, existingData, patch) {
       const result = coerceOptionalDate(rawValue);
       normalizedValue = result.valid ? result.value : null;
       valid = result.valid;
+    } else if (field === 'customer_type') {
+      const ct = normalizeString(String(rawValue ?? '')).toLowerCase().replace(/\s+/g, '_');
+      if (ct === '') {
+        normalizedValue = null; // empty → missing_required_field handles it
+        valid = true;
+      } else if (VALID_CUSTOMER_TYPES.has(ct)) {
+        normalizedValue = ct;
+        valid = true;
+      } else {
+        normalizedValue = null;
+        valid = false;
+        invalidSeverity = 'blocker';
+      }
+    } else if (field === 'is_active') {
+      const result = coerceBooleanFlag(rawValue, { defaultValue: true, allowUndefined: true });
+      normalizedValue = result.value === false ? false : true;
+      valid = true;
     } else if (field === 'is_primary') {
       const result = coerceBooleanFlag(rawValue, { defaultValue: null, allowUndefined: true });
       normalizedValue = result.valid ? result.value : null;
@@ -199,7 +220,9 @@ function generateStructuralIssues(candidateData, entityType) {
       issues.push(issue('missing_required_field', 'blocker', field));
     }
   }
-  if (entityType === 'active_student' && !candidateData?.phone && !candidateData?.email) {
+  const isStudentEntity = entityType === 'active_student'
+    || (entityType === 'customer' && candidateData?.customer_type === 'student');
+  if (isStudentEntity && !candidateData?.phone && !candidateData?.email) {
     issues.push(issue('missing_contact_path', 'blocker', 'phone'));
   }
   return issues;
@@ -226,7 +249,7 @@ async function generateDuplicateIssues(supabase, orgId, candidateData, decisions
       const { data: importCandidates, error: importError } = await withOrgScope(supabase, 'import_candidates', orgId)
         .select('id, candidate_data, status')
         .eq('workspace_id', workspaceId)
-        .in('entity_type', ['active_student', 'inactive_student']);
+        .in('entity_type', ['active_student', 'inactive_student', 'customer']);
       if (importError) throw importError;
       const hasImportDuplicate = (importCandidates || []).some((candidate) => (
         candidate.id !== candidateId

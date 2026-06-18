@@ -258,6 +258,73 @@ async function simulateGuardianLink(supabase, orgId, candidateData) {
   };
 }
 
+async function simulateStudentNote(supabase, orgId, candidateData) {
+  const studentIdentity = normalizeString(
+    candidateData?.identity_number ?? candidateData?.student_identity_number,
+  );
+  const noteText = normalizeString(candidateData?.note_text);
+  const identityResult = coerceIdentityNumber(studentIdentity);
+
+  if (!identityResult.valid || !identityResult.value) {
+    return {
+      outcome: 'blocked',
+      action_description: 'תעודת זהות תקינה חסרה — לא ניתן לשייך את ההערה לתלמיד/ה.',
+      target_table: 'students',
+      matched_record_id: null,
+      matched_record_summary: null,
+      fields_that_would_change: [],
+      simulated_at: nowIso(),
+    };
+  }
+
+  const { data: profile } = await findClientProfileByIdentityNumber(
+    supabase, identityResult.value, { orgId },
+  );
+  if (!profile?.id) {
+    return {
+      outcome: 'blocked',
+      action_description: 'תלמיד/ה לא נמצא/ה בפרופילי לקוח — צריך לייבא את הלקוח/ה תחילה.',
+      target_table: 'students',
+      matched_record_id: null,
+      matched_record_summary: null,
+      fields_that_would_change: [],
+      simulated_at: nowIso(),
+    };
+  }
+
+  const { data: student } = await withOrgScope(supabase, 'students', orgId)
+    .select('id')
+    .eq('client_profile_id', profile.id)
+    .maybeSingle();
+  if (!student?.id) {
+    return {
+      outcome: 'blocked',
+      action_description: 'נמצא פרופיל לקוח אך אין רשומת תלמיד/ה — ההערה תתווסף רק לאחר שתיווצר רשומת תלמיד/ה.',
+      target_table: 'students',
+      matched_record_id: profile.id,
+      matched_record_summary: {
+        name: [profile.first_name, profile.last_name].filter(Boolean).join(' '),
+      },
+      fields_that_would_change: [],
+      simulated_at: nowIso(),
+    };
+  }
+
+  return {
+    outcome: 'update',
+    action_description: noteText
+      ? 'ההערה תתווסף להערות הפנימיות של התלמיד/ה (notes_internal).'
+      : 'אין טקסט הערה — לא יבוצע שינוי.',
+    target_table: 'students',
+    matched_record_id: student.id,
+    matched_record_summary: {
+      name: [profile.first_name, profile.last_name].filter(Boolean).join(' '),
+    },
+    fields_that_would_change: noteText ? ['notes_internal'] : [],
+    simulated_at: nowIso(),
+  };
+}
+
 async function simulateService(supabase, orgId, candidateData) {
   const serviceName = normalizeString(candidateData?.service_name ?? candidateData?.name);
   if (!serviceName) {
