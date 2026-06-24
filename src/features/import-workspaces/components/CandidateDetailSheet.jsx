@@ -183,7 +183,19 @@ function formatMatchedRecordSummary(summary) {
 function IssueItem({ issue }) {
   const isBlocker = issue.severity === 'blocker';
   const fieldPrefix = FIELD_LABELS[issue.field] ? `${FIELD_LABELS[issue.field]}: ` : '';
-  const message = issue.message || ISSUE_MESSAGES[issue.code] || issue.code || 'נדרשת בדיקה.';
+  const duplicateName = String(issue.duplicate_name || '').trim();
+  const duplicateNames = Array.isArray(issue.duplicate_names)
+    ? issue.duplicate_names.map((name) => String(name || '').trim()).filter(Boolean)
+    : [];
+  const duplicateText = duplicateName
+    ? ` (${duplicateName})`
+    : duplicateNames.length > 0
+      ? ` (${duplicateNames.join(', ')})`
+      : '';
+  const baseMessage = issue.message || ISSUE_MESSAGES[issue.code] || issue.code || 'נדרשת בדיקה.';
+  const message = !issue.message && ['duplicate_identity_number', 'duplicate_identity_in_file'].includes(issue.code)
+    ? baseMessage.replace('.', `${duplicateText}.`)
+    : baseMessage;
   return (
     <li className={cn(
       'flex items-start gap-2 text-sm rounded px-2.5 py-1.5',

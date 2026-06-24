@@ -119,6 +119,17 @@ function issue(code, severity, field, extra = {}) {
   };
 }
 
+function compactName(parts) {
+  return (parts || []).map(normalizeString).filter(Boolean).join(' ');
+}
+
+function candidateDisplayName(candidateData) {
+  return compactName([candidateData?.first_name, candidateData?.last_name])
+    || compactName([candidateData?.guardian_first_name, candidateData?.guardian_last_name])
+    || normalizeString(candidateData?.name)
+    || '';
+}
+
 function normalizeRelationship(raw) {
   const value = coerceOptionalText(raw).value;
   if (!value) return { value: null, valid: true };
@@ -161,7 +172,7 @@ function normalizeCandidateDataPatch(entityType, existingData, patch) {
 
     let normalizedValue = rawValue;
     let valid = true;
-    let invalidSeverity = 'warning';
+    let invalidSeverity = 'blocker';
 
     if (['first_name', 'last_name', 'guardian_first_name', 'guardian_last_name', 'service_name', 'description', 'note_text'].includes(field)) {
       const result = coerceOptionalText(rawValue);
@@ -349,13 +360,15 @@ async function generateDuplicateIssues(supabase, orgId, candidateData, decisions
   // DB duplicate — only cleared by skip / link_to_existing.
   if (identityNumber && !hasResolvedDuplicateIdentityDecision(decisions)) {
     const { data, error } = await withOrgScope(supabase, 'client_profiles', orgId)
-      .select('id')
+      .select('id, first_name, middle_name, last_name')
       .eq('identity_number', identityNumber)
       .maybeSingle();
     if (error) throw error;
     if (data?.id) {
+      const duplicateName = compactName([data.first_name, data.middle_name, data.last_name]);
       issues.push(issue('duplicate_identity_number', 'blocker', 'identity_number', {
         existing_client_profile_id: data.id,
+        duplicate_name: duplicateName,
       }));
     }
   }
@@ -368,13 +381,23 @@ async function generateDuplicateIssues(supabase, orgId, candidateData, decisions
       .eq('workspace_id', workspaceId)
       .eq('entity_type', 'customer');
     if (importError) throw importError;
+    const duplicateNames = (importCandidates || [])
+      .filter((candidate) => (
+        candidate.id !== candidateId
+        && normalizeString(candidate.status) !== 'skipped'
+        && normalizeString(candidate.candidate_data?.identity_number) === identityNumber
+      ))
+      .map((candidate) => candidateDisplayName(candidate.candidate_data))
+      .filter(Boolean);
     const hasImportDuplicate = (importCandidates || []).some((candidate) => (
       candidate.id !== candidateId
       && normalizeString(candidate.status) !== 'skipped'
       && normalizeString(candidate.candidate_data?.identity_number) === identityNumber
     ));
     if (hasImportDuplicate) {
-      issues.push(issue('duplicate_identity_in_file', 'blocker', 'identity_number'));
+      issues.push(issue('duplicate_identity_in_file', 'blocker', 'identity_number', {
+        duplicate_names: [...new Set(duplicateNames)],
+      }));
     }
   }
 

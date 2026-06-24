@@ -80,6 +80,15 @@ function fieldLabel(field) {
 
 function issueMessage(issue) {
   const label = fieldLabel(issue?.field);
+  const duplicateName = normalizeString(issue?.duplicate_name);
+  const duplicateNames = Array.isArray(issue?.duplicate_names)
+    ? issue.duplicate_names.map(normalizeString).filter(Boolean)
+    : [];
+  const duplicateText = duplicateName
+    ? ` (${duplicateName})`
+    : duplicateNames.length > 0
+      ? ` (${duplicateNames.join(', ')})`
+      : '';
   switch (issue?.code) {
     case 'missing_required_field':
       return `${label} הוא שדה חובה.`;
@@ -88,9 +97,9 @@ function issueMessage(issue) {
     case 'invalid_field_format':
       return `${label} בפורמט לא תקין.`;
     case 'duplicate_identity_number':
-      return 'קיימת כבר רשומה במערכת עם אותה תעודת זהות. אי אפשר ליצור שתי רשומות עם אותו מספר; יש לקשר לרשומה הקיימת, לתקן את המספר, או לדלג.';
+      return `קיימת כבר רשומה במערכת עם אותה תעודת זהות${duplicateText}. אי אפשר ליצור שתי רשומות עם אותו מספר; יש לקשר לרשומה הקיימת, לתקן את המספר, או לדלג.`;
     case 'duplicate_identity_in_file':
-      return 'אותה תעודת זהות מופיעה יותר מפעם אחת בקובץ או במרחב הייבוא. יש לאחד, לתקן או לדלג על הכפילות לפני הייבוא.';
+      return `אותה תעודת זהות מופיעה יותר מפעם אחת בקובץ או במרחב הייבוא${duplicateText}. יש לאחד, לתקן או לדלג על הכפילות לפני הייבוא.`;
     case 'duplicate_email':
       return 'קיימת כבר רשומה עם אותו אימייל. בדוק/י אם מדובר באותו אדם.';
     case 'missing_contact_path':
@@ -233,7 +242,7 @@ function normalizeCandidateData(mapped, entityType) {
     if (data.guardian_email !== null && data.guardian_email !== undefined) {
       const guardianEmailResult = coerceEmail(data.guardian_email);
       if (!guardianEmailResult.valid) {
-        fieldIssues.push({ code: 'invalid_field_format', severity: 'warning', field: 'guardian_email' });
+        fieldIssues.push({ code: 'invalid_field_format', severity: 'blocker', field: 'guardian_email' });
       }
       data.guardian_email = guardianEmailResult.valid ? guardianEmailResult.value : data.guardian_email;
     }
@@ -275,7 +284,7 @@ function normalizeCandidateData(mapped, entityType) {
   if (data.phone !== null && data.phone !== undefined) {
     const phoneResult = validateIsraeliPhone(data.phone);
     if (!phoneResult.valid && data.phone !== '') {
-      fieldIssues.push({ code: 'invalid_field_format', severity: 'warning', field: 'phone' });
+      fieldIssues.push({ code: 'invalid_field_format', severity: 'blocker', field: 'phone' });
     }
     data.phone = phoneResult.valid ? phoneResult.value : data.phone;
   }
@@ -283,7 +292,7 @@ function normalizeCandidateData(mapped, entityType) {
   if (data.guardian_phone !== null && data.guardian_phone !== undefined) {
     const phoneResult = validateIsraeliPhone(data.guardian_phone);
     if (!phoneResult.valid && data.guardian_phone !== '') {
-      fieldIssues.push({ code: 'invalid_field_format', severity: 'warning', field: 'guardian_phone' });
+      fieldIssues.push({ code: 'invalid_field_format', severity: 'blocker', field: 'guardian_phone' });
     }
     data.guardian_phone = phoneResult.valid ? phoneResult.value : data.guardian_phone;
   }
@@ -292,7 +301,7 @@ function normalizeCandidateData(mapped, entityType) {
   if (data.email !== null && data.email !== undefined) {
     const emailResult = coerceEmail(data.email);
     if (!emailResult.valid) {
-      fieldIssues.push({ code: 'invalid_field_format', severity: 'warning', field: 'email' });
+      fieldIssues.push({ code: 'invalid_field_format', severity: 'blocker', field: 'email' });
     }
     data.email = emailResult.valid ? emailResult.value : data.email;
   }
@@ -301,7 +310,7 @@ function normalizeCandidateData(mapped, entityType) {
   if (data.date_of_birth !== null && data.date_of_birth !== undefined) {
     const dateResult = normalizeDate(data.date_of_birth);
     if (dateResult.provided && !dateResult.valid) {
-      fieldIssues.push({ code: 'invalid_field_format', severity: 'warning', field: 'date_of_birth' });
+      fieldIssues.push({ code: 'invalid_field_format', severity: 'blocker', field: 'date_of_birth' });
     }
     data.date_of_birth = dateResult.valid ? dateResult.value : data.date_of_birth;
   }
@@ -349,7 +358,7 @@ function normalizeCandidateData(mapped, entityType) {
       } else if (falseSet.has(str)) {
         data.is_active = false;
       } else {
-        fieldIssues.push({ code: 'invalid_field_format', severity: 'warning', field: 'is_active' });
+        fieldIssues.push({ code: 'invalid_field_format', severity: 'blocker', field: 'is_active' });
         data.is_active = true;
       }
     }
@@ -361,6 +370,17 @@ function normalizeCandidateData(mapped, entityType) {
 // Generate structural issues (missing required fields, missing recommended fields).
 function hasValidPhone(value) {
   return Boolean(validateIsraeliPhone(value).value);
+}
+
+function compactName(parts) {
+  return (parts || []).map(normalizeString).filter(Boolean).join(' ');
+}
+
+function candidateDisplayName(candidateData) {
+  return compactName([candidateData?.first_name, candidateData?.last_name])
+    || compactName([candidateData?.guardian_first_name, candidateData?.guardian_last_name])
+    || normalizeString(candidateData?.name)
+    || '';
 }
 
 function buildGuardianPhoneContext(normalizedCandidates) {
@@ -702,6 +722,17 @@ export default async function importWorkspacesAnalyzeChunk(context, req) {
     if (identityNumber) counts.set(identityNumber, (counts.get(identityNumber) || 0) + 1);
     return counts;
   }, new Map());
+  const identityDuplicateNames = customerCandidates.reduce((namesByIdentity, n) => {
+    const identityNumber = normalizeString(n.candidateData.identity_number);
+    if (!identityNumber) return namesByIdentity;
+    const names = namesByIdentity.get(identityNumber) || [];
+    names.push({
+      rowId: n.rowId,
+      name: candidateDisplayName(n.candidateData),
+    });
+    namesByIdentity.set(identityNumber, names);
+    return namesByIdentity;
+  }, new Map());
 
   const emails = [...new Set(
     customerCandidates.map((n) => n.candidateData.email).filter(Boolean),
@@ -712,7 +743,7 @@ export default async function importWorkspacesAnalyzeChunk(context, req) {
   const [duplicateIdResult, duplicateEmailResult, importIdentityResult] = await Promise.all([
     identityNumbers.length > 0
       ? withOrgScope(supabase, 'client_profiles', orgId)
-          .select('id, identity_number')
+          .select('id, identity_number, first_name, middle_name, last_name')
           .in('identity_number', identityNumbers)
       : Promise.resolve({ data: [], error: null }),
     emails.length > 0
@@ -761,12 +792,21 @@ export default async function importWorkspacesAnalyzeChunk(context, req) {
     const identityNumber = normalizeString(existingCandidate.candidate_data?.identity_number);
     if (identityNumber && identityNumberCounts.has(identityNumber)) {
       identityNumberCounts.set(identityNumber, (identityNumberCounts.get(identityNumber) || 0) + 1);
+      const names = identityDuplicateNames.get(identityNumber) || [];
+      names.push({
+        rowId: existingCandidate.source_row_id,
+        name: candidateDisplayName(existingCandidate.candidate_data),
+      });
+      identityDuplicateNames.set(identityNumber, names);
     }
   }
 
   // Build lookup maps for O(1) access
   const existingByIdNum = new Map(
-    (duplicateIdResult.data || []).map((r) => [r.identity_number, r.id]),
+    (duplicateIdResult.data || []).map((r) => [r.identity_number, {
+      id: r.id,
+      name: compactName([r.first_name, r.middle_name, r.last_name]),
+    }]),
   );
   const existingByEmail = new Map(
     (duplicateEmailResult.data || []).map((r) => [r.email, r.id]),
@@ -799,19 +839,25 @@ export default async function importWorkspacesAnalyzeChunk(context, req) {
     if (entityType === 'customer' && candidateData.identity_number) {
       if ((identityNumberCounts.get(candidateData.identity_number) || 0) > 1
         && !hasResolvedInFileDuplicateDecision(existingDecisions)) {
+        const duplicateNames = (identityDuplicateNames.get(candidateData.identity_number) || [])
+          .filter((item) => item.rowId !== rowId)
+          .map((item) => item.name)
+          .filter(Boolean);
         issues.push({
           code: 'duplicate_identity_in_file',
           severity: 'blocker',
           field: 'identity_number',
+          duplicate_names: [...new Set(duplicateNames)],
         });
       }
-      const existingId = existingByIdNum.get(candidateData.identity_number);
-      if (existingId && !hasResolvedDuplicateDecision) {
+      const existingIdentity = existingByIdNum.get(candidateData.identity_number);
+      if (existingIdentity?.id && !hasResolvedDuplicateDecision) {
         issues.push({
           code: 'duplicate_identity_number',
           severity: 'blocker',
           field: 'identity_number',
-          existing_client_profile_id: existingId,
+          existing_client_profile_id: existingIdentity.id,
+          duplicate_name: existingIdentity.name,
         });
       }
     }
