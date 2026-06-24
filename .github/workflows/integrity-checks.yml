@@ -87,6 +87,11 @@ jobs:
         id: report
         shell: bash
         run: |
+          # This step only builds the report and writes overall_status; the actual
+          # check results are already captured via each step's outcome. A non-zero
+          # grep/tail/SIGPIPE here must NOT abort it (GitHub's default shell is -e
+          # -o pipefail), so errexit/pipefail are explicitly disabled.
+          set +e +o pipefail
           api_status="${{ steps.lint_api.outcome }}"
           sql_status="${{ steps.lint_sql.outcome }}"
           api_responses_status="${{ steps.lint_api_responses.outcome }}"
@@ -97,7 +102,7 @@ jobs:
           run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
           updated_at="$(date -u +'%Y-%m-%d %H:%M:%S UTC')"
           # Frontend type-check is warn-only: surface the issue count, never fail the job on it.
-          types_count="$(grep -oE '\[typecheck\] [0-9]+ type' types-lint.log | grep -oE '[0-9]+' | head -n1)"
+          types_count="$(grep -oE '\[typecheck\] [0-9]+ type' types-lint.log 2>/dev/null | grep -oE '[0-9]+' | head -n1 || true)"
           types_count="${types_count:-0}"
           if [ "$types_count" = "0" ]; then types_label="0 — clean ✅"; else types_label="${types_count} — warn-only ⚠️"; fi
           # Overall pass/fail = the blocking checks only (api, sql, api-responses, upsert).
