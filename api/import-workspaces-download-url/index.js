@@ -146,7 +146,13 @@ export default async function importWorkspacesDownloadUrl(context, req) {
   let downloadUrl;
   try {
     const fileName = knownObjects.get(requestedKey) || 'import-file';
-    downloadUrl = await driver.getDownloadUrl(requestedKey, PRESIGNED_TTL_SECONDS, fileName, 'inline');
+    // Use 'attachment' (not 'inline') so the driver always returns a *presigned*
+    // URL on the R2 storage domain (*.r2.cloudflarestorage.com), which the app CSP
+    // connect-src allows. The 'inline' path would return the public custom-domain
+    // URL (documents.thepcrunners.com), which CSP blocks — and which a private
+    // backup object would not serve anyway. The browser fetch()es the body, so the
+    // attachment Content-Disposition has no effect on recovery.
+    downloadUrl = await driver.getDownloadUrl(requestedKey, PRESIGNED_TTL_SECONDS, fileName, 'attachment');
   } catch (err) {
     context.log?.error?.('import-workspaces-download-url: presign failed', { message: err?.message });
     return respondDownloadUrlError(context, 500, 'storage_unavailable', err, { action: 'presign_download_url' });

@@ -51,18 +51,59 @@ jobs:
           set -o pipefail
           npm run lint:sql 2>&1 | tee sql-lint.log
 
+      - name: Validate API response contracts
+        id: lint_api_responses
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run lint:api-responses:strict-ux 2>&1 | tee api-responses-lint.log
+
+      - name: Validate upsert conflicts
+        id: lint_upsert
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run lint:upsert-conflicts 2>&1 | tee upsert-lint.log
+
+      - name: Validate error tracking (warn-only)
+        id: lint_error_tracking
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run lint:error-tracking 2>&1 | tee error-tracking-lint.log
+
+      - name: Type-check frontend (warn-only)
+        id: lint_types
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run lint:types 2>&1 | tee types-lint.log
+
       - name: Build integrity report
         id: report
         shell: bash
         run: |
           api_status="${{ steps.lint_api.outcome }}"
           sql_status="${{ steps.lint_sql.outcome }}"
+          api_responses_status="${{ steps.lint_api_responses.outcome }}"
+          upsert_status="${{ steps.lint_upsert.outcome }}"
           report_sha="${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}"
           report_branch="${{ github.event_name == 'pull_request' && github.event.pull_request.head.ref || github.ref_name }}"
           short_sha="$(printf '%s' "$report_sha" | cut -c1-8)"
           run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
           updated_at="$(date -u +'%Y-%m-%d %H:%M:%S UTC')"
-          if [ "$api_status" = "success" ] && [ "$sql_status" = "success" ]; then
+          # Frontend type-check is warn-only: surface the issue count, never fail the job on it.
+          types_count="$(grep -oE '\[typecheck\] [0-9]+ type' types-lint.log | grep -oE '[0-9]+' | head -n1)"
+          types_count="${types_count:-0}"
+          if [ "$types_count" = "0" ]; then types_label="0 — clean ✅"; else types_label="${types_count} — warn-only ⚠️"; fi
+          # Overall pass/fail = the blocking checks only (api, sql, api-responses, upsert).
+          # Warn-only checks (error-tracking, frontend type-check) never affect it.
+          if [ "$api_status" = "success" ] && [ "$sql_status" = "success" ] \
+            && [ "$api_responses_status" = "success" ] && [ "$upsert_status" = "success" ]; then
             overall_status="success"
             status_icon="✅"
             status_line="All integrity checks passed."
@@ -74,7 +115,7 @@ jobs:
 
           {
             echo "<!-- pr-health-integrity:start -->"
-            echo "<!-- integrity-meta api=${api_status} sql=${sql_status} overall=${overall_status} sha=${short_sha} -->"
+            echo "<!-- integrity-meta api=${api_status} sql=${sql_status} apiResponses=${api_responses_status} upsert=${upsert_status} types=${types_count} overall=${overall_status} sha=${short_sha} -->"
             echo "## ${status_icon} Integrity Checks"
             echo
             echo "> __CHANGE_SUMMARY__"
@@ -89,7 +130,11 @@ jobs:
             echo "| Check | Result |"
             echo "| --- | --- |"
             echo "| API lint | ${api_status} |"
+            echo "| API response contracts | ${api_responses_status} |"
+            echo "| Upsert conflicts | ${upsert_status} |"
             echo "| SQL lint | ${sql_status} |"
+            echo "| Error tracking (warn-only) | see output |"
+            echo "| Frontend type-check (warn-only) | ${types_label} |"
             echo
             echo "<details><summary>API lint output</summary>"
             echo
@@ -107,6 +152,38 @@ jobs:
             echo
             echo "</details>"
             echo
+            echo "<details><summary>API response contracts output</summary>"
+            echo
+            echo '```text'
+            tail -n 200 api-responses-lint.log
+            echo '```'
+            echo
+            echo "</details>"
+            echo
+            echo "<details><summary>Upsert conflicts output</summary>"
+            echo
+            echo '```text'
+            tail -n 200 upsert-lint.log
+            echo '```'
+            echo
+            echo "</details>"
+            echo
+            echo "<details><summary>Error tracking output (warn-only)</summary>"
+            echo
+            echo '```text'
+            tail -n 200 error-tracking-lint.log
+            echo '```'
+            echo
+            echo "</details>"
+            echo
+            echo "<details><summary>Frontend type-check output (warn-only)</summary>"
+            echo
+            echo '```text'
+            tail -n 200 types-lint.log
+            echo '```'
+            echo
+            echo "</details>"
+            echo
             echo "<!-- pr-health-integrity:end -->"
           } > integrity-report.md
 
@@ -120,6 +197,10 @@ jobs:
           path: |
             api-lint.log
             sql-lint.log
+            api-responses-lint.log
+            upsert-lint.log
+            error-tracking-lint.log
+            types-lint.log
             integrity-report.md
 
       - name: Comment report on pull request
@@ -137,7 +218,7 @@ jobs:
             const legacyMarker = '<!-- integrity-check-report -->';
             const sectionStart = '<!-- pr-health-integrity:start -->';
             const sectionEnd = '<!-- pr-health-integrity:end -->';
-            const metaPattern = /<!-- integrity-meta api=(\w+) sql=(\w+) overall=(\w+) sha=([0-9a-f]+) -->/;
+            const metaPattern = /<!-- integrity-meta api=(\w+) sql=(\w+) apiResponses=(\w+) upsert=(\w+) types=(\d+) overall=(\w+) sha=([0-9a-f]+) -->/;
 
             const upsertSection = (body, startMarker, endMarker, nextSection) => {
               const startIndex = body.indexOf(startMarker);
@@ -163,15 +244,21 @@ jobs:
             const currentMeta = currentMetaMatch ? {
               api: currentMetaMatch[1],
               sql: currentMetaMatch[2],
-              overall: currentMetaMatch[3],
-              sha: currentMetaMatch[4],
+              apiResponses: currentMetaMatch[3],
+              upsert: currentMetaMatch[4],
+              types: currentMetaMatch[5],
+              overall: currentMetaMatch[6],
+              sha: currentMetaMatch[7],
             } : null;
             const previousMetaMatch = existing?.body?.match(metaPattern);
             const previousMeta = previousMetaMatch ? {
               api: previousMetaMatch[1],
               sql: previousMetaMatch[2],
-              overall: previousMetaMatch[3],
-              sha: previousMetaMatch[4],
+              apiResponses: previousMetaMatch[3],
+              upsert: previousMetaMatch[4],
+              types: previousMetaMatch[5],
+              overall: previousMetaMatch[6],
+              sha: previousMetaMatch[7],
             } : null;
 
             const humanizeCheck = (value) => {
@@ -189,6 +276,15 @@ jobs:
               }
               if (previousMeta.sql !== currentMeta.sql) {
                 changeLines.push(`SQL lint changed from ${humanizeCheck(previousMeta.sql)} to ${humanizeCheck(currentMeta.sql)}.`);
+              }
+              if (previousMeta.apiResponses !== currentMeta.apiResponses) {
+                changeLines.push(`API response contracts changed from ${humanizeCheck(previousMeta.apiResponses)} to ${humanizeCheck(currentMeta.apiResponses)}.`);
+              }
+              if (previousMeta.upsert !== currentMeta.upsert) {
+                changeLines.push(`Upsert conflicts changed from ${humanizeCheck(previousMeta.upsert)} to ${humanizeCheck(currentMeta.upsert)}.`);
+              }
+              if (previousMeta.types !== currentMeta.types) {
+                changeLines.push(`Frontend type-check issues changed from ${previousMeta.types} to ${currentMeta.types} (warn-only).`);
               }
               if (!changeLines.length) {
                 changeLines.push(`No status change since commit \`${previousMeta.sha}\`.`);

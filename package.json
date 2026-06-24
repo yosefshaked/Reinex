@@ -10,10 +10,12 @@
   },
   "scripts": {
     "dev": "vite",
-    "build": "npm run lint:api && npm run lint:api-responses:strict-ux && npm run lint:error-tracking && npm run lint:sql && vite build",
+    "build": "npm run lint:api && npm run lint:api-responses:strict-ux && npm run lint:error-tracking && npm run lint:sql && npm run lint:types && vite build",
     "dep:check": "madge --circular src --ts-config jsconfig.json",
     "check:schema": "node scripts/checkSchema.js",
     "lint": "eslint .",
+    "lint:types": "node scripts/typecheck.js",
+    "lint:types:strict": "node scripts/typecheck.js --strict",
     "lint:api": "eslint api/",
     "lint:sql": "node scripts/validate-setup-sql.js --format=text",
     "lint:sql:strict": "node scripts/validate-setup-sql.js --strict --format=text",
@@ -102,6 +104,7 @@
     "madge": "^8.0.0",
     "postcss": "^8.5.6",
     "tailwindcss": "^3.4.17",
+    "typescript": "^6.0.3",
     "vite": "^7.1.2",
     "wait-on": "^8.0.4"
   }

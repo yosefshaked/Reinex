@@ -440,7 +440,7 @@ function MapStep({ workspace, selectedSourceReference, onSourceChange, onSaved }
 // Recover parsed rows that were lost (e.g. after a refresh): first try to
 // re-download + re-parse the server backup automatically, then fall back to
 // asking the user to re-select the same file from disk.
-function RowRecovery({ uploadHook, objectKey, fileName }) {
+function RowRecovery({ uploadHook, objectKey, fileName, remainingCount = 1 }) {
   const { parseState, recoverFromBackup, recoverFromFile } = uploadHook;
   const [phase, setPhase] = useState(objectKey ? 'recovering' : 'needs_reupload');
   const [recoverError, setRecoverError] = useState(null);
@@ -470,10 +470,14 @@ function RowRecovery({ uploadHook, objectKey, fileName }) {
     setPickedName(file.name);
     setRecoverError(null);
     setPhase('recovering');
-    recoverFromFile(file, objectKey).catch((err) => {
-      setRecoverError(err?.message || 'parse_failed');
-      setPhase('needs_reupload');
-    });
+    recoverFromFile(file, objectKey)
+      .catch((err) => {
+        setRecoverError(err?.message || 'parse_failed');
+        setPhase('needs_reupload');
+      })
+      // Clear the input only AFTER the read settles. Resetting value mid-read can
+      // abort the FileReader (NotReadableError → file_read_error) in Chrome.
+      .finally(() => { if (fileInputRef.current) fileInputRef.current.value = ''; });
   }
 
   if (phase === 'recovering') {
@@ -492,11 +496,17 @@ function RowRecovery({ uploadHook, objectKey, fileName }) {
   return (
     <div className="space-y-3 rounded-lg border border-yellow-200 bg-yellow-50 px-4 py-3 text-sm text-yellow-800 dark:border-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-300">
       <div>
-        <p className="font-medium">צריך לטעון מחדש את הקובץ</p>
+        <p className="font-medium">
+          צריך לטעון מחדש את הקובץ{fileName ? `: ${fileName}` : ''}
+          {remainingCount > 1 ? ` (נותרו ${remainingCount} מקורות)` : ''}
+        </p>
         <p className="mt-1 text-xs">
           הנתונים נקראים מהקובץ בדפדפן ולא נשמרים אחרי רענון הדף.
           {objectKey ? ' לא הצלחנו לשחזר את הקובץ מהגיבוי בשרת. ' : ' '}
-          בחר/י שוב את אותו קובץ כדי להמשיך בקליטה. הגיבוי בשרת הוא עותק בטיחות בלבד ואינו משמש לייבוא.
+          {fileName
+            ? `בחר/י שוב את הקובץ ${fileName} כדי להמשיך בקליטה. `
+            : 'בחר/י שוב את אותו קובץ כדי להמשיך בקליטה. '}
+          הגיבוי בשרת הוא עותק בטיחות בלבד ואינו משמש לייבוא.
         </p>
       </div>
       <input
@@ -504,12 +514,12 @@ function RowRecovery({ uploadHook, objectKey, fileName }) {
         type="file"
         accept=".xlsx,.xls,.csv"
         className="sr-only"
-        onChange={(e) => { handlePick(e.target.files?.[0]); e.target.value = ''; }}
+        onChange={(e) => handlePick(e.target.files?.[0])}
       />
       <div className="flex flex-wrap gap-2">
         <Button variant="outline" size="sm" className="gap-2" onClick={() => fileInputRef.current?.click()} disabled={isBusy}>
           <UploadCloud className="h-4 w-4" />
-          {pickedName || 'בחר/י קובץ'}
+          {pickedName || (fileName ? `בחר/י את ${fileName}` : 'בחר/י קובץ')}
         </Button>
         {objectKey && (
           <Button variant="ghost" size="sm" className="gap-2" onClick={attemptRecover} disabled={isBusy}>
@@ -532,7 +542,9 @@ function ProcessStep({ processing, uploadHook, workspace, sourceReference, onSou
   const sourceMapping = config.mappings?.by_source?.[sourceReference] || {};
   const hasSourceMapping = hasConfiguredMapping(sourceMapping)
     || (sources.length === 1 && Object.keys(config.mappings?.field_map || {}).length > 0);
-  const recoverySource = sources.find((source) => {
+  // Sources whose rows are neither in memory nor saved in the DB yet. Recovered
+  // one at a time (a single parse can run at once); the next surfaces after each.
+  const recoverySources = sources.filter((source) => {
     const reference = source.sourceReference;
     const totalRows = getSourceTotalRows(source);
     const hasRows = uploadHook.parsedSources?.some((parsedSource) => (
@@ -541,6 +553,7 @@ function ProcessStep({ processing, uploadHook, workspace, sourceReference, onSou
     const uploadedRows = Number(processing.sourceProgress?.[reference]?.uploadedRows || 0);
     return totalRows > 0 && uploadedRows < totalRows && !hasRows;
   });
+  const recoverySource = recoverySources[0] || null;
 
   return (
     <div className="space-y-4">
@@ -568,7 +581,8 @@ function ProcessStep({ processing, uploadHook, workspace, sourceReference, onSou
           key={recoverySource.sourceReference}
           uploadHook={uploadHook}
           objectKey={recoverySource.file?.objectKey || config.objectKey || null}
-          fileName={recoverySource.file?.fileName || config.fileName || null}
+          fileName={recoverySource.file?.fileName || recoverySource.label || config.fileName || null}
+          remainingCount={recoverySources.length}
         />
       )}
       <ProgressOrchestrator processing={processing} onRetry={onRetry} />

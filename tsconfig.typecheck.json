@@ -1,0 +1,27 @@
+{
+  "// purpose": "Warn-only JS type-checking for the frontend (src/). Catches the class of bug that ESLint cannot — e.g. destructuring a property a function never returns, renamed props, typos on object access. Run via `npm run lint:types` (warn) or `lint:types:strict` (enforce). Settings are intentionally permissive (strict off) so it surfaces structural errors, not an implicit-any flood. Tighten over time, then flip the build step to strict.",
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": true,
+    "noEmit": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "target": "es2022",
+    "lib": ["es2022", "dom", "dom.iterable"],
+    "jsx": "react-jsx",
+    "paths": {
+      "@/*": ["./src/*"]
+    },
+    "types": ["react", "react-dom"],
+    "resolveJsonModule": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    "strict": false,
+    "noImplicitAny": false,
+    "strictNullChecks": false
+  },
+  "include": ["src"],
+  "exclude": ["node_modules", "dist"]
+}
