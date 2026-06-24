@@ -595,12 +595,141 @@ function ProcessStep({ processing, uploadHook, workspace, sourceReference, onSou
   );
 }
 
-// Collect all candidates of a given status by paginating through listCandidates.
+const ENTITY_TYPE_LABELS = {
+  customer: 'לקוח/ה',
+  guardian: 'הורה',
+  guardian_link: 'קישור הורה-תלמיד',
+  service: 'שירות',
+};
+
+const STATUS_LABELS = {
+  needs_review: 'לבדיקה',
+  ready: 'מוכן',
+  blocked: 'חסום',
+  blocked_by_dependency: 'ממתין לתלות',
+  skipped: 'מדולג',
+  committed: 'בוצע',
+  failed: 'נכשל',
+};
+
+const FIELD_LABELS = {
+  first_name: 'שם פרטי',
+  last_name: 'שם משפחה',
+  identity_number: 'תעודת זהות',
+  phone: 'טלפון',
+  guardian_first_name: 'שם פרטי של ההורה',
+  guardian_last_name: 'שם משפחה של ההורה',
+  guardian_phone: 'טלפון הורה',
+  guardian_email: 'אימייל הורה',
+  email: 'אימייל',
+  date_of_birth: 'תאריך לידה',
+  customer_type: 'סוג לקוח',
+  is_active: 'פעיל/ה',
+  relationship: 'קרבה',
+  service_name: 'שם השירות',
+  name: 'שם השירות',
+  description: 'תיאור',
+};
+
+const ISSUE_MESSAGES = {
+  missing_required_field: 'שדה חובה חסר.',
+  missing_recommended_field: 'שדה מומלץ חסר.',
+  invalid_field_format: 'פורמט השדה לא תקין.',
+  duplicate_identity_number: 'קיימת כבר רשומה במערכת עם אותה תעודת זהות. אי אפשר ליצור שתי רשומות עם אותו מספר; יש לקשר לרשומה הקיימת, לתקן את המספר, או לדלג.',
+  duplicate_identity_in_file: 'אותה תעודת זהות מופיעה יותר מפעם אחת בקובץ או במרחב הייבוא. יש לתקן או לדלג על הכפילות.',
+  duplicate_email: 'קיימת כבר רשומה עם אותו אימייל. מומלץ לבדוק אם זו אותה רשומה.',
+  missing_contact_path: 'נדרש טלפון תקין בתלמיד/ה או באפוטרופוס מקושר.',
+};
+
+function candidateDisplayName(candidate) {
+  const data = candidate?.candidate_data || {};
+  return [
+    data.first_name,
+    data.last_name,
+  ].filter(Boolean).join(' ')
+    || [
+      data.guardian_first_name,
+      data.guardian_last_name,
+    ].filter(Boolean).join(' ')
+    || data.service_name
+    || data.name
+    || '—';
+}
+
+function issueText(issue) {
+  const fieldPrefix = FIELD_LABELS[issue?.field] ? `${FIELD_LABELS[issue.field]}: ` : '';
+  const duplicateName = String(issue?.duplicate_name || '').trim();
+  const duplicateNames = Array.isArray(issue?.duplicate_names)
+    ? issue.duplicate_names.map((name) => String(name || '').trim()).filter(Boolean)
+    : [];
+  const duplicateText = duplicateName
+    ? ` (${duplicateName})`
+    : duplicateNames.length > 0
+      ? ` (${duplicateNames.join(', ')})`
+      : '';
+  const baseMessage = issue?.message || ISSUE_MESSAGES[issue?.code] || issue?.code || 'נדרשת בדיקה.';
+  const message = !issue?.message && ['duplicate_identity_number', 'duplicate_identity_in_file'].includes(issue?.code)
+    ? baseMessage.replace('.', `${duplicateText}.`)
+    : baseMessage;
+  return `${fieldPrefix}${message}`;
+}
+
+function candidateExclusionReasons(candidate) {
+  const status = String(candidate?.status || '');
+  if (status === 'skipped') return ['סומן לדילוג ולכן לא ייובא.'];
+  if (status === 'needs_review') return ['עדיין ממתין להחלטה בסקירה.'];
+  if (status === 'failed') return ['נכשל בביצוע קודם. יש לחזור לסקירה, לתקן ולנסות שוב.'];
+  if (status === 'blocked_by_dependency') return ['ממתין לתלות אחרת לפני הייבוא.'];
+
+  const issues = Array.isArray(candidate?.issues) ? candidate.issues : [];
+  if (issues.length > 0) return issues.map(issueText);
+  if (status && status !== 'ready') return [`סטטוס: ${STATUS_LABELS[status] || status}`];
+  return ['לא ייובא בשלב זה.'];
+}
+
+function CandidatePreviewRow({ candidate, reasons = [], variant = 'import' }) {
+  const isExcluded = variant === 'excluded';
+  return (
+    <div className="rounded-md border px-3 py-2 text-sm">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <p className="font-medium">{candidateDisplayName(candidate)}</p>
+          <p className="text-xs text-muted-foreground">
+            {ENTITY_TYPE_LABELS[candidate.entity_type] || candidate.entity_type}
+          </p>
+        </div>
+        <Badge variant={isExcluded ? 'secondary' : 'default'} className="text-xs">
+          {STATUS_LABELS[candidate.status] || candidate.status}
+        </Badge>
+      </div>
+      {reasons.length > 0 && (
+        <ul className="mt-2 space-y-1">
+          {reasons.map((reason, index) => (
+            <li
+              key={`${candidate.id}-${index}`}
+              className={isExcluded
+                ? 'rounded bg-destructive/10 px-2 py-1 text-xs text-destructive'
+                : 'rounded bg-emerald-50 px-2 py-1 text-xs text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300'}
+            >
+              {reason}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+// Collect all candidates, optionally scoped to a status, by paginating through listCandidates.
 async function fetchAllCandidates(workspaceId, status, sourceReference) {
   const candidates = [];
   let page = 1;
   while (true) {
-    const result = await listCandidates(workspaceId, { status, sourceReference, page });
+    const result = await listCandidates(workspaceId, {
+      status: status || undefined,
+      sourceReference,
+      page,
+    });
     const batch = result.candidates ?? [];
     candidates.push(...batch);
     if (batch.length < (result.pageSize ?? 50)) break;
@@ -622,6 +751,26 @@ function CommitStep({ workspaceId, sourceReference, onBackToReview }) {
   const [progress, setProgress] = useState({ done: 0, total: 0, waveLabel: '' });
   const [summary, setSummary]   = useState({ committed: 0, failed: 0 });
   const [errorMsg, setErrorMsg] = useState('');
+  const [preview, setPreview] = useState({ loading: true, error: '', importable: [], excluded: [] });
+
+  const loadPreview = useCallback(async () => {
+    if (!workspaceId) return;
+    setPreview((current) => ({ ...current, loading: true, error: '' }));
+    try {
+      const candidates = await fetchAllCandidates(workspaceId, '', sourceReference);
+      const importable = candidates.filter((candidate) => candidate.status === 'ready');
+      const excluded = candidates.filter((candidate) => (
+        candidate.status !== 'ready' && candidate.status !== 'committed'
+      ));
+      setPreview({ loading: false, error: '', importable, excluded });
+    } catch (err) {
+      setPreview({ loading: false, error: err.message || 'שגיאה בטעינת תצוגת הייבוא', importable: [], excluded: [] });
+    }
+  }, [sourceReference, workspaceId]);
+
+  useEffect(() => {
+    if (phase === 'idle') loadPreview();
+  }, [loadPreview, phase]);
 
   async function runCommit(mode = 'full') {
     if (phase === 'running') return;
@@ -664,8 +813,8 @@ function CommitStep({ workspaceId, sourceReference, onBackToReview }) {
         for (let i = 0; i < idsInWave.length; i += 25) {
           const chunk  = idsInWave.slice(i, i + 25);
           const result = await commitChunk(workspaceId, chunk);
-          totalCommitted += result.committed ?? chunk.length;
-          totalFailed    += result.failed    ?? 0;
+          totalCommitted += Number(result.committed ?? chunk.length);
+          totalFailed    += Number(result.failed ?? 0);
           done += chunk.length;
           setProgress({ done, total, waveLabel: wave.label });
         }
@@ -756,16 +905,93 @@ function CommitStep({ workspaceId, sourceReference, onBackToReview }) {
   }
 
   return (
-    <div className="py-8 text-center space-y-4">
-      <p className="text-sm text-muted-foreground">
-        לחץ על &ldquo;בצע ייבוא&rdquo; כדי להעביר את כל המועמדים המאושרים לטבלאות הפעילות.
-        <br />
-        שורות שנכשלות לא מונעות את השאר — ניתן לתקן ולנסות שנית.
-      </p>
-      <Button onClick={() => runCommit('full')} className="gap-2">
-        <UploadCloud className="h-4 w-4" />
-        בצע ייבוא
-      </Button>
+    <div className="space-y-5">
+      <div className="rounded-lg border bg-muted/35 px-4 py-3 text-sm text-muted-foreground">
+        בדקו את הרשימות לפני ביצוע. רק מועמדים בסטטוס מוכן יועברו לטבלאות הפעילות; השאר יישארו בסביבת הייבוא לתיקון או דילוג.
+      </div>
+
+      {preview.loading && (
+        <div className="flex items-center gap-2 rounded-lg border px-4 py-6 text-sm text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          טוען רשימת ייבוא…
+        </div>
+      )}
+
+      {!preview.loading && preview.error && (
+        <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+          {preview.error}
+        </div>
+      )}
+
+      {!preview.loading && !preview.error && (
+        <div className="grid gap-4 lg:grid-cols-2">
+          <section className="space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <h3 className="text-sm font-semibold">ייובאו עכשיו</h3>
+              <Badge variant="default" className="text-xs">{preview.importable.length}</Badge>
+            </div>
+            <div className="max-h-[26rem] space-y-2 overflow-y-auto rounded-lg border bg-background p-2">
+              {preview.importable.length > 0 ? (
+                preview.importable.map((candidate) => (
+                  <CandidatePreviewRow
+                    key={candidate.id}
+                    candidate={candidate}
+                    reasons={['מוכן לייבוא.']}
+                  />
+                ))
+              ) : (
+                <p className="px-3 py-6 text-center text-sm text-muted-foreground">
+                  אין מועמדים מוכנים לייבוא.
+                </p>
+              )}
+            </div>
+          </section>
+
+          <section className="space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <h3 className="text-sm font-semibold">לא ייובאו עכשיו</h3>
+              <Badge variant="secondary" className="text-xs">{preview.excluded.length}</Badge>
+            </div>
+            <div className="max-h-[26rem] space-y-2 overflow-y-auto rounded-lg border bg-background p-2">
+              {preview.excluded.length > 0 ? (
+                preview.excluded.map((candidate) => (
+                  <CandidatePreviewRow
+                    key={candidate.id}
+                    candidate={candidate}
+                    variant="excluded"
+                    reasons={candidateExclusionReasons(candidate)}
+                  />
+                ))
+              ) : (
+                <p className="px-3 py-6 text-center text-sm text-muted-foreground">
+                  אין מועמדים חסומים או מדולגים.
+                </p>
+              )}
+            </div>
+          </section>
+        </div>
+      )}
+
+      <div className="flex flex-col gap-2 border-t pt-4 sm:flex-row-reverse sm:items-center">
+        <Button
+          onClick={() => runCommit('full')}
+          className="gap-2"
+          disabled={preview.loading || Boolean(preview.error) || preview.importable.length === 0}
+        >
+          <UploadCloud className="h-4 w-4" />
+          בצע ייבוא
+        </Button>
+        <Button variant="outline" onClick={loadPreview} disabled={preview.loading} className="gap-2">
+          <RefreshCcw className="h-4 w-4" />
+          רענן רשימות
+        </Button>
+        {onBackToReview && (
+          <Button variant="ghost" onClick={onBackToReview} className="gap-2">
+            <ArrowRight className="h-4 w-4" />
+            חזרה לסקירה
+          </Button>
+        )}
+      </div>
     </div>
   );
 }

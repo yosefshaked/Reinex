@@ -270,7 +270,7 @@ export async function runDryRunChunk(workspaceId, candidateIds) {
  *
  * @param {string} workspaceId
  * @param {string[]} candidateIds  — max 50 UUIDs
- * @returns {Promise<{ committed: number, workspace_id: string, results: object[] }>}
+ * @returns {Promise<{ committed: number, failed?: number, workspace_id: string, results: object[], failures?: object[] }>}
  */
 export async function commitChunk(workspaceId, candidateIds) {
   return authenticatedFetch(

@@ -1,5 +1,8 @@
 import { cn } from "@/lib/utils"
 
+/**
+ * @param {any} props
+ */
 function PageLayout({
   title,
   description,
