@@ -6458,22 +6458,31 @@ DELETE FROM public.import_candidates
  WHERE entity_type = 'student_note'
    AND status <> 'committed';
 
--- 4. Once the data conforms, tighten the entity_type CHECK to the canonical four.
---    Guarded so it only fires when the old (legacy-permitting) constraint is still in
---    place AND no row would violate the tighter rule (e.g. a committed student_note).
+-- 4. Drop the legacy entity_type CHECK constraint left under its ORIGINAL name.
+--    The first version of this feature named it import_candidates_entity_type_chk;
+--    a later commit renamed it to ..._entity_type_check in CREATE TABLE, but
+--    CREATE TABLE IF NOT EXISTS never recreates an existing table, so databases
+--    provisioned before the rename kept the _chk constraint — which predates the
+--    'customer' type and was raising 23514 on customer inserts. Drop it by its
+--    known name (no-op via IF EXISTS on fresh or already-fixed databases).
+ALTER TABLE public.import_candidates
+  DROP CONSTRAINT IF EXISTS import_candidates_entity_type_chk;
+
+-- Ensure the canonical entity_type CHECK exists. Only adds it when no entity_type
+-- CHECK remains (so we never stack a second one) AND the data already conforms (so
+-- the ADD validates cleanly). Idempotent: a no-op once the canonical one is present.
 DO $$
 BEGIN
-  IF EXISTS (
+  IF NOT EXISTS (
     SELECT 1 FROM pg_constraint
-     WHERE conname = 'import_candidates_entity_type_check'
-       AND conrelid = 'public.import_candidates'::regclass
-       AND pg_get_constraintdef(oid) LIKE '%active_student%'
+     WHERE conrelid = 'public.import_candidates'::regclass
+       AND contype = 'c'
+       AND pg_get_constraintdef(oid) LIKE '%entity_type%'
   )
   AND NOT EXISTS (
     SELECT 1 FROM public.import_candidates
      WHERE entity_type NOT IN ('customer', 'guardian', 'guardian_link', 'service')
   ) THEN
-    ALTER TABLE public.import_candidates DROP CONSTRAINT import_candidates_entity_type_check;
     ALTER TABLE public.import_candidates
       ADD CONSTRAINT import_candidates_entity_type_check CHECK (
         entity_type IN ('customer', 'guardian', 'guardian_link', 'service')

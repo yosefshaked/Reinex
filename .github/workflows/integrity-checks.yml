@@ -118,6 +118,23 @@ jobs:
             status_line="One or more integrity checks failed."
           fi
 
+          # Embed a log file in a collapsible. Uses a ~~~ fence (immune to backtick
+          # runs in tool output — e.g. TS template-literal types — which otherwise
+          # close the code block early and swallow the rest of the comment) and
+          # strips ANSI colour codes for clean rendering.
+          emit_log_details() {
+            echo "<details><summary>$1</summary>"
+            echo
+            echo '~~~text'
+            if [ -f "$2" ]; then
+              tail -n 200 "$2" | sed -E 's/\x1B\[[0-9;]*[A-Za-z]//g'
+            fi
+            echo '~~~'
+            echo
+            echo "</details>"
+            echo
+          }
+
           {
             echo "<!-- pr-health-integrity:start -->"
             echo "<!-- integrity-meta api=${api_status} sql=${sql_status} apiResponses=${api_responses_status} upsert=${upsert_status} types=${types_count} overall=${overall_status} sha=${short_sha} -->"
@@ -141,54 +158,12 @@ jobs:
             echo "| Error tracking (warn-only) | see output |"
             echo "| Frontend type-check (warn-only) | ${types_label} |"
             echo
-            echo "<details><summary>API lint output</summary>"
-            echo
-            echo '```text'
-            tail -n 200 api-lint.log
-            echo '```'
-            echo
-            echo "</details>"
-            echo
-            echo "<details><summary>SQL lint output</summary>"
-            echo
-            echo '```text'
-            tail -n 200 sql-lint.log
-            echo '```'
-            echo
-            echo "</details>"
-            echo
-            echo "<details><summary>API response contracts output</summary>"
-            echo
-            echo '```text'
-            tail -n 200 api-responses-lint.log
-            echo '```'
-            echo
-            echo "</details>"
-            echo
-            echo "<details><summary>Upsert conflicts output</summary>"
-            echo
-            echo '```text'
-            tail -n 200 upsert-lint.log
-            echo '```'
-            echo
-            echo "</details>"
-            echo
-            echo "<details><summary>Error tracking output (warn-only)</summary>"
-            echo
-            echo '```text'
-            tail -n 200 error-tracking-lint.log
-            echo '```'
-            echo
-            echo "</details>"
-            echo
-            echo "<details><summary>Frontend type-check output (warn-only)</summary>"
-            echo
-            echo '```text'
-            tail -n 200 types-lint.log
-            echo '```'
-            echo
-            echo "</details>"
-            echo
+            emit_log_details "API lint output" api-lint.log
+            emit_log_details "SQL lint output" sql-lint.log
+            emit_log_details "API response contracts output" api-responses-lint.log
+            emit_log_details "Upsert conflicts output" upsert-lint.log
+            emit_log_details "Error tracking output (warn-only)" error-tracking-lint.log
+            emit_log_details "Frontend type-check output (warn-only)" types-lint.log
             echo "<!-- pr-health-integrity:end -->"
           } > integrity-report.md
 
