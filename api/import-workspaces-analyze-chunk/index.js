@@ -94,7 +94,7 @@ function issueMessage(issue) {
     case 'duplicate_email':
       return 'קיימת כבר רשומה עם אותו אימייל. בדוק/י אם מדובר באותו אדם.';
     case 'missing_contact_path':
-      return 'לתלמיד/ה פעיל/ה חייב להיות לפחות טלפון או אימייל כדי שלא תיווצר רשומה בלי דרך יצירת קשר.';
+      return 'לתלמיד/ה חייב להיות טלפון תקין בתלמיד/ה או באפוטרופוס מקושר.';
     case 'source_join_not_found':
       return `לא נמצאה רשומה תואמת במקור הנוסף עבור ${label}. בדוק/י את עמודות הקישור שנבחרו.`;
     case 'ambiguous_source_join':
@@ -235,7 +235,7 @@ function normalizeCandidateData(mapped, entityType) {
       if (!guardianEmailResult.valid) {
         fieldIssues.push({ code: 'invalid_field_format', severity: 'warning', field: 'guardian_email' });
       }
-      data.guardian_email = guardianEmailResult.valid ? guardianEmailResult.value : null;
+      data.guardian_email = guardianEmailResult.valid ? guardianEmailResult.value : data.guardian_email;
     }
   }
 
@@ -256,14 +256,20 @@ function normalizeCandidateData(mapped, entityType) {
   const lastName = coerceOptionalText(data.last_name);
   data.last_name = lastName.value;
 
-  // Identity number
+  // Identity number — kept raw when invalid (a blocker, so it can't commit until
+  // fixed) so the bad value is visible and editable in review.
   if (data.identity_number !== null && data.identity_number !== undefined) {
     const idResult = coerceIdentityNumber(data.identity_number);
     if (idResult.provided && !idResult.valid) {
       fieldIssues.push({ code: 'invalid_field_format', severity: 'blocker', field: 'identity_number' });
     }
-    data.identity_number = idResult.valid ? idResult.value : null;
+    data.identity_number = idResult.valid ? idResult.value : data.identity_number;
   }
+
+  // For format-validated fields we KEEP the raw value when it fails validation
+  // (normalizing only when valid), so a bad value stays visible and editable in
+  // review instead of silently vanishing. The warning/blocker still fires, and the
+  // commit engine re-cleans optional fields before writing to the live tables.
 
   // Phone
   if (data.phone !== null && data.phone !== undefined) {
@@ -271,7 +277,7 @@ function normalizeCandidateData(mapped, entityType) {
     if (!phoneResult.valid && data.phone !== '') {
       fieldIssues.push({ code: 'invalid_field_format', severity: 'warning', field: 'phone' });
     }
-    data.phone = phoneResult.valid ? phoneResult.value : null;
+    data.phone = phoneResult.valid ? phoneResult.value : data.phone;
   }
 
   if (data.guardian_phone !== null && data.guardian_phone !== undefined) {
@@ -279,7 +285,7 @@ function normalizeCandidateData(mapped, entityType) {
     if (!phoneResult.valid && data.guardian_phone !== '') {
       fieldIssues.push({ code: 'invalid_field_format', severity: 'warning', field: 'guardian_phone' });
     }
-    data.guardian_phone = phoneResult.valid ? phoneResult.value : null;
+    data.guardian_phone = phoneResult.valid ? phoneResult.value : data.guardian_phone;
   }
 
   // Email
@@ -288,7 +294,7 @@ function normalizeCandidateData(mapped, entityType) {
     if (!emailResult.valid) {
       fieldIssues.push({ code: 'invalid_field_format', severity: 'warning', field: 'email' });
     }
-    data.email = emailResult.valid ? emailResult.value : null;
+    data.email = emailResult.valid ? emailResult.value : data.email;
   }
 
   // Date of birth
@@ -297,7 +303,7 @@ function normalizeCandidateData(mapped, entityType) {
     if (dateResult.provided && !dateResult.valid) {
       fieldIssues.push({ code: 'invalid_field_format', severity: 'warning', field: 'date_of_birth' });
     }
-    data.date_of_birth = dateResult.value;
+    data.date_of_birth = dateResult.valid ? dateResult.value : data.date_of_birth;
   }
 
   // Service name coercion
@@ -353,7 +359,34 @@ function normalizeCandidateData(mapped, entityType) {
 }
 
 // Generate structural issues (missing required fields, missing recommended fields).
-function generateStructuralIssues(candidateData, entityType) {
+function hasValidPhone(value) {
+  return Boolean(validateIsraeliPhone(value).value);
+}
+
+function buildGuardianPhoneContext(normalizedCandidates) {
+  const rowsWithGuardianPhone = new Set();
+  const identitiesWithGuardianPhone = new Set();
+
+  for (const item of normalizedCandidates || []) {
+    if (!hasValidPhone(item?.candidateData?.guardian_phone)) continue;
+    if (item.rowId) rowsWithGuardianPhone.add(item.rowId);
+
+    const identityNumber = normalizeString(item?.candidateData?.identity_number);
+    if (identityNumber) identitiesWithGuardianPhone.add(identityNumber);
+  }
+
+  return { rowsWithGuardianPhone, identitiesWithGuardianPhone };
+}
+
+function hasRelatedGuardianPhone(candidateData, rowId, guardianPhoneContext) {
+  if (!guardianPhoneContext) return false;
+  if (rowId && guardianPhoneContext.rowsWithGuardianPhone?.has(rowId)) return true;
+
+  const identityNumber = normalizeString(candidateData?.identity_number);
+  return Boolean(identityNumber && guardianPhoneContext.identitiesWithGuardianPhone?.has(identityNumber));
+}
+
+function generateStructuralIssues(candidateData, entityType, options = {}) {
   const schema = ENTITY_SCHEMA[entityType];
   if (!schema) return [];
   const issues = [];
@@ -371,8 +404,15 @@ function generateStructuralIssues(candidateData, entityType) {
     }
   }
   const isStudentEntity = entityType === 'customer' && candidateData.customer_type === 'student';
-  if (isStudentEntity && !candidateData.phone && !candidateData.email) {
-    issues.push({ code: 'missing_contact_path', severity: 'blocker', field: 'phone' });
+  if (isStudentEntity) {
+    // Require a valid phone on the student profile or a related guardian path.
+    // Guardians and students are separate candidates, so this checks sibling
+    // guardian/guardian_link rows by source row and student identity.
+    const hasStudentPhone = hasValidPhone(candidateData.phone);
+    const hasGuardianPhone = hasRelatedGuardianPhone(candidateData, options.rowId, options.guardianPhoneContext);
+    if (!hasStudentPhone && !hasGuardianPhone) {
+      issues.push({ code: 'missing_contact_path', severity: 'blocker', field: 'phone' });
+    }
   }
   return issues;
 }
@@ -734,10 +774,22 @@ export default async function importWorkspacesAnalyzeChunk(context, req) {
 
   // --- Build candidates ---
   const now = new Date().toISOString();
+  const guardianPhoneContext = buildGuardianPhoneContext(normalized);
+
   const candidates = normalized.map(({ rowId, entityType, candidateData, fieldIssues, mergedRowIds }) => {
     const existingDecisions = existingDecisionsByKey.get(`${rowId}:${entityType}`) || {};
     const hasResolvedDuplicateDecision = hasResolvedDuplicateIdentityDecision(existingDecisions);
-    const issues = [...fieldIssues, ...generateStructuralIssues(candidateData, entityType)];
+    const issues = [
+      ...fieldIssues,
+      ...generateStructuralIssues(candidateData, entityType, { rowId, guardianPhoneContext }),
+    ];
+
+    // A required field that is present but invalid must block (not merely warn):
+    // we keep the raw value for editing, but an unusable required value can't commit.
+    const requiredFields = new Set(ENTITY_SCHEMA[entityType]?.blockers || []);
+    for (const iss of issues) {
+      if (iss.code === 'invalid_field_format' && requiredFields.has(iss.field)) iss.severity = 'blocker';
+    }
 
     if (entityType === 'customer' && candidateData.note_text && candidateData.customer_type !== 'student') {
       issues.push({ code: 'note_requires_student', severity: 'warning', field: 'note_text' });

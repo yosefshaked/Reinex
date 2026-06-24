@@ -34,7 +34,7 @@ import {
   upsertClientGuardianLink,
   findClientProfileByIdentityNumber,
 } from '../_shared/client-profiles.js';
-import { validateIsraeliPhone } from '../_shared/student-validation.js';
+import { validateIsraeliPhone, coerceEmail, coerceOptionalDate } from '../_shared/student-validation.js';
 import { attachErrorTracking, respondTracked } from '../_shared/error-events.js';
 import { mergeMetadata } from '../_shared/metadata-utils.js';
 
@@ -85,6 +85,19 @@ async function commitCustomer(supabase, orgId, candidate) {
 
   const isActive = data?.is_active !== false;
 
+  // Optional contact fields are kept raw in candidate_data so a bad value stays
+  // visible/editable in review. Re-clean them here before writing: a still-invalid
+  // optional value is dropped (null) rather than written to the live table or
+  // causing createOrReuseClientProfile's payload validation to reject the whole
+  // record. Required fields (names, identity_number) are blocker-validated, so they
+  // are already valid by the time a candidate is committable.
+  const cleanPhone = validateIsraeliPhone(data.phone);
+  const cleanEmail = coerceEmail(data.email);
+  const cleanDob = coerceOptionalDate(data.date_of_birth);
+  const phone = cleanPhone.valid ? cleanPhone.value : null;
+  const email = cleanEmail.valid ? cleanEmail.value : null;
+  const dateOfBirth = cleanDob.valid ? cleanDob.value : null;
+
   let clientProfileId;
   let profileLedgerAction;
 
@@ -103,9 +116,9 @@ async function commitCustomer(supabase, orgId, candidate) {
     // Fill-empty — only populate blank fields; is_active and customer_type are intentionally
     // NOT updated on linked profiles until a future "prefer file" option is added
     const safeUpdates = {};
-    if (!profile.phone && data.phone) safeUpdates.phone = data.phone;
-    if (!profile.email && data.email) safeUpdates.email = data.email;
-    if (!profile.date_of_birth && data.date_of_birth) safeUpdates.date_of_birth = data.date_of_birth;
+    if (!profile.phone && phone) safeUpdates.phone = phone;
+    if (!profile.email && email) safeUpdates.email = email;
+    if (!profile.date_of_birth && dateOfBirth) safeUpdates.date_of_birth = dateOfBirth;
 
     if (Object.keys(safeUpdates).length) {
       safeUpdates.updated_at = new Date().toISOString();
@@ -127,9 +140,9 @@ async function commitCustomer(supabase, orgId, candidate) {
       first_name: data.first_name,
       last_name: data.last_name,
       identity_number: data.identity_number,
-      phone: data.phone,
-      email: data.email,
-      date_of_birth: data.date_of_birth,
+      phone,
+      email,
+      date_of_birth: dateOfBirth,
       is_active: isActive,
     });
     clientProfileId = result.clientProfileId;

@@ -72,6 +72,10 @@ function countBlockingIssues(issues) {
   return (Array.isArray(issues) ? issues : []).filter((issue) => issue?.severity === 'blocker').length;
 }
 
+function hasValidPhone(value) {
+  return Boolean(validateIsraeliPhone(value).value);
+}
+
 // DB duplicate (duplicate_identity_number) is resolved only by skipping or linking
 // to the existing record — never by create_as_new (see decision #4).
 function shouldClearDuplicateIdentityIssue(decisionsPatch) {
@@ -164,21 +168,23 @@ function normalizeCandidateDataPatch(entityType, existingData, patch) {
       normalizedValue = result.value;
       valid = result.valid;
     } else if (field === 'identity_number') {
+      // Keep the raw value when invalid so it stays visible/editable (the
+      // invalid-format blocker prevents commit until it is corrected).
       const result = coerceIdentityNumber(rawValue);
-      normalizedValue = result.valid ? result.value : null;
+      normalizedValue = result.valid ? result.value : rawValue;
       valid = result.valid;
       invalidSeverity = 'blocker';
     } else if (['phone', 'guardian_phone'].includes(field)) {
       const result = validateIsraeliPhone(rawValue);
-      normalizedValue = result.valid ? result.value : null;
+      normalizedValue = result.valid ? result.value : rawValue;
       valid = result.valid;
     } else if (['email', 'guardian_email'].includes(field)) {
       const result = coerceEmail(rawValue);
-      normalizedValue = result.valid ? result.value : null;
+      normalizedValue = result.valid ? result.value : rawValue;
       valid = result.valid;
     } else if (field === 'date_of_birth') {
       const result = coerceOptionalDate(rawValue);
-      normalizedValue = result.valid ? result.value : null;
+      normalizedValue = result.valid ? result.value : rawValue;
       valid = result.valid;
     } else if (field === 'customer_type') {
       const ct = normalizeString(String(rawValue ?? '')).toLowerCase().replace(/\s+/g, '_');
@@ -222,7 +228,7 @@ function normalizeCandidateDataPatch(entityType, existingData, patch) {
   return { nextData, fieldIssues, changedFields };
 }
 
-function generateStructuralIssues(candidateData, entityType) {
+function generateStructuralIssues(candidateData, entityType, options = {}) {
   const requiredFields = REQUIRED_FIELDS_BY_ENTITY[entityType] || [];
   const issues = [];
   for (const field of requiredFields) {
@@ -232,10 +238,101 @@ function generateStructuralIssues(candidateData, entityType) {
     }
   }
   const isStudentEntity = entityType === 'customer' && candidateData?.customer_type === 'student';
-  if (isStudentEntity && !candidateData?.phone && !candidateData?.email) {
-    issues.push(issue('missing_contact_path', 'blocker', 'phone'));
+  if (isStudentEntity) {
+    // Require a valid phone on the student profile or a related guardian path.
+    const hasStudentPhone = hasValidPhone(candidateData?.phone);
+    if (!hasStudentPhone && !options.hasRelatedGuardianPhone) {
+      issues.push(issue('missing_contact_path', 'blocker', 'phone'));
+    }
   }
   return issues;
+}
+
+function isRelatedGuardianPhoneCandidate(customerContext, guardianCandidate) {
+  if (!guardianCandidate || normalizeString(guardianCandidate.status) === 'skipped') return false;
+  if (!hasValidPhone(guardianCandidate.candidate_data?.guardian_phone)) return false;
+  if (customerContext.sourceRowId && guardianCandidate.source_row_id === customerContext.sourceRowId) return true;
+  return Boolean(
+    customerContext.identityNumber
+    && normalizeString(guardianCandidate.candidate_data?.identity_number) === customerContext.identityNumber
+  );
+}
+
+async function hasRelatedGuardianPhoneForCustomer(supabase, orgId, { workspaceId, candidateId, sourceRowId, candidateData, extraGuardianCandidate = null }) {
+  const identityNumber = normalizeString(candidateData?.identity_number);
+  const customerContext = { sourceRowId, identityNumber };
+  if (isRelatedGuardianPhoneCandidate(customerContext, extraGuardianCandidate)) return true;
+
+  const { data, error } = await withOrgScope(supabase, 'import_candidates', orgId)
+    .select('id, source_row_id, entity_type, candidate_data, status')
+    .eq('workspace_id', workspaceId)
+    .in('entity_type', ['guardian', 'guardian_link']);
+  if (error) throw error;
+
+  return (data || []).some((candidate) => {
+    if (candidate.id === candidateId || normalizeString(candidate.status) === 'skipped') return false;
+    return isRelatedGuardianPhoneCandidate(customerContext, candidate);
+  });
+}
+
+async function recomputeCustomerContactIssue(supabase, orgId, customerCandidate, options = {}) {
+  const data = customerCandidate?.candidate_data || {};
+  const existingIssues = Array.isArray(customerCandidate?.issues) ? customerCandidate.issues : [];
+  const withoutContactIssue = existingIssues.filter((item) => item?.code !== 'missing_contact_path');
+  const hasRelatedGuardianPhone = await hasRelatedGuardianPhoneForCustomer(supabase, orgId, {
+    workspaceId: customerCandidate.workspace_id,
+    candidateId: customerCandidate.id,
+    sourceRowId: customerCandidate.source_row_id,
+    candidateData: data,
+    extraGuardianCandidate: options.extraGuardianCandidate || null,
+  });
+
+  const shouldBlockForContact = data.customer_type === 'student'
+    && !hasValidPhone(data.phone)
+    && !hasRelatedGuardianPhone;
+  const nextIssues = shouldBlockForContact
+    ? [...withoutContactIssue, issue('missing_contact_path', 'blocker', 'phone')]
+    : withoutContactIssue;
+  const blockingCount = countBlockingIssues(nextIssues);
+
+  const updates = {
+    issues: nextIssues,
+    blocking_issues_count: blockingCount,
+    updated_at: new Date().toISOString(),
+  };
+  if (!['committed', 'skipped'].includes(normalizeString(customerCandidate.status))) {
+    updates.status = blockingCount > 0 ? 'blocked' : 'ready';
+  }
+
+  const { error } = await withOrgScope(supabase, 'import_candidates', orgId)
+    .update(updates)
+    .eq('id', customerCandidate.id);
+  if (error) throw error;
+}
+
+async function refreshRelatedCustomerContactIssues(supabase, orgId, guardianCandidate) {
+  const identityNumber = normalizeString(guardianCandidate?.candidate_data?.identity_number);
+  const query = withOrgScope(supabase, 'import_candidates', orgId)
+    .select('id, workspace_id, source_row_id, entity_type, status, candidate_data, issues')
+    .eq('workspace_id', guardianCandidate.workspace_id)
+    .eq('entity_type', 'customer');
+
+  const { data, error } = await query;
+  if (error) throw error;
+
+  const relatedCustomers = (data || []).filter((candidate) => (
+    candidate.source_row_id === guardianCandidate.source_row_id
+    || (
+      identityNumber
+      && normalizeString(candidate.candidate_data?.identity_number) === identityNumber
+    )
+  ));
+
+  for (const customerCandidate of relatedCustomers) {
+    await recomputeCustomerContactIssue(supabase, orgId, customerCandidate, {
+      extraGuardianCandidate: guardianCandidate,
+    });
+  }
 }
 
 async function generateDuplicateIssues(supabase, orgId, candidateData, decisions, { workspaceId, candidateId, entityType } = {}) {
@@ -502,17 +599,62 @@ export default async function importCandidates(context, req) {
         });
       }
 
+      let hasRelatedGuardianPhone = false;
+      if (existing.entity_type === 'customer' && nextData.customer_type === 'student') {
+        try {
+          hasRelatedGuardianPhone = await hasRelatedGuardianPhoneForCustomer(supabase, orgId, {
+            workspaceId: existing.workspace_id,
+            candidateId: existing.id,
+            sourceRowId: existing.source_row_id,
+            candidateData: nextData,
+          });
+        } catch (err) {
+          context.log?.error?.('import-candidates: guardian contact validation after edit failed', { message: err?.message });
+          return respondCandidatesError(context, 500, 'failed_to_validate_candidate_edit', err, {
+            action: 'validate_guardian_contact_path',
+            candidateId,
+          });
+        }
+      }
+
       const nextIssues = [
         ...fieldIssues,
-        ...generateStructuralIssues(nextData, existing.entity_type),
+        ...generateStructuralIssues(nextData, existing.entity_type, { hasRelatedGuardianPhone }),
         ...duplicateIssues,
       ];
+      // A required field that is present but invalid must block (we keep the raw
+      // value for editing, but an unusable required value can't commit).
+      const requiredFields = new Set(REQUIRED_FIELDS_BY_ENTITY[existing.entity_type] || []);
+      for (const iss of nextIssues) {
+        if (iss.code === 'invalid_field_format' && requiredFields.has(iss.field)) {
+          iss.severity = 'blocker';
+          iss.is_blocking = true;
+        }
+      }
       const blockingCount = countBlockingIssues(nextIssues);
       updates.candidate_data = nextData;
       updates.decisions = nextDecisions;
       updates.issues = nextIssues;
       updates.blocking_issues_count = blockingCount;
       updates.status = blockingCount > 0 ? 'blocked' : 'ready';
+
+      if (
+        ['guardian', 'guardian_link'].includes(existing.entity_type)
+        && Object.prototype.hasOwnProperty.call(body.candidate_data_patch, 'guardian_phone')
+      ) {
+        try {
+          await refreshRelatedCustomerContactIssues(supabase, orgId, {
+            ...existing,
+            candidate_data: nextData,
+          });
+        } catch (err) {
+          context.log?.error?.('import-candidates: related customer contact refresh failed', { message: err?.message });
+          return respondCandidatesError(context, 500, 'failed_to_validate_candidate_edit', err, {
+            action: 'refresh_related_customer_contact_issues',
+            candidateId,
+          });
+        }
+      }
     }
 
     // Status update — validate against allowed values
