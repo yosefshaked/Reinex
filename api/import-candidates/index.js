@@ -194,11 +194,17 @@ async function loadImportRowsForCandidates(supabase, orgId, candidates) {
     ...(Array.isArray(candidate.merged_from_row_ids) ? candidate.merged_from_row_ids : []),
   ]).filter(Boolean))];
   if (rowIds.length === 0) return new Map();
-  const { data, error } = await withOrgScope(supabase, 'import_rows', orgId)
-    .select('id, source_reference, raw_data')
-    .in('id', rowIds);
-  if (error) throw error;
-  return new Map((data || []).map((row) => [row.id, row]));
+  const rows = [];
+  const chunkSize = 100;
+  for (let index = 0; index < rowIds.length; index += chunkSize) {
+    const chunk = rowIds.slice(index, index + chunkSize);
+    const { data, error } = await withOrgScope(supabase, 'import_rows', orgId)
+      .select('id, source_reference, raw_data')
+      .in('id', chunk);
+    if (error) throw error;
+    rows.push(...(data || []));
+  }
+  return new Map(rows.map((row) => [row.id, row]));
 }
 
 function normalizeRelatedCandidate(candidate) {
