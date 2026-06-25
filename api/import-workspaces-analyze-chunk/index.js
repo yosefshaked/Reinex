@@ -439,6 +439,21 @@ function normalizeUuid(value) {
   return UUID_PATTERN.test(normalized) ? normalized : '';
 }
 
+function buildImportKey(entityType, rowId, candidateData = {}, join = {}) {
+  if (entityType === 'guardian_link') {
+    const identity = normalizeString(candidateData.identity_number);
+    const guardianContact = normalizeString(candidateData.guardian_phone || candidateData.guardian_email);
+    const joinValue = Object.values(join.values || {}).map(normalizeString).filter(Boolean)[0] || '';
+    return [
+      'guardian_link',
+      identity || 'missing_identity',
+      guardianContact || 'missing_guardian',
+      joinValue || rowId,
+    ].join(':');
+  }
+  return `${entityType}:${rowId}`;
+}
+
 function hasResolvedDuplicateIdentityDecision(decisions) {
   const action = normalizeString(decisions?.action);
   if (action === 'skip') return true;
@@ -611,7 +626,7 @@ export default async function importWorkspacesAnalyzeChunk(context, req) {
 
   const rowIds = rows.map((row) => row.id);
   const { data: existingCandidates, error: existingCandidatesErr } = await withOrgScope(supabase, 'import_candidates', orgId)
-    .select('id, source_row_id, entity_type, decisions, status')
+    .select('id, source_row_id, entity_type, import_key, decisions, status')
     .eq('workspace_id', workspaceId)
     .in('source_row_id', rowIds);
 
@@ -641,19 +656,16 @@ export default async function importWorkspacesAnalyzeChunk(context, req) {
     }
   }
 
-  const existingDecisionsByKey = new Map(
-    (existingCandidates || []).map((candidate) => [
-      `${candidate.source_row_id}:${candidate.entity_type}`,
-      candidate.decisions && typeof candidate.decisions === 'object' ? candidate.decisions : {},
-    ]),
-  );
-
-  const existingStatusByKey = new Map(
-    (existingCandidates || []).map((candidate) => [
-      `${candidate.source_row_id}:${candidate.entity_type}`,
-      normalizeString(candidate.status),
-    ]),
-  );
+  const existingDecisionsByKey = new Map();
+  const existingStatusByKey = new Map();
+  for (const candidate of existingCandidates || []) {
+    const legacyKey = `${candidate.source_row_id}:${candidate.entity_type}`;
+    const importKey = normalizeString(candidate.import_key) || legacyKey;
+    existingDecisionsByKey.set(importKey, candidate.decisions && typeof candidate.decisions === 'object' ? candidate.decisions : {});
+    existingStatusByKey.set(importKey, normalizeString(candidate.status));
+    existingDecisionsByKey.set(legacyKey, candidate.decisions && typeof candidate.decisions === 'object' ? candidate.decisions : {});
+    existingStatusByKey.set(legacyKey, normalizeString(candidate.status));
+  }
   const preservedStatuses = new Set(['committed', 'skipped']);
 
   const indexesByEntity = new Map();
@@ -676,36 +688,52 @@ export default async function importWorkspacesAnalyzeChunk(context, req) {
   }
 
   // Every enabled section can emit its own candidate from the same source row.
+  // guardian_link may fan out into several candidates when one row maps to
+  // multiple real student-parent links through the configured join key.
   const normalized = rows.flatMap((row) => configuredEntities.flatMap((mapping) => {
-    const candidateKey = `${row.id}:${mapping.entityType}`;
-    if (preservedStatuses.has(existingStatusByKey.get(candidateKey))) return [];
-    const { mapped, mergedRowIds, joinIssues, join } = applyMappings(
+    const mappingResult = applyMappings(
       row.raw_data || {},
       mapping.field_map || {},
       sourceReference,
       joinColumns,
       indexesByEntity.get(mapping.entityType) || new Map(),
+      { allowFanOut: mapping.entityType === 'guardian_link' },
     );
-    for (const [field, fixedValue] of Object.entries(mapping.fixed_values || {})) {
-      if (mapped[field] === null || mapped[field] === undefined || mapped[field] === '') mapped[field] = fixedValue;
-    }
-    const { data: candidateData, fieldIssues } = normalizeCandidateData(mapped, mapping.entityType);
-    if (join && Object.keys(join.values || {}).length > 0) {
-      candidateData.__import = {
-        ...(candidateData.__import || {}),
-        join,
-      };
-    }
-    return [{
-      rowId: row.id,
-      rowIndex: row.row_index,
-      entityType: mapping.entityType,
-      candidateData,
-      fieldIssues: [...fieldIssues, ...joinIssues],
-      mergedRowIds,
-    }];
+    const variants = Array.isArray(mappingResult.mappedVariants) && mappingResult.mappedVariants.length > 0
+      ? mappingResult.mappedVariants
+      : [{
+        mapped: mappingResult.mapped,
+        mergedRowIds: mappingResult.mergedRowIds,
+        join: mappingResult.join,
+      }];
+
+    return variants.flatMap((variant) => {
+      const mapped = { ...(variant.mapped || {}) };
+      for (const [field, fixedValue] of Object.entries(mapping.fixed_values || {})) {
+        if (mapped[field] === null || mapped[field] === undefined || mapped[field] === '') mapped[field] = fixedValue;
+      }
+      const { data: candidateData, fieldIssues } = normalizeCandidateData(mapped, mapping.entityType);
+      if (variant.join && Object.keys(variant.join.values || {}).length > 0) {
+        candidateData.__import = {
+          ...(candidateData.__import || {}),
+          join: variant.join,
+        };
+      }
+      const importKey = buildImportKey(mapping.entityType, row.id, candidateData, variant.join);
+      const legacyKey = `${row.id}:${mapping.entityType}`;
+      if (preservedStatuses.has(existingStatusByKey.get(importKey) || existingStatusByKey.get(legacyKey))) return [];
+      return [{
+        rowId: row.id,
+        rowIndex: row.row_index,
+        entityType: mapping.entityType,
+        importKey,
+        candidateData,
+        fieldIssues: [...fieldIssues, ...(mappingResult.joinIssues || [])],
+        mergedRowIds: variant.mergedRowIds || [],
+      }];
+    });
   }));
-  const candidatesPreserved = (rows.length * configuredEntities.length) - normalized.length;
+  const candidatesPreserved = Math.max(0, (rows.length * configuredEntities.length) - normalized.length);
 
   // --- Bulk duplicate detection (Performance: single query per field type) ---
   const customerCandidates = normalized.filter((item) => item.entityType === 'customer');
@@ -831,8 +859,8 @@ export default async function importWorkspacesAnalyzeChunk(context, req) {
   const now = new Date().toISOString();
   const guardianPhoneContext = buildGuardianPhoneContext(normalized);
 
-  const candidates = normalized.map(({ rowId, entityType, candidateData, fieldIssues, mergedRowIds }) => {
-    const existingDecisions = existingDecisionsByKey.get(`${rowId}:${entityType}`) || {};
+  const candidates = normalized.map(({ rowId, entityType, importKey, candidateData, fieldIssues, mergedRowIds }) => {
+    const existingDecisions = existingDecisionsByKey.get(importKey) || existingDecisionsByKey.get(`${rowId}:${entityType}`) || {};
     const hasResolvedDuplicateDecision = hasResolvedDuplicateIdentityDecision(existingDecisions);
     const issues = [
       ...fieldIssues,
@@ -909,6 +937,7 @@ export default async function importWorkspacesAnalyzeChunk(context, req) {
       org_id: orgId,
       workspace_id: workspaceId,
       source_row_id: rowId,
+      import_key: importKey,
       entity_type: entityType,
       status,
       candidate_data: candidateData,
@@ -924,7 +953,7 @@ export default async function importWorkspacesAnalyzeChunk(context, req) {
   if (candidates.length > 0) {
     // --- Upsert candidates (idempotent per source row and entity section) ---
     const { data, error: upsertErr } = await withOrgScope(supabase, 'import_candidates', orgId)
-      .upsert(candidates, { onConflict: 'workspace_id,source_row_id,entity_type' })
+      .upsert(candidates, { onConflict: 'workspace_id,entity_type,import_key' })
       .select('id');
 
     if (upsertErr) {

@@ -221,6 +221,26 @@ export async function patchCandidate(candidateId, patch) {
 }
 
 /**
+ * Create or reuse a guardian_link import candidate between an imported
+ * customer candidate and guardian candidate.
+ *
+ * @param {string} workspaceId
+ * @param {{ customerCandidateId: string, guardianCandidateId: string }} data
+ * @returns {Promise<{ candidate: object }>}
+ */
+export async function createRelationCandidate(workspaceId, { customerCandidateId, guardianCandidateId }) {
+  return authenticatedFetch('/api/import-candidates', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      workspace_id: workspaceId,
+      customer_candidate_id: customerCandidateId,
+      guardian_candidate_id: guardianCandidateId,
+    }),
+  });
+}
+
+/**
  * Search existing client profiles to link an import candidate to.
  *
  * Pass `identityNumber` for the exact-identity auto-lookup, or `query` for a

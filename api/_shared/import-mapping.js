@@ -113,10 +113,11 @@ export function getExternalSourceReferences(mapping = {}, anchorSourceReference 
     .filter((sourceReference) => sourceReference !== anchorSourceReference);
 }
 
-export function applyMappings(rawData, fieldMap, anchorSourceReference, joinColumns, externalRowsBySourceAndKey) {
+export function applyMappings(rawData, fieldMap, anchorSourceReference, joinColumns, externalRowsBySourceAndKey, options = {}) {
   const out = {};
   const mergedRowIds = [];
   const joinIssues = [];
+  const fanOutBySource = new Map();
   const join = {
     columns: {},
     values: {},
@@ -156,6 +157,16 @@ export function applyMappings(rawData, fieldMap, anchorSourceReference, joinColu
       mergedRowIds.push(matches[0].id);
       const externalJoinValue = normalizeJoinValue(matches[0].raw_data?.[externalJoinColumn]);
       if (externalJoinValue) join.values[source.sourceReference] = externalJoinValue;
+    } else if (matches.length > 1 && options.allowFanOut) {
+      out[canonicalField] = null;
+      const fanOut = fanOutBySource.get(source.sourceReference) || {
+        sourceReference: source.sourceReference,
+        joinColumn: externalJoinColumn,
+        matches,
+        fields: [],
+      };
+      fanOut.fields.push({ canonicalField, column: source.column });
+      fanOutBySource.set(source.sourceReference, fanOut);
     } else {
       out[canonicalField] = null;
       joinIssues.push({
@@ -166,5 +177,39 @@ export function applyMappings(rawData, fieldMap, anchorSourceReference, joinColu
       });
     }
   }
-  return { mapped: out, mergedRowIds: [...new Set(mergedRowIds)], joinIssues, join };
+  const fanOutSources = [...fanOutBySource.values()];
+  if (fanOutSources.length === 1) {
+    const fanOut = fanOutSources[0];
+    const mappedVariants = fanOut.matches.map((match) => {
+      const nextMapped = { ...out };
+      for (const field of fanOut.fields) {
+        nextMapped[field.canonicalField] = match.raw_data?.[field.column] ?? null;
+      }
+      const nextJoin = {
+        columns: { ...join.columns },
+        values: { ...join.values },
+      };
+      const externalJoinValue = normalizeJoinValue(match.raw_data?.[fanOut.joinColumn]);
+      if (externalJoinValue) nextJoin.values[fanOut.sourceReference] = externalJoinValue;
+      return {
+        mapped: nextMapped,
+        mergedRowIds: [...new Set([...mergedRowIds, match.id])],
+        join: nextJoin,
+      };
+    });
+    return { mapped: out, mappedVariants, mergedRowIds: [...new Set(mergedRowIds)], joinIssues, join };
+  }
+  if (fanOutSources.length > 1) {
+    for (const fanOut of fanOutSources) {
+      for (const field of fanOut.fields) {
+        joinIssues.push({
+          code: 'ambiguous_source_join',
+          severity: 'blocker',
+          field: field.canonicalField,
+          source_reference: fanOut.sourceReference,
+        });
+      }
+    }
+  }
+  return { mapped: out, mappedVariants: null, mergedRowIds: [...new Set(mergedRowIds)], joinIssues, join };
 }

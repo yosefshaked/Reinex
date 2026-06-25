@@ -6407,11 +6407,27 @@ CREATE INDEX IF NOT EXISTS import_candidates_dependency_idx
 ALTER TABLE public.import_candidates
   ADD COLUMN IF NOT EXISTS source_row_id uuid REFERENCES public.import_rows(id) ON DELETE CASCADE;
 
+-- Stable import identity for candidates. Guardian links may need multiple
+-- candidates from the same source row, so source_row_id alone is not enough.
+ALTER TABLE public.import_candidates
+  ADD COLUMN IF NOT EXISTS import_key text;
+
+UPDATE public.import_candidates
+   SET import_key = entity_type || ':' || source_row_id::text
+ WHERE import_key IS NULL OR import_key = '';
+
+ALTER TABLE public.import_candidates
+  ALTER COLUMN import_key SET NOT NULL;
+
 -- One source row may produce several entity candidates (customer, guardian,
 -- guardian_link, service). Replace the legacy one-candidate-per-row key.
 DROP INDEX IF EXISTS public.import_candidates_workspace_source_row_uidx;
-CREATE UNIQUE INDEX IF NOT EXISTS import_candidates_workspace_source_row_entity_uidx
+DROP INDEX IF EXISTS public.import_candidates_workspace_source_row_entity_uidx;
+CREATE INDEX IF NOT EXISTS import_candidates_workspace_source_row_entity_idx
   ON public.import_candidates (workspace_id, source_row_id, entity_type);
+
+CREATE UNIQUE INDEX IF NOT EXISTS import_candidates_workspace_entity_key_uidx
+  ON public.import_candidates (workspace_id, entity_type, import_key);
 
 CREATE INDEX IF NOT EXISTS import_candidates_blocking_idx
   ON public.import_candidates (workspace_id, blocking_issues_count)

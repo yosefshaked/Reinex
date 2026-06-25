@@ -8,7 +8,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { AlertCircle, AlertTriangle, Check, Link2, Loader2, Pencil, Plus, PlusCircle, Search, X, XCircle, Zap } from 'lucide-react';
-import { patchCandidate, runDryRunChunk, searchLinkTargets } from '../api/importWorkspacesApi.js';
+import { createRelationCandidate, patchCandidate, runDryRunChunk, searchLinkTargets } from '../api/importWorkspacesApi.js';
 
 const FIELD_LABELS = {
   first_name:               'שם פרטי',
@@ -240,6 +240,44 @@ function candidateTabTitle(candidate, allTabs) {
   return data.identity_number || data.guardian_phone || data.phone || '';
 }
 
+function hasRelationCandidate(customer, guardian, allTabs) {
+  const identity = candidateIdentity(customer);
+  const guardianPhone = candidateGuardianPhone(guardian);
+  return allTabs.some((item) => (
+    item.entity_type === 'guardian_link'
+    && (
+      (
+        identity
+        && guardianPhone
+        && candidateIdentity(item) === identity
+        && candidateGuardianPhone(item) === guardianPhone
+      )
+      || (shareJoinValue(customer, item) && shareJoinValue(guardian, item))
+    )
+  ));
+}
+
+function buildMissingRelationPairs(allTabs) {
+  const customers = allTabs.filter((item) => item.entity_type === 'customer');
+  const guardians = allTabs.filter((item) => item.entity_type === 'guardian');
+  const pairs = [];
+  for (const customer of customers) {
+    for (const guardian of guardians) {
+      const hasSharedContext = shareJoinValue(customer, guardian)
+        || allTabs.some((item) => (
+          item.entity_type === 'guardian_link'
+          && shareJoinValue(customer, item)
+          && shareJoinValue(guardian, item)
+        ));
+      const explicitPair = candidateIdentity(customer) && candidateGuardianPhone(guardian);
+      if (!hasSharedContext && !explicitPair) continue;
+      if (hasRelationCandidate(customer, guardian, allTabs)) continue;
+      pairs.push({ customer, guardian });
+    }
+  }
+  return pairs;
+}
+
 function flattenRelatedCandidates(candidate) {
   if (!candidate) return [];
   const related = candidate.related_candidates || {};
@@ -408,6 +446,8 @@ export function CandidateDetailSheet({ candidate, workspaceId, open, onClose, on
   const [dryRunSummaries, setDryRunSummaries] = useState({});
   const [runningDryRun, setRunningDryRun] = useState(false);
   const [dryRunError, setDryRunError] = useState(null);
+  const [creatingRelationKey, setCreatingRelationKey] = useState(null);
+  const [relationCreateError, setRelationCreateError] = useState(null);
 
   // Live copy of the candidate so a per-field edit can update the drawer in
   // place (issues/blockers recompute server-side) without closing it.
@@ -432,6 +472,8 @@ export function CandidateDetailSheet({ candidate, workspaceId, open, onClose, on
     setActiveCandidateId(candidate?.id || null);
     setDryRunSummaries(candidate?.id ? { [candidate.id]: candidate?.candidate_data?.dry_run_summary ?? null } : {});
     setDryRunError(null);
+    setCreatingRelationKey(null);
+    setRelationCreateError(null);
     setSaveError(null);
     setEditingField(null);
     setEditingValue('');
@@ -483,6 +525,7 @@ export function CandidateDetailSheet({ candidate, workspaceId, open, onClose, on
     : active.candidate_data?.dry_run_summary ?? null;
   const relatedGroupKey = groupRoot?.related_candidates?.group_key || {};
   const showEntityTabs = candidateTabs.length > 1;
+  const missingRelationPairs = buildMissingRelationPairs(candidateTabs);
   const blockers = issues.filter(i => i.severity === 'blocker');
   const warnings = issues.filter(i => i.severity === 'warning');
   const hasIdentityBlocker = blockers.some(b => b.code === 'duplicate_identity_number');
@@ -518,6 +561,25 @@ export function CandidateDetailSheet({ candidate, workspaceId, open, onClose, on
     const nextGroup = replaceCandidateInGroup(groupRoot, updated);
     setLiveCandidate(nextGroup);
     onCandidateUpdated?.(nextGroup);
+  }
+
+  async function handleCreateRelation(customer, guardian) {
+    if (!workspaceId || !customer?.id || !guardian?.id) return;
+    const key = `${customer.id}:${guardian.id}`;
+    setCreatingRelationKey(key);
+    setRelationCreateError(null);
+    try {
+      const result = await createRelationCandidate(workspaceId, {
+        customerCandidateId: customer.id,
+        guardianCandidateId: guardian.id,
+      });
+      updateLiveCandidate(result.candidate);
+      setActiveCandidateId(result.candidate.id);
+    } catch (err) {
+      setRelationCreateError(err.message || 'שגיאה ביצירת קשר');
+    } finally {
+      setCreatingRelationKey(null);
+    }
   }
 
   async function applyDecision(decisionsPatch, newStatus) {
@@ -809,6 +871,43 @@ export function CandidateDetailSheet({ candidate, workspaceId, open, onClose, on
                     </span>
                   )}
                 </div>
+              )}
+            </section>
+          )}
+
+          {missingRelationPairs.length > 0 && (
+            <section className="space-y-2 rounded-md border border-dashed px-3 py-2">
+              <div>
+                <h3 className="text-sm font-semibold">קשר חסר</h3>
+                <p className="text-xs leading-5 text-muted-foreground">
+                  נמצאו לקוח/ה והורה מחוברים לפי המיפוי, אבל אין עדיין רשומת קשר לייבוא.
+                </p>
+              </div>
+              <div className="space-y-1.5">
+                {missingRelationPairs.map(({ customer, guardian }) => {
+                  const key = `${customer.id}:${guardian.id}`;
+                  return (
+                    <div key={key} className="flex flex-wrap items-center gap-2 text-xs">
+                      <span className="font-medium">
+                        {candidateTitle(customer)} · {candidateTitle(guardian)}
+                      </span>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="h-7 gap-1.5"
+                        disabled={Boolean(creatingRelationKey)}
+                        onClick={() => handleCreateRelation(customer, guardian)}
+                      >
+                        <Plus className="h-3.5 w-3.5" />
+                        {creatingRelationKey === key ? 'יוצר קשר…' : 'צור קשר'}
+                      </Button>
+                    </div>
+                  );
+                })}
+              </div>
+              {relationCreateError && (
+                <p className="text-xs text-destructive">{relationCreateError}</p>
               )}
             </section>
           )}

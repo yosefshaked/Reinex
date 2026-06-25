@@ -157,6 +157,18 @@ function haveSharedJoinValue(left, right) {
   return getCandidateJoinValues(right).some((value) => leftValues.has(value));
 }
 
+function buildGuardianLinkImportKey(candidateData = {}, fallback = '') {
+  const identity = normalizeString(candidateData.identity_number);
+  const guardianContact = normalizeString(candidateData.guardian_phone || candidateData.guardian_email);
+  const joinValue = Object.values(candidateData.__import?.join?.values || {}).map(normalizeString).filter(Boolean)[0] || '';
+  return [
+    'guardian_link',
+    identity || 'missing_identity',
+    guardianContact || 'missing_guardian',
+    joinValue || fallback || 'manual',
+  ].join(':');
+}
+
 function attachJoinMetadata(candidate, rowsById, joinColumns) {
   if (!candidate || getCandidateJoinValues(candidate).length > 0) return candidate;
   const rowIds = [
@@ -819,6 +831,104 @@ export default async function importCandidates(context, req) {
       page,
       pageSize: PAGE_SIZE,
     });
+  }
+
+  // ── POST: create a missing guardian_link candidate from related rows ───────
+  if (method === 'POST') {
+    const workspaceId = normalizeUuid(body?.workspace_id || req.query?.workspace_id);
+    const customerCandidateId = normalizeUuid(body?.customer_candidate_id);
+    const guardianCandidateId = normalizeUuid(body?.guardian_candidate_id);
+    if (!workspaceId) {
+      return respond(context, 400, { message: 'workspace_id_required' });
+    }
+    if (!customerCandidateId || !guardianCandidateId) {
+      return respond(context, 400, { message: 'customer_and_guardian_candidates_required' });
+    }
+
+    const { data: sourceCandidates, error: sourceError } = await withOrgScope(supabase, 'import_candidates', orgId)
+      .select('id, workspace_id, source_row_id, entity_type, candidate_data, status')
+      .eq('workspace_id', workspaceId)
+      .in('id', [customerCandidateId, guardianCandidateId]);
+    if (sourceError) {
+      context.log?.error?.('import-candidates: missing relation source load failed', { message: sourceError.message });
+      return respondCandidatesError(context, 500, 'failed_to_create_relation_candidate', sourceError, { action: 'load_relation_sources' });
+    }
+
+    const customer = (sourceCandidates || []).find((candidate) => candidate.id === customerCandidateId && candidate.entity_type === 'customer');
+    const guardian = (sourceCandidates || []).find((candidate) => candidate.id === guardianCandidateId && candidate.entity_type === 'guardian');
+    if (!customer || !guardian) {
+      return respond(context, 400, { message: 'customer_or_guardian_candidate_not_found' });
+    }
+
+    const customerData = customer.candidate_data || {};
+    const guardianData = guardian.candidate_data || {};
+    const identityNumber = normalizeString(customerData.identity_number || customerData.student_identity_number);
+    const guardianPhone = normalizeString(guardianData.guardian_phone);
+    const guardianEmail = normalizeString(guardianData.guardian_email);
+    const join = customerData.__import?.join || guardianData.__import?.join || null;
+    const candidateData = {
+      identity_number: identityNumber || null,
+      guardian_phone: guardianPhone || null,
+      guardian_email: guardianEmail || null,
+      relationship: normalizeString(body?.relationship) || null,
+      is_primary: typeof body?.is_primary === 'boolean' ? body.is_primary : null,
+      ...(join ? { __import: { join } } : {}),
+    };
+    const importKey = buildGuardianLinkImportKey(candidateData, `${customer.id}:${guardian.id}`);
+
+    const nextIssues = generateStructuralIssues(candidateData, 'guardian_link');
+    const blockingCount = countBlockingIssues(nextIssues);
+    const now = new Date().toISOString();
+    const payload = {
+      org_id: orgId,
+      workspace_id: workspaceId,
+      source_row_id: customer.source_row_id || guardian.source_row_id,
+      import_key: importKey,
+      entity_type: 'guardian_link',
+      status: blockingCount > 0 ? 'blocked' : 'ready',
+      candidate_data: candidateData,
+      merged_from_row_ids: [customer.source_row_id, guardian.source_row_id].filter(Boolean),
+      issues: nextIssues,
+      blocking_issues_count: blockingCount,
+      decisions: {
+        created_from_drawer: true,
+        customer_candidate_id: customer.id,
+        guardian_candidate_id: guardian.id,
+        created_by: userId,
+        created_at: now,
+      },
+      updated_at: now,
+    };
+
+    const { data: created, error: createError } = await withOrgScope(supabase, 'import_candidates', orgId)
+      .upsert(payload, { onConflict: 'workspace_id,entity_type,import_key' })
+      .select('id, entity_type, status, candidate_data, issues, blocking_issues_count, decisions, source_row_id, merged_from_row_ids, updated_at')
+      .single();
+    if (createError || !created) {
+      context.log?.error?.('import-candidates: missing relation create failed', { message: createError?.message });
+      return respondCandidatesError(context, 500, 'failed_to_create_relation_candidate', createError || new Error('missing_created_candidate'), {
+        action: 'create_relation_candidate',
+      });
+    }
+
+    try {
+      await refreshGuardianPrimaryIssues(supabase, orgId, workspaceId, {
+        overrideCandidate: {
+          ...created,
+          candidate_data: created.candidate_data,
+        },
+      });
+      const { data: refreshed, error: refreshError } = await withOrgScope(supabase, 'import_candidates', orgId)
+        .select('id, entity_type, status, candidate_data, issues, blocking_issues_count, decisions, source_row_id, merged_from_row_ids, updated_at')
+        .eq('id', created.id)
+        .single();
+      if (refreshError) throw refreshError;
+      const candidateForResponse = await attachRelatedCandidates(supabase, orgId, workspaceId, refreshed || created);
+      return respond(context, 200, { candidate: candidateForResponse });
+    } catch (err) {
+      context.log?.error?.('import-candidates: missing relation refresh failed', { message: err?.message });
+      return respondCandidatesError(context, 500, 'failed_to_create_relation_candidate', err, { action: 'refresh_created_relation' });
+    }
   }
 
   // ── PATCH: update decisions and/or status on a specific candidate ────────────
