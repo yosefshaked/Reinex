@@ -86,6 +86,22 @@ export async function getImportWorkspace(workspaceId) {
 }
 
 /**
+ * Permanently delete an import workspace and all of its staging data
+ * (import_rows, import_candidates, import_commit_ledger via FK cascade) plus its
+ * temporary backup file(s) in storage. Committed/partially-committed workspaces
+ * are rejected by the backend (409). Live tables are never touched.
+ *
+ * @param {string} workspaceId
+ * @returns {Promise<{ deleted: boolean, files_deleted: number, files_failed: number }>}
+ */
+export async function deleteImportWorkspace(workspaceId) {
+  return authenticatedFetch(
+    `/api/import-workspaces/${encodeURIComponent(workspaceId)}`,
+    { method: 'DELETE' },
+  );
+}
+
+/**
  * Send one chunk of parsed rows to the backend for ingestion.
  *
  * Each row must carry:

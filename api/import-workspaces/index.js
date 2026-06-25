@@ -13,6 +13,21 @@ import {
   withOrgScope,
 } from '../_shared/org-bff.js';
 import { attachErrorTracking, respondTracked } from '../_shared/error-events.js';
+import { getStorageDriver } from '../cross-platform/storage-drivers/index.js';
+
+// Statuses where live data has already been written — these workspaces keep their
+// staging + audit trail and cannot be deleted.
+const COMMITTED_STATUSES = new Set(['committed', 'partially_committed']);
+
+// Every temporary backup object the workspace owns across its sources.
+function collectWorkspaceObjectKeys(config = {}) {
+  const keys = new Set();
+  const add = (key) => { const k = normalizeString(key); if (k) keys.add(k); };
+  add(config.objectKey);
+  for (const file of Array.isArray(config.files) ? config.files : []) add(file?.objectKey);
+  for (const source of Array.isArray(config.sources) ? config.sources : []) add(source?.file?.objectKey);
+  return [...keys];
+}
 
 // Wraps respondTracked so internal (500-level) failures persist an error_events
 // row and return the support code to the user. Validation/auth/not-found stay
@@ -295,6 +310,69 @@ export default async function importWorkspaces(context, req) {
       return respond(context, 404, { message: 'workspace_not_found' });
     }
     return respond(context, 200, { workspace: data });
+  }
+
+  // ── DELETE /api/import-workspaces/:id — remove workspace + all import data ──
+  if (method === 'DELETE') {
+    const { data: workspace, error: loadError } = await withOrgScope(supabase, 'import_workspaces', orgId)
+      .select('id, status, config')
+      .eq('id', workspaceId)
+      .maybeSingle();
+    if (loadError) {
+      context.log?.error?.('import-workspaces: delete load failed', { message: loadError.message });
+      return respondWorkspacesError(context, 500, 'failed_to_load_workspace', loadError, { action: 'load_for_delete', workspaceId });
+    }
+    if (!workspace) {
+      return respond(context, 404, { message: 'workspace_not_found' });
+    }
+    // Only un-committed workspaces can be deleted: once data has gone live we keep
+    // the staging + audit trail so the import stays traceable.
+    if (COMMITTED_STATUSES.has(normalizeString(workspace.status))) {
+      return respond(context, 409, { message: 'cannot_delete_committed_workspace', status: workspace.status });
+    }
+
+    // Best-effort removal of the temporary backup file(s). A storage failure must
+    // not block the DB cleanup — the objects also expire on their own TTL.
+    const objectKeys = collectWorkspaceObjectKeys(workspace.config || {});
+    let filesDeleted = 0;
+    const fileErrors = [];
+    if (objectKeys.length > 0) {
+      let driver = null;
+      try {
+        driver = getStorageDriver('managed', null, env);
+      } catch (err) {
+        context.log?.error?.('import-workspaces: storage init for delete failed', { message: err?.message });
+      }
+      if (driver) {
+        for (const key of objectKeys) {
+          try {
+            await driver.delete(key);
+            filesDeleted += 1;
+          } catch (err) {
+            fileErrors.push(key);
+            context.log?.error?.('import-workspaces: backup delete failed', { objectKey: key, message: err?.message });
+          }
+        }
+      }
+    }
+
+    // Delete the workspace row. FK ON DELETE CASCADE removes import_rows,
+    // import_candidates and import_commit_ledger automatically. Live tables are
+    // untouched — no foreign key points from live data into the import tables.
+    const { error: deleteError } = await withOrgScope(supabase, 'import_workspaces', orgId)
+      .delete()
+      .eq('id', workspaceId);
+    if (deleteError) {
+      context.log?.error?.('import-workspaces: delete failed', { message: deleteError.message });
+      return respondWorkspacesError(context, 500, 'failed_to_delete_workspace', deleteError, { action: 'delete', workspaceId });
+    }
+
+    return respond(context, 200, {
+      deleted: true,
+      workspace_id: workspaceId,
+      files_deleted: filesDeleted,
+      files_failed: fileErrors.length,
+    });
   }
 
   return respond(context, 405, { message: 'method_not_allowed' });

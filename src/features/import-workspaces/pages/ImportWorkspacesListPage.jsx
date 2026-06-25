@@ -8,8 +8,12 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Plus, ArrowLeft, FolderInput } from 'lucide-react';
-import { listImportWorkspaces, createImportWorkspace } from '../api/importWorkspacesApi.js';
+import { Plus, ArrowLeft, FolderInput, Trash2 } from 'lucide-react';
+import { listImportWorkspaces, createImportWorkspace, deleteImportWorkspace } from '../api/importWorkspacesApi.js';
+
+// Once live data has been written we keep the staging + audit trail, so these
+// statuses can't be deleted (the backend rejects them too).
+const NON_DELETABLE_STATUSES = new Set(['committed', 'partially_committed']);
 
 const STATUS_LABEL = {
   draft:      'טיוטה',
@@ -47,6 +51,11 @@ export default function ImportWorkspacesListPage() {
   const [creating, setCreating]     = useState(false);
   const [createError, setCreateError] = useState(null);
 
+  // Delete confirm state
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [deleting, setDeleting]         = useState(false);
+  const [deleteError, setDeleteError]   = useState(null);
+
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -76,6 +85,21 @@ export default function ImportWorkspacesListPage() {
       setCreateError(err.message || 'שגיאה ביצירה');
     } finally {
       setCreating(false);
+    }
+  }
+
+  async function handleDelete() {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      await deleteImportWorkspace(deleteTarget.id);
+      setWorkspaces((prev) => prev.filter((w) => w.id !== deleteTarget.id));
+      setDeleteTarget(null);
+    } catch (err) {
+      setDeleteError(err.message || 'שגיאה במחיקה');
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -136,6 +160,17 @@ export default function ImportWorkspacesListPage() {
                   <Badge variant={STATUS_VARIANT[ws.status] || 'secondary'}>
                     {STATUS_LABEL[ws.status] || ws.status}
                   </Badge>
+                  {!NON_DELETABLE_STATUSES.has(ws.status) && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                      onClick={(e) => { e.stopPropagation(); setDeleteError(null); setDeleteTarget(ws); }}
+                      aria-label={`מחק סביבת ייבוא: ${ws.name}`}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  )}
                   <ArrowLeft className="h-4 w-4 text-muted-foreground" />
                 </div>
               </CardHeader>
@@ -184,6 +219,33 @@ export default function ImportWorkspacesListPage() {
             </Button>
             <Button onClick={handleCreate} disabled={creating || !newName.trim()}>
               {creating ? 'יוצר…' : 'צור'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete confirm dialog */}
+      <Dialog open={!!deleteTarget} onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}>
+        <DialogContent dir="rtl" className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>מחיקת סביבת ייבוא</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-2 py-2 text-sm">
+            <p>
+              למחוק לצמיתות את <span className="font-medium">{deleteTarget?.name}</span> ואת כל נתוני הייבוא שלה
+              (שורות, מועמדים וקבצי הגיבוי הזמניים)?
+            </p>
+            <p className="text-muted-foreground">
+              הפעולה אינה משפיעה על נתונים שכבר יובאו למערכת — רק על סביבת הייבוא עצמה. לא ניתן לשחזר.
+            </p>
+            {deleteError && <p className="text-destructive">{deleteError}</p>}
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setDeleteTarget(null)} disabled={deleting}>
+              ביטול
+            </Button>
+            <Button variant="destructive" onClick={handleDelete} disabled={deleting}>
+              {deleting ? 'מוחק…' : 'מחק לצמיתות'}
             </Button>
           </DialogFooter>
         </DialogContent>
