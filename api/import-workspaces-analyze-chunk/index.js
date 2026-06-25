@@ -345,19 +345,21 @@ function candidateDisplayName(candidateData) {
     || '';
 }
 
-function buildGuardianPhoneContext(normalizedCandidates) {
-  const rowsWithGuardianPhone = new Set();
-  const identitiesWithGuardianPhone = new Set();
+function buildGuardianContactContext(normalizedCandidates) {
+  const rowsWithGuardianContact = new Set();
+  const identitiesWithGuardianContact = new Set();
 
   for (const item of normalizedCandidates || []) {
-    if (!hasValidPhone(item?.candidateData?.guardian_phone)) continue;
-    if (item.rowId) rowsWithGuardianPhone.add(item.rowId);
+    const hasGuardianContact = hasValidPhone(item?.candidateData?.guardian_phone)
+      || Boolean(normalizeString(item?.candidateData?.guardian_email));
+    if (!hasGuardianContact) continue;
+    if (item.rowId) rowsWithGuardianContact.add(item.rowId);
 
     const identityNumber = normalizeString(item?.candidateData?.identity_number);
-    if (identityNumber) identitiesWithGuardianPhone.add(identityNumber);
+    if (identityNumber) identitiesWithGuardianContact.add(identityNumber);
   }
 
-  return { rowsWithGuardianPhone, identitiesWithGuardianPhone };
+  return { rowsWithGuardianContact, identitiesWithGuardianContact };
 }
 
 function isTruthyPrimary(value) {
@@ -394,12 +396,12 @@ function buildGuardianPrimaryIssueContext(currentCandidates, existingCandidates 
   return identitiesNeedingPrimary;
 }
 
-function hasRelatedGuardianPhone(candidateData, rowId, guardianPhoneContext) {
-  if (!guardianPhoneContext) return false;
-  if (rowId && guardianPhoneContext.rowsWithGuardianPhone?.has(rowId)) return true;
+function hasRelatedGuardianContact(candidateData, rowId, guardianContactContext) {
+  if (!guardianContactContext) return false;
+  if (rowId && guardianContactContext.rowsWithGuardianContact?.has(rowId)) return true;
 
   const identityNumber = normalizeString(candidateData?.identity_number);
-  return Boolean(identityNumber && guardianPhoneContext.identitiesWithGuardianPhone?.has(identityNumber));
+  return Boolean(identityNumber && guardianContactContext.identitiesWithGuardianContact?.has(identityNumber));
 }
 
 function generateStructuralIssues(candidateData, entityType, options = {}) {
@@ -409,6 +411,13 @@ function generateStructuralIssues(candidateData, entityType, options = {}) {
 
   for (const field of schema.blockers) {
     const val = candidateData[field];
+    if (
+      entityType === 'guardian_link'
+      && field === 'guardian_phone'
+      && normalizeString(candidateData.guardian_email)
+    ) {
+      continue;
+    }
     if (val === null || val === undefined || val === '') {
       issues.push({ code: 'missing_required_field', severity: 'blocker', field });
     }
@@ -419,14 +428,21 @@ function generateStructuralIssues(candidateData, entityType, options = {}) {
       issues.push({ code: 'missing_recommended_field', severity: 'warning', field });
     }
   }
+  if (entityType === 'guardian_link') {
+    const hasGuardianPhone = hasValidPhone(candidateData.guardian_phone);
+    const hasGuardianEmail = Boolean(normalizeString(candidateData.guardian_email));
+    if (!hasGuardianPhone && !hasGuardianEmail && !issues.some((item) => item.field === 'guardian_phone')) {
+      issues.push({ code: 'missing_required_field', severity: 'blocker', field: 'guardian_phone' });
+    }
+  }
   const isStudentEntity = entityType === 'customer' && candidateData.customer_type === 'student';
   if (isStudentEntity) {
     // Require a valid phone on the student profile or a related guardian path.
     // Guardians and students are separate candidates, so this checks sibling
     // guardian/guardian_link rows by source row and student identity.
     const hasStudentPhone = hasValidPhone(candidateData.phone);
-    const hasGuardianPhone = hasRelatedGuardianPhone(candidateData, options.rowId, options.guardianPhoneContext);
-    if (!hasStudentPhone && !hasGuardianPhone) {
+    const hasGuardianContact = hasRelatedGuardianContact(candidateData, options.rowId, options.guardianContactContext);
+    if (!hasStudentPhone && !hasGuardianContact) {
       issues.push({ code: 'missing_contact_path', severity: 'blocker', field: 'phone' });
     }
   }
@@ -857,14 +873,14 @@ export default async function importWorkspacesAnalyzeChunk(context, req) {
 
   // --- Build candidates ---
   const now = new Date().toISOString();
-  const guardianPhoneContext = buildGuardianPhoneContext(normalized);
+  const guardianContactContext = buildGuardianContactContext(normalized);
 
   const candidates = normalized.map(({ rowId, entityType, importKey, candidateData, fieldIssues, mergedRowIds }) => {
     const existingDecisions = existingDecisionsByKey.get(importKey) || existingDecisionsByKey.get(`${rowId}:${entityType}`) || {};
     const hasResolvedDuplicateDecision = hasResolvedDuplicateIdentityDecision(existingDecisions);
     const issues = [
       ...fieldIssues,
-      ...generateStructuralIssues(candidateData, entityType, { rowId, guardianPhoneContext }),
+      ...generateStructuralIssues(candidateData, entityType, { rowId, guardianContactContext }),
     ];
 
     // A required field that is present but invalid must block (not merely warn):

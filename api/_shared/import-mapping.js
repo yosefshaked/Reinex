@@ -23,14 +23,14 @@ export const ENTITY_SCHEMA = {
 export const ENTITY_FIELD_ORDER = {
   customer: ['first_name', 'last_name', 'identity_number', 'customer_type', 'is_active', 'phone', 'email', 'date_of_birth', 'note_text'],
   guardian: ['guardian_first_name', 'guardian_last_name', 'guardian_phone', 'guardian_email'],
-  guardian_link: ['identity_number', 'guardian_phone', 'relationship', 'is_primary'],
+  guardian_link: ['identity_number', 'guardian_phone', 'guardian_email', 'relationship', 'is_primary'],
   service: ['service_name', 'description'],
 };
 
 export const ENTITY_GRAIN_FIELDS = {
   customer: ['identity_number', 'first_name'],
   guardian: ['guardian_first_name', 'guardian_phone'],
-  guardian_link: ['guardian_phone', 'identity_number'],
+  guardian_link: ['guardian_phone', 'guardian_email', 'identity_number'],
   service: ['service_name'],
 };
 

@@ -102,7 +102,7 @@ const STATUS_VARIANT = {
 const EDITABLE_FIELDS_BY_ENTITY = {
   customer: ['first_name', 'last_name', 'identity_number', 'customer_type', 'is_active', 'phone', 'email', 'date_of_birth', 'note_text'],
   guardian: ['guardian_first_name', 'guardian_last_name', 'guardian_phone', 'guardian_email'],
-  guardian_link: ['identity_number', 'guardian_phone', 'relationship', 'is_primary'],
+  guardian_link: ['identity_number', 'guardian_phone', 'guardian_email', 'relationship', 'is_primary'],
   service: ['service_name', 'description'],
 };
 
@@ -193,6 +193,11 @@ function candidateGuardianPhone(candidate) {
   return data.guardian_phone || '';
 }
 
+function candidateGuardianEmail(candidate) {
+  const data = canonicalizeCandidateData(candidate?.candidate_data || {});
+  return data.guardian_email || '';
+}
+
 function candidateJoinValues(candidate) {
   const values = candidate?.candidate_data?.__import?.join?.values;
   if (!values || typeof values !== 'object') return [];
@@ -208,6 +213,7 @@ function shareJoinValue(left, right) {
 function relationTabTitle(candidate, allTabs) {
   const identity = candidateIdentity(candidate);
   const guardianPhone = candidateGuardianPhone(candidate);
+  const guardianEmail = candidateGuardianEmail(candidate);
   const customer = allTabs.find((item) => (
     item.entity_type === 'customer'
     && (
@@ -219,6 +225,7 @@ function relationTabTitle(candidate, allTabs) {
     item.entity_type === 'guardian'
     && (
       (guardianPhone && candidateGuardianPhone(item) === guardianPhone)
+      || (!guardianPhone && guardianEmail && candidateGuardianEmail(item) === guardianEmail)
       || shareJoinValue(candidate, item)
     )
   ));
@@ -227,7 +234,7 @@ function relationTabTitle(candidate, allTabs) {
   return [customerName !== 'רשומה' ? customerName : '', guardianName !== 'רשומה' ? guardianName : '']
     .filter(Boolean)
     .join(' · ')
-    || [identity, guardianPhone].filter(Boolean).join(' · ')
+    || [identity, guardianPhone || guardianEmail].filter(Boolean).join(' · ')
     || candidateJoinValues(candidate)[0]
     || 'קשר';
 }
@@ -243,6 +250,7 @@ function candidateTabTitle(candidate, allTabs) {
 function hasRelationCandidate(customer, guardian, allTabs) {
   const identity = candidateIdentity(customer);
   const guardianPhone = candidateGuardianPhone(guardian);
+  const guardianEmail = candidateGuardianEmail(guardian);
   return allTabs.some((item) => (
     item.entity_type === 'guardian_link'
     && (
@@ -251,6 +259,13 @@ function hasRelationCandidate(customer, guardian, allTabs) {
         && guardianPhone
         && candidateIdentity(item) === identity
         && candidateGuardianPhone(item) === guardianPhone
+      )
+      || (
+        identity
+        && !guardianPhone
+        && guardianEmail
+        && candidateIdentity(item) === identity
+        && candidateGuardianEmail(item) === guardianEmail
       )
       || (shareJoinValue(customer, item) && shareJoinValue(guardian, item))
     )
@@ -269,7 +284,7 @@ function buildMissingRelationPairs(allTabs) {
           && shareJoinValue(customer, item)
           && shareJoinValue(guardian, item)
         ));
-      const explicitPair = candidateIdentity(customer) && candidateGuardianPhone(guardian);
+      const explicitPair = candidateIdentity(customer) && (candidateGuardianPhone(guardian) || candidateGuardianEmail(guardian));
       if (!hasSharedContext && !explicitPair) continue;
       if (hasRelationCandidate(customer, guardian, allTabs)) continue;
       pairs.push({ customer, guardian });
@@ -278,43 +293,34 @@ function buildMissingRelationPairs(allTabs) {
   return pairs;
 }
 
-function flattenRelatedCandidates(candidate) {
-  if (!candidate) return [];
-  const related = candidate.related_candidates || {};
-  const rows = [
-    candidate,
-    ...(related.customer || []),
-    ...(related.guardian || []),
-    ...(related.guardian_link || []),
-  ];
-  const seen = new Set();
-  return rows.filter((row) => {
-    if (!row?.id || seen.has(row.id)) return false;
-    seen.add(row.id);
-    return true;
-  }).sort((a, b) => (
-    (ENTITY_TAB_ORDER[a.entity_type] ?? 99) - (ENTITY_TAB_ORDER[b.entity_type] ?? 99)
-  ));
-}
+/**
+ * Flatten a relation group (from the relations hook) into a sorted tab list.
+ * `group` is { id, group_key, customer, guardian, guardian_link } | null.
+ * `candidate` is the currently-opened candidate (used as a fallback when the
+ * group hasn't loaded yet or when the candidate is a service entity).
+ * `liveCandidateById` is a Map<id, candidate> of locally-updated candidates.
+ */
+function flattenGroupTabs(group, candidate, liveCandidateById) {
+  const members = group
+    ? [
+      ...(group.customer || []),
+      ...(group.guardian || []),
+      ...(group.guardian_link || []),
+    ]
+    : (candidate ? [candidate] : []);
 
-function replaceCandidateInGroup(groupRoot, updated) {
-  if (!groupRoot || !updated?.id) return groupRoot;
-  if (updated.related_candidates) return updated;
-  const nextRoot = groupRoot.id === updated.id
-    ? {
-      ...updated,
-      related_candidates: updated.related_candidates || groupRoot.related_candidates,
-    }
-    : { ...groupRoot };
-  const related = groupRoot.related_candidates;
-  if (!related) return nextRoot;
-  nextRoot.related_candidates = {
-    ...related,
-    customer: (related.customer || []).map((item) => item.id === updated.id ? updated : item),
-    guardian: (related.guardian || []).map((item) => item.id === updated.id ? updated : item),
-    guardian_link: (related.guardian_link || []).map((item) => item.id === updated.id ? updated : item),
-  };
-  return nextRoot;
+  const seen = new Set();
+  return members
+    .filter((row) => {
+      if (!row?.id || seen.has(row.id)) return false;
+      seen.add(row.id);
+      return true;
+    })
+    // Overlay live (locally-updated) data so issues/status are up-to-date.
+    .map((row) => liveCandidateById.get(row.id) || row)
+    .sort((a, b) => (
+      (ENTITY_TAB_ORDER[a.entity_type] ?? 99) - (ENTITY_TAB_ORDER[b.entity_type] ?? 99)
+    ));
 }
 
 // A field is "present" (shown as a value row) when it holds a meaningful value.
@@ -438,9 +444,10 @@ function ProfileResultCard({ profile, onLink, disabled }) {
  *   onClose: () => void,
  *   onDecisionSaved?: (updated: object) => void,
  *   onCandidateUpdated?: (updated: object) => void,
+ *   relationsHook?: { getGroupForCandidate: (id: string) => object|null, refetch: () => void },
  * }} props
  */
-export function CandidateDetailSheet({ candidate, workspaceId, open, onClose, onDecisionSaved, onCandidateUpdated }) {
+export function CandidateDetailSheet({ candidate, workspaceId, open, onClose, onDecisionSaved, onCandidateUpdated, relationsHook }) {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState(null);
   const [dryRunSummaries, setDryRunSummaries] = useState({});
@@ -449,9 +456,10 @@ export function CandidateDetailSheet({ candidate, workspaceId, open, onClose, on
   const [creatingRelationKey, setCreatingRelationKey] = useState(null);
   const [relationCreateError, setRelationCreateError] = useState(null);
 
-  // Live copy of the candidate so a per-field edit can update the drawer in
-  // place (issues/blockers recompute server-side) without closing it.
-  const [liveCandidate, setLiveCandidate] = useState(candidate);
+  // Per-field inline edits update local data (issues/status) without requiring a
+  // full refetch. We keep a map of candidateId → updated candidate object so the
+  // tabs reflect the latest PATCH response while the drawer stays open.
+  const [liveCandidateById, setLiveCandidateById] = useState({});
   const [activeCandidateId, setActiveCandidateId] = useState(candidate?.id || null);
   const [editingField, setEditingField] = useState(null);
   const [editingValue, setEditingValue] = useState('');
@@ -468,7 +476,7 @@ export function CandidateDetailSheet({ candidate, workspaceId, open, onClose, on
   const [linking, setLinking] = useState(false);
 
   useEffect(() => {
-    setLiveCandidate(candidate);
+    setLiveCandidateById(candidate?.id ? { [candidate.id]: candidate } : {});
     setActiveCandidateId(candidate?.id || null);
     setDryRunSummaries(candidate?.id ? { [candidate.id]: candidate?.candidate_data?.dry_run_summary ?? null } : {});
     setDryRunError(null);
@@ -512,9 +520,10 @@ export function CandidateDetailSheet({ candidate, workspaceId, open, onClose, on
     return () => { cancelled = true; clearTimeout(handle); };
   }, [linkMode, linkStep, linkQuery]);
 
-  // Prefer the live connected group once it matches the opened candidate.
-  const groupRoot = liveCandidate && liveCandidate.id === candidate?.id ? liveCandidate : candidate;
-  const candidateTabs = flattenRelatedCandidates(groupRoot);
+  // Source the family group from the relations hook (if available).
+  const relationGroup = relationsHook?.getGroupForCandidate(candidate?.id) ?? null;
+  const liveCandidateMap = new Map(Object.entries(liveCandidateById));
+  const candidateTabs = flattenGroupTabs(relationGroup, candidate, liveCandidateMap);
   const active = candidateTabs.find((item) => item.id === activeCandidateId) || candidateTabs[0];
   if (!active) return null;
 
@@ -523,7 +532,7 @@ export function CandidateDetailSheet({ candidate, workspaceId, open, onClose, on
   const activeDryRunSummary = Object.prototype.hasOwnProperty.call(dryRunSummaries, active.id)
     ? dryRunSummaries[active.id]
     : active.candidate_data?.dry_run_summary ?? null;
-  const relatedGroupKey = groupRoot?.related_candidates?.group_key || {};
+  const relatedGroupKey = relationGroup?.group_key || {};
   const showEntityTabs = candidateTabs.length > 1;
   const missingRelationPairs = buildMissingRelationPairs(candidateTabs);
   const blockers = issues.filter(i => i.severity === 'blocker');
@@ -558,9 +567,9 @@ export function CandidateDetailSheet({ candidate, workspaceId, open, onClose, on
   }
 
   function updateLiveCandidate(updated) {
-    const nextGroup = replaceCandidateInGroup(groupRoot, updated);
-    setLiveCandidate(nextGroup);
-    onCandidateUpdated?.(nextGroup);
+    if (!updated?.id) return;
+    setLiveCandidateById((prev) => ({ ...prev, [updated.id]: updated }));
+    onCandidateUpdated?.(updated);
   }
 
   async function handleCreateRelation(customer, guardian) {
@@ -573,8 +582,9 @@ export function CandidateDetailSheet({ candidate, workspaceId, open, onClose, on
         customerCandidateId: customer.id,
         guardianCandidateId: guardian.id,
       });
-      updateLiveCandidate(result.candidate);
-      setActiveCandidateId(result.candidate.id);
+      // Refetch relations so the new guardian_link appears in the group.
+      relationsHook?.refetch();
+      setActiveCandidateId(result.candidate?.id);
     } catch (err) {
       setRelationCreateError(err.message || 'שגיאה ביצירת קשר');
     } finally {

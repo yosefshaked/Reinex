@@ -258,6 +258,20 @@ export async function searchLinkTargets({ identityNumber, query } = {}) {
 }
 
 /**
+ * Fetch connected-component relation groups for a whole workspace.
+ * Returns { groups: Array<{ id, group_key, customer, guardian, guardian_link }> }
+ * Computed server-side in one pass via union-find; meant to be fetched once
+ * and cached on the client.
+ *
+ * @param {string} workspaceId
+ * @returns {Promise<{ groups: object[] }>}
+ */
+export async function fetchCandidateRelations(workspaceId) {
+  const params = new URLSearchParams({ workspace_id: workspaceId, view: 'relations' });
+  return authenticatedFetch(`/api/import-candidates?${params}`);
+}
+
+/**
  * Run the dry-run simulation engine for a chunk of candidates.
  *
  * The backend reads live tables (read-only) and writes dry_run_summary into

@@ -210,9 +210,10 @@ async function commitGuardianLink(supabase, orgId, candidate, committedProfilesB
   const { candidate_data: data = {} } = candidate;
   const studentIdentity = normalizeString(data.identity_number);
   const guardianPhone = normalizeString(data.guardian_phone);
+  const guardianEmail = normalizeString(data.guardian_email);
 
   if (!studentIdentity) throw new Error('student_identity_number_required');
-  if (!guardianPhone) throw new Error('guardian_phone_required');
+  if (!guardianPhone && !guardianEmail) throw new Error('guardian_contact_required');
 
   // Try this batch first (student committed in wave 0), then fall back to DB
   let clientProfileId = committedProfilesByIdentity.get(studentIdentity);
@@ -223,14 +224,29 @@ async function commitGuardianLink(supabase, orgId, candidate, committedProfilesB
   }
   if (!clientProfileId) throw new Error('guardian_link_student_not_found');
 
-  const phoneResult = validateIsraeliPhone(guardianPhone);
-  if (!phoneResult.valid || !phoneResult.value) throw new Error('invalid_guardian_phone');
-
-  const { data: guardian, error: guardianError } = await withOrgScope(supabase, 'guardians', orgId)
-    .select('id')
-    .eq('phone', phoneResult.value)
-    .limit(1)
-    .maybeSingle();
+  let guardian = null;
+  let guardianError = null;
+  if (guardianPhone) {
+    const phoneResult = validateIsraeliPhone(guardianPhone);
+    if (!phoneResult.valid || !phoneResult.value) throw new Error('invalid_guardian_phone');
+    const result = await withOrgScope(supabase, 'guardians', orgId)
+      .select('id')
+      .eq('phone', phoneResult.value)
+      .limit(1)
+      .maybeSingle();
+    guardian = result.data || null;
+    guardianError = result.error || null;
+  } else {
+    const { value: emailValue, valid: emailValid } = coerceEmail(guardianEmail);
+    if (!emailValid || !emailValue) throw new Error('invalid_guardian_email');
+    const result = await withOrgScope(supabase, 'guardians', orgId)
+      .select('id')
+      .eq('email', emailValue)
+      .limit(1)
+      .maybeSingle();
+    guardian = result.data || null;
+    guardianError = result.error || null;
+  }
   if (guardianError) throw new Error(`failed_to_find_guardian:${guardianError.message}`);
   if (!guardian?.id) throw new Error('guardian_link_guardian_not_found');
 

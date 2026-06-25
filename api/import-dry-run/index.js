@@ -182,6 +182,7 @@ async function simulateGuardianLink(supabase, orgId, candidateData) {
     candidateData?.identity_number ?? candidateData?.student_identity_number ?? candidateData?.student_identity,
   );
   const guardianPhone = normalizeString(candidateData?.guardian_phone ?? candidateData?.phone);
+  const guardianEmail = normalizeString(candidateData?.guardian_email ?? candidateData?.email);
 
   const studentIdentityResult = coerceIdentityNumber(studentIdentity);
   let studentProfile = null;
@@ -195,13 +196,23 @@ async function simulateGuardianLink(supabase, orgId, candidateData) {
   }
 
   const phoneResult = validateIsraeliPhone(guardianPhone);
-  if (phoneResult.valid && phoneResult.value) {
+  if (guardianPhone && phoneResult.valid && phoneResult.value) {
     const { data } = await withOrgScope(supabase, 'guardians', orgId)
-      .select('id, first_name, last_name, phone')
+      .select('id, first_name, last_name, phone, email')
       .eq('phone', phoneResult.value)
       .limit(1)
       .maybeSingle();
     guardianRecord = data || null;
+  } else if (!guardianPhone && guardianEmail) {
+    const emailResult = coerceEmail(guardianEmail);
+    if (emailResult.valid && emailResult.value) {
+      const { data } = await withOrgScope(supabase, 'guardians', orgId)
+        .select('id, first_name, last_name, phone, email')
+        .eq('email', emailResult.value)
+        .limit(1)
+        .maybeSingle();
+      guardianRecord = data || null;
+    }
   }
 
   if (!studentProfile) {

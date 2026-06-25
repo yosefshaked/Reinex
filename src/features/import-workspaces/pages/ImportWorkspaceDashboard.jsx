@@ -16,6 +16,7 @@ import {
   getSourceTotalRows,
   useImportProcessing,
 } from '../hooks/useImportProcessing.js';
+import { useImportRelations } from '../hooks/useImportRelations.js';
 import { PipelineStepper } from '../components/PipelineStepper.jsx';
 import { MappingEditor } from '../components/MappingEditor.jsx';
 import { ProgressOrchestrator } from '../components/ProgressOrchestrator.jsx';
@@ -1004,6 +1005,7 @@ export default function ImportWorkspaceDashboard() {
   const [selectedCandidate, setSelectedCandidate] = useState(null);
   const [sheetOpen, setSheetOpen]         = useState(false);
   const [queueKey, setQueueKey]           = useState(0); // force re-mount queue on decision
+  const relationsHook = useImportRelations(currentStep === 'review' ? workspaceId : null);
   const [isDryRunning, setIsDryRunning]   = useState(false);
   const [dryRunProgress, setDryRunProgress] = useState({ done: 0, total: 0 });
   const [analysisRequest, setAnalysisRequest] = useState(null);
@@ -1217,6 +1219,7 @@ export default function ImportWorkspaceDashboard() {
   }
 
   function handleDecisionSaved() {
+    relationsHook.refetch(); // update family groups after skip/link/etc.
     setQueueKey(k => k + 1); // refresh queue
     setSheetOpen(false);
   }
@@ -1225,6 +1228,7 @@ export default function ImportWorkspaceDashboard() {
   // background but keep the drawer open so the user can keep fixing fields.
   function handleCandidateUpdated(updated) {
     if (updated) setSelectedCandidate(updated);
+    relationsHook.refetch();
     setQueueKey(k => k + 1);
   }
 
@@ -1464,6 +1468,7 @@ export default function ImportWorkspaceDashboard() {
         onClose={() => setSheetOpen(false)}
         onDecisionSaved={handleDecisionSaved}
         onCandidateUpdated={handleCandidateUpdated}
+        relationsHook={relationsHook}
       />
     </PageLayout>
   );
