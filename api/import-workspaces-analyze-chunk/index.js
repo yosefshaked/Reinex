@@ -23,6 +23,13 @@ import {
   coerceOptionalText,
 } from '../_shared/student-validation.js';
 import { attachErrorTracking, respondTracked } from '../_shared/error-events.js';
+import {
+  ENTITY_SCHEMA,
+  applyMappings,
+  buildEnabledEntityMappings,
+  getExternalSourceReferences,
+  normalizeJoinValue,
+} from '../_shared/import-mapping.js';
 
 // Internal (500-level) failures persist an error_events row and return the
 // support code; validation/auth/not-found stay on plain respond().
@@ -31,30 +38,6 @@ function respondAnalyzeError(context, status, message, error, metadata = {}) {
 }
 
 const MAX_ROWS_PER_ANALYSIS_CHUNK = 100;
-
-// Minimum fields required per entity type.
-// blockers → missing field sets status to 'blocked' and increments blocking_issues_count.
-// warnings → missing field generates a 'warning' issue only.
-const ENTITY_SCHEMA = {
-  customer: {
-    // identity_number is always required — it is the duplicate blocker regardless of is_active.
-    // customer_type (student | one_time_customer) must be explicitly chosen; there is no default.
-    blockers: ['first_name', 'last_name', 'identity_number', 'customer_type'],
-    warnings: ['phone', 'email', 'date_of_birth'],
-  },
-  guardian: {
-    blockers: ['guardian_first_name', 'guardian_last_name'],
-    warnings: ['guardian_phone', 'guardian_email'],
-  },
-  guardian_link: {
-    blockers: ['identity_number', 'guardian_phone'],
-    warnings: [],
-  },
-  service: {
-    blockers: ['service_name'],
-    warnings: ['description'],
-  },
-};
 
 const FIELD_LABELS = {
   first_name: 'שם פרטי',
@@ -108,6 +91,10 @@ function issueMessage(issue) {
       return `לא נמצאה רשומה תואמת במקור הנוסף עבור ${label}. בדוק/י את עמודות הקישור שנבחרו.`;
     case 'ambiguous_source_join':
       return `נמצאו כמה רשומות תואמות במקור הנוסף עבור ${label}. ערך הקישור חייב לזהות רשומה אחת בלבד.`;
+    case 'cross_source_join_columns_required':
+      return `צריך לבחור עמודות חיבור בין הקבצים עבור ${label}.`;
+    case 'guardian_primary_contact_required':
+      return 'נמצאו כמה אנשי קשר לאותו תלמיד — יש לבחור איש קשר ראשי אחד.';
     case 'note_requires_student':
       return 'הערה פנימית נשמרת רק עבור לקוח/ה מסוג תלמיד/ה.';
     default:
@@ -123,55 +110,6 @@ function withIssuePresentation(issue) {
     is_blocking: issue?.severity === 'blocker',
     message: issue?.message || issueMessage(issue),
   };
-}
-
-function normalizeFieldSource(value, anchorSourceReference) {
-  if (value && typeof value === 'object') {
-    const sourceReference = normalizeString(value.source_reference);
-    const column = normalizeString(value.column);
-    return sourceReference && column ? { sourceReference, column } : null;
-  }
-  const column = normalizeString(value);
-  return column ? { sourceReference: anchorSourceReference, column } : null;
-}
-
-function normalizeJoinValue(value) {
-  const normalized = normalizeString(value).toLocaleLowerCase('he-IL').replace(/\s+/g, '');
-  const digits = normalized.replace(/\D/g, '');
-  return digits.length >= 5 ? digits : normalized;
-}
-
-// Apply source-qualified mappings to one anchor row. Cross-source values are
-// resolved through explicit join columns; row position is never used.
-function applyMappings(rawData, fieldMap, anchorSourceReference, joinColumns, externalRowsBySourceAndKey) {
-  const out = {};
-  const mergedRowIds = [];
-  const joinIssues = [];
-  for (const [canonicalField, configuredSource] of Object.entries(fieldMap || {})) {
-    const source = normalizeFieldSource(configuredSource, anchorSourceReference);
-    if (!source) continue;
-    if (source.sourceReference === anchorSourceReference) {
-      out[canonicalField] = rawData[source.column] ?? null;
-      continue;
-    }
-
-    const anchorJoinColumn = normalizeString(joinColumns?.[anchorSourceReference]);
-    const anchorJoinValue = normalizeJoinValue(rawData[anchorJoinColumn]);
-    const matches = externalRowsBySourceAndKey.get(source.sourceReference)?.get(anchorJoinValue) || [];
-    if (matches.length === 1) {
-      out[canonicalField] = matches[0].raw_data?.[source.column] ?? null;
-      mergedRowIds.push(matches[0].id);
-    } else {
-      out[canonicalField] = null;
-      joinIssues.push({
-        code: matches.length > 1 ? 'ambiguous_source_join' : 'source_join_not_found',
-        severity: 'blocker',
-        field: canonicalField,
-        source_reference: source.sourceReference,
-      });
-    }
-  }
-  return { mapped: out, mergedRowIds: [...new Set(mergedRowIds)], joinIssues };
 }
 
 function isValidDateParts(year, month, day) {
@@ -325,6 +263,30 @@ function normalizeCandidateData(mapped, entityType) {
     data.note_text = coerceOptionalText(data.note_text).value;
   }
 
+  if (entityType === 'guardian_link') {
+    if (data.relationship !== null && data.relationship !== undefined) {
+      data.relationship = coerceOptionalText(data.relationship).value;
+    }
+    const rawPrimary = data.is_primary;
+    if (rawPrimary === null || rawPrimary === undefined || rawPrimary === '') {
+      data.is_primary = null;
+    } else if (typeof rawPrimary === 'boolean') {
+      data.is_primary = rawPrimary;
+    } else {
+      const str = normalizeString(String(rawPrimary)).toLowerCase();
+      const trueSet = new Set(['true', '1', 'yes', 'כן', 'primary', 'ראשי', 'y']);
+      const falseSet = new Set(['false', '0', 'no', 'לא', 'לא ראשי', 'n']);
+      if (trueSet.has(str)) {
+        data.is_primary = true;
+      } else if (falseSet.has(str)) {
+        data.is_primary = false;
+      } else {
+        fieldIssues.push({ code: 'invalid_field_format', severity: 'blocker', field: 'is_primary' });
+        data.is_primary = null;
+      }
+    }
+  }
+
   // customer_type: must be 'student' or 'one_time_customer' when provided
   const VALID_CUSTOMER_TYPES = new Set(['student', 'one_time_customer']);
   if (entityType === 'customer') {
@@ -396,6 +358,40 @@ function buildGuardianPhoneContext(normalizedCandidates) {
   }
 
   return { rowsWithGuardianPhone, identitiesWithGuardianPhone };
+}
+
+function isTruthyPrimary(value) {
+  if (value === true) return true;
+  const normalized = normalizeString(value).toLowerCase();
+  return ['true', '1', 'yes', 'כן', 'y'].includes(normalized);
+}
+
+function buildGuardianPrimaryIssueContext(currentCandidates, existingCandidates = []) {
+  const groups = new Map();
+  const add = (candidate) => {
+    if (!candidate || normalizeString(candidate.status) === 'skipped') return;
+    const identityNumber = normalizeString(candidate.candidateData?.identity_number || candidate.candidate_data?.identity_number);
+    if (!identityNumber) return;
+    const items = groups.get(identityNumber) || [];
+    items.push({
+      rowId: candidate.rowId || candidate.source_row_id || '',
+      isPrimary: isTruthyPrimary(candidate.candidateData?.is_primary ?? candidate.candidate_data?.is_primary),
+    });
+    groups.set(identityNumber, items);
+  };
+
+  currentCandidates
+    .filter((candidate) => candidate.entityType === 'guardian_link')
+    .forEach(add);
+  existingCandidates.forEach(add);
+
+  const identitiesNeedingPrimary = new Set();
+  for (const [identityNumber, items] of groups.entries()) {
+    if (items.length < 2) continue;
+    const primaryCount = items.filter((item) => item.isPrimary).length;
+    if (primaryCount !== 1) identitiesNeedingPrimary.add(identityNumber);
+  }
+  return identitiesNeedingPrimary;
 }
 
 function hasRelatedGuardianPhone(candidateData, rowId, guardianPhoneContext) {
@@ -545,12 +541,9 @@ export default async function importWorkspacesAnalyzeChunk(context, req) {
   }
 
   const config = workspace.config || {};
-  const sourceMapping = config.mappings?.by_source?.[sourceReference];
-  const configuredEntities = sourceMapping?.entities && typeof sourceMapping.entities === 'object'
-    ? Object.entries(sourceMapping.entities)
-        .filter(([, mapping]) => mapping?.enabled)
-        .map(([entityType, mapping]) => ({ entityType, ...mapping }))
-    : [];
+  const joinColumns = config.mappings?.join || {};
+  const configuredEntities = buildEnabledEntityMappings(config.mappings || {})
+    .filter((mapping) => mapping.anchorSourceReference === sourceReference);
   if (configuredEntities.length === 0) {
     return respond(context, 400, { message: 'no_enabled_entities_for_source' });
   }
@@ -559,21 +552,17 @@ export default async function importWorkspacesAnalyzeChunk(context, req) {
     if (!ENTITY_SCHEMA[mapping.entityType]) {
       return respond(context, 400, { message: 'unsupported_entity_type', entityType: mapping.entityType });
     }
-    const externalReferences = Object.values(mapping.field_map || {})
-      .map((value) => normalizeFieldSource(value, sourceReference)?.sourceReference)
-      .filter((reference) => reference && reference !== sourceReference);
+    const externalReferences = getExternalSourceReferences(mapping, sourceReference);
     if (externalReferences.some((externalReference) => (
-      !normalizeString(mapping.join_columns?.[sourceReference])
-      || !normalizeString(mapping.join_columns?.[externalReference])
+      !normalizeString(joinColumns?.[sourceReference])
+      || !normalizeString(joinColumns?.[externalReference])
     ))) {
       return respond(context, 400, { message: 'cross_source_join_columns_required', entityType: mapping.entityType });
     }
   }
 
   const externalSourceReferences = [...new Set(configuredEntities.flatMap((mapping) => (
-    Object.values(mapping.field_map || {})
-      .map((value) => normalizeFieldSource(value, sourceReference)?.sourceReference)
-      .filter((reference) => reference && reference !== sourceReference)
+    getExternalSourceReferences(mapping, sourceReference)
   )))];
 
   // --- Load import rows for this chunk ---
@@ -671,7 +660,7 @@ export default async function importWorkspacesAnalyzeChunk(context, req) {
   for (const mapping of configuredEntities) {
     const indexes = new Map();
     for (const externalReference of externalSourceReferences) {
-      const joinColumn = mapping.join_columns?.[externalReference];
+      const joinColumn = joinColumns?.[externalReference];
       if (!joinColumn) continue;
       const rowsByKey = new Map();
       for (const externalRow of externalRowsBySource.get(externalReference) || []) {
@@ -694,7 +683,7 @@ export default async function importWorkspacesAnalyzeChunk(context, req) {
       row.raw_data || {},
       mapping.field_map || {},
       sourceReference,
-      mapping.join_columns || {},
+      joinColumns,
       indexesByEntity.get(mapping.entityType) || new Map(),
     );
     for (const [field, fixedValue] of Object.entries(mapping.fixed_values || {})) {
@@ -786,6 +775,26 @@ export default async function importWorkspacesAnalyzeChunk(context, req) {
     });
   }
 
+  let existingGuardianLinksForPrimary = [];
+  if (normalized.some((item) => item.entityType === 'guardian_link')) {
+    const currentRowIdSetForPrimary = new Set(rowIds);
+    const { data: existingGuardianLinks, error: guardianPrimaryError } = await withOrgScope(supabase, 'import_candidates', orgId)
+      .select('source_row_id, candidate_data, status')
+      .eq('workspace_id', workspaceId)
+      .eq('entity_type', 'guardian_link');
+    if (guardianPrimaryError) {
+      context.log?.error?.('import-workspaces-analyze-chunk: guardian primary lookup failed', {
+        message: guardianPrimaryError.message,
+      });
+      return respondAnalyzeError(context, 500, 'failed_to_check_guardian_primary_contacts', guardianPrimaryError, {
+        action: 'check_guardian_primary_contacts',
+      });
+    }
+    existingGuardianLinksForPrimary = (existingGuardianLinks || [])
+      .filter((candidate) => !currentRowIdSetForPrimary.has(candidate.source_row_id));
+  }
+  const identitiesNeedingPrimary = buildGuardianPrimaryIssueContext(normalized, existingGuardianLinksForPrimary);
+
   for (const existingCandidate of importIdentityResult.data || []) {
     if (currentRowIdSet.has(existingCandidate.source_row_id)) continue;
     if (normalizeString(existingCandidate.status) === 'skipped') continue;
@@ -833,6 +842,17 @@ export default async function importWorkspacesAnalyzeChunk(context, req) {
 
     if (entityType === 'customer' && candidateData.note_text && candidateData.customer_type !== 'student') {
       issues.push({ code: 'note_requires_student', severity: 'warning', field: 'note_text' });
+    }
+
+    if (
+      entityType === 'guardian_link'
+      && identitiesNeedingPrimary.has(normalizeString(candidateData.identity_number))
+    ) {
+      issues.push({
+        code: 'guardian_primary_contact_required',
+        severity: 'blocker',
+        field: 'is_primary',
+      });
     }
 
     // Duplicate identity number check

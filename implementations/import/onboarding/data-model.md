@@ -53,7 +53,7 @@ Statuses:
 - `sources`: one entry per CSV or non-empty workbook sheet, with a unique `sourceReference`, human-readable file/sheet label, headers, profile, and optional temporary R2 file metadata
 - files: names, sizes, hashes, encodings, sheet names, temporary R2 object keys, R2 expiry timestamps
 - sheet profiles: row counts, header rows, detected entity hints
-- mappings: source-keyed rules under `mappings.by_source[sourceReference]`. Every target-field assignment stores both `source_reference` and `column`, so one candidate may draw values from several files/sheets. Cross-source mappings also store `join_columns` for every participating source; joins use explicit values such as student identity and never row position.
+- mappings: global rules under `mappings.entities` plus one workspace-level `mappings.join` object. Every target-field assignment stores both `source_reference` and `column`, so one candidate may draw values from several files/sheets. `mappings.join[sourceReference]` stores the shared key column for each file/sheet when a mapped entity pulls fields across sources.
 - normalization settings: date locale, encoding override, phone/identity cleanup rules
 - operation progress: current chunk, total chunks, last error, resumable cursor
 - import policy: active/inactive lanes, inactive archive rules, chunk sizes
@@ -87,6 +87,17 @@ The suffix is required. It must include a timestamp or content hash so corrected
 For Excel workbooks, every non-empty sheet is a separate source and its label/reference includes both filename and sheet name. This allows student and guardian sheets to retain independent profiles, mappings, ingestion progress, and analysis progress inside one workspace.
 
 When a candidate uses fields from multiple sources, its anchor row remains `source_row_id` and every matched contributing row is included in `merged_from_row_ids`. Missing joins and non-unique joins are blocking issues; the analyzer must not guess which row to use.
+
+Mapping uses one screen for the whole workspace. Users enable any combination of `customer`, `guardian`, `guardian_link`, and `service`, then map each entity field to a column from any uploaded source. The system infers the anchor source per entity:
+
+- `customer`: `identity_number`, else `first_name`
+- `guardian`: `guardian_first_name`, else `guardian_phone`
+- `guardian_link`: `guardian_phone`, else `identity_number`
+- `service`: `service_name`
+
+If the grain field is unmapped, the anchor falls back to the source that supplies the most mapped fields for that entity; ties use the first field in the entity schema order. Fields from the anchor source are read directly from the iterated row. Fields from another source are resolved through `mappings.join`: normalize the anchor row's join value, look it up in the external source's join column, and require exactly one match. Zero matches create `source_join_not_found`; multiple matches create `ambiguous_source_join`.
+
+Guardian links are anchored to the parent/guardian file by `guardian_phone`. This supports one student with multiple guardians because each parent row emits one guardian and one guardian link. When two or more guardian links resolve to the same student identity and the data does not mark exactly one `is_primary`, analysis must add a blocking `guardian_primary_contact_required` issue asking the user to choose one primary contact. Commit must write exactly one primary guardian link per student, respecting the user's selected `is_primary`.
 
 `raw_data` stores:
 - decoded raw cell values

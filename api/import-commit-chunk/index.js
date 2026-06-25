@@ -31,7 +31,6 @@ import {
   createOrReuseClientProfile,
   ensureStudentForClientProfile,
   createOrReuseGuardianByParts,
-  upsertClientGuardianLink,
   findClientProfileByIdentityNumber,
 } from '../_shared/client-profiles.js';
 import { validateIsraeliPhone, coerceEmail, coerceOptionalDate } from '../_shared/student-validation.js';
@@ -235,12 +234,43 @@ async function commitGuardianLink(supabase, orgId, candidate, committedProfilesB
   if (guardianError) throw new Error(`failed_to_find_guardian:${guardianError.message}`);
   if (!guardian?.id) throw new Error('guardian_link_guardian_not_found');
 
-  await upsertClientGuardianLink(supabase, {
-    orgId,
-    clientProfileId,
-    guardianId: guardian.id,
-    relationship: normalizeString(data.relationship) || null,
-  });
+  const requestedPrimary = data.is_primary === true;
+  if (requestedPrimary) {
+    const { error: demoteError } = await withOrgScope(supabase, 'client_guardians', orgId)
+      .update({ is_primary: false })
+      .eq('client_profile_id', clientProfileId);
+    if (demoteError) throw new Error(`failed_to_update_guardian_primary:${demoteError.message}`);
+  }
+
+  const { error: upsertError } = await withOrgScope(supabase, 'client_guardians', orgId)
+    .upsert({
+      org_id: orgId,
+      client_profile_id: clientProfileId,
+      guardian_id: guardian.id,
+      relationship: normalizeString(data.relationship) || null,
+      is_primary: requestedPrimary,
+    }, { onConflict: 'org_id,client_profile_id,guardian_id' });
+  if (upsertError) throw new Error(`failed_to_link_guardian:${upsertError.message}`);
+
+  const { data: links, error: linksError } = await withOrgScope(supabase, 'client_guardians', orgId)
+    .select('guardian_id, is_primary')
+    .eq('client_profile_id', clientProfileId);
+  if (linksError) throw new Error(`failed_to_verify_guardian_primary:${linksError.message}`);
+  const primaryLinks = (links || []).filter((link) => link.is_primary);
+  if (primaryLinks.length === 0) {
+    const { error: promoteError } = await withOrgScope(supabase, 'client_guardians', orgId)
+      .update({ is_primary: true })
+      .eq('client_profile_id', clientProfileId)
+      .eq('guardian_id', guardian.id);
+    if (promoteError) throw new Error(`failed_to_update_guardian_primary:${promoteError.message}`);
+  } else if (primaryLinks.length > 1) {
+    const keepGuardianId = requestedPrimary ? guardian.id : primaryLinks[0].guardian_id;
+    const { error: normalizePrimaryError } = await withOrgScope(supabase, 'client_guardians', orgId)
+      .update({ is_primary: false })
+      .eq('client_profile_id', clientProfileId)
+      .neq('guardian_id', keepGuardianId);
+    if (normalizePrimaryError) throw new Error(`failed_to_update_guardian_primary:${normalizePrimaryError.message}`);
+  }
 
   return { clientProfileId, guardianId: guardian.id };
 }

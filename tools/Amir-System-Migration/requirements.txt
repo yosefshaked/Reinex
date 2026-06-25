@@ -1,0 +1,5 @@
+# Dependencies for the Amir System migration tool (Windows only).
+# Provides win32com, used to read the password-protected Access .mdb via COM/ADO.
+#
+#   python -m pip install -r tools/Amir-System-Migration/requirements.txt
+pywin32>=306

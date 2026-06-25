@@ -19,7 +19,16 @@ import json
 import sys
 from pathlib import Path
 
-import win32com.client
+try:
+    import win32com.client
+except ImportError as exc:  # pragma: no cover - depends on local environment
+    raise SystemExit(
+        "Missing dependency 'pywin32' (provides win32com), required to read the Access "
+        ".mdb via COM/ADO on Windows.\n"
+        "Install it for the Python you are running this with:\n"
+        "    python -m pip install pywin32\n"
+        "(or: pip install -r tools/Amir-System-Migration/requirements.txt)"
+    ) from exc
 
 
 AD_SCHEMA_TABLES = 20

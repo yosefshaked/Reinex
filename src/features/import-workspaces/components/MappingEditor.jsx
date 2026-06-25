@@ -5,6 +5,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 import { Save } from 'lucide-react';
+import { getEntityMappedSources, inferEntityAnchorSource } from '../lib/importMapping.js';
 
 const SECTION_DEFINITIONS = [
   {
@@ -104,7 +105,6 @@ function normalizeInitialEntities(initialEntities, legacyMapping) {
     normalized[section.type] = {
       enabled: Boolean(configured?.enabled),
       field_map: migrateFieldMap(section.type, configured?.field_map || {}),
-      join_columns: configured?.join_columns || {},
       fixed_values: configured?.fixed_values || {},
     };
   }
@@ -112,27 +112,46 @@ function normalizeInitialEntities(initialEntities, legacyMapping) {
     normalized[legacyMapping.entity_type] = {
       enabled: true,
       field_map: migrateFieldMap(legacyMapping.entity_type, legacyMapping.field_map || {}),
-      join_columns: legacyMapping.join_columns || {},
       fixed_values: legacyMapping.fixed_values || {},
     };
   }
   return normalized;
 }
 
-function SectionMapping({ section, value, sources, anchorSourceReference, onChange }) {
+function normalizeInitialJoin(initialJoin = {}) {
+  return Object.fromEntries(
+    Object.entries(initialJoin || {}).filter(([, column]) => column),
+  );
+}
+
+function sectionUsesCrossSource(sectionType, entity) {
+  const anchorSourceReference = inferEntityAnchorSource(sectionType, entity);
+  if (!anchorSourceReference) return false;
+  return getEntityMappedSources(entity).some((sourceReference) => sourceReference !== anchorSourceReference);
+}
+
+function requiredJoinSourcesForEntities(entities) {
+  const required = new Set();
+  for (const [entityType, entity] of Object.entries(entities || {})) {
+    if (!entity?.enabled) continue;
+    const anchorSourceReference = inferEntityAnchorSource(entityType, entity);
+    if (!anchorSourceReference) continue;
+    const mappedSources = getEntityMappedSources(entity);
+    if (!mappedSources.some((sourceReference) => sourceReference !== anchorSourceReference)) continue;
+    required.add(anchorSourceReference);
+    mappedSources.forEach((sourceReference) => required.add(sourceReference));
+  }
+  return required;
+}
+
+function SectionMapping({ section, value, sources, onChange }) {
   const [expanded, setExpanded] = useState(value.enabled);
-  const mappedSources = [...new Set(Object.values(value.field_map || {})
-    .map((fieldSource) => decodeSourceField(fieldSource, anchorSourceReference)?.source_reference)
-    .filter(Boolean))];
-  const crossSource = mappedSources.some((sourceReference) => sourceReference !== anchorSourceReference);
-  const joinSources = crossSource
-    ? [...new Set([anchorSourceReference, ...mappedSources].filter(Boolean))]
-    : [];
+  const crossSource = sectionUsesCrossSource(section.type, value);
 
   function updateField(field, encodedValue) {
     const nextMap = { ...value.field_map };
     if (encodedValue === SKIP_VALUE) delete nextMap[field];
-    else nextMap[field] = decodeSourceField(encodedValue, anchorSourceReference);
+    else nextMap[field] = decodeSourceField(encodedValue);
     onChange({ ...value, field_map: nextMap });
   }
 
@@ -147,7 +166,6 @@ function SectionMapping({ section, value, sources, anchorSourceReference, onChan
     value.field_map?.[field.value]
     || (value.fixed_values?.[field.value] !== undefined && value.fixed_values?.[field.value] !== '')
   ));
-  const joinsComplete = joinSources.every((sourceReference) => value.join_columns?.[sourceReference]);
 
   return (
     <details
@@ -174,8 +192,8 @@ function SectionMapping({ section, value, sources, anchorSourceReference, onChan
             </div>
           </div>
           {value.enabled && (
-            <Badge variant={requiredComplete && joinsComplete ? 'default' : 'secondary'}>
-              {requiredComplete && joinsComplete ? 'מוכן' : 'דורש השלמה'}
+            <Badge variant={requiredComplete ? 'default' : 'secondary'}>
+              {requiredComplete ? (crossSource ? 'מוכן · חוצה קבצים' : 'מוכן') : 'דורש השלמה'}
             </Badge>
           )}
         </div>
@@ -194,7 +212,7 @@ function SectionMapping({ section, value, sources, anchorSourceReference, onChan
               </thead>
               <tbody className="divide-y">
                 {section.fields.map((field) => {
-                  const mapped = decodeSourceField(value.field_map?.[field.value], anchorSourceReference);
+                  const mapped = decodeSourceField(value.field_map?.[field.value]);
                   const mappedSource = sources.find((source) => source.sourceReference === mapped?.source_reference);
                   const sample = mapped ? mappedSource?.profile?.sampleRow?.[mapped.column] : null;
                   return (
@@ -275,65 +293,83 @@ function SectionMapping({ section, value, sources, anchorSourceReference, onChan
               </div>
             </div>
           )}
-
-          {crossSource && (
-            <div className="space-y-3 rounded-lg border p-3">
-              <div>
-                <p className="text-sm font-medium">חיבור בין המקורות</p>
-                <p className="text-xs text-muted-foreground">בחר בכל מקור עמודה עם אותו מזהה. החיבור אינו מתבצע לפי מספר שורה.</p>
-              </div>
-              <div className="grid gap-3 sm:grid-cols-2">
-                {joinSources.map((sourceReference) => {
-                  const source = sources.find((item) => item.sourceReference === sourceReference);
-                  return (
-                    <div key={sourceReference} className="space-y-1">
-                      <span className="text-xs font-medium">{source?.label || sourceReference}</span>
-                      <Select
-                        value={value.join_columns?.[sourceReference] || SKIP_VALUE}
-                        onValueChange={(selected) => onChange({
-                          ...value,
-                          join_columns: {
-                            ...value.join_columns,
-                            [sourceReference]: selected === SKIP_VALUE ? '' : selected,
-                          },
-                        })}
-                        dir="rtl"
-                      >
-                        <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value={SKIP_VALUE}>— בחר עמודת קישור —</SelectItem>
-                          {(source?.headers || source?.profile?.headers || []).map((column) => (
-                            <SelectItem key={column} value={column}>{column}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
         </div>
       )}
     </details>
   );
 }
 
+function WorkspaceJoinSection({ sources, join, requiredSources, onChange }) {
+  if (sources.length < 2) return null;
+  const requiresJoin = requiredSources.size > 0;
+  return (
+    <div className={cn(
+      'space-y-3 rounded-lg border p-4',
+      requiresJoin && 'border-primary/40 bg-primary/5',
+    )}>
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <p className="text-sm font-medium">חיבור בין הקבצים</p>
+          <p className="text-xs text-muted-foreground">
+            בחר בכל קובץ עמודה שמחזיקה את אותו מזהה משותף, למשל תעודת זהות תלמיד או מזהה תלמיד במערכת הקודמת.
+          </p>
+        </div>
+        {requiresJoin && <Badge variant="secondary">נדרש</Badge>}
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        {sources.map((source) => {
+          const required = requiredSources.has(source.sourceReference);
+          return (
+            <div key={source.sourceReference} className="space-y-1">
+              <span className="text-xs font-medium">
+                {source.label || source.sheetName || source.filename || source.sourceReference}
+                {required && <span className="ms-1 text-destructive">*</span>}
+              </span>
+              <Select
+                value={join[source.sourceReference] || SKIP_VALUE}
+                onValueChange={(selected) => onChange({
+                  ...join,
+                  [source.sourceReference]: selected === SKIP_VALUE ? '' : selected,
+                })}
+                dir="rtl"
+              >
+                <SelectTrigger className={cn('h-8', required && !join[source.sourceReference] && 'border-destructive')}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={SKIP_VALUE}>— בחר עמודת חיבור —</SelectItem>
+                  {(source.headers || source.profile?.headers || []).map((column) => (
+                    <SelectItem key={column} value={column}>{column}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export function MappingEditor({
   sources = [],
-  anchorSourceReference,
   initialEntities = {},
+  initialJoin = {},
   legacyMapping = null,
   onSave,
   saving = false,
 }) {
-  const initialSignature = JSON.stringify({ initialEntities, legacyMapping });
+  const initialSignature = JSON.stringify({ initialEntities, initialJoin, legacyMapping });
   const [entities, setEntities] = useState(() => normalizeInitialEntities(initialEntities, legacyMapping));
+  const [join, setJoin] = useState(() => normalizeInitialJoin(initialJoin));
 
   useEffect(() => {
     const parsed = JSON.parse(initialSignature);
     setEntities(normalizeInitialEntities(parsed.initialEntities, parsed.legacyMapping));
+    setJoin(normalizeInitialJoin(parsed.initialJoin));
   }, [initialSignature]);
+
+  const requiredJoinSources = useMemo(() => requiredJoinSourcesForEntities(entities), [entities]);
 
   const validation = useMemo(() => {
     const enabled = SECTION_DEFINITIONS.filter((section) => entities[section.type]?.enabled);
@@ -345,21 +381,21 @@ export function MappingEditor({
         || (entity.fixed_values?.[field.value] !== undefined && entity.fixed_values?.[field.value] !== '')
       ));
       if (!requiredComplete) return { valid: false, message: `חסרים שדות חובה באזור ${section.label}.` };
-      const mappedSources = [...new Set(Object.values(entity.field_map || {})
-        .map((fieldSource) => decodeSourceField(fieldSource, anchorSourceReference)?.source_reference)
-        .filter(Boolean))];
-      const joinSources = mappedSources.some((reference) => reference !== anchorSourceReference)
-        ? [...new Set([anchorSourceReference, ...mappedSources])]
-        : [];
-      if (!joinSources.every((reference) => entity.join_columns?.[reference])) {
-        return { valid: false, message: `צריך לבחור עמודות חיבור באזור ${section.label}.` };
-      }
+    }
+    if (![...requiredJoinSources].every((reference) => join[reference])) {
+      return { valid: false, message: 'צריך לבחור עמודות חיבור בין הקבצים.' };
     }
     return { valid: true, message: '' };
-  }, [anchorSourceReference, entities]);
+  }, [entities, join, requiredJoinSources]);
 
   return (
     <div className="space-y-4">
+      <WorkspaceJoinSection
+        sources={sources}
+        join={join}
+        requiredSources={requiredJoinSources}
+        onChange={setJoin}
+      />
       <div className="space-y-2">
         {SECTION_DEFINITIONS.map((section) => (
           <SectionMapping
@@ -367,14 +403,13 @@ export function MappingEditor({
             section={section}
             value={entities[section.type]}
             sources={sources}
-            anchorSourceReference={anchorSourceReference}
             onChange={(next) => setEntities((current) => ({ ...current, [section.type]: next }))}
           />
         ))}
       </div>
       {!validation.valid && <p className="text-xs text-muted-foreground">{validation.message}</p>}
       <div className="flex justify-end">
-        <Button onClick={() => onSave?.(entities)} disabled={!validation.valid || saving} className="gap-2">
+        <Button onClick={() => onSave?.(entities, join)} disabled={!validation.valid || saving} className="gap-2">
           <Save className="h-4 w-4" />
           {saving ? 'שומר…' : 'שמור והמשך'}
         </Button>

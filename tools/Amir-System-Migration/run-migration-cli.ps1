@@ -1,15 +1,17 @@
 Param(
   [ValidateSet("menu", "wizard", "run", "summarize-report")]
   [string]$Mode = "menu",
-  [ValidateSet("inventory", "riders-core", "lessons-candidates", "all")]
+  [ValidateSet("inventory", "riders-core", "lessons-candidates", "extract", "all")]
   [string]$Job = "all",
   [string]$MdbPath = "",
   [string]$ReportPath = "",
   [string]$SummaryOutput = "",
   [string]$PasswordEnv = "MDB_PASSWORD",
   [int]$SampleRows = 10,
+  [string]$Tables = "",
   [string]$OutputDir = "",
-  [switch]$NoPause
+  [switch]$NoPause,
+  [switch]$NoDepCheck
 )
 
 if (-not $OutputDir -or $OutputDir.Trim() -eq "") {
@@ -25,6 +27,40 @@ if (-not (Test-Path $scriptPath)) {
 $pythonExe = "C:/Users/Admin/AppData/Local/Programs/Python/Python313/python.exe"
 if (-not (Test-Path $pythonExe)) {
   $pythonExe = "python"
+}
+
+# Ensure pywin32 (win32com) is available for the resolved Python. Installs only when
+# missing, so normal runs aren't slowed down. Skip with -NoDepCheck.
+if (-not $NoDepCheck) {
+  & $pythonExe -c "import win32com.client" 2>$null
+  if ($LASTEXITCODE -ne 0) {
+    Write-Host "Dependency 'pywin32' (win32com) not found for '$pythonExe' - installing..."
+    $reqPath = Join-Path $PSScriptRoot "requirements.txt"
+    if (Test-Path $reqPath) {
+      & $pythonExe -m pip install -r $reqPath
+    } else {
+      & $pythonExe -m pip install pywin32
+    }
+    if ($LASTEXITCODE -ne 0) {
+      Write-Error "Failed to install pywin32. Install it manually: $pythonExe -m pip install pywin32"
+      if (-not $NoPause) { Read-Host "Press Enter to close" }
+      exit 1
+    }
+    # Re-verify (pywin32 occasionally needs its post-install step).
+    & $pythonExe -c "import win32com.client" 2>$null
+    if ($LASTEXITCODE -ne 0) {
+      Write-Host "pywin32 installed but win32com is not importable yet - running post-install..."
+      & $pythonExe -m pywin32_postinstall -install 2>$null
+      & $pythonExe -c "import win32com.client" 2>$null
+      if ($LASTEXITCODE -ne 0) {
+        Write-Error "win32com still not importable. Try a new terminal, or: $pythonExe -m pywin32_postinstall -install"
+        if (-not $NoPause) { Read-Host "Press Enter to close" }
+        exit 1
+      }
+    }
+    Write-Host "pywin32 is ready."
+    Write-Host ""
+  }
 }
 
 $resolvedMode = $Mode
@@ -52,14 +88,16 @@ if ($resolvedMode -eq "run" -and ($Job -eq "all" -or [string]::IsNullOrWhiteSpac
   Write-Host "  1) inventory"
   Write-Host "  2) riders-core"
   Write-Host "  3) lessons-candidates"
-  Write-Host "  4) all"
-  $jobChoice = (Read-Host "Enter 1-4 [4]").Trim()
-  if ([string]::IsNullOrWhiteSpace($jobChoice)) { $jobChoice = "4" }
+  Write-Host "  4) extract (import-ready CSVs)"
+  Write-Host "  5) all"
+  $jobChoice = (Read-Host "Enter 1-5 [5]").Trim()
+  if ([string]::IsNullOrWhiteSpace($jobChoice)) { $jobChoice = "5" }
   switch ($jobChoice) {
     "1" { $Job = "inventory" }
     "2" { $Job = "riders-core" }
     "3" { $Job = "lessons-candidates" }
-    "4" { $Job = "all" }
+    "4" { $Job = "extract" }
+    "5" { $Job = "all" }
     default {
       Write-Error "Invalid selection: $jobChoice"
       exit 2
@@ -91,6 +129,9 @@ elseif ($resolvedMode -eq "run") {
     exit 2
   }
   $args += @("run", $Job, "--mdb", $effectiveMdbPath, "--password-env", $PasswordEnv, "--sample-rows", "$SampleRows", "--output-dir", $OutputDir)
+  if ($Tables -and $Tables.Trim() -ne "") {
+    $args += @("--tables", $Tables)
+  }
 }
 elseif ($resolvedMode -eq "summarize-report") {
   if (-not $effectiveReportPath -or $effectiveReportPath.Trim() -eq "") {

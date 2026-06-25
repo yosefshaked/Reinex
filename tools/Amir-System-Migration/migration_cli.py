@@ -8,6 +8,7 @@ It runs predefined discovery jobs and writes JSON reports to disk.
 from __future__ import annotations
 
 import argparse
+import csv
 import getpass
 import hashlib
 import json
@@ -174,6 +175,87 @@ def compute_rider_parent_duplicates(conn, max_rows: int = 20000) -> dict:
     }
 
 
+DEFAULT_EXTRACT_TABLES = ["Riders", "RiderParents"]
+
+
+def to_cell(value):
+    """Render an Access value as an import-friendly CSV cell.
+
+    Dates become ISO (YYYY-MM-DD), Yes/No becomes TRUE/FALSE, NULL becomes empty.
+    The Import Workspaces parser understands all of these.
+    """
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return "TRUE" if value else "FALSE"
+    if hasattr(value, "strftime"):
+        try:
+            if getattr(value, "hour", 0) == 0 and getattr(value, "minute", 0) == 0 and getattr(value, "second", 0) == 0:
+                return value.strftime("%Y-%m-%d")
+            return value.strftime("%Y-%m-%d %H:%M:%S")
+        except Exception:
+            return str(value)
+    return value
+
+
+def stream_table_to_csv(conn, object_name: str, csv_path: Path) -> dict:
+    """Stream every row of a table/query into a UTF-8 (BOM) CSV that Import
+    Workspaces can ingest directly. Returns counts + column names only — never row
+    content — so the manifest stays free of sensitive data. Streams row-by-row to
+    avoid loading the whole table into memory.
+    """
+    sql = f"SELECT * FROM {quote_access_name(object_name)}"
+    recordset = conn.Execute(sql)[0]
+    field_names = [field.Name for field in recordset.Fields]
+    row_count = 0
+    # utf-8-sig writes a BOM so both Excel and the encoding sniffer read Hebrew correctly.
+    with open(csv_path, "w", encoding="utf-8-sig", newline="") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(field_names)
+        while not recordset.EOF:
+            writer.writerow([to_cell(recordset.Fields(name).Value) for name in field_names])
+            row_count += 1
+            recordset.MoveNext()
+    return {
+        "object_name": object_name,
+        "exists": True,
+        "ok": True,
+        "row_count": row_count,
+        "columns": field_names,
+        "csv_file": str(csv_path),
+    }
+
+
+def run_extract_job(conn, output_dir: Path, tables: list[str]) -> dict:
+    """Write one import-ready CSV per requested table. The CSVs hold the data; the
+    returned manifest holds only counts/columns/paths (safe to share).
+    """
+    ensure_output_dir(output_dir)
+    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+    extracted = []
+    for name in tables:
+        if not object_exists(conn, name, include_system=True):
+            extracted.append({"object_name": name, "exists": False, "ok": False, "error": "object_not_found"})
+            continue
+        csv_path = output_dir / f"{ts}_{sanitize_filename(name)}.csv"
+        try:
+            extracted.append(stream_table_to_csv(conn, name, csv_path))
+        except Exception as exc:  # pragma: no cover - depends on local data/content
+            extracted.append({"object_name": name, "exists": True, "ok": False, "error": str(exc)})
+    return {
+        "job": "extract",
+        "tables_requested": tables,
+        "output_dir": str(output_dir),
+        "extracted": extracted,
+        "import_hint": (
+            "Upload the per-table CSVs to one Import Workspace. Map the riders CSV to "
+            "'customer' and the parents CSV to 'guardian' + 'guardian_link', joining the two "
+            "sources on the shared rider key (e.g. RiderId) so guardian-links resolve to the "
+            "correct student. CSVs are UTF-8 (BOM) and ready to upload as-is."
+        ),
+    }
+
+
 def run_inventory_job(conn) -> dict:
     objects = list_objects(conn, include_system=False)
     grouped = {}
@@ -298,15 +380,19 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=False)
 
     run = sub.add_parser("run", help="Run a predefined discovery job")
-    run.add_argument("job", choices=["inventory", "riders-core", "lessons-candidates", "all"]) 
+    run.add_argument("job", choices=["inventory", "riders-core", "lessons-candidates", "extract", "all"])
     run.add_argument("--mdb", required=True, help="Path to .mdb file")
     run.add_argument("--password", help="MDB password")
     run.add_argument("--password-env", default="MDB_PASSWORD", help="Environment variable for MDB password")
     run.add_argument("--sample-rows", type=int, default=10, help="Rows to sample per object")
-    run.add_argument("--output-dir", default="tools/Amir-System-Migration/output", help="Where JSON reports are written")
+    run.add_argument("--output-dir", default="tools/Amir-System-Migration/output", help="Where reports / extract CSVs are written")
     run.add_argument(
         "--lesson-candidates",
         help="Comma separated override for lessons-candidates job",
+    )
+    run.add_argument(
+        "--tables",
+        help="Comma separated tables for the 'extract' job (default: Riders,RiderParents)",
     )
 
     wizard = sub.add_parser("wizard", help="Interactive prompt to run a job")
@@ -329,22 +415,31 @@ def pick_job_interactively() -> str:
         ("1", "inventory"),
         ("2", "riders-core"),
         ("3", "lessons-candidates"),
-        ("4", "all"),
+        ("4", "extract"),
+        ("5", "all"),
     ]
     print("Select job:")
     print("  1) inventory")
     print("  2) riders-core")
     print("  3) lessons-candidates")
-    print("  4) all")
+    print("  4) extract (import-ready CSVs)")
+    print("  5) all")
     while True:
-        choice = input("Enter 1-4 [4]: ").strip() or "4"
+        choice = input("Enter 1-5 [5]: ").strip() or "5"
         for key, value in options:
             if choice == key:
                 return value
         print("Invalid choice, try again.")
 
 
-def run_selected_job(conn, job: str, sample_rows: int, lesson_candidates_arg: str | None) -> dict:
+def run_selected_job(
+    conn,
+    job: str,
+    sample_rows: int,
+    lesson_candidates_arg: str | None,
+    output_dir: str | None = None,
+    tables: list[str] | None = None,
+) -> dict:
     if job == "inventory":
         return run_inventory_job(conn)
     if job == "riders-core":
@@ -355,6 +450,9 @@ def run_selected_job(conn, job: str, sample_rows: int, lesson_candidates_arg: st
         else:
             candidates = LESSON_CANDIDATES
         return run_lessons_candidates_job(conn, sample_rows, candidates)
+    if job == "extract":
+        target_dir = Path(output_dir or "tools/Amir-System-Migration/output")
+        return run_extract_job(conn, target_dir, tables or DEFAULT_EXTRACT_TABLES)
     if job == "all":
         return run_all_discovery_job(conn, sample_rows)
     raise ValueError(f"Unsupported job: {job}")
@@ -365,9 +463,18 @@ def run_noninteractive(args) -> int:
     password = resolve_password(args.password, args.password_env, prompt_if_missing=True)
     provider = None
     conn = None
+    tables_arg = getattr(args, "tables", None)
+    tables = [t.strip() for t in tables_arg.split(",") if t.strip()] if tables_arg else None
     try:
         conn, provider = open_connection(mdb_path, password)
-        result = run_selected_job(conn, args.job, args.sample_rows, args.lesson_candidates)
+        result = run_selected_job(
+            conn,
+            args.job,
+            args.sample_rows,
+            args.lesson_candidates,
+            output_dir=args.output_dir,
+            tables=tables,
+        )
         report = build_base_report(mdb_path, provider, args.job, result, status="success")
         out = write_report(Path(args.output_dir), args.job, report)
         print(f"Job completed: {args.job}")
@@ -404,7 +511,13 @@ def run_wizard(args) -> int:
     conn = None
     try:
         conn, provider = open_connection(mdb_path, password)
-        result = run_selected_job(conn, job, args.sample_rows, lesson_candidates_arg=None)
+        result = run_selected_job(
+            conn,
+            job,
+            args.sample_rows,
+            lesson_candidates_arg=None,
+            output_dir=args.output_dir,
+        )
         report = build_base_report(mdb_path, provider, job, result, status="success")
         out = write_report(Path(args.output_dir), job, report)
         print(f"Job completed: {job}")

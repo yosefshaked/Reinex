@@ -40,7 +40,8 @@ function buildDefaultWorkspaceConfig() {
     sheets: [],
     sheetProfiles: [],
     mappings: {
-      field_map: {},
+      entities: {},
+      join: {},
       fixed_values: {},
       enum_dictionaries: {},
       ignored_columns: [],

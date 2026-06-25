@@ -72,9 +72,7 @@ function deriveCompletedSteps(ws, ingestionStatus, analysisStatus, ingestedRowsB
   const completed = [];
 
   const sources = getWorkspaceSources(config);
-  const hasMappings = Object.values(config.mappings?.by_source || {})
-    .some(hasConfiguredMapping)
-    || Object.keys(config.mappings?.field_map || {}).length > 0;
+  const hasMappings = hasConfiguredMapping(config.mappings || {});
   const sourceProgress = progress.by_source || {};
   const { anchorReferences, participatingReferences } = getMappedSourceReferences(config);
   const participatingSources = participatingReferences.size > 0
@@ -115,9 +113,7 @@ function deriveCurrentStep(ws, ingestionStatus, analysisStatus, ingestedRowsBySo
   if (!config.sourceReference) return 'upload';
 
   const sources = getWorkspaceSources(config);
-  const hasMappings = Object.values(config.mappings?.by_source || {})
-    .some(hasConfiguredMapping)
-    || Object.keys(config.mappings?.field_map || {}).length > 0;
+  const hasMappings = hasConfiguredMapping(config.mappings || {});
   if (!hasMappings) return 'map';
 
   const sourceProgress = progress.by_source || {};
@@ -314,6 +310,13 @@ function UploadStep({ hook, workspace, onDone, onCreateNew }) {
         )}
       </div>
 
+      {(isParsed || savedSources.length > 0 || hook.parsedSources?.length > 0) && (
+        <p className="text-xs text-muted-foreground">
+          מייבאים מכמה קבצים (למשל תלמידים והורים בנפרד)? בחר/י עכשיו קובץ נוסף — כל קובץ מנותח בנפרד
+          ומתווסף לרשימת המקורות למטה. כשסיימת להוסיף את כל הקבצים, לחצ/י &quot;המשך למיפוי&quot;.
+        </p>
+      )}
+
       {(savedSources.length > 0 || hook.parsedSources?.length > 0) && (
         <div className="space-y-2 rounded-lg border p-3">
           <p className="text-sm font-medium">מקורות שנוספו</p>
@@ -326,7 +329,7 @@ function UploadStep({ hook, workspace, onDone, onCreateNew }) {
               <Badge variant="secondary">{Number(source.profile?.totalRows || 0).toLocaleString()} שורות</Badge>
             </div>
           ))}
-          <p className="text-xs text-muted-foreground">כל גיליון נשמר כמקור נפרד, כדי שאפשר יהיה למפות תלמידים והורים באופן עצמאי.</p>
+          <p className="text-xs text-muted-foreground">כל קובץ (וכל גיליון) נשמר כמקור נפרד, כדי שאפשר למפות תלמידים והורים בנפרד ולחבר ביניהם בשלב המיפוי.</p>
         </div>
       )}
 
@@ -362,39 +365,34 @@ function UploadStep({ hook, workspace, onDone, onCreateNew }) {
 }
 
 // ── Map Step ───────────────────────────────────────────────────────────────
-function MapStep({ workspace, selectedSourceReference, onSourceChange, onSaved }) {
+function MapStep({ workspace, onSaved }) {
   const config      = workspace.config || {};
   const sources     = getWorkspaceSources(config);
-  const selectedSource = sources.find((source) => source.sourceReference === selectedSourceReference) || sources[0];
-  const sourceReference = selectedSource?.sourceReference;
   const workspaceId = workspace.id;
 
-  const savedSourceMapping = config.mappings?.by_source?.[sourceReference] || {};
   const [saving, setSaving]         = useState(false);
   const [saveError, setSaveError]   = useState(null);
 
-  async function handleSave(entities) {
+  async function handleSave(entities, join) {
     setSaving(true);
     setSaveError(null);
     try {
+      const progressReset = Object.fromEntries(
+        sources
+          .map((source) => source.sourceReference)
+          .filter(Boolean)
+          .map((sourceReference) => [sourceReference, { analyzedRows: 0 }]),
+      );
       await patchWorkspaceConfig(workspaceId, {
-        activeSourceReference: sourceReference,
         mappings: {
-          by_source: {
-            [sourceReference]: {
-              entities,
-            },
-          },
+          entities,
+          join,
         },
         operationProgress: {
-          by_source: {
-            [sourceReference]: {
-              analyzedRows: 0,
-            },
-          },
+          by_source: progressReset,
         },
       });
-      onSaved?.(sourceReference);
+      onSaved?.();
     } catch (err) {
       setSaveError(err.message || 'שגיאה בשמירה');
     } finally {
@@ -407,29 +405,11 @@ function MapStep({ workspace, selectedSourceReference, onSourceChange, onSaved }
       <p className="text-sm text-muted-foreground">
         הפעל את האזורים שברצונך לייבא ומפה אותם במקביל. כל שורה יכולה ליצור לקוח, הורה, חיבור להורה ושירות.
       </p>
-      {sources.length > 1 && (
-        <div className="space-y-2">
-          <p className="text-sm font-medium">בחר מקור למיפוי</p>
-          <div className="flex flex-wrap gap-2">
-            {sources.map((source) => (
-              <Button
-                key={source.sourceReference}
-                type="button"
-                variant={source.sourceReference === sourceReference ? 'default' : 'outline'}
-                onClick={() => onSourceChange?.(source.sourceReference)}
-              >
-                {source.label || source.sheetName || source.filename || source.sourceReference}
-              </Button>
-            ))}
-          </div>
-        </div>
-      )}
       {saveError && <p className="text-xs text-destructive">{saveError}</p>}
       <MappingEditor
         sources={sources}
-        anchorSourceReference={sourceReference}
-        initialEntities={savedSourceMapping.entities || {}}
-        legacyMapping={savedSourceMapping.entity_type ? savedSourceMapping : null}
+        initialEntities={config.mappings?.entities || {}}
+        initialJoin={config.mappings?.join || {}}
         onSave={handleSave}
         saving={saving}
       />
@@ -539,9 +519,8 @@ function RowRecovery({ uploadHook, objectKey, fileName, remainingCount = 1 }) {
 function ProcessStep({ processing, uploadHook, workspace, sourceReference, onSourceChange, onRetry }) {
   const config    = workspace.config || {};
   const sources = getWorkspaceSources(config);
-  const sourceMapping = config.mappings?.by_source?.[sourceReference] || {};
-  const hasSourceMapping = hasConfiguredMapping(sourceMapping)
-    || (sources.length === 1 && Object.keys(config.mappings?.field_map || {}).length > 0);
+  const { anchorReferences } = getMappedSourceReferences(config);
+  const hasSourceMapping = anchorReferences.includes(sourceReference);
   // Sources whose rows are neither in memory nor saved in the DB yet. Recovered
   // one at a time (a single parse can run at once); the next surfaces after each.
   const recoverySources = sources.filter((source) => {
@@ -1141,23 +1120,29 @@ export default function ImportWorkspaceDashboard() {
           && Number(processingSourceProgress[reference]?.uploadedRows || 0) >= requiredTotal;
       })
     ));
+    const forceReferences = Array.isArray(analysisRequest?.sourceReferences)
+      ? analysisRequest.sourceReferences
+      : analysisRequest?.sourceReference
+        ? [analysisRequest.sourceReference]
+        : [];
+    const readyForceReferences = forceReferences.filter((reference) => readyAnchors.includes(reference));
     const forceKey = analysisRequest
-      ? `${analysisRequest.sourceReference}:${analysisRequest.token}`
+      ? `${readyForceReferences.slice().sort().join('|')}:${analysisRequest.token}`
       : null;
-    const forceReference = analysisRequest
-      && readyAnchors.includes(analysisRequest.sourceReference)
+    const shouldForce = analysisRequest
+      && readyForceReferences.length > 0
       && !startedForcedAnalysisKeysRef.current.has(forceKey)
-      ? analysisRequest.sourceReference
-      : null;
+      ? true
+      : false;
     const hasIncompleteAnchor = readyAnchors.some((reference) => {
       const total = getSourceTotalRows(sourcesByReference.get(reference));
       return Number(processingSourceProgress[reference]?.analyzedRows || 0) < total;
     });
-    if (!forceReference && !hasIncompleteAnchor) return;
+    if (!shouldForce && !hasIncompleteAnchor) return;
 
-    if (forceReference) startedForcedAnalysisKeysRef.current.add(forceKey);
-    const requestToken = forceReference ? analysisRequest.token : null;
-    analyzeAll({ forceReferences: forceReference ? [forceReference] : [] }).then((completed) => {
+    if (shouldForce) startedForcedAnalysisKeysRef.current.add(forceKey);
+    const requestToken = shouldForce ? analysisRequest.token : null;
+    analyzeAll({ forceReferences: shouldForce ? readyForceReferences : [] }).then((completed) => {
       if (completed && requestToken) setCompletedAnalysisRequestToken(requestToken);
     });
   }, [
@@ -1380,14 +1365,14 @@ export default function ImportWorkspaceDashboard() {
           {currentStep === 'map' && workspace && (
             <MapStep
               workspace={workspace}
-              selectedSourceReference={sourceRef}
-              onSourceChange={handleSourceChange}
-              onSaved={async (savedSourceReference) => {
-                await handleSourceChange(savedSourceReference);
-                resetAnalysisProgress(savedSourceReference);
+              onSaved={async () => {
+                const refreshed = await load();
+                const nextConfig = refreshed?.config || config;
+                const { anchorReferences } = getMappedSourceReferences(nextConfig);
+                anchorReferences.forEach((reference) => resetAnalysisProgress(reference));
                 setAnalysisRequest((previous) => ({
                   token: Number(previous?.token || 0) + 1,
-                  sourceReference: savedSourceReference,
+                  sourceReferences: anchorReferences,
                 }));
                 setCurrentStep('process');
               }}

@@ -24,6 +24,7 @@ import {
   coerceOptionalDate,
   coerceBooleanFlag,
 } from '../_shared/student-validation.js';
+import { normalizeFieldSource } from '../_shared/import-mapping.js';
 
 // Internal (500-level) failures persist an error_events row and return the
 // support code; validation/auth/not-found/conflict stay on plain respond().
@@ -110,11 +111,15 @@ function isPlainObject(value) {
 }
 
 function issue(code, severity, field, extra = {}) {
+  const message = code === 'guardian_primary_contact_required'
+    ? 'נמצאו כמה אנשי קשר לאותו תלמיד — יש לבחור איש קשר ראשי אחד.'
+    : undefined;
   return {
     code,
     severity,
     field,
     is_blocking: severity === 'blocker',
+    ...(message ? { message } : {}),
     ...extra,
   };
 }
@@ -343,6 +348,62 @@ async function refreshRelatedCustomerContactIssues(supabase, orgId, guardianCand
     await recomputeCustomerContactIssue(supabase, orgId, customerCandidate, {
       extraGuardianCandidate: guardianCandidate,
     });
+  }
+}
+
+function isTruthyPrimary(value) {
+  if (value === true) return true;
+  const normalized = normalizeString(value).toLowerCase();
+  return ['true', '1', 'yes', 'כן', 'y'].includes(normalized);
+}
+
+async function refreshGuardianPrimaryIssues(supabase, orgId, workspaceId, options = {}) {
+  const overrideCandidate = options.overrideCandidate || null;
+  const identityNumber = normalizeString(
+    options.identityNumber
+    || overrideCandidate?.candidate_data?.identity_number
+    || overrideCandidate?.candidateData?.identity_number,
+  );
+  if (!identityNumber) return;
+
+  const { data, error } = await withOrgScope(supabase, 'import_candidates', orgId)
+    .select('id, status, candidate_data, issues')
+    .eq('workspace_id', workspaceId)
+    .eq('entity_type', 'guardian_link');
+  if (error) throw error;
+
+  const candidates = (data || [])
+    .map((candidate) => (
+      overrideCandidate?.id === candidate.id
+        ? { ...candidate, candidate_data: overrideCandidate.candidate_data, status: overrideCandidate.status || candidate.status }
+        : candidate
+    ))
+    .filter((candidate) => (
+      normalizeString(candidate.status) !== 'skipped'
+      && normalizeString(candidate.candidate_data?.identity_number) === identityNumber
+    ));
+  const primaryCount = candidates.filter((candidate) => isTruthyPrimary(candidate.candidate_data?.is_primary)).length;
+  const needsIssue = candidates.length >= 2 && primaryCount !== 1;
+
+  for (const candidate of candidates) {
+    const existingIssues = Array.isArray(candidate.issues) ? candidate.issues : [];
+    const withoutPrimaryIssue = existingIssues.filter((item) => item?.code !== 'guardian_primary_contact_required');
+    const nextIssues = needsIssue
+      ? [...withoutPrimaryIssue, issue('guardian_primary_contact_required', 'blocker', 'is_primary')]
+      : withoutPrimaryIssue;
+    const blockingCount = countBlockingIssues(nextIssues);
+    const updates = {
+      issues: nextIssues,
+      blocking_issues_count: blockingCount,
+      updated_at: new Date().toISOString(),
+    };
+    if (!['committed', 'skipped'].includes(normalizeString(candidate.status))) {
+      updates.status = blockingCount > 0 ? 'blocked' : 'ready';
+    }
+    const { error: updateError } = await withOrgScope(supabase, 'import_candidates', orgId)
+      .update(updates)
+      .eq('id', candidate.id);
+    if (updateError) throw updateError;
   }
 }
 
@@ -586,17 +647,19 @@ export default async function importCandidates(context, req) {
       );
 
       if (changedFields.length > 0) {
-        const fieldMap = workspace.config?.mappings?.field_map || {};
         const now = new Date().toISOString();
         const existingChanges = isPlainObject(nextDecisions.field_changes)
           ? { ...nextDecisions.field_changes }
           : {};
         for (const change of changedFields) {
+          const source = normalizeFieldSource(
+            workspace.config?.mappings?.entities?.[existing.entity_type]?.field_map?.[change.field],
+          );
           existingChanges[change.field] = {
             from: change.from,
             to: change.to,
             source_row_id: existing.source_row_id,
-            source_column: fieldMap[change.field] || null,
+            source_column: source ? `${source.sourceReference} · ${source.column}` : null,
             updated_at: now,
             updated_by: userId,
           };
@@ -645,6 +708,15 @@ export default async function importCandidates(context, req) {
         ...generateStructuralIssues(nextData, existing.entity_type, { hasRelatedGuardianPhone }),
         ...duplicateIssues,
       ];
+      if (
+        existing.entity_type === 'guardian_link'
+        && !Object.prototype.hasOwnProperty.call(body.candidate_data_patch, 'is_primary')
+        && !Object.prototype.hasOwnProperty.call(body.candidate_data_patch, 'identity_number')
+      ) {
+        const existingPrimaryIssue = (Array.isArray(existing.issues) ? existing.issues : [])
+          .find((item) => item?.code === 'guardian_primary_contact_required');
+        if (existingPrimaryIssue) nextIssues.push(existingPrimaryIssue);
+      }
       // A required field that is present but invalid must block (we keep the raw
       // value for editing, but an unusable required value can't commit).
       const requiredFields = new Set(REQUIRED_FIELDS_BY_ENTITY[existing.entity_type] || []);
@@ -718,7 +790,37 @@ export default async function importCandidates(context, req) {
       return respondCandidatesError(context, 500, 'failed_to_patch_candidate', updateErr, { action: 'patch', candidateId });
     }
 
-    return respond(context, 200, { candidate: updated });
+    let candidateForResponse = updated;
+    if (
+      updated.entity_type === 'guardian_link'
+      && (
+        Object.prototype.hasOwnProperty.call(body?.candidate_data_patch || {}, 'is_primary')
+        || Object.prototype.hasOwnProperty.call(body?.candidate_data_patch || {}, 'identity_number')
+      )
+    ) {
+      try {
+        await refreshGuardianPrimaryIssues(supabase, orgId, existing.workspace_id, {
+          overrideCandidate: {
+            ...updated,
+            candidate_data: updated.candidate_data,
+          },
+        });
+        const { data: refreshed, error: refreshFetchError } = await withOrgScope(supabase, 'import_candidates', orgId)
+          .select('id, entity_type, status, candidate_data, issues, blocking_issues_count, decisions, source_row_id, updated_at')
+          .eq('id', candidateId)
+          .single();
+        if (refreshFetchError) throw refreshFetchError;
+        candidateForResponse = refreshed || updated;
+      } catch (err) {
+        context.log?.error?.('import-candidates: guardian primary validation after edit failed', { message: err?.message });
+        return respondCandidatesError(context, 500, 'failed_to_validate_candidate_edit', err, {
+          action: 'validate_guardian_primary_contact',
+          candidateId,
+        });
+      }
+    }
+
+    return respond(context, 200, { candidate: candidateForResponse });
   }
 
   return respond(context, 405, { message: 'method_not_allowed' });

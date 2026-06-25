@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { analyzeChunk, ingestRowsBulk, patchWorkspaceConfig } from '../api/importWorkspacesApi.js';
+import { getEntityMappedSources, inferEntityAnchorSource } from '../lib/importMapping.js';
 
 const INGEST_CHUNK_SIZE = 500;
 const ANALYSIS_CHUNK_SIZE = 100;
@@ -22,21 +23,17 @@ export function getMappedSourceReferences(config = {}) {
   const participatingReferences = new Set();
   const requiredReferencesByAnchor = new Map();
 
-  for (const [anchorReference, mapping] of Object.entries(config.mappings?.by_source || {})) {
-    const entityMappings = mapping?.entities
-      ? Object.values(mapping.entities).filter((entity) => entity?.enabled)
-      : [mapping];
-    if (!entityMappings.some((entity) => Object.keys(entity?.field_map || {}).length > 0)) continue;
+  Object.entries(config.mappings?.entities || {}).forEach(([entityType, entity]) => {
+    if (!entity?.enabled || Object.keys(entity.field_map || {}).length === 0) return;
+    const anchorReference = inferEntityAnchorSource(entityType, entity);
+    if (!anchorReference) return;
 
-    const requiredReferences = new Set([anchorReference]);
-    entityMappings.forEach((entity) => Object.values(entity?.field_map || {}).forEach((fieldSource) => {
-      if (fieldSource?.source_reference) requiredReferences.add(fieldSource.source_reference);
-    }));
-
-    anchorReferences.push(anchorReference);
+    const requiredReferences = requiredReferencesByAnchor.get(anchorReference) || new Set([anchorReference]);
+    getEntityMappedSources(entity).forEach((reference) => requiredReferences.add(reference));
     requiredReferencesByAnchor.set(anchorReference, requiredReferences);
+    if (!anchorReferences.includes(anchorReference)) anchorReferences.push(anchorReference);
     requiredReferences.forEach((reference) => participatingReferences.add(reference));
-  }
+  });
 
   return { anchorReferences, participatingReferences, requiredReferencesByAnchor };
 }
