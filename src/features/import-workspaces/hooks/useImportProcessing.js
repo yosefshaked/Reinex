@@ -127,7 +127,10 @@ export function useImportProcessing(
   const ingestAll = useCallback(async () => {
     if (!workspaceId || runningRef.current) return false;
 
+    const { participatingReferences } = getMappedSourceReferences(configRef.current);
+    const participatingSet = participatingReferences.size > 0 ? participatingReferences : null;
     const ingestibleSources = sourcesRef.current
+      .filter((source) => !participatingSet || participatingSet.has(source.sourceReference))
       .map((source) => ({ source, rows: getParsedRowsRef.current?.(source.sourceReference) }))
       .filter(({ source, rows }) => source.sourceReference && Array.isArray(rows) && rows.length > 0);
     if (ingestibleSources.length === 0) return false;
@@ -334,13 +337,16 @@ export function useImportProcessing(
     }
   }, [updateSourceProgress, workspaceId]);
 
-  const { anchorReferences } = getMappedSourceReferences(config);
+  const { anchorReferences, participatingReferences } = getMappedSourceReferences(config);
   const sourcesByReference = new Map(sources.map((source) => [source.sourceReference, source]));
-  const ingestTotal = sources.reduce((sum, source) => sum + getSourceTotalRows(source), 0);
+  const ingestSources = participatingReferences.size > 0
+    ? sources.filter((source) => participatingReferences.has(source.sourceReference))
+    : sources;
+  const ingestTotal = ingestSources.reduce((sum, source) => sum + getSourceTotalRows(source), 0);
   const analyzedTotal = anchorReferences.reduce((sum, reference) => (
     sum + getSourceTotalRows(sourcesByReference.get(reference))
   ), 0);
-  const ingested = sources.reduce((sum, source) => {
+  const ingested = ingestSources.reduce((sum, source) => {
     const total = getSourceTotalRows(source);
     return sum + Math.min(Number(sourceProgress[source.sourceReference]?.uploadedRows || 0), total);
   }, 0);

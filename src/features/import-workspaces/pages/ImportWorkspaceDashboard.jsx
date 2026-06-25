@@ -519,11 +519,14 @@ function RowRecovery({ uploadHook, objectKey, fileName, remainingCount = 1 }) {
 function ProcessStep({ processing, uploadHook, workspace, sourceReference, onSourceChange, onRetry }) {
   const config    = workspace.config || {};
   const sources = getWorkspaceSources(config);
-  const { anchorReferences } = getMappedSourceReferences(config);
+  const { anchorReferences, participatingReferences } = getMappedSourceReferences(config);
+  const requiredSources = participatingReferences.size > 0
+    ? sources.filter((source) => participatingReferences.has(source.sourceReference))
+    : sources;
   const hasSourceMapping = anchorReferences.includes(sourceReference);
   // Sources whose rows are neither in memory nor saved in the DB yet. Recovered
   // one at a time (a single parse can run at once); the next surfaces after each.
-  const recoverySources = sources.filter((source) => {
+  const recoverySources = requiredSources.filter((source) => {
     const reference = source.sourceReference;
     const totalRows = getSourceTotalRows(source);
     const hasRows = uploadHook.parsedSources?.some((parsedSource) => (
@@ -556,13 +559,21 @@ function ProcessStep({ processing, uploadHook, workspace, sourceReference, onSou
       )}
       {/* Parsed rows lost (e.g. after refresh): recover from backup or re-pick. */}
       {recoverySource && (
-        <RowRecovery
-          key={recoverySource.sourceReference}
-          uploadHook={uploadHook}
-          objectKey={recoverySource.file?.objectKey || config.objectKey || null}
-          fileName={recoverySource.file?.fileName || recoverySource.label || config.fileName || null}
-          remainingCount={recoverySources.length}
-        />
+        <div className="space-y-2 rounded-lg border border-amber-200 bg-amber-50/70 p-3 dark:border-amber-900/60 dark:bg-amber-950/20">
+          <p className="text-sm font-medium text-amber-900 dark:text-amber-200">
+            חסר מקור שנדרש לפי המיפוי
+          </p>
+          <p className="text-xs text-amber-800/80 dark:text-amber-200/80">
+            המיפוי משתמש במקור הזה, לכן צריך לטעון או לשחזר את השורות שלו לפני הניתוח.
+          </p>
+          <RowRecovery
+            key={recoverySource.sourceReference}
+            uploadHook={uploadHook}
+            objectKey={recoverySource.file?.objectKey || config.objectKey || null}
+            fileName={recoverySource.file?.fileName || recoverySource.label || config.fileName || null}
+            remainingCount={recoverySources.length}
+          />
+        </div>
       )}
       <ProgressOrchestrator processing={processing} onRetry={onRetry} />
       {!hasSourceMapping && (
@@ -1081,13 +1092,16 @@ export default function ImportWorkspaceDashboard() {
   }, [load, uploadHook]);
 
   useEffect(() => {
+    const { participatingReferences } = getMappedSourceReferences(config);
     if (
       uploadHook.parseState.status !== 'done'
       || uploadHook.parsedSources.length === 0
       || processingStatus === 'running'
       || processingStatus === 'error'
     ) return;
-    const hasIncompleteSource = uploadHook.parsedSources.some((source) => (
+    const hasIncompleteSource = uploadHook.parsedSources
+      .filter((source) => participatingReferences.size === 0 || participatingReferences.has(source.sourceReference))
+      .some((source) => (
       Number(processingSourceProgress[source.sourceReference]?.uploadedRows || 0) < (source.rows?.length || 0)
     ));
     if (!hasIncompleteSource) return;
@@ -1096,13 +1110,16 @@ export default function ImportWorkspaceDashboard() {
     ingestAll,
     processingSourceProgress,
     processingStatus,
+    config,
     uploadHook.parseState.status,
     uploadHook.parsedSources,
   ]);
 
   useEffect(() => {
-    const { anchorReferences, requiredReferencesByAnchor } = getMappedSourceReferences(config);
-    const parsedIngestPending = uploadHook.parsedSources.some((source) => (
+    const { anchorReferences, participatingReferences, requiredReferencesByAnchor } = getMappedSourceReferences(config);
+    const parsedIngestPending = uploadHook.parsedSources
+      .filter((source) => participatingReferences.size === 0 || participatingReferences.has(source.sourceReference))
+      .some((source) => (
       Number(processingSourceProgress[source.sourceReference]?.uploadedRows || 0) < (source.rows?.length || 0)
     ));
     if (
@@ -1223,7 +1240,7 @@ export default function ImportWorkspaceDashboard() {
     const problematic = [];
     let pg = 1;
     while (true) {
-      const result = await listCandidates(workspaceId, { sourceReference: sourceRef || undefined, page: pg });
+      const result = await listCandidates(workspaceId, { page: pg });
       const batch = result.candidates ?? [];
       for (const c of batch) {
         if (c.blocking_issues_count > 0 || c.status === 'failed') problematic.push(c);
@@ -1269,7 +1286,7 @@ export default function ImportWorkspaceDashboard() {
       let total = null;
       let done = 0;
       while (true) {
-        const result = await listCandidates(workspaceId, { sourceReference: sourceRef || undefined, page });
+        const result = await listCandidates(workspaceId, { page });
         const candidates = result.candidates ?? [];
         if (total === null) {
           total = result.total ?? candidates.length;
@@ -1434,7 +1451,6 @@ export default function ImportWorkspaceDashboard() {
               <CandidateQueue
                 key={queueKey}
                 workspaceId={workspaceId}
-                sourceReference={sourceRef}
                 onCandidateSelect={handleCandidateSelect}
               />
             </>
@@ -1443,7 +1459,6 @@ export default function ImportWorkspaceDashboard() {
           {currentStep === 'commit' && (
             <CommitStep
               workspaceId={workspaceId}
-              sourceReference={sourceRef}
               onBackToReview={() => { setQueueKey(k => k + 1); setCurrentStep('review'); }}
             />
           )}

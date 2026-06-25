@@ -66,6 +66,39 @@ const ENTITY_LABELS = {
   service:          'שירות',
 };
 
+const ENTITY_TAB_LABELS = {
+  customer:      'לקוח/ה',
+  guardian:      'הורה',
+  guardian_link: 'קשר',
+};
+
+const ENTITY_TAB_ORDER = {
+  customer: 0,
+  guardian: 1,
+  guardian_link: 2,
+  service: 3,
+};
+
+const STATUS_LABELS = {
+  needs_review:          'לבדיקה',
+  ready:                 'מוכן',
+  blocked:               'חסום',
+  blocked_by_dependency: 'ממתין לתלות',
+  skipped:               'מדולג',
+  committed:             'בוצע',
+  failed:                'נכשל',
+};
+
+const STATUS_VARIANT = {
+  needs_review:          'default',
+  ready:                 'default',
+  blocked:               'destructive',
+  blocked_by_dependency: 'secondary',
+  skipped:               'secondary',
+  committed:             'outline',
+  failed:                'destructive',
+};
+
 const EDITABLE_FIELDS_BY_ENTITY = {
   customer: ['first_name', 'last_name', 'identity_number', 'customer_type', 'is_active', 'phone', 'email', 'date_of_birth', 'note_text'],
   guardian: ['guardian_first_name', 'guardian_last_name', 'guardian_phone', 'guardian_email'],
@@ -136,6 +169,53 @@ function canonicalizeCandidateData(candidateData = {}) {
   delete data.student_identity_number;
   delete data.name;
   return data;
+}
+
+function candidateTitle(candidate) {
+  const data = canonicalizeCandidateData(candidate?.candidate_data || {});
+  return [data.first_name, data.last_name].filter(Boolean).join(' ')
+    || [data.guardian_first_name, data.guardian_last_name].filter(Boolean).join(' ')
+    || data.service_name
+    || 'רשומה';
+}
+
+function flattenRelatedCandidates(candidate) {
+  if (!candidate) return [];
+  const related = candidate.related_candidates || {};
+  const rows = [
+    candidate,
+    ...(related.customer || []),
+    ...(related.guardian || []),
+    ...(related.guardian_link || []),
+  ];
+  const seen = new Set();
+  return rows.filter((row) => {
+    if (!row?.id || seen.has(row.id)) return false;
+    seen.add(row.id);
+    return true;
+  }).sort((a, b) => (
+    (ENTITY_TAB_ORDER[a.entity_type] ?? 99) - (ENTITY_TAB_ORDER[b.entity_type] ?? 99)
+  ));
+}
+
+function replaceCandidateInGroup(groupRoot, updated) {
+  if (!groupRoot || !updated?.id) return groupRoot;
+  if (updated.related_candidates) return updated;
+  const nextRoot = groupRoot.id === updated.id
+    ? {
+      ...updated,
+      related_candidates: updated.related_candidates || groupRoot.related_candidates,
+    }
+    : { ...groupRoot };
+  const related = groupRoot.related_candidates;
+  if (!related) return nextRoot;
+  nextRoot.related_candidates = {
+    ...related,
+    customer: (related.customer || []).map((item) => item.id === updated.id ? updated : item),
+    guardian: (related.guardian || []).map((item) => item.id === updated.id ? updated : item),
+    guardian_link: (related.guardian_link || []).map((item) => item.id === updated.id ? updated : item),
+  };
+  return nextRoot;
 }
 
 // A field is "present" (shown as a value row) when it holds a meaningful value.
@@ -264,13 +344,14 @@ function ProfileResultCard({ profile, onLink, disabled }) {
 export function CandidateDetailSheet({ candidate, workspaceId, open, onClose, onDecisionSaved, onCandidateUpdated }) {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState(null);
-  const [dryRunSummary, setDryRunSummary] = useState(null);
+  const [dryRunSummaries, setDryRunSummaries] = useState({});
   const [runningDryRun, setRunningDryRun] = useState(false);
   const [dryRunError, setDryRunError] = useState(null);
 
   // Live copy of the candidate so a per-field edit can update the drawer in
   // place (issues/blockers recompute server-side) without closing it.
   const [liveCandidate, setLiveCandidate] = useState(candidate);
+  const [activeCandidateId, setActiveCandidateId] = useState(candidate?.id || null);
   const [editingField, setEditingField] = useState(null);
   const [editingValue, setEditingValue] = useState('');
   const [savingField, setSavingField] = useState(null);
@@ -287,7 +368,8 @@ export function CandidateDetailSheet({ candidate, workspaceId, open, onClose, on
 
   useEffect(() => {
     setLiveCandidate(candidate);
-    setDryRunSummary(candidate?.candidate_data?.dry_run_summary ?? null);
+    setActiveCandidateId(candidate?.id || null);
+    setDryRunSummaries(candidate?.id ? { [candidate.id]: candidate?.candidate_data?.dry_run_summary ?? null } : {});
     setDryRunError(null);
     setSaveError(null);
     setEditingField(null);
@@ -327,12 +409,19 @@ export function CandidateDetailSheet({ candidate, workspaceId, open, onClose, on
     return () => { cancelled = true; clearTimeout(handle); };
   }, [linkMode, linkStep, linkQuery]);
 
-  // Prefer the live copy once it matches the opened candidate.
-  const active = liveCandidate && liveCandidate.id === candidate?.id ? liveCandidate : candidate;
+  // Prefer the live connected group once it matches the opened candidate.
+  const groupRoot = liveCandidate && liveCandidate.id === candidate?.id ? liveCandidate : candidate;
+  const candidateTabs = flattenRelatedCandidates(groupRoot);
+  const active = candidateTabs.find((item) => item.id === activeCandidateId) || candidateTabs[0];
   if (!active) return null;
 
   const candidate_data = canonicalizeCandidateData(active.candidate_data || {});
   const { issues = [], entity_type, status, decisions = {} } = active;
+  const activeDryRunSummary = Object.prototype.hasOwnProperty.call(dryRunSummaries, active.id)
+    ? dryRunSummaries[active.id]
+    : active.candidate_data?.dry_run_summary ?? null;
+  const relatedGroupKey = groupRoot?.related_candidates?.group_key || {};
+  const showEntityTabs = candidateTabs.length > 1;
   const blockers = issues.filter(i => i.severity === 'blocker');
   const warnings = issues.filter(i => i.severity === 'warning');
   const hasIdentityBlocker = blockers.some(b => b.code === 'duplicate_identity_number');
@@ -349,6 +438,26 @@ export function CandidateDetailSheet({ candidate, workspaceId, open, onClose, on
     ? [...valueFields, editingField]
     : valueFields;
   const missingFields = editableFields.filter((f) => !hasValue(f, candidate_data) && f !== editingField);
+
+  function switchActiveCandidate(candidateId) {
+    if (candidateId === active.id) return;
+    setActiveCandidateId(candidateId);
+    setSaveError(null);
+    setDryRunError(null);
+    setEditingField(null);
+    setEditingValue('');
+    setAddOpen(false);
+    setLinkMode(false);
+    setLinkError(null);
+    setLinkResults([]);
+    setLinkQuery('');
+  }
+
+  function updateLiveCandidate(updated) {
+    const nextGroup = replaceCandidateInGroup(groupRoot, updated);
+    setLiveCandidate(nextGroup);
+    onCandidateUpdated?.(nextGroup);
+  }
 
   async function applyDecision(decisionsPatch, newStatus) {
     setSaving(true);
@@ -458,8 +567,7 @@ export function CandidateDetailSheet({ candidate, workspaceId, open, onClose, on
       const result = await patchCandidate(active.id, {
         candidate_data_patch: { [field]: value },
       });
-      setLiveCandidate(result.candidate);
-      onCandidateUpdated?.(result.candidate);
+      updateLiveCandidate(result.candidate);
       setEditingField(null);
       setEditingValue('');
     } catch (err) {
@@ -477,14 +585,17 @@ export function CandidateDetailSheet({ candidate, workspaceId, open, onClose, on
       const data = await runDryRunChunk(workspaceId, [active.id]);
       const firstResult = data.results?.[0];
       if (firstResult) {
-        setDryRunSummary({
-          outcome:                  firstResult.outcome,
-          action_description:       firstResult.action_description,
-          matched_record_id:        firstResult.matched_record_id,
-          matched_record_summary:   firstResult.matched_record_summary,
-          fields_that_would_change: firstResult.fields_that_would_change,
-          simulated_at:             new Date().toISOString(),
-        });
+        setDryRunSummaries((current) => ({
+          ...current,
+          [active.id]: {
+            outcome:                  firstResult.outcome,
+            action_description:       firstResult.action_description,
+            matched_record_id:        firstResult.matched_record_id,
+            matched_record_summary:   firstResult.matched_record_summary,
+            fields_that_would_change: firstResult.fields_that_would_change,
+            simulated_at:             new Date().toISOString(),
+          },
+        }));
       }
     } catch (err) {
       setDryRunError(err.message || 'שגיאה בהרצת הבדיקה');
@@ -561,10 +672,7 @@ export function CandidateDetailSheet({ candidate, workspaceId, open, onClose, on
       <SheetContent side="left" className="w-full sm:max-w-lg overflow-y-auto" dir="rtl">
         <SheetHeader>
           <SheetTitle>
-            {[candidate_data.first_name, candidate_data.last_name].filter(Boolean).join(' ')
-              || [candidate_data.guardian_first_name, candidate_data.guardian_last_name].filter(Boolean).join(' ')
-              || candidate_data.service_name
-              || 'רשומה'}
+            {candidateTitle(active)}
           </SheetTitle>
           <SheetDescription>
             {ENTITY_LABELS[entity_type] ?? entity_type}
@@ -572,6 +680,63 @@ export function CandidateDetailSheet({ candidate, workspaceId, open, onClose, on
         </SheetHeader>
 
         <div className="mt-4 space-y-5">
+          {showEntityTabs && (
+            <section className="space-y-2">
+              <div className="flex flex-wrap gap-1.5" role="tablist" aria-label="רשומות מחוברות">
+                {candidateTabs.map((tabCandidate) => {
+                  const activeTab = tabCandidate.id === active.id;
+                  const blockerCount = Number(tabCandidate.blocking_issues_count || 0);
+                  const warningCount = (tabCandidate.issues || []).filter((item) => item?.severity === 'warning').length;
+                  return (
+                    <button
+                      key={tabCandidate.id}
+                      type="button"
+                      role="tab"
+                      aria-selected={activeTab}
+                      onClick={() => switchActiveCandidate(tabCandidate.id)}
+                      className={cn(
+                        'inline-flex min-h-9 items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium transition-colors',
+                        activeTab ? 'border-primary bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-muted',
+                      )}
+                    >
+                      <span>{ENTITY_TAB_LABELS[tabCandidate.entity_type] || ENTITY_LABELS[tabCandidate.entity_type] || tabCandidate.entity_type}</span>
+                      <Badge variant={STATUS_VARIANT[tabCandidate.status] || 'secondary'} className="px-1.5 py-0 text-[10px]">
+                        {STATUS_LABELS[tabCandidate.status] || tabCandidate.status}
+                      </Badge>
+                      {blockerCount > 0 && (
+                        <span className="inline-flex items-center gap-0.5 rounded bg-destructive/10 px-1 py-0.5 text-[10px] text-destructive">
+                          <AlertCircle className="h-3 w-3" />
+                          {blockerCount}
+                        </span>
+                      )}
+                      {blockerCount === 0 && warningCount > 0 && (
+                        <span className="inline-flex items-center gap-0.5 rounded bg-yellow-100 px-1 py-0.5 text-[10px] text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400">
+                          <AlertTriangle className="h-3 w-3" />
+                          {warningCount}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {(relatedGroupKey.identity_number || relatedGroupKey.guardian_phone) && (
+                <div className="flex flex-wrap gap-1.5 text-xs text-muted-foreground">
+                  {relatedGroupKey.identity_number && (
+                    <span className="rounded-md bg-muted px-2 py-1">
+                      ת״ז: {relatedGroupKey.identity_number}
+                    </span>
+                  )}
+                  {relatedGroupKey.guardian_phone && (
+                    <span className="rounded-md bg-muted px-2 py-1">
+                      טלפון הורה: {relatedGroupKey.guardian_phone}
+                    </span>
+                  )}
+                </div>
+              )}
+            </section>
+          )}
+
           {/* Candidate data — read-only rows with per-field inline editing */}
           <section className="space-y-2">
             <div className="flex items-center justify-between">
@@ -678,7 +843,7 @@ export function CandidateDetailSheet({ candidate, workspaceId, open, onClose, on
           </section>
 
           {/* Dry-run simulation result */}
-          {dryRunSummary && (
+          {activeDryRunSummary && (
             <>
               <Separator />
               <section>
@@ -686,20 +851,20 @@ export function CandidateDetailSheet({ candidate, workspaceId, open, onClose, on
                 <div className="rounded-lg border bg-muted/40 px-3 py-3 space-y-2 text-sm">
                   <div className="flex items-center justify-between">
                     <span className="text-muted-foreground">תוצאה</span>
-                    <DryRunOutcomeBadge outcome={dryRunSummary.outcome} />
+                    <DryRunOutcomeBadge outcome={activeDryRunSummary.outcome} />
                   </div>
-                  {dryRunSummary.action_description && (
-                    <p>{dryRunSummary.action_description}</p>
+                  {activeDryRunSummary.action_description && (
+                    <p>{activeDryRunSummary.action_description}</p>
                   )}
-                  {dryRunSummary.matched_record_summary && (
+                  {activeDryRunSummary.matched_record_summary && (
                     <p className="text-xs text-muted-foreground">
-                      רשומה תואמת: {formatMatchedRecordSummary(dryRunSummary.matched_record_summary)}
+                      רשומה תואמת: {formatMatchedRecordSummary(activeDryRunSummary.matched_record_summary)}
                     </p>
                   )}
-                  {dryRunSummary.fields_that_would_change?.length > 0 && (
+                  {activeDryRunSummary.fields_that_would_change?.length > 0 && (
                     <p className="text-xs text-muted-foreground">
                       שדות לעדכון:{' '}
-                      {dryRunSummary.fields_that_would_change
+                      {activeDryRunSummary.fields_that_would_change
                         .map(f => FIELD_LABELS[f] || f)
                         .join(', ')}
                     </p>
@@ -755,7 +920,7 @@ export function CandidateDetailSheet({ candidate, workspaceId, open, onClose, on
                   disabled={runningDryRun || busy}
                 >
                   <Zap className="h-4 w-4" />
-                  {runningDryRun ? 'בודק ללא ייבוא…' : dryRunSummary ? 'בדוק שוב ללא ייבוא' : 'בדוק ללא ייבוא'}
+                  {runningDryRun ? 'בודק ללא ייבוא…' : activeDryRunSummary ? 'בדוק שוב ללא ייבוא' : 'בדוק ללא ייבוא'}
                 </Button>
                 <p className="text-xs text-muted-foreground">
                   הבדיקה מראה מה יקרה בייבוא הסופי, בלי ליצור או לעדכן נתונים בפועל.

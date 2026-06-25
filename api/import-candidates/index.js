@@ -135,6 +135,109 @@ function candidateDisplayName(candidateData) {
     || '';
 }
 
+function getCandidateIdentity(candidate) {
+  const data = candidate?.candidate_data || {};
+  return normalizeString(data.identity_number ?? data.student_identity_number);
+}
+
+function getCandidateGuardianPhone(candidate) {
+  const data = candidate?.candidate_data || {};
+  return normalizeString(data.guardian_phone);
+}
+
+function normalizeRelatedCandidate(candidate) {
+  if (!candidate) return null;
+  const clean = { ...candidate };
+  delete clean.import_rows;
+  delete clean.related_candidates;
+  return clean;
+}
+
+function uniqueCandidates(candidates) {
+  const seen = new Set();
+  const result = [];
+  for (const candidate of candidates || []) {
+    if (!candidate?.id || seen.has(candidate.id)) continue;
+    seen.add(candidate.id);
+    result.push(normalizeRelatedCandidate(candidate));
+  }
+  return result;
+}
+
+function buildRelatedCandidates(candidate, allWorkspaceCandidates) {
+  const identity = getCandidateIdentity(candidate);
+  const guardianPhone = getCandidateGuardianPhone(candidate);
+  const byType = {
+    customer: [],
+    guardian: [],
+    guardian_link: [],
+  };
+
+  const activeType = normalizeString(candidate?.entity_type);
+  const all = allWorkspaceCandidates || [];
+  const linksByIdentity = identity
+    ? all.filter((item) => item.entity_type === 'guardian_link' && getCandidateIdentity(item) === identity)
+    : [];
+  const linksByPhone = guardianPhone
+    ? all.filter((item) => item.entity_type === 'guardian_link' && getCandidateGuardianPhone(item) === guardianPhone)
+    : [];
+
+  if (activeType === 'customer') {
+    byType.customer.push(candidate);
+    byType.guardian_link.push(...linksByIdentity);
+    const phones = new Set(linksByIdentity.map(getCandidateGuardianPhone).filter(Boolean));
+    byType.guardian.push(...all.filter((item) => (
+      item.entity_type === 'guardian' && phones.has(getCandidateGuardianPhone(item))
+    )));
+  } else if (activeType === 'guardian') {
+    byType.guardian.push(candidate);
+    byType.guardian_link.push(...linksByPhone);
+    const identities = new Set(linksByPhone.map(getCandidateIdentity).filter(Boolean));
+    byType.customer.push(...all.filter((item) => (
+      item.entity_type === 'customer' && identities.has(getCandidateIdentity(item))
+    )));
+  } else if (activeType === 'guardian_link') {
+    byType.guardian_link.push(candidate);
+    if (identity) {
+      byType.customer.push(...all.filter((item) => (
+        item.entity_type === 'customer' && getCandidateIdentity(item) === identity
+      )));
+    }
+    if (guardianPhone) {
+      byType.guardian.push(...all.filter((item) => (
+        item.entity_type === 'guardian' && getCandidateGuardianPhone(item) === guardianPhone
+      )));
+    }
+  }
+
+  const linkIdentity = getCandidateIdentity(byType.guardian_link[0]);
+  const linkPhone = getCandidateGuardianPhone(byType.guardian_link[0]);
+  const groupKey = {
+    identity_number: identity || linkIdentity || getCandidateIdentity(byType.customer[0]) || null,
+    guardian_phone: guardianPhone || linkPhone || getCandidateGuardianPhone(byType.guardian[0]) || null,
+  };
+
+  return {
+    group_key: groupKey,
+    customer: uniqueCandidates(byType.customer),
+    guardian: uniqueCandidates(byType.guardian),
+    guardian_link: uniqueCandidates(byType.guardian_link),
+  };
+}
+
+async function attachRelatedCandidates(supabase, orgId, workspaceId, candidate) {
+  const clean = normalizeRelatedCandidate(candidate);
+  if (!clean || !workspaceId) return clean;
+  const { data, error } = await withOrgScope(supabase, 'import_candidates', orgId)
+    .select('id, entity_type, status, candidate_data, issues, blocking_issues_count, decisions, source_row_id, depends_on_candidate_id, created_at, updated_at')
+    .eq('workspace_id', workspaceId);
+  if (error) throw error;
+  return {
+    ...clean,
+    related_candidates: buildRelatedCandidates(clean, data || []),
+  };
+}
+
 function normalizeRelationship(raw) {
   const value = coerceOptionalText(raw).value;
   if (!value) return { value: null, valid: true };
@@ -568,11 +671,21 @@ export default async function importCandidates(context, req) {
       return respondCandidatesError(context, 500, 'failed_to_list_candidates', error, { action: 'list' });
     }
 
+    const { data: allWorkspaceCandidates, error: relatedError } = await withOrgScope(supabase, 'import_candidates', orgId)
+      .select('id, entity_type, status, candidate_data, issues, blocking_issues_count, decisions, source_row_id, depends_on_candidate_id, created_at, updated_at')
+      .eq('workspace_id', workspaceId);
+
+    if (relatedError) {
+      context.log?.error?.('import-candidates: related candidate load failed', { message: relatedError.message });
+      return respondCandidatesError(context, 500, 'failed_to_list_candidates', relatedError, { action: 'list_related' });
+    }
+
     const candidates = (data || []).map((candidate) => {
-      if (!candidate.import_rows) return candidate;
-      const clean = { ...candidate };
-      delete clean.import_rows;
-      return clean;
+      const clean = normalizeRelatedCandidate(candidate);
+      return {
+        ...clean,
+        related_candidates: buildRelatedCandidates(clean, allWorkspaceCandidates || []),
+      };
     });
 
     return respond(context, 200, {
@@ -818,6 +931,21 @@ export default async function importCandidates(context, req) {
           candidateId,
         });
       }
+    }
+
+    try {
+      candidateForResponse = await attachRelatedCandidates(
+        supabase,
+        orgId,
+        existing.workspace_id,
+        candidateForResponse,
+      );
+    } catch (err) {
+      context.log?.error?.('import-candidates: related candidate refresh after patch failed', { message: err?.message });
+      return respondCandidatesError(context, 500, 'failed_to_patch_candidate', err, {
+        action: 'refresh_related_after_patch',
+        candidateId,
+      });
     }
 
     return respond(context, 200, { candidate: candidateForResponse });
