@@ -123,6 +123,38 @@ test('buildRelationGroups: join-value grouping links customer and guardian', () 
   assert.equal(groupIdByCandidateId.get('c1'), groupIdByCandidateId.get('g1'));
 });
 
+test('buildRelationGroups: guardian with no phone/email/join still groups via shared source row', () => {
+  // Real-world: user mapped guardian_phone only onto the link, not the guardian.
+  // The guardian and link come from the same parents row, so they share source_row_id.
+  // The link pulled the student's identity from the students row, recorded in
+  // merged_from_row_ids, which is the customer's own source row.
+  const customer = { ...makeCustomer('c1', '100000001'), source_row_id: 'row-student-1' };
+  const link = {
+    ...makeGuardianLink('l1', '100000001', '0541234567', null),
+    source_row_id: 'row-parent-1',
+    merged_from_row_ids: ['row-parent-1', 'row-student-1'],
+  };
+  // guardian has NO phone, NO email, NO join — only its parents source row
+  const guardian = { ...makeGuardian('g1', null, null), source_row_id: 'row-parent-1' };
+
+  const { groupIdByCandidateId, groups } = buildRelationGroups([customer, link, guardian]);
+  assert.equal(new Set([...groupIdByCandidateId.values()]).size, 1, 'all in one group via row provenance');
+  const [groupId] = new Set([...groupIdByCandidateId.values()]);
+  assert.equal(groups.get(groupId).memberIds.length, 3);
+});
+
+test('buildRelationGroups: shared source row does not over-merge unrelated families', () => {
+  const customerA = { ...makeCustomer('cA', '100000001'), source_row_id: 'row-a' };
+  const guardianA = { ...makeGuardian('gA', null, null), source_row_id: 'row-a' };
+  const customerB = { ...makeCustomer('cB', '200000002'), source_row_id: 'row-b' };
+  const guardianB = { ...makeGuardian('gB', null, null), source_row_id: 'row-b' };
+
+  const { groupIdByCandidateId, groups } = buildRelationGroups([customerA, guardianA, customerB, guardianB]);
+  assert.equal(groups.size, 2, 'distinct rows stay in distinct families');
+  assert.equal(groupIdByCandidateId.get('cA'), groupIdByCandidateId.get('gA'));
+  assert.notEqual(groupIdByCandidateId.get('cA'), groupIdByCandidateId.get('cB'));
+});
+
 test('buildRelationGroups: service entities are excluded from grouping', () => {
   const customer = makeCustomer('c1', '100000001');
   const service = { id: 's1', entity_type: 'service', candidate_data: { service_name: 'ריקוד' } };

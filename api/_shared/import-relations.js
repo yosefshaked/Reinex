@@ -73,6 +73,30 @@ function joinKeys(candidate) {
 }
 
 /**
+ * Row-provenance keys — the most reliable family signal we have.
+ *
+ * Every candidate carries the source row it was minted from (`source_row_id`),
+ * and `merged_from_row_ids` records the rows analyze actually merged when it
+ * resolved the cross-file join. So:
+ *   - a guardian and the guardian_link(s) from the same parents row share that row
+ *   - a guardian_link that pulled the student's identity from the students file
+ *     carries that student row, which is the customer's own source row
+ * That reconstructs the exact linkage analyze computed, with no dependence on
+ * which optional fields (phone/email) the user happened to map, or on the join
+ * value being re-persisted. A source row belongs to exactly one record, so this
+ * can never over-merge unrelated families.
+ */
+function rowKeys(candidate) {
+  const ids = [
+    candidate?.source_row_id,
+    ...(Array.isArray(candidate?.merged_from_row_ids) ? candidate.merged_from_row_ids : []),
+  ]
+    .map((v) => (v === null || v === undefined ? '' : String(v).trim()))
+    .filter((v) => v && !isSentinel(v));
+  return [...new Set(ids)].map((v) => `row:${v}`);
+}
+
+/**
  * Return all namespaced canonical keys for a candidate.
  * Keys are namespaced to prevent cross-type collisions.
  */
@@ -85,12 +109,14 @@ export function candidateLinkKeys(candidate) {
     const identity = canonicalIdentityKey(data.identity_number ?? data.student_identity_number);
     if (identity) keys.add(identity);
     for (const k of joinKeys(candidate)) keys.add(k);
+    for (const k of rowKeys(candidate)) keys.add(k);
   } else if (type === 'guardian') {
     const phone = canonicalPhoneKey(data.guardian_phone);
     if (phone) keys.add(phone);
     const email = canonicalEmailKey(data.guardian_email);
     if (email) keys.add(email);
     for (const k of joinKeys(candidate)) keys.add(k);
+    for (const k of rowKeys(candidate)) keys.add(k);
   } else if (type === 'guardian_link') {
     const identity = canonicalIdentityKey(data.identity_number ?? data.student_identity_number);
     if (identity) keys.add(identity);
@@ -99,6 +125,7 @@ export function candidateLinkKeys(candidate) {
     const email = canonicalEmailKey(data.guardian_email);
     if (email) keys.add(email);
     for (const k of joinKeys(candidate)) keys.add(k);
+    for (const k of rowKeys(candidate)) keys.add(k);
   }
   // 'service' entities don't participate in family grouping
 
