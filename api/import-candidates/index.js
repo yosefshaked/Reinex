@@ -573,16 +573,30 @@ export default async function importCandidates(context, req) {
 
     // ── view=relations: one-pass connected-components grouping ──────────────
     if (normalizeString(req.query?.view) === 'relations') {
-      const { data: allCandidates, error: allError } = await withOrgScope(supabase, 'import_candidates', orgId)
-        .select('id, entity_type, status, candidate_data, issues, blocking_issues_count, decisions, source_row_id, merged_from_row_ids, depends_on_candidate_id, created_at, updated_at')
-        .eq('workspace_id', workspaceId);
+      // Load EVERY candidate in the workspace. A single query is capped at the
+      // PostgREST max-rows limit (1000), which silently drops members of large
+      // imports — an orphaned guardian_link with no guardian is the tell. Page
+      // through with .range() (same pattern as analyze-chunk) so the union-find
+      // sees the whole graph and no family member is left behind.
+      const RELATIONS_PAGE = 1000;
+      const allCandidates = [];
+      for (let from = 0; ; from += RELATIONS_PAGE) {
+        const { data: pageRows, error: allError } = await withOrgScope(supabase, 'import_candidates', orgId)
+          .select('id, entity_type, status, candidate_data, issues, blocking_issues_count, decisions, source_row_id, merged_from_row_ids, depends_on_candidate_id, created_at, updated_at')
+          .eq('workspace_id', workspaceId)
+          .order('created_at', { ascending: true })
+          .range(from, from + RELATIONS_PAGE - 1);
 
-      if (allError) {
-        context.log?.error?.('import-candidates: relations load failed', { message: allError.message });
-        return respondCandidatesError(context, 500, 'failed_to_load_relations', allError, { action: 'load_relations' });
+        if (allError) {
+          context.log?.error?.('import-candidates: relations load failed', { message: allError.message });
+          return respondCandidatesError(context, 500, 'failed_to_load_relations', allError, { action: 'load_relations' });
+        }
+
+        allCandidates.push(...(pageRows || []));
+        if (!pageRows || pageRows.length < RELATIONS_PAGE) break;
       }
 
-      const allCandidatesClean = (allCandidates || []).map(normalizeRelatedCandidate);
+      const allCandidatesClean = allCandidates.map(normalizeRelatedCandidate);
       const { groups } = buildRelationGroups(allCandidatesClean);
 
       // Build response: one entry per group, members split by entity_type
