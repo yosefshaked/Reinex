@@ -24,7 +24,7 @@ import {
   coerceOptionalDate,
   coerceBooleanFlag,
 } from '../_shared/student-validation.js';
-import { normalizeFieldSource } from '../_shared/import-mapping.js';
+import { normalizeFieldSource, normalizeJoinValue } from '../_shared/import-mapping.js';
 
 // Internal (500-level) failures persist an error_events row and return the
 // support code; validation/auth/not-found/conflict stay on plain respond().
@@ -145,6 +145,62 @@ function getCandidateGuardianPhone(candidate) {
   return normalizeString(data.guardian_phone);
 }
 
+function getCandidateJoinValues(candidate) {
+  const values = candidate?.candidate_data?.__import?.join?.values;
+  if (!values || typeof values !== 'object') return [];
+  return Object.values(values).map(normalizeString).filter(Boolean);
+}
+
+function haveSharedJoinValue(left, right) {
+  const leftValues = new Set(getCandidateJoinValues(left));
+  if (leftValues.size === 0) return false;
+  return getCandidateJoinValues(right).some((value) => leftValues.has(value));
+}
+
+function attachJoinMetadata(candidate, rowsById, joinColumns) {
+  if (!candidate || getCandidateJoinValues(candidate).length > 0) return candidate;
+  const rowIds = [
+    candidate.source_row_id,
+    ...(Array.isArray(candidate.merged_from_row_ids) ? candidate.merged_from_row_ids : []),
+  ].filter(Boolean);
+  const columns = {};
+  const values = {};
+  for (const rowId of rowIds) {
+    const row = rowsById.get(rowId);
+    if (!row?.source_reference) continue;
+    const joinColumn = normalizeString(joinColumns?.[row.source_reference]);
+    if (!joinColumn) continue;
+    const joinValue = normalizeJoinValue(row.raw_data?.[joinColumn]);
+    if (!joinValue) continue;
+    columns[row.source_reference] = joinColumn;
+    values[row.source_reference] = joinValue;
+  }
+  if (Object.keys(values).length === 0) return candidate;
+  return {
+    ...candidate,
+    candidate_data: {
+      ...(candidate.candidate_data || {}),
+      __import: {
+        ...(candidate.candidate_data?.__import || {}),
+        join: { columns, values },
+      },
+    },
+  };
+}
+
+async function loadImportRowsForCandidates(supabase, orgId, candidates) {
+  const rowIds = [...new Set((candidates || []).flatMap((candidate) => [
+    candidate.source_row_id,
+    ...(Array.isArray(candidate.merged_from_row_ids) ? candidate.merged_from_row_ids : []),
+  ]).filter(Boolean))];
+  if (rowIds.length === 0) return new Map();
+  const { data, error } = await withOrgScope(supabase, 'import_rows', orgId)
+    .select('id, source_reference, raw_data')
+    .in('id', rowIds);
+  if (error) throw error;
+  return new Map((data || []).map((row) => [row.id, row]));
+}
+
 function normalizeRelatedCandidate(candidate) {
   if (!candidate) return null;
   const clean = { ...candidate };
@@ -175,6 +231,16 @@ function buildRelatedCandidates(candidate, allWorkspaceCandidates) {
 
   const activeType = normalizeString(candidate?.entity_type);
   const all = allWorkspaceCandidates || [];
+  const hasJoinContext = getCandidateJoinValues(candidate).length > 0;
+  const linksByJoin = hasJoinContext
+    ? all.filter((item) => item.entity_type === 'guardian_link' && haveSharedJoinValue(candidate, item))
+    : [];
+  const customersByJoin = hasJoinContext
+    ? all.filter((item) => item.entity_type === 'customer' && haveSharedJoinValue(candidate, item))
+    : [];
+  const guardiansByJoin = hasJoinContext
+    ? all.filter((item) => item.entity_type === 'guardian' && haveSharedJoinValue(candidate, item))
+    : [];
   const linksByIdentity = identity
     ? all.filter((item) => item.entity_type === 'guardian_link' && getCandidateIdentity(item) === identity)
     : [];
@@ -184,37 +250,58 @@ function buildRelatedCandidates(candidate, allWorkspaceCandidates) {
 
   if (activeType === 'customer') {
     byType.customer.push(candidate);
-    byType.guardian_link.push(...linksByIdentity);
+    byType.guardian_link.push(...linksByJoin, ...linksByIdentity);
     const phones = new Set(linksByIdentity.map(getCandidateGuardianPhone).filter(Boolean));
+    byType.guardian_link.forEach((item) => {
+      const phone = getCandidateGuardianPhone(item);
+      if (phone) phones.add(phone);
+    });
+    byType.guardian.push(...all.filter((item) => (
+      item.entity_type === 'guardian' && phones.has(getCandidateGuardianPhone(item))
+    )), ...guardiansByJoin);
+  } else if (activeType === 'guardian') {
+    byType.guardian.push(candidate, ...guardiansByJoin);
+    const identities = new Set(linksByPhone.map(getCandidateIdentity).filter(Boolean));
+    const linksForRelatedStudents = all.filter((item) => (
+      item.entity_type === 'guardian_link' && identities.has(getCandidateIdentity(item))
+    ));
+    byType.guardian_link.push(...linksByJoin, ...linksByPhone, ...linksForRelatedStudents);
+    byType.guardian_link.forEach((item) => {
+      const itemIdentity = getCandidateIdentity(item);
+      if (itemIdentity) identities.add(itemIdentity);
+    });
+    const phones = new Set(byType.guardian_link.map(getCandidateGuardianPhone).filter(Boolean));
+    byType.customer.push(...customersByJoin, ...all.filter((item) => (
+      item.entity_type === 'customer' && identities.has(getCandidateIdentity(item))
+    )));
     byType.guardian.push(...all.filter((item) => (
       item.entity_type === 'guardian' && phones.has(getCandidateGuardianPhone(item))
     )));
-  } else if (activeType === 'guardian') {
-    byType.guardian.push(candidate);
-    byType.guardian_link.push(...linksByPhone);
-    const identities = new Set(linksByPhone.map(getCandidateIdentity).filter(Boolean));
-    byType.customer.push(...all.filter((item) => (
-      item.entity_type === 'customer' && identities.has(getCandidateIdentity(item))
-    )));
   } else if (activeType === 'guardian_link') {
-    byType.guardian_link.push(candidate);
+    byType.guardian_link.push(candidate, ...linksByJoin, ...linksByIdentity);
     if (identity) {
       byType.customer.push(...all.filter((item) => (
         item.entity_type === 'customer' && getCandidateIdentity(item) === identity
       )));
     }
-    if (guardianPhone) {
-      byType.guardian.push(...all.filter((item) => (
-        item.entity_type === 'guardian' && getCandidateGuardianPhone(item) === guardianPhone
-      )));
-    }
+    byType.customer.push(...customersByJoin);
+    const phones = new Set(byType.guardian_link.map(getCandidateGuardianPhone).filter(Boolean));
+    byType.guardian.push(...guardiansByJoin, ...all.filter((item) => (
+      item.entity_type === 'guardian' && phones.has(getCandidateGuardianPhone(item))
+    )));
   }
 
   const linkIdentity = getCandidateIdentity(byType.guardian_link[0]);
   const linkPhone = getCandidateGuardianPhone(byType.guardian_link[0]);
+  const joinValue = getCandidateJoinValues(candidate)[0]
+    || byType.guardian_link.map(getCandidateJoinValues).flat()[0]
+    || byType.customer.map(getCandidateJoinValues).flat()[0]
+    || byType.guardian.map(getCandidateJoinValues).flat()[0]
+    || null;
   const groupKey = {
     identity_number: identity || linkIdentity || getCandidateIdentity(byType.customer[0]) || null,
     guardian_phone: guardianPhone || linkPhone || getCandidateGuardianPhone(byType.guardian[0]) || null,
+    join_value: joinValue,
   };
 
   return {
@@ -228,13 +315,23 @@ function buildRelatedCandidates(candidate, allWorkspaceCandidates) {
 async function attachRelatedCandidates(supabase, orgId, workspaceId, candidate) {
   const clean = normalizeRelatedCandidate(candidate);
   if (!clean || !workspaceId) return clean;
+  const { data: workspace, error: workspaceError } = await withOrgScope(supabase, 'import_workspaces', orgId)
+    .select('id, config')
+    .eq('id', workspaceId)
+    .maybeSingle();
+  if (workspaceError || !workspace) throw workspaceError || new Error('workspace_not_found');
+
   const { data, error } = await withOrgScope(supabase, 'import_candidates', orgId)
-    .select('id, entity_type, status, candidate_data, issues, blocking_issues_count, decisions, source_row_id, depends_on_candidate_id, created_at, updated_at')
+    .select('id, entity_type, status, candidate_data, issues, blocking_issues_count, decisions, source_row_id, merged_from_row_ids, depends_on_candidate_id, created_at, updated_at')
     .eq('workspace_id', workspaceId);
   if (error) throw error;
+  const rowsById = await loadImportRowsForCandidates(supabase, orgId, data || []);
+  const joinColumns = workspace.config?.mappings?.join || {};
+  const hydratedCandidates = (data || []).map((item) => attachJoinMetadata(item, rowsById, joinColumns));
+  const hydratedClean = attachJoinMetadata(clean, rowsById, joinColumns);
   return {
-    ...clean,
-    related_candidates: buildRelatedCandidates(clean, data || []),
+    ...hydratedClean,
+    related_candidates: buildRelatedCandidates(hydratedClean, hydratedCandidates),
   };
 }
 
@@ -645,8 +742,8 @@ export default async function importCandidates(context, req) {
     const from = (page - 1) * PAGE_SIZE;
     const to = from + PAGE_SIZE - 1;
     const selectColumns = sourceReference
-      ? 'id, entity_type, status, candidate_data, issues, blocking_issues_count, decisions, source_row_id, depends_on_candidate_id, created_at, updated_at, import_rows!inner(source_reference)'
-      : 'id, entity_type, status, candidate_data, issues, blocking_issues_count, decisions, source_row_id, depends_on_candidate_id, created_at, updated_at';
+      ? 'id, entity_type, status, candidate_data, issues, blocking_issues_count, decisions, source_row_id, merged_from_row_ids, depends_on_candidate_id, created_at, updated_at, import_rows!inner(source_reference)'
+      : 'id, entity_type, status, candidate_data, issues, blocking_issues_count, decisions, source_row_id, merged_from_row_ids, depends_on_candidate_id, created_at, updated_at';
 
     let query = withOrgScope(supabase, 'import_candidates', orgId)
       .select(selectColumns, { count: 'exact' })
@@ -671,8 +768,17 @@ export default async function importCandidates(context, req) {
       return respondCandidatesError(context, 500, 'failed_to_list_candidates', error, { action: 'list' });
     }
 
-    const { data: allWorkspaceCandidates, error: relatedError } = await withOrgScope(supabase, 'import_candidates', orgId)
-      .select('id, entity_type, status, candidate_data, issues, blocking_issues_count, decisions, source_row_id, depends_on_candidate_id, created_at, updated_at')
+    const { data: workspace, error: workspaceError } = await withOrgScope(supabase, 'import_workspaces', orgId)
+      .select('id, config')
+      .eq('id', workspaceId)
+      .maybeSingle();
+    if (workspaceError || !workspace) {
+      context.log?.error?.('import-candidates: workspace load for related candidates failed', { message: workspaceError?.message });
+      return respondCandidatesError(context, 500, 'failed_to_list_candidates', workspaceError || new Error('workspace_not_found'), { action: 'load_workspace_for_related' });
+    }
+
+    const { data: allWorkspaceCandidatesRaw, error: relatedError } = await withOrgScope(supabase, 'import_candidates', orgId)
+      .select('id, entity_type, status, candidate_data, issues, blocking_issues_count, decisions, source_row_id, merged_from_row_ids, depends_on_candidate_id, created_at, updated_at')
       .eq('workspace_id', workspaceId);
 
     if (relatedError) {
@@ -680,11 +786,24 @@ export default async function importCandidates(context, req) {
       return respondCandidatesError(context, 500, 'failed_to_list_candidates', relatedError, { action: 'list_related' });
     }
 
+    let allWorkspaceCandidates = allWorkspaceCandidatesRaw || [];
+    try {
+      const rowsById = await loadImportRowsForCandidates(supabase, orgId, allWorkspaceCandidates);
+      const joinColumns = workspace.config?.mappings?.join || {};
+      allWorkspaceCandidates = allWorkspaceCandidates.map((candidate) => (
+        attachJoinMetadata(candidate, rowsById, joinColumns)
+      ));
+    } catch (err) {
+      context.log?.error?.('import-candidates: join metadata load failed', { message: err?.message });
+      return respondCandidatesError(context, 500, 'failed_to_list_candidates', err, { action: 'load_join_metadata' });
+    }
+
     const candidates = (data || []).map((candidate) => {
-      const clean = normalizeRelatedCandidate(candidate);
+      const enriched = allWorkspaceCandidates.find((item) => item.id === candidate.id) || candidate;
+      const clean = normalizeRelatedCandidate(enriched);
       return {
         ...clean,
-        related_candidates: buildRelatedCandidates(clean, allWorkspaceCandidates || []),
+        related_candidates: buildRelatedCandidates(clean, allWorkspaceCandidates),
       };
     });
 
@@ -895,7 +1014,7 @@ export default async function importCandidates(context, req) {
     const { data: updated, error: updateErr } = await withOrgScope(supabase, 'import_candidates', orgId)
       .update(updates)
       .eq('id', candidateId)
-      .select('id, entity_type, status, candidate_data, issues, blocking_issues_count, decisions, source_row_id, updated_at')
+      .select('id, entity_type, status, candidate_data, issues, blocking_issues_count, decisions, source_row_id, merged_from_row_ids, updated_at')
       .single();
 
     if (updateErr) {
@@ -919,7 +1038,7 @@ export default async function importCandidates(context, req) {
           },
         });
         const { data: refreshed, error: refreshFetchError } = await withOrgScope(supabase, 'import_candidates', orgId)
-          .select('id, entity_type, status, candidate_data, issues, blocking_issues_count, decisions, source_row_id, updated_at')
+          .select('id, entity_type, status, candidate_data, issues, blocking_issues_count, decisions, source_row_id, merged_from_row_ids, updated_at')
           .eq('id', candidateId)
           .single();
         if (refreshFetchError) throw refreshFetchError;

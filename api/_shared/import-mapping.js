@@ -117,6 +117,16 @@ export function applyMappings(rawData, fieldMap, anchorSourceReference, joinColu
   const out = {};
   const mergedRowIds = [];
   const joinIssues = [];
+  const join = {
+    columns: {},
+    values: {},
+  };
+  const anchorJoinColumn = normalizeString(joinColumns?.[anchorSourceReference]);
+  if (anchorJoinColumn) {
+    join.columns[anchorSourceReference] = anchorJoinColumn;
+    const anchorJoinValue = normalizeJoinValue(rawData?.[anchorJoinColumn]);
+    if (anchorJoinValue) join.values[anchorSourceReference] = anchorJoinValue;
+  }
 
   for (const [canonicalField, configuredSource] of Object.entries(fieldMap || {})) {
     const source = normalizeFieldSource(configuredSource, anchorSourceReference);
@@ -126,8 +136,8 @@ export function applyMappings(rawData, fieldMap, anchorSourceReference, joinColu
       continue;
     }
 
-    const anchorJoinColumn = normalizeString(joinColumns?.[anchorSourceReference]);
     const externalJoinColumn = normalizeString(joinColumns?.[source.sourceReference]);
+    if (externalJoinColumn) join.columns[source.sourceReference] = externalJoinColumn;
     if (!anchorJoinColumn || !externalJoinColumn) {
       out[canonicalField] = null;
       joinIssues.push({
@@ -144,6 +154,8 @@ export function applyMappings(rawData, fieldMap, anchorSourceReference, joinColu
     if (matches.length === 1) {
       out[canonicalField] = matches[0].raw_data?.[source.column] ?? null;
       mergedRowIds.push(matches[0].id);
+      const externalJoinValue = normalizeJoinValue(matches[0].raw_data?.[externalJoinColumn]);
+      if (externalJoinValue) join.values[source.sourceReference] = externalJoinValue;
     } else {
       out[canonicalField] = null;
       joinIssues.push({
@@ -154,5 +166,5 @@ export function applyMappings(rawData, fieldMap, anchorSourceReference, joinColu
       });
     }
   }
-  return { mapped: out, mergedRowIds: [...new Set(mergedRowIds)], joinIssues };
+  return { mapped: out, mergedRowIds: [...new Set(mergedRowIds)], joinIssues, join };
 }

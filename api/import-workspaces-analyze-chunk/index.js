@@ -679,7 +679,7 @@ export default async function importWorkspacesAnalyzeChunk(context, req) {
   const normalized = rows.flatMap((row) => configuredEntities.flatMap((mapping) => {
     const candidateKey = `${row.id}:${mapping.entityType}`;
     if (preservedStatuses.has(existingStatusByKey.get(candidateKey))) return [];
-    const { mapped, mergedRowIds, joinIssues } = applyMappings(
+    const { mapped, mergedRowIds, joinIssues, join } = applyMappings(
       row.raw_data || {},
       mapping.field_map || {},
       sourceReference,
@@ -690,6 +690,12 @@ export default async function importWorkspacesAnalyzeChunk(context, req) {
       if (mapped[field] === null || mapped[field] === undefined || mapped[field] === '') mapped[field] = fixedValue;
     }
     const { data: candidateData, fieldIssues } = normalizeCandidateData(mapped, mapping.entityType);
+    if (join && Object.keys(join.values || {}).length > 0) {
+      candidateData.__import = {
+        ...(candidateData.__import || {}),
+        join,
+      };
+    }
     return [{
       rowId: row.id,
       rowIndex: row.row_index,

@@ -516,14 +516,13 @@ function RowRecovery({ uploadHook, objectKey, fileName, remainingCount = 1 }) {
 }
 
 // ── Processing Step ────────────────────────────────────────────────────────
-function ProcessStep({ processing, uploadHook, workspace, sourceReference, onSourceChange, onRetry }) {
+function ProcessStep({ processing, uploadHook, workspace, onRetry }) {
   const config    = workspace.config || {};
   const sources = getWorkspaceSources(config);
   const { anchorReferences, participatingReferences } = getMappedSourceReferences(config);
   const requiredSources = participatingReferences.size > 0
     ? sources.filter((source) => participatingReferences.has(source.sourceReference))
     : sources;
-  const hasSourceMapping = anchorReferences.includes(sourceReference);
   // Sources whose rows are neither in memory nor saved in the DB yet. Recovered
   // one at a time (a single parse can run at once); the next surfaces after each.
   const recoverySources = requiredSources.filter((source) => {
@@ -542,19 +541,31 @@ function ProcessStep({ processing, uploadHook, workspace, sourceReference, onSou
       <p className="text-sm text-muted-foreground">
         מעבד את הקובץ — אפשר להמתין כאן. השורות נשמרות לבדיקה ולאחר מכן נבדקות מול כללי המערכת.
       </p>
-      {sources.length > 1 && (
-        <div className="flex flex-wrap gap-2">
-          {sources.map((source) => (
-            <Button
-              key={source.sourceReference}
-              type="button"
-              size="sm"
-              variant={source.sourceReference === sourceReference ? 'default' : 'outline'}
-              onClick={() => onSourceChange?.(source.sourceReference)}
-            >
-              {source.label || source.sheetName || source.filename || source.sourceReference}
-            </Button>
-          ))}
+      {requiredSources.length > 1 && (
+        <div className="space-y-1.5 text-sm">
+          {requiredSources.map((source) => {
+            const totalRows = getSourceTotalRows(source);
+            const progress = processing.sourceProgress?.[source.sourceReference] || {};
+            const uploadedRows = Math.min(Number(progress.uploadedRows || 0), totalRows);
+            const analyzedRows = anchorReferences.includes(source.sourceReference)
+              ? Math.min(Number(progress.analyzedRows || 0), totalRows)
+              : null;
+            return (
+              <div key={source.sourceReference} className="flex flex-wrap items-center gap-2">
+                <span className="font-medium">
+                  {source.label || source.sheetName || source.filename || source.sourceReference}
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  נשמרו {uploadedRows.toLocaleString()} / {totalRows.toLocaleString()} שורות
+                </span>
+                {analyzedRows !== null && (
+                  <span className="text-xs text-muted-foreground">
+                    נותחו {analyzedRows.toLocaleString()} / {totalRows.toLocaleString()}
+                  </span>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
       {/* Parsed rows lost (e.g. after refresh): recover from backup or re-pick. */}
@@ -576,11 +587,6 @@ function ProcessStep({ processing, uploadHook, workspace, sourceReference, onSou
         </div>
       )}
       <ProgressOrchestrator processing={processing} onRetry={onRetry} />
-      {!hasSourceMapping && (
-        <p className="text-xs text-muted-foreground">
-          המקור הזה משמש להשלמת פרטים במיפוי אחר. צריך לשמור את השורות שלו, אבל אין צורך למפות או לנתח אותו בנפרד.
-        </p>
-      )}
     </div>
   );
 }
@@ -1000,7 +1006,6 @@ export default function ImportWorkspaceDashboard() {
   const [queueKey, setQueueKey]           = useState(0); // force re-mount queue on decision
   const [isDryRunning, setIsDryRunning]   = useState(false);
   const [dryRunProgress, setDryRunProgress] = useState({ done: 0, total: 0 });
-  const [selectedSourceReference, setSelectedSourceReference] = useState(null);
   const [analysisRequest, setAnalysisRequest] = useState(null);
   const [completedAnalysisRequestToken, setCompletedAnalysisRequestToken] = useState(0);
   const [ingestedRowsBySource, setIngestedRowsBySource] = useState({});
@@ -1014,7 +1019,6 @@ export default function ImportWorkspaceDashboard() {
   const uploadHook = useImportFileUpload(workspaceId, getWorkspaceSources(config));
 
   const sources = useMemo(() => getWorkspaceSources(config), [config]);
-  const sourceRef     = selectedSourceReference || config.activeSourceReference || uploadHook.sourceReference || config.sourceReference || null;
   const processingSources = useMemo(() => {
     const byReference = new Map(sources.map((source) => [source.sourceReference, source]));
     for (const parsedSource of uploadHook.parsedSources || []) {
@@ -1074,22 +1078,11 @@ export default function ImportWorkspaceDashboard() {
   // Auto-navigate to the current step on first load
   useEffect(() => {
     if (!workspace) return;
-    const availableSources = getWorkspaceSources(workspace.config || {});
-    setSelectedSourceReference((current) => current
-      || workspace.config?.activeSourceReference
-      || availableSources[0]?.sourceReference
-      || null);
     if (initialStepDerivedRef.current) return;
     initialStepDerivedRef.current = true;
     const derived = deriveCurrentStep(workspace, 'idle', 'idle', ingestedRowsBySource);
     setCurrentStep(derived);
   }, [ingestedRowsBySource, workspace]);
-
-  const handleSourceChange = useCallback(async (nextSourceReference) => {
-    await load();
-    setSelectedSourceReference(nextSourceReference);
-    uploadHook.selectParsedSource(nextSourceReference);
-  }, [load, uploadHook]);
 
   useEffect(() => {
     const { participatingReferences } = getMappedSourceReferences(config);
@@ -1401,8 +1394,6 @@ export default function ImportWorkspaceDashboard() {
               processing={processing}
               uploadHook={uploadHook}
               workspace={workspace}
-              sourceReference={sourceRef}
-              onSourceChange={handleSourceChange}
               onRetry={handleProcessingRetry}
             />
           )}

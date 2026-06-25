@@ -156,7 +156,11 @@ function describeDecision(decisions) {
 function getEditableFields(entityType, candidateData) {
   const canonical = EDITABLE_FIELDS_BY_ENTITY[entityType] || [];
   const extra = Object.keys(candidateData || {})
-    .filter((field) => !['dry_run_summary', 'student_identity_number', 'name'].includes(field) && !canonical.includes(field));
+    .filter((field) => (
+      !['dry_run_summary', 'student_identity_number', 'name', '__import'].includes(field)
+      && !field.startsWith('__')
+      && !canonical.includes(field)
+    ));
   return [...canonical, ...extra];
 }
 
@@ -177,6 +181,63 @@ function candidateTitle(candidate) {
     || [data.guardian_first_name, data.guardian_last_name].filter(Boolean).join(' ')
     || data.service_name
     || 'רשומה';
+}
+
+function candidateIdentity(candidate) {
+  const data = canonicalizeCandidateData(candidate?.candidate_data || {});
+  return data.identity_number || '';
+}
+
+function candidateGuardianPhone(candidate) {
+  const data = canonicalizeCandidateData(candidate?.candidate_data || {});
+  return data.guardian_phone || '';
+}
+
+function candidateJoinValues(candidate) {
+  const values = candidate?.candidate_data?.__import?.join?.values;
+  if (!values || typeof values !== 'object') return [];
+  return Object.values(values).map((value) => String(value || '').trim()).filter(Boolean);
+}
+
+function shareJoinValue(left, right) {
+  const leftValues = new Set(candidateJoinValues(left));
+  if (leftValues.size === 0) return false;
+  return candidateJoinValues(right).some((value) => leftValues.has(value));
+}
+
+function relationTabTitle(candidate, allTabs) {
+  const identity = candidateIdentity(candidate);
+  const guardianPhone = candidateGuardianPhone(candidate);
+  const customer = allTabs.find((item) => (
+    item.entity_type === 'customer'
+    && (
+      (identity && candidateIdentity(item) === identity)
+      || shareJoinValue(candidate, item)
+    )
+  ));
+  const guardian = allTabs.find((item) => (
+    item.entity_type === 'guardian'
+    && (
+      (guardianPhone && candidateGuardianPhone(item) === guardianPhone)
+      || shareJoinValue(candidate, item)
+    )
+  ));
+  const customerName = customer ? candidateTitle(customer) : '';
+  const guardianName = guardian ? candidateTitle(guardian) : '';
+  return [customerName !== 'רשומה' ? customerName : '', guardianName !== 'רשומה' ? guardianName : '']
+    .filter(Boolean)
+    .join(' · ')
+    || [identity, guardianPhone].filter(Boolean).join(' · ')
+    || candidateJoinValues(candidate)[0]
+    || 'קשר';
+}
+
+function candidateTabTitle(candidate, allTabs) {
+  if (candidate?.entity_type === 'guardian_link') return relationTabTitle(candidate, allTabs);
+  const title = candidateTitle(candidate);
+  if (title !== 'רשומה') return title;
+  const data = canonicalizeCandidateData(candidate?.candidate_data || {});
+  return data.identity_number || data.guardian_phone || data.phone || '';
 }
 
 function flattenRelatedCandidates(candidate) {
@@ -687,6 +748,7 @@ export function CandidateDetailSheet({ candidate, workspaceId, open, onClose, on
                   const activeTab = tabCandidate.id === active.id;
                   const blockerCount = Number(tabCandidate.blocking_issues_count || 0);
                   const warningCount = (tabCandidate.issues || []).filter((item) => item?.severity === 'warning').length;
+                  const tabTitle = candidateTabTitle(tabCandidate, candidateTabs);
                   return (
                     <button
                       key={tabCandidate.id}
@@ -695,11 +757,20 @@ export function CandidateDetailSheet({ candidate, workspaceId, open, onClose, on
                       aria-selected={activeTab}
                       onClick={() => switchActiveCandidate(tabCandidate.id)}
                       className={cn(
-                        'inline-flex min-h-9 items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium transition-colors',
+                        'inline-flex min-h-11 max-w-[12rem] items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium transition-colors',
                         activeTab ? 'border-primary bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-muted',
                       )}
                     >
-                      <span>{ENTITY_TAB_LABELS[tabCandidate.entity_type] || ENTITY_LABELS[tabCandidate.entity_type] || tabCandidate.entity_type}</span>
+                      <span className="min-w-0 text-start">
+                        <span className="block">
+                          {ENTITY_TAB_LABELS[tabCandidate.entity_type] || ENTITY_LABELS[tabCandidate.entity_type] || tabCandidate.entity_type}
+                        </span>
+                        {tabTitle && (
+                          <span className="block max-w-[8.5rem] truncate text-[11px] font-normal">
+                            {tabTitle}
+                          </span>
+                        )}
+                      </span>
                       <Badge variant={STATUS_VARIANT[tabCandidate.status] || 'secondary'} className="px-1.5 py-0 text-[10px]">
                         {STATUS_LABELS[tabCandidate.status] || tabCandidate.status}
                       </Badge>
@@ -720,8 +791,13 @@ export function CandidateDetailSheet({ candidate, workspaceId, open, onClose, on
                 })}
               </div>
 
-              {(relatedGroupKey.identity_number || relatedGroupKey.guardian_phone) && (
+              {(relatedGroupKey.identity_number || relatedGroupKey.guardian_phone || relatedGroupKey.join_value) && (
                 <div className="flex flex-wrap gap-1.5 text-xs text-muted-foreground">
+                  {relatedGroupKey.join_value && (
+                    <span className="rounded-md bg-muted px-2 py-1">
+                      מזהה קישור: {relatedGroupKey.join_value}
+                    </span>
+                  )}
                   {relatedGroupKey.identity_number && (
                     <span className="rounded-md bg-muted px-2 py-1">
                       ת״ז: {relatedGroupKey.identity_number}
