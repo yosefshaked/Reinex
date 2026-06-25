@@ -221,12 +221,15 @@ function relationTabTitle(candidate, allTabs) {
       || shareJoinValue(candidate, item)
     )
   ));
+  // Match the link to its guardian by the guardian-specific signal (phone, then
+  // email) ONLY. The join value is a *family* key shared by every guardian in the
+  // family, so using it here would make .find() return the same (first) guardian
+  // for every link — mislabelling all of a student's links with one parent's name.
   const guardian = allTabs.find((item) => (
     item.entity_type === 'guardian'
     && (
       (guardianPhone && candidateGuardianPhone(item) === guardianPhone)
       || (!guardianPhone && guardianEmail && candidateGuardianEmail(item) === guardianEmail)
-      || shareJoinValue(candidate, item)
     )
   ));
   const customerName = customer ? candidateTitle(customer) : '';
