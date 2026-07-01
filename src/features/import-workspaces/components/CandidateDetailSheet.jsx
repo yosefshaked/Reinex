@@ -569,10 +569,19 @@ export function CandidateDetailSheet({ candidate, workspaceId, open, onClose, on
     setLinkQuery('');
   }
 
-  function updateLiveCandidate(updated) {
-    if (!updated?.id) return;
-    setLiveCandidateById((prev) => ({ ...prev, [updated.id]: updated }));
-    onCandidateUpdated?.(updated);
+  // Apply the edited candidate AND the siblings the server corrected (Approach A):
+  // overlay them on the drawer's per-candidate map, patch the relations cache, and
+  // notify the parent — all locally, with no refetch.
+  function applyEditedRows(primary, affected = []) {
+    const rows = [primary, ...(affected || [])].filter((row) => row?.id);
+    if (rows.length === 0) return;
+    setLiveCandidateById((prev) => {
+      const next = { ...prev };
+      for (const row of rows) next[row.id] = row;
+      return next;
+    });
+    relationsHook?.applyCandidateUpdates?.(rows);
+    onCandidateUpdated?.(primary, affected || []);
   }
 
   async function handleCreateRelation(customer, guardian) {
@@ -603,7 +612,7 @@ export function CandidateDetailSheet({ candidate, workspaceId, open, onClose, on
         decisions_patch: decisionsPatch,
         status: newStatus,
       });
-      onDecisionSaved?.(result.candidate);
+      onDecisionSaved?.(result.candidate, result.affected_candidates || []);
       onClose();
     } catch (err) {
       setSaveError(err.message || 'שגיאה בשמירה');
@@ -660,7 +669,7 @@ export function CandidateDetailSheet({ candidate, workspaceId, open, onClose, on
         decisions_patch: { action: 'link_to_existing', linked_id: profileId },
         status: 'ready',
       });
-      onDecisionSaved?.(result.candidate);
+      onDecisionSaved?.(result.candidate, result.affected_candidates || []);
       onClose();
     } catch (err) {
       setLinkError(err.message || 'שגיאה בקישור הרשומה');
@@ -703,7 +712,7 @@ export function CandidateDetailSheet({ candidate, workspaceId, open, onClose, on
       const result = await patchCandidate(active.id, {
         candidate_data_patch: { [field]: value },
       });
-      updateLiveCandidate(result.candidate);
+      applyEditedRows(result.candidate, result.affected_candidates || []);
       setEditingField(null);
       setEditingValue('');
     } catch (err) {

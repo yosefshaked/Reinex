@@ -1004,7 +1004,10 @@ export default function ImportWorkspaceDashboard() {
   const [currentStep, setCurrentStep]     = useState('upload');
   const [selectedCandidate, setSelectedCandidate] = useState(null);
   const [sheetOpen, setSheetOpen]         = useState(false);
-  const [queueKey, setQueueKey]           = useState(0); // force re-mount queue on decision
+  const [queueKey, setQueueKey]           = useState(0); // force re-mount queue on step change
+  // Server-returned rows (edited candidate + siblings it corrected) overlaid on the
+  // queue so an edit updates the affected badges without a refetch/remount (Approach A).
+  const [patchedCandidates, setPatchedCandidates] = useState({});
   const relationsHook = useImportRelations(currentStep === 'review' ? workspaceId : null);
   const [isDryRunning, setIsDryRunning]   = useState(false);
   const [dryRunProgress, setDryRunProgress] = useState({ done: 0, total: 0 });
@@ -1218,18 +1221,35 @@ export default function ImportWorkspaceDashboard() {
     setSheetOpen(true);
   }
 
-  function handleDecisionSaved() {
-    relationsHook.refetch(); // update family groups after skip/link/etc.
-    setQueueKey(k => k + 1); // refresh queue
+  // Overlay server-returned rows onto the queue (no refetch). updated_at guards the
+  // overlay so a later real fetch always wins (see CandidateQueue).
+  function patchQueueCandidates(rows) {
+    const valid = (rows || []).filter((row) => row?.id);
+    if (valid.length === 0) return;
+    setPatchedCandidates((prev) => {
+      const next = { ...prev };
+      for (const row of valid) next[row.id] = row;
+      return next;
+    });
+  }
+
+  // A decision (skip/link/create_as_new) changes status but not group membership, so
+  // patch the edited candidate + any siblings the server corrected locally.
+  function handleDecisionSaved(candidate, affected = []) {
+    const rows = [candidate, ...affected].filter(Boolean);
+    relationsHook.applyCandidateUpdates(rows);
+    patchQueueCandidates(rows);
     setSheetOpen(false);
   }
 
-  // A per-field edit recomputes issues server-side; refresh the queue in the
-  // background but keep the drawer open so the user can keep fixing fields.
-  function handleCandidateUpdated(updated) {
+  // A per-field edit recomputes issues server-side (for the candidate and its
+  // siblings); patch them into the relations cache + queue overlay locally and keep
+  // the drawer open so the user can keep fixing fields.
+  function handleCandidateUpdated(updated, affected = []) {
     if (updated) setSelectedCandidate(updated);
-    relationsHook.refetch();
-    setQueueKey(k => k + 1);
+    const rows = [updated, ...affected].filter(Boolean);
+    relationsHook.applyCandidateUpdates(rows);
+    patchQueueCandidates(rows);
   }
 
   async function handleExportIssues() {
@@ -1446,6 +1466,7 @@ export default function ImportWorkspaceDashboard() {
               <CandidateQueue
                 key={queueKey}
                 workspaceId={workspaceId}
+                patchedById={patchedCandidates}
                 onCandidateSelect={handleCandidateSelect}
               />
             </>
@@ -1454,7 +1475,7 @@ export default function ImportWorkspaceDashboard() {
           {currentStep === 'commit' && (
             <CommitStep
               workspaceId={workspaceId}
-              onBackToReview={() => { setQueueKey(k => k + 1); setCurrentStep('review'); }}
+              onBackToReview={() => { setPatchedCandidates({}); setQueueKey(k => k + 1); setCurrentStep('review'); }}
             />
           )}
         </CardContent>

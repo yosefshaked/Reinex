@@ -95,7 +95,7 @@ function CandidateRow({ candidate, onSelect }) {
  *   onCandidateSelect: (candidate: object) => void,
  * }} props
  */
-export function CandidateQueue({ workspaceId, sourceReference = null, onCandidateSelect }) {
+export function CandidateQueue({ workspaceId, sourceReference = null, patchedById = {}, onCandidateSelect }) {
   const [entityType, setEntityType]  = useState('');
   const [status, setStatus]          = useState('');
   const [page, setPage]              = useState(1);
@@ -206,9 +206,15 @@ export function CandidateQueue({ workspaceId, sourceReference = null, onCandidat
                 </td>
               </tr>
             )}
-            {!loading && !error && (data?.candidates || []).map(c => (
-              <CandidateRow key={c.id} candidate={c} onSelect={onCandidateSelect} />
-            ))}
+            {!loading && !error && (data?.candidates || []).map(c => {
+              // Overlay a locally-patched row from a recent edit, but only if it's at
+              // least as fresh as the fetched row so a real refetch always wins.
+              const patched = patchedById[c.id];
+              const row = patched && (!c.updated_at || String(patched.updated_at) >= String(c.updated_at))
+                ? patched
+                : c;
+              return <CandidateRow key={c.id} candidate={row} onSelect={onCandidateSelect} />;
+            })}
           </tbody>
         </table>
       </div>

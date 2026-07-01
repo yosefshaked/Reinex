@@ -71,9 +71,38 @@ export function useImportRelations(workspaceId) {
   }, []);
 
   /**
-   * Refetch the relations (call after any mutation that changes the family structure).
+   * Patch already-cached group members in place from server-returned rows, with no
+   * network call (Approach A). Used after an edit whose response carries the edited
+   * candidate + the siblings the server also corrected. Membership is unchanged, so
+   * we only replace matching members by id; add/remove still needs refetch().
+   * @param {object[]} rows
+   */
+  const applyCandidateUpdates = useCallback((rows) => {
+    const byId = new Map((rows || []).filter((r) => r?.id).map((r) => [r.id, r]));
+    if (byId.size === 0) return;
+    setGroups((prev) => prev.map((group) => {
+      let changed = false;
+      const patch = (arr) => (arr || []).map((member) => {
+        const update = byId.get(member.id);
+        if (!update) return member;
+        changed = true;
+        return { ...member, ...update };
+      });
+      const next = {
+        ...group,
+        customer: patch(group.customer),
+        guardian: patch(group.guardian),
+        guardian_link: patch(group.guardian_link),
+      };
+      return changed ? next : group;
+    }));
+  }, []);
+
+  /**
+   * Refetch the relations (call after any mutation that changes the family structure,
+   * e.g. creating a new guardian_link — a pure field edit uses applyCandidateUpdates).
    */
   const refetch = useCallback(() => load(), [load]);
 
-  return { loading, error, groups, getGroupForCandidate, refetch };
+  return { loading, error, groups, getGroupForCandidate, applyCandidateUpdates, refetch };
 }

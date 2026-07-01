@@ -328,6 +328,11 @@ async function hasRelatedGuardianContactForCustomer(supabase, orgId, { workspace
   });
 }
 
+// Fields the review UI (queue rows + drawer tabs) renders. Cross-candidate
+// refreshes return rows with this shape so the client can patch its caches
+// locally instead of refetching the workspace (Approach A).
+const AFFECTED_CANDIDATE_SELECT = 'id, entity_type, status, candidate_data, issues, blocking_issues_count, decisions, source_row_id, merged_from_row_ids, updated_at';
+
 async function recomputeCustomerContactIssue(supabase, orgId, customerCandidate, options = {}) {
   const data = customerCandidate?.candidate_data || {};
   const existingIssues = Array.isArray(customerCandidate?.issues) ? customerCandidate.issues : [];
@@ -357,10 +362,13 @@ async function recomputeCustomerContactIssue(supabase, orgId, customerCandidate,
     updates.status = blockingCount > 0 ? 'blocked' : 'ready';
   }
 
-  const { error } = await withOrgScope(supabase, 'import_candidates', orgId)
+  const { data: updatedRow, error } = await withOrgScope(supabase, 'import_candidates', orgId)
     .update(updates)
-    .eq('id', customerCandidate.id);
+    .eq('id', customerCandidate.id)
+    .select(AFFECTED_CANDIDATE_SELECT)
+    .single();
   if (error) throw error;
+  return updatedRow;
 }
 
 async function refreshRelatedCustomerContactIssues(supabase, orgId, guardianCandidate) {
@@ -381,11 +389,14 @@ async function refreshRelatedCustomerContactIssues(supabase, orgId, guardianCand
     )
   ));
 
+  const affected = [];
   for (const customerCandidate of relatedCustomers) {
-    await recomputeCustomerContactIssue(supabase, orgId, customerCandidate, {
+    const row = await recomputeCustomerContactIssue(supabase, orgId, customerCandidate, {
       extraGuardianCandidate: guardianCandidate,
     });
+    if (row) affected.push(row);
   }
+  return affected;
 }
 
 function isTruthyPrimary(value) {
@@ -401,7 +412,7 @@ async function refreshGuardianPrimaryIssues(supabase, orgId, workspaceId, option
     || overrideCandidate?.candidate_data?.identity_number
     || overrideCandidate?.candidateData?.identity_number,
   );
-  if (!identityNumber) return;
+  if (!identityNumber) return [];
 
   const { data, error } = await withOrgScope(supabase, 'import_candidates', orgId)
     .select('id, status, candidate_data, issues')
@@ -422,6 +433,7 @@ async function refreshGuardianPrimaryIssues(supabase, orgId, workspaceId, option
   const primaryCount = candidates.filter((candidate) => isTruthyPrimary(candidate.candidate_data?.is_primary)).length;
   const needsIssue = candidates.length >= 2 && primaryCount !== 1;
 
+  const affected = [];
   for (const candidate of candidates) {
     const existingIssues = Array.isArray(candidate.issues) ? candidate.issues : [];
     const withoutPrimaryIssue = existingIssues.filter((item) => item?.code !== 'guardian_primary_contact_required');
@@ -437,11 +449,74 @@ async function refreshGuardianPrimaryIssues(supabase, orgId, workspaceId, option
     if (!['committed', 'skipped'].includes(normalizeString(candidate.status))) {
       updates.status = blockingCount > 0 ? 'blocked' : 'ready';
     }
-    const { error: updateError } = await withOrgScope(supabase, 'import_candidates', orgId)
+    const { data: updatedRow, error: updateError } = await withOrgScope(supabase, 'import_candidates', orgId)
       .update(updates)
-      .eq('id', candidate.id);
+      .eq('id', candidate.id)
+      .select(AFFECTED_CANDIDATE_SELECT)
+      .single();
     if (updateError) throw updateError;
+    if (updatedRow) affected.push(updatedRow);
   }
+  return affected;
+}
+
+// Duplicate flags are cross-candidate: whether candidate B is flagged depends on
+// candidate A. So when A's identity changes (or A is skipped/un-skipped), the
+// SIBLINGS that shared A's old/new identity must be re-checked too — otherwise B
+// keeps a stale duplicate_identity_* flag until it is edited itself. Strictly
+// scoped to the same org (withOrgScope) and workspace, and reuses
+// generateDuplicateIssues so the rule stays identical to first-pass analysis.
+async function refreshRelatedDuplicateIssues(supabase, orgId, workspaceId, identityNumbers, excludeCandidateId) {
+  const targets = [...new Set((identityNumbers || []).map(normalizeString).filter(Boolean))];
+  if (!workspaceId || targets.length === 0) return;
+
+  const { data, error } = await withOrgScope(supabase, 'import_candidates', orgId)
+    .select('id, status, candidate_data, issues, decisions')
+    .eq('workspace_id', workspaceId)
+    .eq('entity_type', 'customer');
+  if (error) throw error;
+
+  const DUPLICATE_CODES = new Set(['duplicate_identity_number', 'duplicate_identity_in_file']);
+  const siblings = (data || []).filter((candidate) => (
+    candidate.id !== excludeCandidateId
+    && targets.includes(normalizeString(candidate.candidate_data?.identity_number))
+  ));
+
+  const affected = [];
+  for (const sibling of siblings) {
+    // Recompute only the identity-duplicate codes; leave every other issue (email
+    // duplicate, missing fields, format) and the sibling's own decisions intact.
+    const freshDuplicateIssues = (await generateDuplicateIssues(
+      supabase,
+      orgId,
+      sibling.candidate_data,
+      sibling.decisions,
+      { workspaceId, candidateId: sibling.id, entityType: 'customer' },
+    )).filter((iss) => DUPLICATE_CODES.has(iss.code));
+
+    const existingIssues = Array.isArray(sibling.issues) ? sibling.issues : [];
+    const nextIssues = [
+      ...existingIssues.filter((iss) => !DUPLICATE_CODES.has(iss?.code)),
+      ...freshDuplicateIssues,
+    ];
+    const blockingCount = countBlockingIssues(nextIssues);
+    const updates = {
+      issues: nextIssues,
+      blocking_issues_count: blockingCount,
+      updated_at: new Date().toISOString(),
+    };
+    if (!['committed', 'skipped'].includes(normalizeString(sibling.status))) {
+      updates.status = blockingCount > 0 ? 'blocked' : 'ready';
+    }
+    const { data: updatedRow, error: updateError } = await withOrgScope(supabase, 'import_candidates', orgId)
+      .update(updates)
+      .eq('id', sibling.id)
+      .select(AFFECTED_CANDIDATE_SELECT)
+      .single();
+    if (updateError) throw updateError;
+    if (updatedRow) affected.push(updatedRow);
+  }
+  return affected;
 }
 
 async function generateDuplicateIssues(supabase, orgId, candidateData, decisions, { workspaceId, candidateId, entityType } = {}) {
@@ -776,6 +851,10 @@ export default async function importCandidates(context, req) {
     }
 
     const updates = {};
+    // Rows the server also corrects as a side effect of this edit (siblings). They
+    // ride back on the response so the client patches its caches locally (Approach A)
+    // instead of refetching the workspace.
+    const affectedCandidates = [];
     let nextDecisions = existing.decisions && typeof existing.decisions === 'object'
       ? { ...existing.decisions }
       : {};
@@ -916,10 +995,11 @@ export default async function importCandidates(context, req) {
         )
       ) {
         try {
-          await refreshRelatedCustomerContactIssues(supabase, orgId, {
+          const contactAffected = await refreshRelatedCustomerContactIssues(supabase, orgId, {
             ...existing,
             candidate_data: nextData,
           });
+          affectedCandidates.push(...(contactAffected || []));
         } catch (err) {
           context.log?.error?.('import-candidates: related customer contact refresh failed', { message: err?.message });
           return respondCandidatesError(context, 500, 'failed_to_validate_candidate_edit', err, {
@@ -968,6 +1048,36 @@ export default async function importCandidates(context, req) {
       return respondCandidatesError(context, 500, 'failed_to_patch_candidate', updateErr, { action: 'patch', candidateId });
     }
 
+    // Cross-candidate duplicate flags can now be stale on OTHER candidates: fixing
+    // this customer's identity (or skipping it) may resolve a sibling's
+    // duplicate_identity_* flag. Re-validate the siblings that shared the old/new
+    // identity. Runs AFTER the save so generateDuplicateIssues reads this
+    // candidate's new state; scoped to this workspace + org only.
+    if (existing.entity_type === 'customer') {
+      const identityBefore = normalizeString(existing.candidate_data?.identity_number);
+      const identityAfter = normalizeString(updated.candidate_data?.identity_number);
+      const skipChanged = (normalizeString(existing.status) === 'skipped')
+        !== (normalizeString(updated.status) === 'skipped');
+      if (identityBefore !== identityAfter || skipChanged) {
+        try {
+          const dupAffected = await refreshRelatedDuplicateIssues(
+            supabase,
+            orgId,
+            existing.workspace_id,
+            [identityBefore, identityAfter],
+            candidateId,
+          );
+          affectedCandidates.push(...(dupAffected || []));
+        } catch (err) {
+          context.log?.error?.('import-candidates: related duplicate refresh after edit failed', { message: err?.message });
+          return respondCandidatesError(context, 500, 'failed_to_validate_candidate_edit', err, {
+            action: 'refresh_related_duplicate_issues',
+            candidateId,
+          });
+        }
+      }
+    }
+
     let candidateForResponse = updated;
     if (
       updated.entity_type === 'guardian_link'
@@ -977,12 +1087,13 @@ export default async function importCandidates(context, req) {
       )
     ) {
       try {
-        await refreshGuardianPrimaryIssues(supabase, orgId, existing.workspace_id, {
+        const primaryAffected = await refreshGuardianPrimaryIssues(supabase, orgId, existing.workspace_id, {
           overrideCandidate: {
             ...updated,
             candidate_data: updated.candidate_data,
           },
         });
+        affectedCandidates.push(...(primaryAffected || []));
         const { data: refreshed, error: refreshFetchError } = await withOrgScope(supabase, 'import_candidates', orgId)
           .select('id, entity_type, status, candidate_data, issues, blocking_issues_count, decisions, source_row_id, merged_from_row_ids, updated_at')
           .eq('id', candidateId)
@@ -998,7 +1109,18 @@ export default async function importCandidates(context, req) {
       }
     }
 
-    return respond(context, 200, { candidate: normalizeRelatedCandidate(candidateForResponse) });
+    // Dedupe the side-effected rows and exclude the edited candidate (already
+    // returned as `candidate`). The client merges these into its queue + relations
+    // caches with no extra fetch.
+    const affectedById = new Map();
+    for (const row of affectedCandidates) {
+      if (row?.id && row.id !== candidateId) affectedById.set(row.id, normalizeRelatedCandidate(row));
+    }
+
+    return respond(context, 200, {
+      candidate: normalizeRelatedCandidate(candidateForResponse),
+      affected_candidates: [...affectedById.values()],
+    });
   }
 
   return respond(context, 405, { message: 'method_not_allowed' });
