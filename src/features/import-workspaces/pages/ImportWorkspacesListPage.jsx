@@ -15,22 +15,29 @@ import { listImportWorkspaces, createImportWorkspace, deleteImportWorkspace } fr
 // statuses can't be deleted (the backend rejects them too).
 const NON_DELETABLE_STATUSES = new Set(['committed', 'partially_committed']);
 
+// Human-readable Hebrew for every workspace status. Keys MUST match
+// import_workspaces_status_check in setup-sql.js (unknown values fall back to the
+// raw string, which is what we're avoiding).
 const STATUS_LABEL = {
-  draft:      'טיוטה',
-  profiling:  'פרופיל',
-  mapping:    'מיפוי',
-  ingesting:  'קליטה',
-  analyzing:  'ניתוח',
-  review:     'סקירה',
-  committing: 'ביצוע',
-  done:       'הושלם',
-  error:      'שגיאה',
+  draft:               'טיוטה',
+  profiling:           'עיבוד ראשוני',
+  mapping:             'מיפוי',
+  analyzing:           'ניתוח',
+  needs_review:        'בבדיקה',
+  ready_to_commit:     'מוכן לייבוא',
+  partially_committed: 'יובא חלקית',
+  committed:           'הושלם',
+  archived:            'בארכיון',
+  cancelled:           'בוטל',
 };
 
 const STATUS_VARIANT = {
-  done:   'default',
-  error:  'destructive',
-  draft:  'secondary',
+  needs_review:        'default',
+  ready_to_commit:     'default',
+  partially_committed: 'default',
+  committed:           'outline',
+  archived:            'outline',
+  cancelled:           'destructive',
 };
 
 function formatDate(iso) {

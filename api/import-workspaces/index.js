@@ -330,6 +330,22 @@ export default async function importWorkspaces(context, req) {
     if (COMMITTED_STATUSES.has(normalizeString(workspace.status))) {
       return respond(context, 409, { message: 'cannot_delete_committed_workspace', status: workspace.status });
     }
+    // A *partial* commit leaves the workspace status at 'needs_review' (nothing sets
+    // 'partially_committed' today), so the status check above isn't enough. Refuse if
+    // ANY candidate already went live — deleting would drop the commit ledger for
+    // records that now exist in the live tables. (See tracking issue: derive
+    // workspace status from candidate state instead of a stored column.)
+    const { count: committedCount, error: committedCountError } = await withOrgScope(supabase, 'import_candidates', orgId)
+      .select('id', { count: 'exact', head: true })
+      .eq('workspace_id', workspaceId)
+      .eq('status', 'committed');
+    if (committedCountError) {
+      context.log?.error?.('import-workspaces: committed-candidate check failed', { message: committedCountError.message });
+      return respondWorkspacesError(context, 500, 'failed_to_load_workspace', committedCountError, { action: 'check_committed_candidates', workspaceId });
+    }
+    if ((committedCount ?? 0) > 0) {
+      return respond(context, 409, { message: 'cannot_delete_committed_workspace', committed_candidates: committedCount });
+    }
 
     // Best-effort removal of the temporary backup file(s). A storage failure must
     // not block the DB cleanup — the objects also expire on their own TTL.
