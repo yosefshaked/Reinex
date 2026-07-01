@@ -111,7 +111,7 @@ export default function ServicesPage() {
     }
   }, [canFetch, session, activeOrgId]);
 
-  const openCreateDialog = () => {
+  const openCreateDialog = useCallback(() => {
     setFormValues(buildInitialForm());
     setTouched({});
     setAddingRequiredForm(false);
@@ -120,7 +120,7 @@ export default function ServicesPage() {
     setEditRFEntry(EMPTY_NEW_REQUIRED_FORM);
     setDialogOpen(true);
     void loadAvailableRequiredForms();
-  };
+  }, [loadAvailableRequiredForms]);
 
   const openEditDialog = (service) => {
     setFormValues(buildInitialForm(service));
@@ -239,7 +239,7 @@ export default function ServicesPage() {
         הוספת שירות
       </Button>
     );
-  }, [isAdmin]);
+  }, [isAdmin, openCreateDialog]);
 
   if (!activeOrgId) {
     return (

@@ -44,11 +44,59 @@ function getStudentNames(instance) {
   return getParticipantDisplayNames(instance?.participants, 'ללא לקוח/ה').join(', ');
 }
 
-function buildLessonLine(instance) {
-  const serviceName = instance?.service?.service_name || 'שיעור';
+function getLessonServiceName(instance) {
+  return instance?.service?.service_name || 'שיעור';
+}
+
+function buildLessonParticipantLine(instance) {
   const endDate = addMinutes(instance?.datetime_start, instance?.duration_minutes);
   const timeRange = `${formatTimeLabel(instance?.datetime_start)}-${formatTimeLabel(endDate)}`;
-  return `${timeRange} - ${getStudentNames(instance)} | ${serviceName}`;
+  return `${timeRange} - ${getStudentNames(instance)}`;
+}
+
+const BREAK_TYPE_LABELS = {
+  break: 'הפסקה',
+  meeting: 'פגישה',
+  unavailable: 'לא זמין',
+  personal: 'אישי',
+};
+
+function buildBreakLine(breakItem) {
+  const endDate = addMinutes(breakItem?.datetime_start, breakItem?.duration_minutes);
+  const timeRange = `${formatTimeLabel(breakItem?.datetime_start)}-${formatTimeLabel(endDate)}`;
+  const label = BREAK_TYPE_LABELS[breakItem?.break_type] || 'הפסקה';
+  const note = breakItem?.note ? ` (${breakItem.note})` : '';
+  return `${timeRange} - ${label}${note}`;
+}
+
+function pushBlankLine(lines) {
+  if (lines.length > 0 && lines[lines.length - 1] !== '') {
+    lines.push('');
+  }
+}
+
+function buildGroupedScheduleLines(sortedItems) {
+  const lines = [];
+  let activeServiceName = '';
+
+  sortedItems.forEach(({ type, item }) => {
+    if (type === 'break') {
+      pushBlankLine(lines);
+      lines.push(buildBreakLine(item));
+      activeServiceName = '';
+      return;
+    }
+
+    const serviceName = getLessonServiceName(item);
+    if (serviceName !== activeServiceName) {
+      pushBlankLine(lines);
+      lines.push(`${serviceName}:`);
+      activeServiceName = serviceName;
+    }
+    lines.push(buildLessonParticipantLine(item));
+  });
+
+  return lines;
 }
 
 export function normalizeWhatsAppPhone(value) {
@@ -85,6 +133,15 @@ export function getInstructorDayLessons(instances, instructorId, dateString) {
     .sort((left, right) => new Date(left.datetime_start).getTime() - new Date(right.datetime_start).getTime());
 }
 
+export function getInstructorDayBreaks(breaks, instructorId, dateString) {
+  return (Array.isArray(breaks) ? breaks : [])
+    .filter((breakItem) => (
+      breakItem?.instructor_employee_id === instructorId &&
+      toLocalDateString(new Date(breakItem?.datetime_start)) === dateString
+    ))
+    .sort((left, right) => new Date(left.datetime_start).getTime() - new Date(right.datetime_start).getTime());
+}
+
 export function getInstructorWeekLessons(instances, instructorId, dateString) {
   const weekStart = getWeekStartDate(dateString);
   const weekEnd = getWeekEndDate(dateString);
@@ -103,20 +160,41 @@ export function getInstructorWeekLessons(instances, instructorId, dateString) {
     .sort((left, right) => new Date(left.datetime_start).getTime() - new Date(right.datetime_start).getTime());
 }
 
-export function buildInstructorDayMessage({ instructorName, dateString, lessons }) {
+export function getInstructorWeekBreaks(breaks, instructorId, dateString) {
+  const weekStart = getWeekStartDate(dateString);
+  const weekEnd = getWeekEndDate(dateString);
+  if (!(weekStart instanceof Date) || Number.isNaN(weekStart.getTime()) || !(weekEnd instanceof Date) || Number.isNaN(weekEnd.getTime())) {
+    return [];
+  }
+
+  return (Array.isArray(breaks) ? breaks : [])
+    .filter((breakItem) => {
+      if (breakItem?.instructor_employee_id !== instructorId) return false;
+      const breakDate = new Date(breakItem?.datetime_start);
+      return breakDate >= weekStart && breakDate <= weekEnd;
+    })
+    .sort((left, right) => new Date(left.datetime_start).getTime() - new Date(right.datetime_start).getTime());
+}
+
+export function buildInstructorDayMessage({ instructorName, dateString, lessons, breaks = [] }) {
+  const sortedItems = [
+    ...lessons.map((item) => ({ type: 'lesson', datetime_start: item.datetime_start, item })),
+    ...breaks.map((item) => ({ type: 'break', datetime_start: item.datetime_start, item })),
+  ].sort((left, right) => new Date(left.datetime_start).getTime() - new Date(right.datetime_start).getTime());
+
   const lines = [
     `שלום ${instructorName},`,
-    `הלקוחות שלך ל-${formatWeekdayDateLabel(dateString)}:`,
+    `המשתתפים שלך ל-${formatWeekdayDateLabel(dateString)}:`,
     '',
-    ...lessons.map(buildLessonLine),
+    ...buildGroupedScheduleLines(sortedItems),
     '',
-    `סה״כ: ${lessons.length} שיעורים`,
+    `סה״כ: ${lessons.length} שיעורים${breaks.length > 0 ? `, ${breaks.length} הפסקות` : ''}`,
   ];
 
   return lines.join('\n').trim();
 }
 
-export function buildInstructorWeekMessage({ instructorName, dateString, lessons }) {
+export function buildInstructorWeekMessage({ instructorName, dateString, lessons, breaks = [] }) {
   const weekStart = getWeekStartDate(dateString);
   const weekEnd = getWeekEndDate(dateString);
   if (!(weekStart instanceof Date) || Number.isNaN(weekStart.getTime()) || !(weekEnd instanceof Date) || Number.isNaN(weekEnd.getTime())) {
@@ -124,18 +202,23 @@ export function buildInstructorWeekMessage({ instructorName, dateString, lessons
   }
   const groupedByDay = new Map();
 
-  lessons.forEach((lesson) => {
-    const dayKey = toLocalDateString(new Date(lesson.datetime_start));
+  const allItems = [
+    ...lessons.map((item) => ({ type: 'lesson', datetime_start: item.datetime_start, item })),
+    ...breaks.map((item) => ({ type: 'break', datetime_start: item.datetime_start, item })),
+  ].sort((left, right) => new Date(left.datetime_start).getTime() - new Date(right.datetime_start).getTime());
+
+  allItems.forEach(({ type, datetime_start, item }) => {
+    const dayKey = toLocalDateString(new Date(datetime_start));
     if (!groupedByDay.has(dayKey)) {
       groupedByDay.set(dayKey, []);
     }
-    groupedByDay.get(dayKey).push(lesson);
+    groupedByDay.get(dayKey).push({ type, item });
   });
 
-  const dayBlocks = Array.from(groupedByDay.entries()).flatMap(([dayKey, dayLessons], index) => {
+  const dayBlocks = Array.from(groupedByDay.entries()).flatMap(([dayKey, dayItems], index) => {
     const block = [
       `${formatWeekdayDateLabel(dayKey)}`,
-      ...dayLessons.map(buildLessonLine),
+      ...buildGroupedScheduleLines(dayItems),
     ];
 
     if (index < groupedByDay.size - 1) {
@@ -147,11 +230,11 @@ export function buildInstructorWeekMessage({ instructorName, dateString, lessons
 
   const lines = [
     `שלום ${instructorName},`,
-    `הלקוחות שלך לשבוע ${formatDateLabel(weekStart)} - ${formatDateLabel(weekEnd)}:`,
+    `המשתתפים שלך לשבוע ${formatDateLabel(weekStart)} - ${formatDateLabel(weekEnd)}:`,
     '',
     ...dayBlocks,
     '',
-    `סה״כ: ${lessons.length} שיעורים`,
+    `סה״כ: ${lessons.length} שיעורים${breaks.length > 0 ? `, ${breaks.length} הפסקות` : ''}`,
   ];
 
   return lines.join('\n').trim();

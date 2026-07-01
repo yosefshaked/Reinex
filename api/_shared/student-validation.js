@@ -284,9 +284,15 @@ export function coerceOptionalDate(raw) {
   if (!datePattern.test(trimmed)) {
     return { value: null, valid: false };
   }
-  // Validate it's a real date
-  const date = new Date(trimmed);
-  if (isNaN(date.getTime())) {
+  // Parse components explicitly. The Date constructor normalizes impossible
+  // values (for example 2026-02-31), which must not pass validation.
+  const [year, month, day] = trimmed.split('-').map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (
+    date.getUTCFullYear() !== year
+    || date.getUTCMonth() !== month - 1
+    || date.getUTCDate() !== day
+  ) {
     return { value: null, valid: false };
   }
   return { value: trimmed, valid: true };

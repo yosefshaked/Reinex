@@ -10,7 +10,7 @@
     "@aws-sdk/client-s3": "^3.705.0",
     "@aws-sdk/s3-request-presigner": "^3.705.0",
     "@azure/storage-blob": "^12.27.0",
-    "@sparticuz/chromium": "^141.0.0",
+    "@sparticuz/chromium-min": "^141.0.0",
     "@supabase/supabase-js": "^2.45.0",
     "archiver": "^7.0.1",
     "date-fns": "^4.1.0",

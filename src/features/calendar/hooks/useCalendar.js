@@ -150,3 +150,80 @@ export function useCalendarInstructors(includeInactive = false) {
 
   return { instructors, isLoading, error, refetch };
 }
+
+/**
+ * Hook for fetching instructor breaks for the visible date range
+ */
+export function useInstructorBreaks(date, viewMode = 'day') {
+  const { activeOrgId } = useOrg();
+  const [breaks, setBreaks] = useState([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [refetchTrigger, setRefetchTrigger] = useState(0);
+  const latestRequestIdRef = useRef(0);
+
+  const refetch = useCallback(() => {
+    setRefetchTrigger(prev => prev + 1);
+  }, []);
+
+  useEffect(() => {
+    if (!activeOrgId || !date) {
+      setBreaks([]);
+      setIsLoading(false);
+      setError(null);
+      return;
+    }
+
+    let cancelled = false;
+    const requestId = latestRequestIdRef.current + 1;
+    latestRequestIdRef.current = requestId;
+
+    async function fetchBreaks() {
+      setIsLoading(true);
+      setError(null);
+
+      try {
+        let startDate = date;
+        let endDate = date;
+
+        if (viewMode === 'week') {
+          const { start, end } = getWeekRangeDateStrings(date);
+          startDate = start;
+          endDate = end;
+        }
+
+        const data = await authenticatedFetch('instructor-breaks', {
+          params: {
+            org_id: activeOrgId,
+            start_date: startDate,
+            end_date: endDate,
+          },
+        });
+
+        if (cancelled || requestId !== latestRequestIdRef.current) {
+          return;
+        }
+
+        setBreaks(Array.isArray(data) ? data : []);
+      } catch (err) {
+        if (cancelled || requestId !== latestRequestIdRef.current) {
+          return;
+        }
+        console.error('Error fetching instructor breaks:', err);
+        setError(err?.message || 'Failed to load breaks');
+      } finally {
+        if (!cancelled && requestId === latestRequestIdRef.current) {
+          setIsLoading(false);
+        }
+      }
+    }
+
+    void fetchBreaks();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeOrgId, date, viewMode, refetchTrigger]);
+
+  return { breaks, isLoading, error, refetch };
+}

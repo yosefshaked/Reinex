@@ -30,6 +30,7 @@ import { useOrg } from '@/org/OrgContext.jsx';
 import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { authenticatedFetch } from '@/lib/api-client.js';
 import { extractSupportCode, resolveApiErrorMessage } from '@/lib/error-support.js';
+import { buildWaitingListInviteWhatsAppMessage } from '@/lib/whatsapp-message-templates.js';
 import { normalizeMembershipRole, isAdminOrOffice, isAdminRole } from '@/features/students/utils/endpoints.js';
 import AddStudentForm, { AddStudentFormFooter } from '@/features/admin/components/AddStudentForm.jsx';
 import ReadOnlyFormAnswersPreview from '@/features/forms/components/ReadOnlyFormAnswersPreview.jsx';
@@ -109,20 +110,15 @@ function formatInviteExpiry(expiresAt) {
   }
 }
 
-function buildInviteWhatsappMessage({ inviteUrl, expiresAt, serviceName, studentName }) {
+function buildInviteWhatsappMessage({ inviteUrl, expiresAt, serviceName, studentName, organizationName }) {
   const formattedExpiry = formatInviteExpiry(expiresAt);
-  return [
-    `שלום${studentName ? ` ${studentName}` : ''},`,
-    '',
-    'שמחים שיצרתם קשר איתנו.',
-    serviceName
-      ? `כדי שנוכל לקדם את הבקשה להצטרפות לשירות ${serviceName}, נשמח שתמלאו את טופס ההצטרפות לרשימת ההמתנה בקישור הבא:`
-      : 'כדי שנוכל לקדם את הבקשה להצטרפות לרשימת ההמתנה, נשמח שתמלאו את הטופס בקישור הבא:',
+  return buildWaitingListInviteWhatsAppMessage({
     inviteUrl,
-    '',
-    formattedExpiry ? `הקישור זמין עד ${formattedExpiry}.` : '',
-    'אם יש שאלות, אפשר לחזור אלינו בהודעה חוזרת.',
-  ].filter(Boolean).join('\n');
+    expiresText: formattedExpiry,
+    serviceName,
+    studentName,
+    organizationName,
+  });
 }
 
 function mapWaitingListInviteErrorMessage(code) {
@@ -599,6 +595,9 @@ export default function WaitingListPage() {
     }
   }, [canFetch, session, activeOrgId, statusFilter]);
 
+  const selectedPreferredDaysKey = selectedEntry?.preferred_days?.join(',') ?? '';
+  const selectedPreferredTimesKey = JSON.stringify(selectedEntry?.preferred_times ?? []);
+
   useEffect(() => {
     void loadReferenceData();
   }, [loadReferenceData]);
@@ -699,7 +698,7 @@ export default function WaitingListPage() {
     return () => {
       cancelled = true;
     };
-  }, [canFetch, selectedEntry?.id, selectedEntry?.status, selectedEntry?.desired_service_id, selectedEntry?.preferred_days?.join(','), JSON.stringify(selectedEntry?.preferred_times), suggestionMode, session, activeOrgId]);
+  }, [canFetch, selectedEntry?.id, selectedEntry?.status, selectedEntry?.desired_service_id, selectedPreferredDaysKey, selectedPreferredTimesKey, suggestionMode, session, activeOrgId]);
 
   const openCreateDialog = () => {
     setFormValues(buildInitialForm(null, studentOptionMap));
@@ -955,9 +954,10 @@ export default function WaitingListPage() {
       expiresAt: inviteResult?.expires_at,
       serviceName,
       studentName,
+      organizationName: activeOrg?.name,
     });
     return `https://wa.me/${normalizedPhone}?text=${encodeURIComponent(message)}`;
-  }, [inviteResult]);
+  }, [activeOrg?.name, inviteResult]);
 
   const handleAddStudentDialogOpenChange = (open) => {
     if (!open) {

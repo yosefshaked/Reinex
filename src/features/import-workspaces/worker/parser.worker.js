@@ -1,0 +1,277 @@
+/**
+ * parser.worker.js — Web Worker for CPU-intensive file parsing.
+ *
+ * Receives:  { type: 'PARSE', payload: { buffer: ArrayBuffer, filename: string } }
+ * Emits:
+ *   { type: 'PROGRESS',      payload: { pct: number, stage: string } }
+ *   { type: 'PARSE_COMPLETE', payload: { headers, rows, sourceReference, profile } }
+ *   { type: 'ERROR',          payload: { message: string } }
+ *
+ * Security: runs in an isolated Worker context — prototype pollution from
+ * malicious file contents cannot reach the main thread's object graph.
+ */
+
+import ExcelJS from 'exceljs';
+import Papa from 'papaparse';
+import jschardet from 'jschardet';
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function postProgress(pct, stage) {
+  self.postMessage({ type: 'PROGRESS', payload: { pct, stage } });
+}
+
+function postError(message) {
+  self.postMessage({ type: 'ERROR', payload: { message } });
+}
+
+/**
+ * Derive a stable, filesystem-safe source reference from the filename.
+ * The caller appends one shared timestamp so every sheet in a workbook can
+ * be grouped as one upload while retaining its own source reference.
+ */
+function generateSourceReference(filename, sheetName = '') {
+  const basename = filename.replace(/\.[^.]+$/, ''); // strip extension
+  const sourceName = sheetName ? `${basename}_${sheetName}` : basename;
+  const safe = sourceName
+    .replace(/[^a-zA-Z0-9_\u0590-\u05FF\s-]/g, '') // keep alphanum, Hebrew, hyphens, spaces
+    .replace(/\s+/g, '_')
+    .slice(0, 80);
+  return safe || 'file';
+}
+
+/**
+ * Detect the likely entity type from column headers using simple heuristics.
+ */
+const STUDENT_HINTS = ['שם', 'name', 'student', 'תלמיד', 'ילד', 'child', 'first', 'last'];
+const GUARDIAN_HINTS = ['parent', 'guardian', 'הורה', 'אמא', 'אבא', 'mother', 'father'];
+const EMPLOYEE_HINTS = ['employee', 'instructor', 'teacher', 'מורה', 'מדריך', 'עובד'];
+
+function detectEntityType(headers) {
+  const joined = headers.join(' ').toLowerCase();
+  if (EMPLOYEE_HINTS.some((h) => joined.includes(h))) return 'employee';
+  if (GUARDIAN_HINTS.some((h) => joined.includes(h))) return 'guardian';
+  if (STUDENT_HINTS.some((h) => joined.includes(h))) return 'student';
+  return 'unknown';
+}
+
+/**
+ * Build a profile summary from the parsed result.
+ */
+function profileSheet(headers, rows) {
+  return {
+    totalRows: rows.length,
+    headers,
+    likelyEntityType: detectEntityType(headers),
+    sampleRow: rows.find((row) => Object.values(row).some((value) => value !== null)) ?? {},
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Value normalisation
+// ---------------------------------------------------------------------------
+
+const PHONE_HEADER_RE = /phone|tel|mobile|טלפון|נייד|פלאפון/i;
+const ID_HEADER_RE = /\bid\b|\bidentity\b|ת\.?ז|תעודת|מספר זהות/i;
+
+function formatSpreadsheetDate(raw) {
+  if (isNaN(raw.getTime())) return null;
+  // Spreadsheet dates have no timezone. Reading local calendar components
+  // avoids toISOString() shifting local midnight to the previous UTC day.
+  const year = raw.getFullYear();
+  const month = String(raw.getMonth() + 1).padStart(2, '0');
+  const day = String(raw.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function normaliseValue(raw, header) {
+  if (raw === null || raw === undefined || raw === '') return null;
+
+  if (typeof raw === 'object' && !(raw instanceof Date)) {
+    raw = raw.result ??
+      raw.text ??
+      (Array.isArray(raw.richText) ? raw.richText.map((part) => part.text ?? '').join('') : undefined);
+
+    if (raw === null || raw === undefined || raw === '') return null;
+  }
+
+  // ExcelJS returns Date objects for date cells
+  if (raw instanceof Date) {
+    return formatSpreadsheetDate(raw);
+  }
+
+  const str = String(raw).trim();
+  if (str === '') return null;
+
+  // Phone / ID columns: strip non-digit characters
+  if (PHONE_HEADER_RE.test(header) || ID_HEADER_RE.test(header)) {
+    return str.replace(/\D/g, '') || null;
+  }
+
+  return str;
+}
+
+function normaliseRow(rawObj, headers) {
+  const out = {};
+  for (const h of headers) {
+    out[h] = normaliseValue(rawObj[h], h);
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// Format-specific parsers
+// ---------------------------------------------------------------------------
+
+function parseExcelSheet(sheet) {
+  const headerRow = sheet.getRow(1);
+  const headers = [];
+  const headerColumns = [];
+  headerRow.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+    const header = normaliseValue(cell.value, '') ?? '';
+    if (!header) return;
+    headers.push(header);
+    headerColumns.push({ colNumber, header });
+  });
+
+  if (headers.length === 0) return null;
+
+  const rows = [];
+  sheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
+    if (rowNumber === 1) return;
+    const obj = {};
+    headerColumns.forEach(({ colNumber, header }) => {
+      obj[header] = row.getCell(colNumber).value;
+    });
+    const normalized = normaliseRow(obj, headers);
+    if (Object.values(normalized).some((value) => value !== null)) rows.push(normalized);
+  });
+
+  return { headers, rows, sheetName: sheet.name };
+}
+
+async function parseExcel(buffer) {
+  postProgress(10, 'loading_excel');
+
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(buffer);
+
+  if (workbook.worksheets.length === 0) throw new Error('excel_no_worksheets');
+
+  postProgress(30, 'reading_sheet');
+
+  postProgress(50, 'extracting_rows');
+  const sources = workbook.worksheets
+    .map(parseExcelSheet)
+    .filter((source) => source && source.rows.length > 0);
+  if (sources.length === 0) throw new Error('excel_no_headers');
+  return sources;
+}
+
+async function parseCsv(buffer) {
+  postProgress(10, 'detecting_encoding');
+
+  // Detect encoding from first 8 KB — use binary string (Buffer not available in browser)
+  const probeBytes = new Uint8Array(buffer.slice(0, 8192));
+  let binaryStr = '';
+  for (let i = 0; i < probeBytes.length; i++) binaryStr += String.fromCharCode(probeBytes[i]);
+  const detected = jschardet.detect(binaryStr);
+  const encoding = (detected?.encoding || 'UTF-8').toUpperCase();
+
+  postProgress(20, 'decoding_text');
+
+  // Decode the buffer to a string
+  let text;
+  try {
+    const decoder = new TextDecoder(encoding === 'ASCII' ? 'utf-8' : encoding);
+    text = decoder.decode(buffer);
+  } catch {
+    // fallback to utf-8 if the detected encoding is not supported
+    text = new TextDecoder('utf-8').decode(buffer);
+  }
+
+  postProgress(30, 'parsing_csv');
+
+  const result = Papa.parse(text, {
+    header: true,
+    skipEmptyLines: true,
+    transformHeader: (h) => h.trim(),
+  });
+
+  if (result.errors.length > 0 && result.data.length === 0) {
+    throw new Error(`csv_parse_error: ${result.errors[0].message}`);
+  }
+
+  const headers = result.meta.fields ?? [];
+  if (headers.length === 0) throw new Error('csv_no_headers');
+
+  postProgress(60, 'normalising_rows');
+
+  const rows = result.data.map((rawObj) => normaliseRow(rawObj, headers));
+
+  return { headers, rows };
+}
+
+// ---------------------------------------------------------------------------
+// Main message handler
+// ---------------------------------------------------------------------------
+
+self.addEventListener('message', async (event) => {
+  const { type, payload } = event.data ?? {};
+  if (type !== 'PARSE') return;
+
+  const { buffer, filename } = payload ?? {};
+
+  if (!buffer || !filename) {
+    postError('missing_buffer_or_filename');
+    return;
+  }
+
+  try {
+    const lowerName = filename.toLowerCase();
+    const isExcel =
+      lowerName.endsWith('.xlsx') ||
+      lowerName.endsWith('.xls') ||
+      lowerName.endsWith('.xlsm');
+
+    let parsedSources;
+
+    if (isExcel) {
+      parsedSources = await parseExcel(buffer);
+    } else {
+      const { headers, rows } = await parseCsv(buffer);
+      parsedSources = [{ headers, rows, sheetName: null }];
+    }
+
+    postProgress(95, 'profiling');
+
+    const timestamp = Math.floor(Date.now() / 1000);
+    const sources = parsedSources.map(({ headers, rows, sheetName }) => ({
+      filename,
+      sheetName,
+      label: sheetName ? `${filename} — ${sheetName}` : filename,
+      headers,
+      rows,
+      sourceReference: `${generateSourceReference(filename, sheetName)}_${timestamp}`,
+      profile: profileSheet(headers, rows),
+    }));
+    const first = sources[0];
+
+    postProgress(100, 'done');
+
+    self.postMessage({
+      type: 'PARSE_COMPLETE',
+      payload: {
+        sources,
+        headers: first.headers,
+        rows: first.rows,
+        sourceReference: first.sourceReference,
+        profile: first.profile,
+      },
+    });
+  } catch (err) {
+    postError(err?.message ?? 'unknown_parse_error');
+  }
+});

@@ -6,7 +6,7 @@
  * Uses AWS SDK v3 for S3 operations.
  */
 
-import { S3Client, PutObjectCommand, DeleteObjectCommand, GetObjectCommand, ListObjectsV2Command, DeleteObjectsCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, DeleteObjectCommand, GetObjectCommand, ListObjectsV2Command, DeleteObjectsCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 /**
@@ -159,6 +159,34 @@ export function createS3Driver(config) {
       return Buffer.concat(chunks);
     },
 
+    /**
+     * Check whether a file exists without downloading it.
+     *
+     * @param {string} path - File path within bucket
+     * @returns {Promise<{ exists: boolean, size?: number, lastModified?: string|null }>}
+     */
+    async exists(path) {
+      const command = new HeadObjectCommand({
+        Bucket: bucket,
+        Key: path,
+      });
+
+      try {
+        const response = await s3Client.send(command);
+        return {
+          exists: true,
+          size: response.ContentLength || 0,
+          lastModified: response.LastModified ? new Date(response.LastModified).toISOString() : null,
+        };
+      } catch (error) {
+        const statusCode = error?.$metadata?.httpStatusCode;
+        if (statusCode === 404 || error?.name === 'NotFound' || error?.name === 'NoSuchKey') {
+          return { exists: false };
+        }
+        throw error;
+      }
+    },
+
           /**
            * List all files under a prefix.
            *
@@ -236,6 +264,23 @@ export function createS3Driver(config) {
       } while (continuationToken);
 
       return deletedCount;
+    },
+
+    /**
+     * Generate a pre-signed PUT URL for direct browser-to-storage uploads.
+     *
+     * @param {string} key - Object key (path within bucket)
+     * @param {string} contentType - MIME type the browser will send in Content-Type
+     * @param {number} expiresIn - URL validity in seconds (default: 900 = 15 min)
+     * @returns {Promise<string>} Pre-signed PUT URL
+     */
+    async getUploadUrl(key, contentType, expiresIn = 900) {
+      const command = new PutObjectCommand({
+        Bucket: bucket,
+        Key: key,
+        ContentType: contentType || 'application/octet-stream',
+      });
+      return getSignedUrl(s3Client, command, { expiresIn });
     },
 
     /**

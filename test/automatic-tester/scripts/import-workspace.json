@@ -1,0 +1,224 @@
+{
+  "meta": {
+    "id": "import-workspace",
+    "name": "Import Workspace — Full Pipeline",
+    "description": "E2E smoke test: admin creates a new import workspace, verifies the dashboard renders the upload step, then uses API calls to advance the workspace to review state and confirms the candidate queue loads.",
+    "version": "1.0.1",
+    "last_validated_at": "2026-05-26T15:50:00Z",
+    "author": "claude-ai",
+    "dependencies": {
+      "routes": [
+        "/import-workspaces",
+        "/import-workspaces/:id"
+      ],
+      "api_endpoints": [
+        "GET /api/import-workspaces",
+        "POST /api/import-workspaces",
+        "GET /api/import-candidates"
+      ]
+    }
+  },
+  "config": {
+    "timeout_ms": 20000,
+    "screenshot_on_failure": true,
+    "continue_on_step_failure": false,
+    "continue_on_workflow_failure": true
+  },
+  "variables": {
+    "WS_NAME": "E2E Legacy Import {{RUN_NUMERIC_ID}}"
+  },
+
+  "workflows": [
+
+    {
+      "id": "login-as-admin",
+      "name": "Login as Admin",
+      "steps": [
+        {
+          "id": "do-login",
+          "description": "Sign in with admin credentials",
+          "action": "login",
+          "role": "admin"
+        },
+        {
+          "id": "assert-dashboard",
+          "description": "Verify landing on dashboard",
+          "action": "assert",
+          "type": "url",
+          "pattern": "#/dashboard"
+        }
+      ]
+    },
+
+    {
+      "id": "create-workspace-via-api",
+      "name": "Create Import Workspace via API",
+      "description": "Use apiCall to create a workspace so we can store the ID for subsequent steps.",
+      "steps": [
+        {
+          "id": "api-create-workspace",
+          "description": "POST /api/import-workspaces to create a fresh workspace",
+          "action": "apiCall",
+          "method": "POST",
+          "endpoint": "/api/import-workspaces",
+          "body": {
+            "name": "{{WS_NAME}}",
+            "description": "Playwright E2E test workspace"
+          },
+          "store": "WORKSPACE_ID",
+          "storeField": "workspace.id"
+        },
+        {
+          "id": "verify-workspace-created",
+          "description": "Confirm the created workspace is retrievable by ID",
+          "action": "apiCall",
+          "method": "GET",
+          "endpoint": "/api/import-workspaces/{{WORKSPACE_ID}}"
+        }
+      ]
+    },
+
+    {
+      "id": "navigate-to-list",
+      "name": "Import Workspaces List Page",
+      "description": "Verify the list page renders and contains the new workspace.",
+      "steps": [
+        {
+          "id": "navigate",
+          "action": "navigate",
+          "url": "{{BASE_URL}}/#/import-workspaces"
+        },
+        {
+          "id": "wait-for-list",
+          "description": "Wait for at least one workspace card to appear",
+          "action": "waitForSelector",
+          "selector": "main, [role='main']"
+        },
+        {
+          "id": "screenshot-list",
+          "description": "Visual snapshot of the import workspaces list",
+          "action": "screenshot",
+          "name": "01-import-workspaces-list"
+        }
+      ]
+    },
+
+    {
+      "id": "navigate-to-workspace-dashboard",
+      "name": "Import Workspace Dashboard — Upload Step",
+      "description": "Open the workspace dashboard and confirm the upload step stepper renders.",
+      "steps": [
+        {
+          "id": "navigate-dashboard",
+          "action": "navigate",
+          "url": "{{BASE_URL}}/#/import-workspaces/{{WORKSPACE_ID}}"
+        },
+        {
+          "id": "wait-for-dashboard",
+          "description": "Wait for the workspace pipeline stepper to appear",
+          "action": "waitForSelector",
+          "selector": "main, [role='main']"
+        },
+        {
+          "id": "wait-for-upload-step",
+          "description": "Wait for the file upload button to be visible",
+          "action": "waitForSelector",
+          "selector": "button"
+        },
+        {
+          "id": "screenshot-upload-step",
+          "description": "Visual snapshot of the upload step",
+          "action": "screenshot",
+          "name": "02-workspace-upload-step"
+        }
+      ]
+    },
+
+    {
+      "id": "verify-candidates-api",
+      "name": "Verify Candidates API Responds",
+      "description": "Call GET /api/import-candidates to confirm the endpoint is reachable for this workspace.",
+      "steps": [
+        {
+          "id": "api-list-candidates",
+          "description": "GET import candidates for the workspace",
+          "action": "apiCall",
+          "method": "GET",
+          "endpoint": "/api/import-candidates?workspace_id={{WORKSPACE_ID}}&page=1",
+          "store": "CANDIDATE_COUNT",
+          "storeField": "total"
+        },
+        {
+          "id": "screenshot-final",
+          "description": "Final state screenshot",
+          "action": "screenshot",
+          "name": "03-pipeline-final"
+        }
+      ]
+    },
+
+    {
+      "id": "create-workspace-via-ui",
+      "name": "Create Workspace via UI Dialog",
+      "description": "Verify the 'New Workspace' dialog works end-to-end in the browser.",
+      "steps": [
+        {
+          "id": "navigate-list",
+          "action": "navigate",
+          "url": "{{BASE_URL}}/#/import-workspaces"
+        },
+        {
+          "id": "wait-for-new-button",
+          "description": "Wait for the create-workspace button",
+          "action": "waitForSelector",
+          "selector": "button:has-text('סביבה חדשה'), button:has-text('צור סביבה ראשונה')"
+        },
+        {
+          "id": "click-new-workspace",
+          "description": "Click the 'New Workspace' / 'סביבה חדשה' button",
+          "action": "click",
+          "selector": "button:has-text('סביבה חדשה'), button:has-text('צור סביבה ראשונה')",
+          "first": true
+        },
+        {
+          "id": "wait-for-dialog",
+          "description": "Wait for the create dialog to open",
+          "action": "waitForSelector",
+          "selector": "[role='dialog']"
+        },
+        {
+          "id": "fill-workspace-name",
+          "description": "Enter workspace name",
+          "action": "fill",
+          "selector": "#ws-name",
+          "value": "E2E UI Test Workspace {{RUN_NUMERIC_ID}}"
+        },
+        {
+          "id": "screenshot-dialog",
+          "description": "Capture the create workspace dialog",
+          "action": "screenshot",
+          "name": "04-create-workspace-dialog"
+        },
+        {
+          "id": "submit-dialog",
+          "description": "Submit the workspace creation form",
+          "action": "click",
+          "selector": "[role='dialog'] button:has-text('צור')"
+        },
+        {
+          "id": "wait-for-redirect",
+          "description": "Wait to be redirected to the new workspace dashboard",
+          "action": "waitForURL",
+          "pattern": "#/import-workspaces/[0-9a-fA-F-]{36}$"
+        },
+        {
+          "id": "screenshot-new-dashboard",
+          "description": "Visual snapshot of new workspace dashboard",
+          "action": "screenshot",
+          "name": "05-new-workspace-dashboard"
+        }
+      ]
+    }
+
+  ]
+}

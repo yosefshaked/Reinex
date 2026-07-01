@@ -4,7 +4,7 @@ import interactionPlugin from '@fullcalendar/interaction';
 import resourceTimeGridPlugin from '@fullcalendar/resource-timegrid';
 import timeGridPlugin from '@fullcalendar/timegrid';
 import heLocale from '@fullcalendar/core/locales/he';
-import { AlertCircle, Clock, Loader2, User } from 'lucide-react';
+import { AlertCircle, Clock, Coffee, Loader2, User } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
@@ -138,7 +138,7 @@ function formatCalendarBound(minutes) {
   return `${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}:00`;
 }
 
-function buildBounds({ templates, instructors, viewMode, selectedDay }) {
+function buildBounds({ templates, breakTemplates, instructors, viewMode, selectedDay }) {
   const days = viewMode === 'day' ? [selectedDay] : DAY_OPTIONS.map((day) => day.value);
   const bounds = [];
 
@@ -160,6 +160,16 @@ function buildBounds({ templates, instructors, viewMode, selectedDay }) {
     if (!days.includes(day)) continue;
     const start = timeToMinutes(template?.time_of_day);
     const end = start == null ? null : start + (Number(template?.duration_minutes) || 0);
+    if (start != null) bounds.push(start);
+    if (end != null) bounds.push(end);
+  }
+
+  for (const bt of breakTemplates || []) {
+    const day = normalizeDayToken(bt?.day_of_week);
+    if (!days.includes(day)) continue;
+    const timeHhMm = String(bt?.time_of_day || '').slice(0, 5);
+    const start = timeToMinutes(timeHhMm);
+    const end = start == null ? null : start + (Number(bt?.duration_minutes) || 0);
     if (start != null) bounds.push(start);
     if (end != null) bounds.push(end);
   }
@@ -211,7 +221,7 @@ function resolveInstructorServiceCapability(instructor, serviceId) {
     .find((capability) => String(capability?.service_id || '') === normalizedServiceId) || null;
 }
 
-function buildInstructorIdsWithVisibleTemplates({ templates, showInactive, days }) {
+function buildInstructorIdsWithVisibleTemplates({ templates, breakTemplates, showInactive, days }) {
   const visibleDays = new Set(days || []);
   const ids = new Set();
   for (const template of templates || []) {
@@ -221,12 +231,19 @@ function buildInstructorIdsWithVisibleTemplates({ templates, showInactive, days 
       ids.add(String(template.instructor_employee_id));
     }
   }
+  for (const bt of breakTemplates || []) {
+    if (!showInactive && bt?.is_active === false) continue;
+    if (!visibleDays.has(normalizeDayToken(bt?.day_of_week))) continue;
+    if (bt?.instructor_employee_id) {
+      ids.add(String(bt.instructor_employee_id));
+    }
+  }
   return ids;
 }
 
-function buildResources({ instructors, templates, showInactive, showUnavailable, viewMode, selectedDay }) {
+function buildResources({ instructors, templates, breakTemplates, showInactive, showUnavailable, viewMode, selectedDay }) {
   const days = getVisibleDayTokens(viewMode, selectedDay);
-  const instructorIdsWithTemplates = buildInstructorIdsWithVisibleTemplates({ templates, showInactive, days });
+  const instructorIdsWithTemplates = buildInstructorIdsWithVisibleTemplates({ templates, breakTemplates, showInactive, days });
   return (instructors || [])
     .filter((instructor) => instructor?.id)
     .filter((instructor) => {
@@ -240,6 +257,34 @@ function buildResources({ instructors, templates, showInactive, showUnavailable,
       businessHours: buildBusinessHours(instructor.service_capabilities),
       extendedProps: { instructor },
     }));
+}
+
+function buildBreakTemplateEvents({ breakTemplates, showInactive }) {
+  const BREAK_TYPE_LABELS = { break: 'הפסקה', meeting: 'פגישה', unavailable: 'חסימה', personal: 'אישי' };
+  return (breakTemplates || [])
+    .filter((bt) => bt?.id && bt?.instructor_employee_id)
+    .filter((bt) => showInactive || bt.is_active !== false)
+    .map((bt) => {
+      const day = normalizeDayToken(bt.day_of_week);
+      const timeHhMm = String(bt.time_of_day || '').slice(0, 5);
+      const start = formatDateTime(day, timeHhMm);
+      if (!start) return null;
+      const duration = Number(bt.duration_minutes) || 30;
+      const end = addMinutesLocalDateTime(start, duration);
+      return {
+        id: `break-template-${bt.id}`,
+        start,
+        end,
+        resourceId: String(bt.instructor_employee_id),
+        title: BREAK_TYPE_LABELS[bt.break_type] || 'הפסקה',
+        classNames: ['reinex-template-break-event', bt.is_active === false ? 'reinex-template-break-event--inactive' : ''],
+        extendedProps: {
+          kind: 'break_template',
+          breakTemplate: bt,
+        },
+      };
+    })
+    .filter(Boolean);
 }
 
 function buildTemplateEvents({ templates, showInactive, waitingListTemplateMatches, missingFormsMap }) {
@@ -316,6 +361,24 @@ function buildClearSpaceEvents(candidates) {
 
 function TemplateEventContent({ event }) {
   const { kind, previewKind, template, waitingCount, missingFormsCount } = event.extendedProps || {};
+  if (kind === 'break_template') {
+    const bt = event.extendedProps?.breakTemplate;
+    const BREAK_TYPE_LABELS = { break: 'הפסקה', meeting: 'פגישה', unavailable: 'חסימה', personal: 'אישי' };
+    return (
+      <div className={cn('reinex-template-break-card', bt?.is_active === false && 'reinex-template-break-card--inactive')}>
+        <div className="reinex-template-break-card__title">
+          <Coffee className="h-3 w-3 shrink-0" />
+          <span>{BREAK_TYPE_LABELS[bt?.break_type] || 'הפסקה'}</span>
+        </div>
+        {bt?.note ? <div className="reinex-template-break-card__note">{bt.note}</div> : null}
+        <div className="reinex-template-break-card__time">
+          <Clock className="h-3 w-3" />
+          {String(bt?.time_of_day || '').slice(0, 5)} · {Number(bt?.duration_minutes) || 0} דק׳
+        </div>
+      </div>
+    );
+  }
+
   if (kind === 'service_drop' || previewKind === 'service_drop') {
     return (
       <div className="reinex-template-clear-space-card">
@@ -385,6 +448,7 @@ function TemplateEventContent({ event }) {
 
 export function TemplateScheduleCalendar({
   templates,
+  breakTemplates = [],
   instructors,
   showInactive,
   showUnavailable,
@@ -396,6 +460,7 @@ export function TemplateScheduleCalendar({
   missingFormsMap,
   isLoading = false,
   onTemplateClick,
+  onBreakTemplateClick,
   onSlotClick,
   onExternalServiceDrop,
   onUnavailableSlot,
@@ -404,12 +469,12 @@ export function TemplateScheduleCalendar({
 }) {
   const calendarRef = useRef(null);
   const resources = useMemo(
-    () => buildResources({ instructors, templates, showInactive, showUnavailable, viewMode, selectedDay }),
-    [instructors, selectedDay, showInactive, showUnavailable, templates, viewMode],
+    () => buildResources({ instructors, templates, breakTemplates, showInactive, showUnavailable, viewMode, selectedDay }),
+    [breakTemplates, instructors, selectedDay, showInactive, showUnavailable, templates, viewMode],
   );
   const bounds = useMemo(
-    () => buildBounds({ templates, instructors, viewMode, selectedDay }),
-    [instructors, selectedDay, templates, viewMode],
+    () => buildBounds({ templates, breakTemplates, instructors, viewMode, selectedDay }),
+    [breakTemplates, instructors, selectedDay, templates, viewMode],
   );
   const events = useMemo(() => {
     const templateEvents = buildTemplateEvents({
@@ -418,21 +483,27 @@ export function TemplateScheduleCalendar({
       waitingListTemplateMatches: showWaitingListMatches ? waitingListTemplateMatches : {},
       missingFormsMap,
     });
+    const breakEvents = buildBreakTemplateEvents({ breakTemplates, showInactive });
     if (!showWaitingListMatches) {
-      return templateEvents;
+      return [...templateEvents, ...breakEvents];
     }
     return [
       ...templateEvents,
+      ...breakEvents,
       ...buildClearSpaceEvents(waitingListCandidates),
     ];
-  }, [missingFormsMap, showInactive, showWaitingListMatches, templates, waitingListCandidates, waitingListTemplateMatches]);
+  }, [breakTemplates, missingFormsMap, showInactive, showWaitingListMatches, templates, waitingListCandidates, waitingListTemplateMatches]);
   const initialDate = viewMode === 'day' ? DAY_DATE_BY_TOKEN[selectedDay] || TEMPLATE_WEEK_START : TEMPLATE_WEEK_START;
   const initialView = viewMode === 'day' ? 'resourceTimeGridDay' : 'resourceTimeGridWeek';
 
   function handleExternalDrop(dropInfo) {
+    const draggedEl = dropInfo?.draggedEl;
+    if (!draggedEl?.classList?.contains('calendar-service-drag-item')) {
+      return;
+    }
+
     const startDate = dropInfo?.date instanceof Date ? dropInfo.date : null;
     const resourceId = dropInfo?.resource?.id || null;
-    const draggedEl = dropInfo?.draggedEl;
     const serviceId = draggedEl?.getAttribute?.('data-service-id') || '';
     const durationMinutes = Number(draggedEl?.getAttribute?.('data-service-duration-minutes')) || 0;
     const dayOfWeek = normalizeDayToken(startDate?.getDay?.());
@@ -551,6 +622,11 @@ export function TemplateScheduleCalendar({
             drop={handleExternalDrop}
             eventClick={(info) => {
               const kind = info.event.extendedProps?.kind;
+              if (kind === 'break_template') {
+                onBreakTemplateClick?.(info.event.extendedProps?.breakTemplate);
+                return;
+              }
+
               if (kind === 'clear_space_match') {
                 onWaitingListMatchClick?.({
                   mode: 'clear_space',

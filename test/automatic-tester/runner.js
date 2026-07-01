@@ -26,7 +26,6 @@ import { readFileSync, readdirSync } from 'fs';
 import { mkdir } from 'fs/promises';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { createRequire } from 'module';
 
 // dotenv (optional — silently skip if not installed)
 try {
@@ -98,9 +97,10 @@ const env = {
   OFFICE_PASSWORD:    process.env.OFFICE_PASSWORD    || '',
   INSTRUCTOR_EMAIL:   process.env.INSTRUCTOR_EMAIL   || '',
   INSTRUCTOR_PASSWORD:process.env.INSTRUCTOR_PASSWORD|| '',
-  TEST_ORG_ID:        process.env.TEST_ORG_ID        || '',
-  SUPABASE_URL:       process.env.SUPABASE_URL       || '',
-  SERVICE_ROLE_KEY:   process.env.SERVICE_ROLE_KEY   || '',
+  TEST_ORG_ID:          process.env.TEST_ORG_ID          || '',
+  SUPABASE_URL:         process.env.SUPABASE_URL         || '',
+  SERVICE_ROLE_KEY:     process.env.SERVICE_ROLE_KEY     || '',
+  BACKUP_SERVICE_KEY:   process.env.BACKUP_SERVICE_KEY   || '',
 };
 
 // ─── Pre-flight checks ────────────────────────────────────────────────────
@@ -307,8 +307,8 @@ async function main() {
       if (workflow.resetSession) {
         await browserCtx.clearCookies();
         await page.evaluate(() => {
-          try { localStorage.clear(); } catch {}
-          try { sessionStorage.clear(); } catch {}
+          try { localStorage.clear(); } catch { /* ignore storage access errors */ }
+          try { sessionStorage.clear(); } catch { /* ignore storage access errors */ }
         }).catch(() => {});
         // Force a full page reload so the Supabase client reinitialises without a session
         const baseUrl = sharedVars.BASE_URL || opts.baseUrl || 'http://localhost:5173';
@@ -380,10 +380,9 @@ async function main() {
 
   // ── Summary ───────────────────────────────────────────────────────────
 
-  let totalWf = 0, passWf = 0, failWf = 0;
+  let passWf = 0, failWf = 0;
   for (const sr of runResults) {
     for (const wf of sr.workflows) {
-      totalWf++;
       if (wf.status === 'pass') passWf++; else failWf++;
     }
   }

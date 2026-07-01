@@ -68,6 +68,14 @@ export function createAzureDriver(config) {
     },
 
     /**
+     * Pre-signed PUT upload URLs are not supported by the Azure Blob adapter.
+     * Import workspaces require managed (R2) or S3-compatible BYOS storage.
+     */
+    async getUploadUrl() {
+      throw new Error('presigned_upload_not_supported_azure');
+    },
+
+    /**
      * Get driver type
      */
     getType() {

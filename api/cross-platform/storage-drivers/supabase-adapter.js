@@ -78,6 +78,14 @@ export function createSupabaseDriver(config) {
     },
 
     /**
+     * Pre-signed PUT upload URLs are not supported by the Supabase adapter.
+     * Import workspaces require managed (R2) or S3-compatible BYOS storage.
+     */
+    async getUploadUrl() {
+      throw new Error('presigned_upload_not_supported_supabase');
+    },
+
+    /**
      * Get driver type
      */
     getType() {

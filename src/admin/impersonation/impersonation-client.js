@@ -153,7 +153,6 @@ export async function exitImpersonation({ reason = 'admin_exit' } = {}) {
   } catch (err) {
     // Do not block session restoration if server-side close fails — we want
     // the admin back in their own seat. The session will expire server-side.
-    // eslint-disable-next-line no-console
     console.warn('system-admin-impersonation-exit call failed; restoring admin session anyway.', err);
   }
 

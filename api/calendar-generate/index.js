@@ -14,6 +14,7 @@ import {
 } from '../_shared/org-bff.js';
 import { parseJsonBodyWithLimit } from '../_shared/validation.js';
 import { dayTokenForDate, normalizeDayToken } from '../_shared/day-of-week.js';
+import { breakTemplateMatchesDate, normalizeBreakTemplateTime } from '../_shared/break-template-schedule.js';
 import {
   buildUtcBoundsForTimezoneDateRange,
   buildUtcIsoForTimezoneDateTime,
@@ -1061,6 +1062,7 @@ export default async function calendarGenerate(context, req) {
           status: 'scheduled',
           documentation_status: 'undocumented',
           created_source: 'weekly_generation',
+          created_by: userId,
           metadata: instanceMetadata,
           applied_override_id: proposal.override_id || null,
           updated_at: new Date().toISOString(),
@@ -1161,6 +1163,40 @@ export default async function calendarGenerate(context, req) {
           datetime_start: proposal.datetime_start,
           target_date: proposal.target_date,
           time_of_day: proposal.time_of_day,
+        });
+      }
+    }
+  }
+
+  // --- Break template generation pass ---
+  if (!dryRun) {
+    const { data: breakTemplateRows } = await withOrgScope(supabase, 'instructor_break_templates', orgId)
+      .select('id, instructor_employee_id, day_of_week, time_of_day, duration_minutes, break_type, note, valid_from, valid_until')
+      .eq('is_active', true);
+
+    const dates = enumerateDates(startDate, endDate);
+    for (const template of breakTemplateRows || []) {
+      for (const date of dates) {
+        if (!breakTemplateMatchesDate(template, date)) continue;
+        const timeHhMm = normalizeBreakTemplateTime(template.time_of_day);
+        const datetimeStartIso = buildUtcIsoForTimezoneDateTime(date, timeHhMm);
+        if (!datetimeStartIso) continue;
+        // Idempotency: skip if a break already exists at this time for this instructor
+        const { data: existingBreak } = await withOrgScope(supabase, 'instructor_breaks', orgId)
+          .select('id')
+          .eq('instructor_employee_id', template.instructor_employee_id)
+          .eq('datetime_start', datetimeStartIso)
+          .maybeSingle();
+        if (existingBreak) continue;
+        await withOrgScope(supabase, 'instructor_breaks', orgId).insert({
+          org_id: orgId,
+          instructor_employee_id: template.instructor_employee_id,
+          datetime_start: datetimeStartIso,
+          duration_minutes: template.duration_minutes,
+          break_type: template.break_type || 'break',
+          note: template.note || null,
+          break_template_id: template.id,
+          created_by: userId,
         });
       }
     }

@@ -108,6 +108,8 @@ export const EXPORT_TABLES = [
   'Documents',
   'instructor_profiles',
   'instructor_service_capabilities',
+  'instructor_break_templates',
+  'instructor_breaks',
   'RateHistory',
   'hmo_provider_tracks',
   'client_guardians',
@@ -137,6 +139,10 @@ export const EXPORT_TABLES = [
   'ledger_accounts',
   'hmo_invoice_batches',
   'hmo_invoice_batch_items',
+  'import_workspaces',
+  'import_rows',
+  'import_candidates',
+  'import_commit_ledger',
 ];
 
 async function assertBackupTableCoverage(tenantClient) {

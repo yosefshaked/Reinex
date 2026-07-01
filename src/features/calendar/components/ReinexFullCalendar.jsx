@@ -457,6 +457,7 @@ function getEventDensityClass(durationMinutes) {
 function EventContent({ arg }) {
   const instance = arg.event.extendedProps?.instance;
   const previewKind = arg.event.extendedProps?.previewKind;
+  const isBreak = arg.event.extendedProps?.isBreak;
   const rootRef = useRef(null);
   const [contentWidth, setContentWidth] = useState(null);
 
@@ -479,6 +480,23 @@ function EventContent({ arg }) {
     observer.observe(element);
     return () => observer.disconnect();
   }, []);
+
+  if (isBreak) {
+    const b = arg.event.extendedProps?.break;
+    const BREAK_TYPE_LABELS = { break: 'הפסקה', meeting: 'פגישה', unavailable: 'לא זמין', personal: 'אישי' };
+    const label = BREAK_TYPE_LABELS[b?.break_type] || 'הפסקה';
+    const narrow = contentWidth != null && contentWidth < 80;
+    return (
+      <div
+        ref={rootRef}
+        className="reinex-calendar-break-card"
+        title={b?.note ? `${label} • ${b.note}` : label}
+      >
+        {!narrow && <span className="reinex-calendar-break-card__label">{label}</span>}
+        {!narrow && b?.note ? <span className="reinex-calendar-break-card__note">{b.note}</span> : null}
+      </div>
+    );
+  }
 
   if (previewKind === 'service_drop') {
     const previewTitle = arg.event.title || 'שירות';
@@ -656,16 +674,19 @@ export default function ReinexFullCalendar({
   currentDate,
   viewMode,
   instances,
+  breaks = [],
   instructors,
   isLoading = false,
   calendarNavigationRef,
   selectedSlot,
   onSlotSelect,
   onEventClick,
+  onBreakClick,
   onDateChange,
   onEventRescheduled,
   onExternalServiceDrop,
   onOpenInstructorWhatsApp,
+  onBreakUpdated,
   emptyState = null,
   onEmptyStateAction,
 }) {
@@ -685,15 +706,38 @@ export default function ReinexFullCalendar({
     () => new Map((instructors || []).map((instructor) => [String(instructor.id), instructor])),
     [instructors],
   );
+  const mappedBreakEvents = useMemo(
+    () => (Array.isArray(breaks) ? breaks : []).map((b) => {
+      const start = new Date(b.datetime_start);
+      const end = new Date(start.getTime() + Number(b.duration_minutes) * 60000);
+      return {
+        id: `break-${b.id}`,
+        start,
+        end,
+        resourceId: String(b.instructor_employee_id),
+        display: 'block',
+        editable: true,
+        startEditable: true,
+        durationEditable: true,
+        resourceEditable: false,
+        overlap: false,
+        classNames: ['reinex-calendar-break'],
+        extendedProps: { isBreak: true, break: b },
+      };
+    }),
+    [breaks],
+  );
+
   const mappedEvents = useMemo(
     () => {
       const baseEvents = mapInstancesToEvents(instances);
+      const allEvents = [...baseEvents, ...mappedBreakEvents];
       if (!(selectedSlot?.start instanceof Date) || !(selectedSlot?.end instanceof Date) || !selectedSlot?.resourceId) {
-        return baseEvents;
+        return allEvents;
       }
 
       return [
-        ...baseEvents,
+        ...allEvents,
         {
           id: 'pending-calendar-selection',
           start: selectedSlot.start,
@@ -704,7 +748,7 @@ export default function ReinexFullCalendar({
         },
       ];
     },
-    [instances, selectedSlot],
+    [instances, mappedBreakEvents, selectedSlot],
   );
   const mappedResources = useMemo(
     () => mapInstructorsToResources(availabilityPresentation.visibleInstructors),
@@ -775,7 +819,6 @@ export default function ReinexFullCalendar({
       return undefined;
     }
 
-    let cancelled = false;
     setPendingDropInfo((current) => (
       current?.rawInfo === dropInfo
         ? { ...current, preview: null, previewError: '', previewLoading: true, previewRequestKey: requestKey }
@@ -800,16 +843,14 @@ export default function ReinexFullCalendar({
           },
         });
 
-        if (cancelled) return;
         setPendingDropInfo((current) => (
-          current?.rawInfo === dropInfo
+          current?.rawInfo === dropInfo && current?.previewRequestKey === requestKey
             ? { ...current, preview: payload?.preview || null, previewError: '', previewLoading: false, previewRequestKey: requestKey }
             : current
         ));
       } catch (error) {
-        if (cancelled) return;
         setPendingDropInfo((current) => (
-          current?.rawInfo === dropInfo
+          current?.rawInfo === dropInfo && current?.previewRequestKey === requestKey
             ? { ...current, preview: null, previewError: error?.message || 'לא ניתן היה לבנות תצוגה מקדימה להעברה.', previewLoading: false, previewRequestKey: requestKey }
             : current
         ));
@@ -817,9 +858,6 @@ export default function ReinexFullCalendar({
     }
 
     void fetchPreview();
-    return () => {
-      cancelled = true;
-    };
   }, [
     activeOrgId,
     pendingDropInfo,
@@ -949,11 +987,15 @@ export default function ReinexFullCalendar({
   }, [currentDate, viewMode]);
 
   const handleEventClick = useCallback((info) => {
+    if (info.event.extendedProps?.isBreak) {
+      onBreakClick?.(info.event.extendedProps.break);
+      return;
+    }
     const instance = info.event.extendedProps?.instance;
     if (instance) {
       onEventClick?.(instance);
     }
-  }, [onEventClick]);
+  }, [onBreakClick, onEventClick]);
 
   const handleDateSelect = useCallback((selectInfo) => {
     const startDate = selectInfo.start instanceof Date ? selectInfo.start : null;
@@ -981,7 +1023,43 @@ export default function ReinexFullCalendar({
     return durationMinutes > 0;
   }, []);
 
+  const handleBreakDrop = useCallback(async (info) => {
+    const b = info.event.extendedProps?.break;
+    const nextStart = info.event.start;
+
+    if (!activeOrgId || !b?.id || !nextStart) {
+      info.revert();
+      toast.error('לא ניתן להעביר את ההפסקה כרגע.');
+      return;
+    }
+
+    setUpdatingEventId(b.id);
+    try {
+      await authenticatedFetch('instructor-breaks', {
+        method: 'PUT',
+        body: {
+          id: b.id,
+          org_id: activeOrgId,
+          datetime_start: nextStart.toISOString(),
+          duration_minutes: b.duration_minutes,
+        },
+      });
+      onBreakUpdated?.();
+    } catch {
+      info.revert();
+      toast.error('שגיאה בעדכון ההפסקה.');
+    } finally {
+      setUpdatingEventId(null);
+    }
+  }, [activeOrgId, onBreakUpdated]);
+
   const handleEventDrop = useCallback((info) => {
+    // Route break drags to dedicated handler
+    if (info.event.extendedProps?.isBreak) {
+      void handleBreakDrop(info);
+      return;
+    }
+
     const instance = info.event.extendedProps?.instance;
     const nextStart = info.event.start;
     const nextResourceId = info.newResource?.id
@@ -1016,7 +1094,7 @@ export default function ReinexFullCalendar({
       selectedReasonCode: overrideState.selectedReasonCode || '',
       customReason: overrideState.customReason || '',
     });
-  }, [activeOrgId, instructorMap]);
+  }, [activeOrgId, handleBreakDrop, instructorMap]);
 
   const clearPendingDrop = useCallback(() => {
     setPendingDropInfo(null);
@@ -1123,9 +1201,13 @@ export default function ReinexFullCalendar({
   }, [clearPendingDrop, pendingDropInfo]);
 
   const handleExternalDrop = useCallback((dropInfo) => {
+    const draggedEl = dropInfo?.draggedEl;
+    if (!draggedEl?.classList?.contains('calendar-service-drag-item')) {
+      return;
+    }
+
     const startDate = dropInfo?.date instanceof Date ? dropInfo.date : null;
     const resourceId = dropInfo?.resource?.id || null;
-    const draggedEl = dropInfo?.draggedEl;
     const serviceId = draggedEl?.getAttribute?.('data-service-id') || '';
     const durationMinutes = Number(draggedEl?.getAttribute?.('data-service-duration-minutes')) || 0;
 
@@ -1254,6 +1336,7 @@ export default function ReinexFullCalendar({
           eventStartEditable
           eventDurationEditable={false}
           eventResourceEditable
+          eventOverlap={(stillEvent) => !stillEvent.extendedProps?.isBreak}
           droppable
           dropAccept=".calendar-service-drag-item"
           selectable

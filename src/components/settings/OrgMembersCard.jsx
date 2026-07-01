@@ -245,7 +245,7 @@ export default function OrgMembersCard() {
     }
   }, [editingMemberId, members]);
 
-  const handleRemoveMember = async (membershipId) => {
+  const handleRemoveMember = useCallback(async (membershipId) => {
     try {
       await removeMember(membershipId);
       toast.success('החבר הוסר מהארגון.');
@@ -253,7 +253,7 @@ export default function OrgMembersCard() {
       console.error('Failed to remove member', error);
       toast.error('הסרת החבר נכשלה.');
     }
-  };
+  }, [removeMember]);
 
   const handleEditNameStart = useCallback(
     (member) => {

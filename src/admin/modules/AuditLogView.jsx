@@ -116,7 +116,9 @@ export default function AuditLogView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const rows = Array.isArray(payload?.rows) ? payload.rows : [];
+  const rows = React.useMemo(() => (
+    Array.isArray(payload?.rows) ? payload.rows : []
+  ), [payload?.rows]);
   const total = typeof payload?.total === 'number' ? payload.total : null;
   const pageStart = page * PAGE_SIZE;
   const pageEnd = pageStart + rows.length;

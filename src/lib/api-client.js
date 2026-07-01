@@ -3,6 +3,7 @@ import { getAuthClient } from '@/lib/supabase-manager.js';
 const ACTIVE_ORG_STORAGE_KEY = 'active_org_id';
 const COMMON_API_ERROR_MESSAGES = {
   admin_or_owner_required: 'נדרשות הרשאות מנהל או בעלים.',
+  cannot_delete_committed_workspace: 'לא ניתן למחוק סביבת ייבוא שכבר יובאו ממנה רשומות למערכת.',
   admin_required: 'נדרשות הרשאות מנהל.',
   client_profile_not_found: 'הלקוח לא נמצא.',
   database_error: 'אירעה שגיאה בגישה לנתונים. נסו שוב.',

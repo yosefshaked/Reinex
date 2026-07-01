@@ -112,7 +112,7 @@ CREATE TABLE IF NOT EXISTS public.organizations (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   name text NOT NULL,
   slug text NOT NULL UNIQUE,
-  created_by uuid NOT NULL,
+  created_by uuid NULL REFERENCES auth.users(id) ON DELETE SET NULL,
   verified_at timestamptz NULL,
   -- Merged from org_settings
   permissions jsonb NOT NULL DEFAULT '{}'::jsonb,
@@ -414,7 +414,7 @@ CREATE TABLE IF NOT EXISTS public.active_routing (
   category text NOT NULL DEFAULT 'active_org',
   routing_info jsonb NOT NULL DEFAULT '{}'::jsonb,
   expires_at timestamptz NULL,
-  created_by uuid NULL,
+  created_by uuid NULL REFERENCES auth.users(id) ON DELETE SET NULL,
   metadata jsonb NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
@@ -1134,7 +1134,7 @@ CREATE TABLE IF NOT EXISTS public.employee_attendance_records (
   notes text NULL,
   source_type text NOT NULL DEFAULT 'manual',
   version int NOT NULL DEFAULT 1,
-  created_by uuid NULL,
+  created_by uuid NULL REFERENCES auth.users(id) ON DELETE SET NULL,
   updated_by uuid NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
@@ -1175,7 +1175,7 @@ CREATE TABLE IF NOT EXISTS public.employee_leave_entries (
   notes text NULL,
   source_type text NOT NULL DEFAULT 'admin_manual',
   approved_by uuid NULL,
-  created_by uuid NULL,
+  created_by uuid NULL REFERENCES auth.users(id) ON DELETE SET NULL,
   updated_by uuid NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
@@ -1235,7 +1235,7 @@ CREATE TABLE IF NOT EXISTS public.employee_leave_balance_events (
   quantity_days numeric NOT NULL,
   effective_date date NOT NULL,
   notes text NULL,
-  created_by uuid NULL,
+  created_by uuid NULL REFERENCES auth.users(id) ON DELETE SET NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   metadata jsonb NULL,
   CONSTRAINT employee_leave_balance_events_employee_id_fkey FOREIGN KEY (employee_id) REFERENCES public."Employees"(id),
@@ -1261,7 +1261,7 @@ CREATE TABLE IF NOT EXISTS public.finance_corrections (
   effective_date date NOT NULL,
   notes text NULL,
   version int NOT NULL DEFAULT 1,
-  created_by uuid NULL,
+  created_by uuid NULL REFERENCES auth.users(id) ON DELETE SET NULL,
   updated_by uuid NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
@@ -1512,7 +1512,7 @@ CREATE TABLE IF NOT EXISTS public.lesson_instances (
   closed_at timestamptz NULL,
   created_source text NOT NULL,
   version int NOT NULL DEFAULT 1,
-  created_by uuid NULL,
+  created_by uuid NULL REFERENCES auth.users(id) ON DELETE SET NULL,
   updated_by uuid NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
@@ -1654,6 +1654,111 @@ CREATE INDEX IF NOT EXISTS lesson_participants_locked_at_idx
   ON public.lesson_participants (org_id, locked_at) WHERE locked_at IS NOT NULL;
 
 -- -----------------------------------------------------------------
+-- public.instructor_breaks
+-- -----------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS public.instructor_breaks (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id uuid NOT NULL REFERENCES public.organizations(id),
+  instructor_employee_id uuid NOT NULL,
+  datetime_start timestamptz NOT NULL,
+  duration_minutes int NOT NULL,
+  break_type text NOT NULL DEFAULT 'break',
+  note text NULL,
+  created_by uuid NULL REFERENCES auth.users(id) ON DELETE SET NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  break_template_id uuid NULL,
+  metadata jsonb NULL,
+  CONSTRAINT instructor_breaks_instructor_employee_id_fkey FOREIGN KEY (instructor_employee_id) REFERENCES public."Employees"(id),
+  CONSTRAINT instructor_breaks_break_type_check CHECK (break_type IN ('break', 'meeting', 'unavailable', 'personal'))
+);
+
+CREATE INDEX IF NOT EXISTS instructor_breaks_datetime_start_idx
+  ON public.instructor_breaks (org_id, datetime_start);
+CREATE INDEX IF NOT EXISTS instructor_breaks_instructor_datetime_idx
+  ON public.instructor_breaks (org_id, instructor_employee_id, datetime_start);
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'instructor_breaks_created_by_fkey'
+  ) THEN
+    ALTER TABLE public.instructor_breaks
+      ADD CONSTRAINT instructor_breaks_created_by_fkey
+      FOREIGN KEY (created_by) REFERENCES auth.users(id) ON DELETE SET NULL;
+  END IF;
+EXCEPTION
+  WHEN undefined_table THEN NULL;
+  WHEN insufficient_privilege THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.instructor_breaks
+    ADD COLUMN IF NOT EXISTS break_template_id uuid NULL;
+EXCEPTION
+  WHEN undefined_table THEN NULL;
+END $$;
+
+CREATE INDEX IF NOT EXISTS instructor_breaks_template_idx
+  ON public.instructor_breaks (org_id, break_template_id) WHERE break_template_id IS NOT NULL;
+
+-- -----------------------------------------------------------------
+-- public.instructor_break_templates
+-- -----------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS public.instructor_break_templates (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id uuid NOT NULL REFERENCES public.organizations(id),
+  instructor_employee_id uuid NOT NULL,
+  day_of_week text NOT NULL,
+  time_of_day time NOT NULL,
+  duration_minutes int NOT NULL,
+  break_type text NOT NULL DEFAULT 'break',
+  note text NULL,
+  valid_from date NULL,
+  valid_until date NULL,
+  is_active boolean NOT NULL DEFAULT true,
+  created_by uuid NULL REFERENCES auth.users(id) ON DELETE SET NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  metadata jsonb NULL,
+  CONSTRAINT instructor_break_templates_instructor_fkey FOREIGN KEY (instructor_employee_id) REFERENCES public."Employees"(id),
+  CONSTRAINT instructor_break_templates_break_type_check CHECK (break_type IN ('break', 'meeting', 'unavailable', 'personal')),
+  CONSTRAINT instructor_break_templates_day_of_week_check CHECK (day_of_week IN ('sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'))
+);
+
+CREATE INDEX IF NOT EXISTS instructor_break_templates_instructor_idx
+  ON public.instructor_break_templates (org_id, instructor_employee_id);
+CREATE INDEX IF NOT EXISTS instructor_break_templates_active_idx
+  ON public.instructor_break_templates (org_id, is_active);
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'instructor_break_templates_created_by_fkey') THEN
+    ALTER TABLE public.instructor_break_templates
+      ADD CONSTRAINT instructor_break_templates_created_by_fkey
+      FOREIGN KEY (created_by) REFERENCES auth.users(id) ON DELETE SET NULL NOT VALID;
+  END IF;
+EXCEPTION
+  WHEN undefined_table THEN NULL;
+  WHEN insufficient_privilege THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'instructor_breaks_break_template_id_fkey') THEN
+    ALTER TABLE public.instructor_breaks
+      ADD CONSTRAINT instructor_breaks_break_template_id_fkey
+      FOREIGN KEY (break_template_id) REFERENCES public.instructor_break_templates(id) ON DELETE SET NULL NOT VALID;
+  END IF;
+EXCEPTION
+  WHEN undefined_table THEN NULL;
+  WHEN insufficient_privilege THEN NULL;
+END $$;
+
+-- -----------------------------------------------------------------
 -- public.grace_cancellation_requests
 -- -----------------------------------------------------------------
 
@@ -1662,7 +1767,7 @@ CREATE TABLE IF NOT EXISTS public.grace_cancellation_requests (
   org_id uuid NOT NULL REFERENCES public.organizations(id),
   lesson_participant_id uuid NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
-  created_by uuid NULL,
+  created_by uuid NULL REFERENCES auth.users(id) ON DELETE SET NULL,
   reason text NULL,
   status text NOT NULL DEFAULT 'manually_excused',
   CONSTRAINT grace_cancellation_requests_lesson_participant_id_fkey FOREIGN KEY (lesson_participant_id) REFERENCES public.lesson_participants(id),
@@ -1672,8 +1777,13 @@ CREATE TABLE IF NOT EXISTS public.grace_cancellation_requests (
 
 DO $$
 BEGIN
-  ALTER TABLE public.grace_cancellation_requests
-    DROP CONSTRAINT IF EXISTS grace_cancellation_requests_created_by_fkey;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'grace_cancellation_requests_created_by_fkey'
+  ) THEN
+    ALTER TABLE public.grace_cancellation_requests
+      ADD CONSTRAINT grace_cancellation_requests_created_by_fkey
+      FOREIGN KEY (created_by) REFERENCES auth.users(id) ON DELETE SET NULL NOT VALID;
+  END IF;
 EXCEPTION
   WHEN undefined_table THEN NULL;
   WHEN insufficient_privilege THEN NULL;
@@ -1746,7 +1856,7 @@ CREATE TABLE IF NOT EXISTS public.instance_locks (
   lock_source_type text NOT NULL,
   lock_source_id uuid NOT NULL,
   lock_reason text NOT NULL,
-  created_by uuid NULL,
+  created_by uuid NULL REFERENCES auth.users(id) ON DELETE SET NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   metadata jsonb NULL,
   CONSTRAINT instance_locks_lesson_instance_id_fkey FOREIGN KEY (lesson_instance_id) REFERENCES public.lesson_instances(id) ON DELETE CASCADE,
@@ -1771,7 +1881,7 @@ CREATE TABLE IF NOT EXISTS public.participant_locks (
   lock_source_type text NOT NULL,
   lock_source_id uuid NOT NULL,
   lock_reason text NOT NULL,
-  created_by uuid NULL,
+  created_by uuid NULL REFERENCES auth.users(id) ON DELETE SET NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   metadata jsonb NULL,
   CONSTRAINT participant_locks_lesson_participant_id_fkey FOREIGN KEY (lesson_participant_id) REFERENCES public.lesson_participants(id) ON DELETE CASCADE,
@@ -1835,7 +1945,7 @@ CREATE TABLE IF NOT EXISTS public.dashboard_tasks (
   resource_id text NULL,
   action_path text NULL,
   version int NOT NULL DEFAULT 1,
-  created_by uuid NULL,
+  created_by uuid NULL REFERENCES auth.users(id) ON DELETE SET NULL,
   resolved_by uuid NULL,
   resolved_at timestamptz NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
@@ -2336,7 +2446,7 @@ CREATE TABLE IF NOT EXISTS public.forms (
   version int NOT NULL DEFAULT 1,
   published_at timestamptz NULL,
   archived_at timestamptz NULL,
-  created_by uuid NOT NULL,
+  created_by uuid NULL REFERENCES auth.users(id) ON DELETE SET NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   is_active boolean NOT NULL DEFAULT true,
@@ -2371,7 +2481,7 @@ CREATE TABLE IF NOT EXISTS public.shared_form_blocks (
   name text NOT NULL,
   content_schema jsonb NOT NULL DEFAULT '{}'::jsonb,
   is_active boolean NOT NULL DEFAULT true,
-  created_by uuid NOT NULL,
+  created_by uuid NULL REFERENCES auth.users(id) ON DELETE SET NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   metadata jsonb NULL,
@@ -4062,6 +4172,160 @@ CREATE POLICY "impersonation_sessions_select_admin"
     (SELECT p.is_system_admin FROM public.profiles p WHERE p.id = auth.uid())
   );
 
+-- -----------------------------------------------------------------
+-- FK migrations: created_by → auth.users(id) ON DELETE SET NULL
+-- (runtime guard for existing databases; CREATE TABLE blocks already
+--  include the inline FK for greenfield installs; NOT VALID skips
+--  scanning existing rows for safety)
+-- -----------------------------------------------------------------
+
+DO $$
+BEGIN
+  ALTER TABLE public.organizations ALTER COLUMN created_by DROP NOT NULL;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'organizations_created_by_fkey') THEN
+    ALTER TABLE public.organizations
+      ADD CONSTRAINT organizations_created_by_fkey
+      FOREIGN KEY (created_by) REFERENCES auth.users(id) ON DELETE SET NULL NOT VALID;
+  END IF;
+EXCEPTION
+  WHEN undefined_table THEN NULL;
+  WHEN insufficient_privilege THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'active_routing_created_by_fkey') THEN
+    ALTER TABLE public.active_routing
+      ADD CONSTRAINT active_routing_created_by_fkey
+      FOREIGN KEY (created_by) REFERENCES auth.users(id) ON DELETE SET NULL NOT VALID;
+  END IF;
+EXCEPTION
+  WHEN undefined_table THEN NULL;
+  WHEN insufficient_privilege THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'employee_attendance_records_created_by_fkey') THEN
+    ALTER TABLE public.employee_attendance_records
+      ADD CONSTRAINT employee_attendance_records_created_by_fkey
+      FOREIGN KEY (created_by) REFERENCES auth.users(id) ON DELETE SET NULL NOT VALID;
+  END IF;
+EXCEPTION
+  WHEN undefined_table THEN NULL;
+  WHEN insufficient_privilege THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'employee_leave_entries_created_by_fkey') THEN
+    ALTER TABLE public.employee_leave_entries
+      ADD CONSTRAINT employee_leave_entries_created_by_fkey
+      FOREIGN KEY (created_by) REFERENCES auth.users(id) ON DELETE SET NULL NOT VALID;
+  END IF;
+EXCEPTION
+  WHEN undefined_table THEN NULL;
+  WHEN insufficient_privilege THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'employee_leave_balance_events_created_by_fkey') THEN
+    ALTER TABLE public.employee_leave_balance_events
+      ADD CONSTRAINT employee_leave_balance_events_created_by_fkey
+      FOREIGN KEY (created_by) REFERENCES auth.users(id) ON DELETE SET NULL NOT VALID;
+  END IF;
+EXCEPTION
+  WHEN undefined_table THEN NULL;
+  WHEN insufficient_privilege THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'finance_corrections_created_by_fkey') THEN
+    ALTER TABLE public.finance_corrections
+      ADD CONSTRAINT finance_corrections_created_by_fkey
+      FOREIGN KEY (created_by) REFERENCES auth.users(id) ON DELETE SET NULL NOT VALID;
+  END IF;
+EXCEPTION
+  WHEN undefined_table THEN NULL;
+  WHEN insufficient_privilege THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'lesson_instances_created_by_fkey') THEN
+    ALTER TABLE public.lesson_instances
+      ADD CONSTRAINT lesson_instances_created_by_fkey
+      FOREIGN KEY (created_by) REFERENCES auth.users(id) ON DELETE SET NULL NOT VALID;
+  END IF;
+EXCEPTION
+  WHEN undefined_table THEN NULL;
+  WHEN insufficient_privilege THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'instance_locks_created_by_fkey') THEN
+    ALTER TABLE public.instance_locks
+      ADD CONSTRAINT instance_locks_created_by_fkey
+      FOREIGN KEY (created_by) REFERENCES auth.users(id) ON DELETE SET NULL NOT VALID;
+  END IF;
+EXCEPTION
+  WHEN undefined_table THEN NULL;
+  WHEN insufficient_privilege THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'participant_locks_created_by_fkey') THEN
+    ALTER TABLE public.participant_locks
+      ADD CONSTRAINT participant_locks_created_by_fkey
+      FOREIGN KEY (created_by) REFERENCES auth.users(id) ON DELETE SET NULL NOT VALID;
+  END IF;
+EXCEPTION
+  WHEN undefined_table THEN NULL;
+  WHEN insufficient_privilege THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'dashboard_tasks_created_by_fkey') THEN
+    ALTER TABLE public.dashboard_tasks
+      ADD CONSTRAINT dashboard_tasks_created_by_fkey
+      FOREIGN KEY (created_by) REFERENCES auth.users(id) ON DELETE SET NULL NOT VALID;
+  END IF;
+EXCEPTION
+  WHEN undefined_table THEN NULL;
+  WHEN insufficient_privilege THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.forms ALTER COLUMN created_by DROP NOT NULL;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'forms_created_by_fkey') THEN
+    ALTER TABLE public.forms
+      ADD CONSTRAINT forms_created_by_fkey
+      FOREIGN KEY (created_by) REFERENCES auth.users(id) ON DELETE SET NULL NOT VALID;
+  END IF;
+EXCEPTION
+  WHEN undefined_table THEN NULL;
+  WHEN insufficient_privilege THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.shared_form_blocks ALTER COLUMN created_by DROP NOT NULL;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'shared_form_blocks_created_by_fkey') THEN
+    ALTER TABLE public.shared_form_blocks
+      ADD CONSTRAINT shared_form_blocks_created_by_fkey
+      FOREIGN KEY (created_by) REFERENCES auth.users(id) ON DELETE SET NULL NOT VALID;
+  END IF;
+EXCEPTION
+  WHEN undefined_table THEN NULL;
+  WHEN insufficient_privilege THEN NULL;
+END $$;
+
 -- Enable RLS on all tables (both domain and payroll)
 ALTER TABLE public.students ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.guardians ENABLE ROW LEVEL SECURITY;
@@ -4091,6 +4355,8 @@ ALTER TABLE public.lesson_template_overrides ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.lesson_template_participants ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.lesson_instances ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.lesson_participants ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.instructor_breaks ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.instructor_break_templates ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.grace_cancellation_requests ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.commitments ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.ledger_transactions ENABLE ROW LEVEL SECURITY;
@@ -4140,6 +4406,8 @@ BEGIN
     'lesson_template_participants',
     'lesson_instances',
     'lesson_participants',
+    'instructor_breaks',
+    'instructor_break_templates',
     'grace_cancellation_requests',
     'commitments',
     'ledger_transactions',
@@ -4238,6 +4506,8 @@ GRANT ALL ON TABLE public.lesson_template_overrides TO app_user;
 GRANT ALL ON TABLE public.lesson_template_participants TO app_user;
 GRANT ALL ON TABLE public.lesson_instances TO app_user;
 GRANT ALL ON TABLE public.lesson_participants TO app_user;
+GRANT ALL ON TABLE public.instructor_breaks TO app_user;
+GRANT ALL ON TABLE public.instructor_break_templates TO app_user;
 GRANT ALL ON TABLE public.grace_cancellation_requests TO app_user;
 GRANT ALL ON TABLE public.commitments TO app_user;
 GRANT ALL ON TABLE public.ledger_transactions TO app_user;
@@ -6007,4 +6277,401 @@ CREATE INDEX IF NOT EXISTS contact_requests_email_created_idx
 ALTER TABLE public.contact_requests ENABLE ROW LEVEL SECURITY;
 
 -- No GRANT to app_user — service_role only. Same pattern as admin_data.
+
+-- =================================================================
+-- Import Workspace: Four-Table Phase 1 Staging Foundation
+-- =================================================================
+-- Tables: import_workspaces, import_rows, import_candidates, import_commit_ledger
+-- All staging data is tenant-scoped via org_id.
+-- ON DELETE CASCADE on workspace_id ensures workspace deletion cleans
+-- up all staged rows, candidates, and ledger entries atomically.
+-- =================================================================
+
+CREATE TABLE IF NOT EXISTS public.import_workspaces (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id uuid NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
+  name text NOT NULL,
+  status text NOT NULL DEFAULT 'draft',
+  config jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT import_workspaces_status_check CHECK (
+    status IN (
+      'draft',
+      'profiling',
+      'mapping',
+      'analyzing',
+      'needs_review',
+      'ready_to_commit',
+      'partially_committed',
+      'committed',
+      'archived',
+      'cancelled'
+    )
+  )
+);
+
+CREATE INDEX IF NOT EXISTS import_workspaces_org_status_idx
+  ON public.import_workspaces (org_id, status);
+
+CREATE INDEX IF NOT EXISTS import_workspaces_updated_idx
+  ON public.import_workspaces (org_id, updated_at DESC);
+
+-- import_rows: frontend-parsed row chunks.
+-- raw_data is the permanent audit source of truth after R2 raw files expire (30-day TTL).
+-- source_reference must include a timestamp/hash suffix so re-uploading a corrected
+-- file never collides with the (workspace_id, source_reference, row_index) unique key.
+CREATE TABLE IF NOT EXISTS public.import_rows (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id uuid NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
+  workspace_id uuid NOT NULL REFERENCES public.import_workspaces(id) ON DELETE CASCADE,
+  source_reference text NOT NULL CHECK (source_reference <> ''),
+  row_index integer NOT NULL,
+  raw_data jsonb NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT import_rows_row_index_non_neg CHECK (row_index >= 0)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS import_rows_workspace_source_row_idx
+  ON public.import_rows (workspace_id, source_reference, row_index);
+
+CREATE INDEX IF NOT EXISTS import_rows_org_workspace_idx
+  ON public.import_rows (org_id, workspace_id);
+
+CREATE INDEX IF NOT EXISTS import_rows_workspace_source_idx
+  ON public.import_rows (workspace_id, source_reference);
+
+-- import_candidates: normalized Golden Record entities ready for review, dry-run, and commit.
+-- blocking_issues_count is denormalized from issues[] — backend must recalculate on every issues write.
+-- depends_on_candidate_id is the Phase 1 single-parent DAG for guardian links and notes.
+-- SET NULL on depends_on deletion ensures children become unblocked rather than orphaned.
+CREATE TABLE IF NOT EXISTS public.import_candidates (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id uuid NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
+  workspace_id uuid NOT NULL REFERENCES public.import_workspaces(id) ON DELETE CASCADE,
+  entity_type text NOT NULL,
+  status text NOT NULL DEFAULT 'needs_review',
+  candidate_data jsonb NOT NULL DEFAULT '{}'::jsonb,
+  merged_from_row_ids uuid[] NOT NULL DEFAULT '{}'::uuid[],
+  issues jsonb NOT NULL DEFAULT '[]'::jsonb,
+  blocking_issues_count integer NOT NULL DEFAULT 0,
+  decisions jsonb NOT NULL DEFAULT '{}'::jsonb,
+  depends_on_candidate_id uuid REFERENCES public.import_candidates(id) ON DELETE SET NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT import_candidates_entity_type_check CHECK (
+    entity_type IN (
+      'customer',
+      'guardian',
+      'guardian_link',
+      'service'
+    )
+  ),
+  CONSTRAINT import_candidates_status_check CHECK (
+    status IN (
+      'needs_review',
+      'ready',
+      'blocked',
+      'blocked_by_dependency',
+      'skipped',
+      'committed',
+      'failed'
+    )
+  ),
+  CONSTRAINT import_candidates_blocking_count_non_negative_check CHECK (blocking_issues_count >= 0),
+  CONSTRAINT import_candidates_no_self_dependency_check CHECK (
+    depends_on_candidate_id IS NULL OR depends_on_candidate_id <> id
+  )
+);
+
+CREATE INDEX IF NOT EXISTS import_candidates_workspace_status_idx
+  ON public.import_candidates (workspace_id, status);
+
+CREATE INDEX IF NOT EXISTS import_candidates_workspace_entity_idx
+  ON public.import_candidates (workspace_id, entity_type);
+
+CREATE INDEX IF NOT EXISTS import_candidates_workspace_entity_status_idx
+  ON public.import_candidates (workspace_id, entity_type, status);
+
+CREATE INDEX IF NOT EXISTS import_candidates_org_workspace_idx
+  ON public.import_candidates (org_id, workspace_id);
+
+-- Sparse index: only rows with a parent dependency need this lookup
+CREATE INDEX IF NOT EXISTS import_candidates_dependency_idx
+  ON public.import_candidates (depends_on_candidate_id)
+  WHERE depends_on_candidate_id IS NOT NULL;
+
+-- source_row_id: the anchor import_row this candidate was derived from.
+-- Enables idempotent re-analysis upsert. Multiple rows merged into one candidate
+-- are captured in merged_from_row_ids; source_row_id is the primary/first row.
+ALTER TABLE public.import_candidates
+  ADD COLUMN IF NOT EXISTS source_row_id uuid REFERENCES public.import_rows(id) ON DELETE CASCADE;
+
+-- Stable import identity for candidates. Guardian links may need multiple
+-- candidates from the same source row, so source_row_id alone is not enough.
+ALTER TABLE public.import_candidates
+  ADD COLUMN IF NOT EXISTS import_key text;
+
+UPDATE public.import_candidates
+   SET import_key = entity_type || ':' || source_row_id::text
+ WHERE import_key IS NULL OR import_key = '';
+
+ALTER TABLE public.import_candidates
+  ALTER COLUMN import_key SET NOT NULL;
+
+-- One source row may produce several entity candidates (customer, guardian,
+-- guardian_link, service). Replace the legacy one-candidate-per-row key.
+DROP INDEX IF EXISTS public.import_candidates_workspace_source_row_uidx;
+DROP INDEX IF EXISTS public.import_candidates_workspace_source_row_entity_uidx;
+CREATE INDEX IF NOT EXISTS import_candidates_workspace_source_row_entity_idx
+  ON public.import_candidates (workspace_id, source_row_id, entity_type);
+
+CREATE UNIQUE INDEX IF NOT EXISTS import_candidates_workspace_entity_key_uidx
+  ON public.import_candidates (workspace_id, entity_type, import_key);
+
+CREATE INDEX IF NOT EXISTS import_candidates_blocking_idx
+  ON public.import_candidates (workspace_id, blocking_issues_count)
+  WHERE blocking_issues_count > 0;
+
+CREATE INDEX IF NOT EXISTS import_candidates_merged_rows_gin_idx
+  ON public.import_candidates USING gin (merged_from_row_ids);
+
+-- ── Migration: collapse legacy import entity types into the canonical four ──────
+-- The import pipeline now uses exactly: customer, guardian, guardian_link, service.
+-- Legacy staging rows (active_student / inactive_student / student_note) and the old
+-- guardian candidate_data shape are converted in-place so no backward-compat code is
+-- needed. Every step is idempotent — each WHERE clause only matches un-migrated rows.
+
+-- 1. active_student / inactive_student → customer (type 'student'), preserving the active flag.
+UPDATE public.import_candidates
+   SET entity_type    = 'customer',
+       candidate_data = candidate_data
+                          || jsonb_build_object('customer_type', 'student')
+                          || jsonb_build_object('is_active', (entity_type = 'active_student')),
+       updated_at     = now()
+ WHERE entity_type IN ('active_student', 'inactive_student');
+
+-- 2. Guardian candidate_data: the old analyzer flattened guardian columns into the
+--    student-style keys. Rename them back to the canonical guardian_* keys so a single
+--    source row can carry both a student and a guardian without colliding.
+UPDATE public.import_candidates
+   SET candidate_data = (candidate_data - 'first_name' - 'last_name' - 'phone' - 'email')
+                          || jsonb_strip_nulls(jsonb_build_object(
+                               'guardian_first_name', candidate_data -> 'first_name',
+                               'guardian_last_name',  candidate_data -> 'last_name',
+                               'guardian_phone',      candidate_data -> 'phone',
+                               'guardian_email',      candidate_data -> 'email'
+                             )),
+       updated_at     = now()
+ WHERE entity_type = 'guardian'
+   AND (candidate_data ? 'first_name' OR candidate_data ? 'last_name'
+        OR candidate_data ? 'phone' OR candidate_data ? 'email');
+
+-- 3. student_note candidates: notes now live on the customer (candidate_data.note_text),
+--    so standalone, un-committed legacy student_note rows are dropped. Committed rows are
+--    left untouched as historical record.
+DELETE FROM public.import_candidates
+ WHERE entity_type = 'student_note'
+   AND status <> 'committed';
+
+-- 4. Drop the legacy entity_type CHECK constraint left under its ORIGINAL name.
+--    The first version of this feature named it import_candidates_entity_type_chk;
+--    a later commit renamed it to ..._entity_type_check in CREATE TABLE, but
+--    CREATE TABLE IF NOT EXISTS never recreates an existing table, so databases
+--    provisioned before the rename kept the _chk constraint — which predates the
+--    'customer' type and was raising 23514 on customer inserts. Drop it by its
+--    known name (no-op via IF EXISTS on fresh or already-fixed databases).
+ALTER TABLE public.import_candidates
+  DROP CONSTRAINT IF EXISTS import_candidates_entity_type_chk;
+
+-- Ensure the canonical entity_type CHECK exists. Only adds it when no entity_type
+-- CHECK remains (so we never stack a second one) AND the data already conforms (so
+-- the ADD validates cleanly). Idempotent: a no-op once the canonical one is present.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+     WHERE conrelid = 'public.import_candidates'::regclass
+       AND contype = 'c'
+       AND pg_get_constraintdef(oid) LIKE '%entity_type%'
+  )
+  AND NOT EXISTS (
+    SELECT 1 FROM public.import_candidates
+     WHERE entity_type NOT IN ('customer', 'guardian', 'guardian_link', 'service')
+  ) THEN
+    ALTER TABLE public.import_candidates
+      ADD CONSTRAINT import_candidates_entity_type_check CHECK (
+        entity_type IN ('customer', 'guardian', 'guardian_link', 'service')
+      );
+  END IF;
+END $$;
+
+-- import_commit_ledger: immutable audit trail for every live record created, updated, or linked
+-- by an import commit. Workspace CASCADE handles bulk cleanup when a workspace is deleted.
+CREATE TABLE IF NOT EXISTS public.import_commit_ledger (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id uuid NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
+  workspace_id uuid NOT NULL REFERENCES public.import_workspaces(id) ON DELETE CASCADE,
+  candidate_id uuid NOT NULL REFERENCES public.import_candidates(id) ON DELETE CASCADE,
+  live_resource_type text NOT NULL CHECK (live_resource_type <> ''),
+  live_resource_id uuid NOT NULL,
+  action_taken text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT import_commit_ledger_action_check CHECK (action_taken IN ('create','update','link'))
+);
+
+CREATE INDEX IF NOT EXISTS import_commit_ledger_workspace_idx
+  ON public.import_commit_ledger (workspace_id);
+
+CREATE INDEX IF NOT EXISTS import_commit_ledger_candidate_idx
+  ON public.import_commit_ledger (candidate_id);
+
+CREATE INDEX IF NOT EXISTS import_commit_ledger_org_workspace_idx
+  ON public.import_commit_ledger (org_id, workspace_id);
+
+-- Supports provenance lookups: "was this live record imported?"
+CREATE INDEX IF NOT EXISTS import_commit_ledger_resource_idx
+  ON public.import_commit_ledger (org_id, live_resource_type, live_resource_id);
+
+-- Enable RLS
+ALTER TABLE public.import_workspaces    ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.import_rows          ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.import_candidates    ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.import_commit_ledger ENABLE ROW LEVEL SECURITY;
+
+-- Tenant RLS policies (SELECT / INSERT / UPDATE / DELETE) — same pattern as all other tenant tables
+DO $$
+DECLARE
+  tbl text;
+  ops text[] := ARRAY['SELECT','INSERT','UPDATE','DELETE'];
+  op  text;
+  pol text;
+BEGIN
+  FOREACH tbl IN ARRAY ARRAY[
+    'import_workspaces',
+    'import_rows',
+    'import_candidates',
+    'import_commit_ledger'
+  ]
+  LOOP
+    FOREACH op IN ARRAY ops
+    LOOP
+      pol := left('tenant_' || lower(op) || '_' || tbl, 63);
+      EXECUTE 'DROP POLICY IF EXISTS ' || quote_ident(pol) || ' ON public.' || quote_ident(tbl);
+
+      IF op = 'SELECT' THEN
+        EXECUTE format(
+          'CREATE POLICY %I ON public.%I FOR SELECT TO authenticated, app_user USING (org_id = get_active_org_id())',
+          pol, tbl);
+      ELSIF op = 'INSERT' THEN
+        EXECUTE format(
+          'CREATE POLICY %I ON public.%I FOR INSERT TO authenticated, app_user WITH CHECK (org_id = get_active_org_id())',
+          pol, tbl);
+      ELSE  -- UPDATE / DELETE
+        EXECUTE format(
+          'CREATE POLICY %I ON public.%I FOR %s TO authenticated, app_user USING (org_id = get_active_org_id())',
+          pol, tbl, op);
+        IF op = 'UPDATE' THEN
+          EXECUTE format(
+            'ALTER POLICY %I ON public.%I WITH CHECK (org_id = get_active_org_id())',
+            pol, tbl);
+        END IF;
+      END IF;
+    END LOOP;
+  END LOOP;
+END $$;
+
+GRANT ALL ON TABLE public.import_workspaces    TO app_user;
+GRANT ALL ON TABLE public.import_rows          TO app_user;
+GRANT ALL ON TABLE public.import_candidates    TO app_user;
+GRANT ALL ON TABLE public.import_commit_ledger TO app_user;
+
+-- =================================================================
+-- Import Workspace helper: recursive JSONB merge
+-- =================================================================
+-- Recursively merges JSON objects key-by-key. When either side is not an
+-- object, the right-hand value replaces the left-hand value. Arrays replace
+-- arrays rather than concatenating.
+-- =================================================================
+CREATE OR REPLACE FUNCTION public.jsonb_deep_merge(a jsonb, b jsonb)
+RETURNS jsonb
+LANGUAGE sql
+IMMUTABLE
+AS $$
+  SELECT CASE
+    WHEN jsonb_typeof(a) = 'object' AND jsonb_typeof(b) = 'object' THEN
+      coalesce((
+        SELECT jsonb_object_agg(merged.key, merged.value)
+        FROM (
+          SELECT
+            coalesce(left_side.key, right_side.key) AS key,
+            CASE
+              WHEN left_side.value IS NULL THEN right_side.value
+              WHEN right_side.value IS NULL THEN left_side.value
+              ELSE public.jsonb_deep_merge(left_side.value, right_side.value)
+            END AS value
+          FROM jsonb_each(a) AS left_side(key, value)
+          FULL JOIN jsonb_each(b) AS right_side(key, value)
+            ON left_side.key = right_side.key
+        ) AS merged
+      ), '{}'::jsonb)
+    ELSE coalesce(b, a)
+  END
+$$;
+
+GRANT EXECUTE ON FUNCTION public.jsonb_deep_merge(jsonb, jsonb)
+  TO authenticated, app_user;
+
+-- =================================================================
+-- Import Workspace RPC: atomic config deep-merge
+-- =================================================================
+-- Merges p_config_patch into the existing config column recursively so that:
+--   - Nested keys present in p_config_patch overwrite the existing value.
+--   - Nested keys absent from p_config_patch are left untouched.
+-- This avoids the race condition where a blind Supabase JS .update({ config })
+-- call overwrites keys written by a concurrent analysis or progress update.
+--
+-- Security: INVOKER — runs under the calling role's permissions so RLS
+-- tenant isolation is fully enforced. The backend service_role bypasses RLS
+-- anyway, but INVOKER is the correct posture per the developer warnings.
+-- =================================================================
+CREATE OR REPLACE FUNCTION public.patch_import_workspace_config(
+  p_workspace_id uuid,
+  p_org_id       uuid,
+  p_config_patch jsonb
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY INVOKER
+AS $$
+DECLARE
+  v_config jsonb;
+BEGIN
+  UPDATE public.import_workspaces
+  SET
+    config     = public.jsonb_deep_merge(config, p_config_patch),
+    updated_at = now()
+  WHERE id     = p_workspace_id
+    AND org_id = p_org_id
+  RETURNING config INTO v_config;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'workspace_not_found' USING ERRCODE = 'P0001';
+  END IF;
+
+  RETURN v_config;
+END;
+$$;
+
+REVOKE EXECUTE ON FUNCTION public.patch_import_workspace_config(uuid, uuid, jsonb)
+  FROM authenticated;
+GRANT EXECUTE ON FUNCTION public.patch_import_workspace_config(uuid, uuid, jsonb)
+  TO app_user;
+
+-- =================================================================
+-- commit_import_chunk — REMOVED
+-- The atomic PL/pgSQL commit RPC was replaced by the JS commit engine in
+-- api/import-commit-chunk/. Drop the dead function so it is not left dangling.
+-- =================================================================
+DROP FUNCTION IF EXISTS public.commit_import_chunk(uuid, uuid, uuid[]);
 `;

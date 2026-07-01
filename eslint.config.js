@@ -129,6 +129,21 @@ export default defineConfig([
     },
   },
   {
+    files: ['test/**/*.{js,jsx,mjs}'],
+    languageOptions: {
+      globals: {
+        ...globals.node,
+      },
+    },
+    rules: {
+      'import/no-unresolved': 'off',
+      'import/named': 'off',
+      'import/default': 'off',
+      'import/namespace': 'off',
+      'no-restricted-imports': 'off',
+    },
+  },
+  {
     files: ['src/lib/supabase-manager.js'],
     rules: {
       'no-restricted-imports': 'off',

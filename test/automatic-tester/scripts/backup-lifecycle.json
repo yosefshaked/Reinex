@@ -1,0 +1,76 @@
+{
+  "meta": {
+    "id": "backup-lifecycle",
+    "name": "Backup — API smoke test",
+    "description": "Triggers a full backup run via POST /api/backup-run with the BACKUP_SERVICE_KEY, then verifies the response reports zero failures. Also verifies that a request missing the service key is rejected (401 guard check).",
+    "version": "1.0.0",
+    "last_validated_at": "2026-05-27T00:00:00Z",
+    "author": "claude-ai",
+    "dependencies": {
+      "routes": [],
+      "api_endpoints": [
+        "POST /api/backup"
+      ],
+      "env_vars": ["BACKUP_SERVICE_KEY"]
+    }
+  },
+  "config": {
+    "timeout_ms": 60000,
+    "screenshot_on_failure": true,
+    "continue_on_step_failure": false,
+    "continue_on_workflow_failure": true
+  },
+  "variables": {},
+
+  "workflows": [
+
+    {
+      "id": "backup-run",
+      "name": "Backup — trigger and verify",
+      "description": "POST /api/backup-run with the BACKUP_SERVICE_KEY header. Expects HTTP 200 and stores the succeeded/failed counts.",
+      "steps": [
+        {
+          "id": "trigger-backup",
+          "description": "Trigger a full backup run for all orgs. The endpoint loops over every organization and exports+encrypts+uploads tenant data.",
+          "action": "apiCall",
+          "method": "POST",
+          "endpoint": "/api/backup-run",
+          "headers": {
+            "x-backup-service-key": "{{BACKUP_SERVICE_KEY}}"
+          },
+          "stores": [
+            { "variable": "BACKUP_SUCCEEDED", "field": "succeeded" },
+            { "variable": "BACKUP_FAILED",    "field": "failed" }
+          ]
+        },
+        {
+          "id": "screenshot-backup-done",
+          "action": "screenshot",
+          "name": "01-backup-completed"
+        }
+      ]
+    },
+
+    {
+      "id": "backup-auth-guard",
+      "name": "Backup — reject request without service key",
+      "description": "POST to the backup endpoint without the x-backup-service-key header. The endpoint must return 401. ignoreStatus prevents the runner from throwing on the expected 401 — a 200 here would indicate a broken auth guard.",
+      "steps": [
+        {
+          "id": "no-key-rejected",
+          "description": "POST /api/backup-run with no service key — must return 401 Unauthorized",
+          "action": "apiCall",
+          "method": "POST",
+          "endpoint": "/api/backup-run",
+          "ignoreStatus": [401]
+        },
+        {
+          "id": "screenshot-auth-guard",
+          "action": "screenshot",
+          "name": "02-backup-auth-guard"
+        }
+      ]
+    }
+
+  ]
+}

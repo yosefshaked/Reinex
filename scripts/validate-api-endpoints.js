@@ -59,7 +59,7 @@ async function extractExports(filePath) {
     }
 
     return exports;
-  } catch (err) {
+  } catch {
     return [];
   }
 }
@@ -147,7 +147,7 @@ async function validateEndpoint(endpointDir, fileName) {
 
   // Check for exports from org-bff.js
   if (content.includes("from '../_shared/org-bff.js'")) {
-    const importMatch = content.match(/import\s+{([^}]+)}\s+from\s+['"]\.\.\/\_shared\/org-bff\.js['"]/);
+    const importMatch = content.match(/import\s+{([^}]+)}\s+from\s+['"]\.\.\/_shared\/org-bff\.js['"]/);
     if (importMatch) {
       const imports = importMatch[1].split(',').map(i => i.trim()).filter(i => i.length > 0);
       const validExports = VALID_EXPORTS['org-bff.js'];
@@ -334,7 +334,7 @@ async function checkStorageDrivers() {
     if (!content.includes('export function getStorageDriver')) {
       errors.push('cross-platform/storage-drivers/index.js: Missing getStorageDriver export');
     }
-  } catch (err) {
+  } catch {
     errors.push(`cross-platform/storage-drivers/index.js: File not found or not readable`);
   }
 }

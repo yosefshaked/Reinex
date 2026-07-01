@@ -4,13 +4,16 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge.jsx';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
-import { Plus, LayoutTemplate, Wand2, PanelRight } from 'lucide-react';
+import { Plus, LayoutTemplate, Wand2, PanelRight, ChevronDown, Coffee } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { DateNavigator } from '../components/CalendarHeader/DateNavigator.jsx';
 import { LessonInstanceDialog } from '../components/LessonInstanceDialog';
 import { AddLessonDialog } from '../components/AddLessonDialog';
 import { ManualGenerationDialog } from '../components/ManualGenerationDialog';
-import { useCalendarInstances, useCalendarInstructors } from '../hooks/useCalendar';
+import { useCalendarInstances, useCalendarInstructors, useInstructorBreaks } from '../hooks/useCalendar';
+import AddBreakDialog from '../components/AddBreakDialog';
+import EditBreakDialog from '../components/EditBreakDialog';
 import ReinexFullCalendar from '../components/ReinexFullCalendar';
 import CalendarWorkspaceDock from '../components/CalendarWorkspaceDock.jsx';
 import InstructorWhatsAppDialog from '../components/InstructorWhatsAppDialog.jsx';
@@ -21,7 +24,9 @@ import { buildCalendarWorkspaceSummary } from '../utils/calendarWorkspace.js';
 import {
   buildInstructorDayMessage,
   buildInstructorWeekMessage,
+  getInstructorDayBreaks,
   getInstructorDayLessons,
+  getInstructorWeekBreaks,
   getInstructorWeekLessons,
 } from '../utils/instructor-whatsapp.js';
 import { addLocalDays, getTodayLocalDateString, getWeekStartDate, parseLocalDateString, toLocalDateString } from '../utils/localDate.js';
@@ -62,6 +67,8 @@ export default function CalendarPage() {
   const [whatsAppCompose, setWhatsAppCompose] = useState(null);
   const [availabilityFixIssue, setAvailabilityFixIssue] = useState(null);
   const [mobileDockOpen, setMobileDockOpen] = useState(false);
+  const [showAddBreakDialog, setShowAddBreakDialog] = useState(false);
+  const [selectedBreak, setSelectedBreak] = useState(null);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -158,6 +165,7 @@ export default function CalendarPage() {
     refetch: refetchInstructors,
   } = useCalendarInstructors();
   const { instances, isLoading: instancesLoading, error: instancesError, refetch: refetchInstances } = useCalendarInstances(dateForQuery, viewMode);
+  const { breaks, refetch: refetchBreaks } = useInstructorBreaks(dateForQuery, viewMode);
   const isCalendarLoading = instructorsLoading || instancesLoading;
 
   const workspaceSummary = useMemo(
@@ -225,6 +233,10 @@ export default function CalendarPage() {
     refetchInstances();
     setPendingSlotSelection(null);
     setPendingServiceId('');
+  };
+
+  const handleBreakAdded = () => {
+    refetchBreaks();
   };
 
   const handleUpdateSuccess = () => {
@@ -326,15 +338,18 @@ export default function CalendarPage() {
     const lessons = mode === 'week'
       ? getInstructorWeekLessons(instances, sourceInstructor.id, currentDate)
       : getInstructorDayLessons(instances, sourceInstructor.id, currentDate);
+    const instructorBreaks = mode === 'week'
+      ? getInstructorWeekBreaks(breaks, sourceInstructor.id, currentDate)
+      : getInstructorDayBreaks(breaks, sourceInstructor.id, currentDate);
 
-    if (!lessons.length) {
+    if (!lessons.length && !instructorBreaks.length) {
       toast.error(mode === 'week' ? 'אין שיעורים מתוכננים או שהושלמו למדריך זה השבוע.' : 'אין שיעורים מתוכננים או שהושלמו למדריך זה ביום זה.');
       return;
     }
 
     const message = mode === 'week'
-      ? buildInstructorWeekMessage({ instructorName: sourceInstructor.full_name || 'מדריך', dateString: currentDate, lessons })
-      : buildInstructorDayMessage({ instructorName: sourceInstructor.full_name || 'מדריך', dateString: currentDate, lessons });
+      ? buildInstructorWeekMessage({ instructorName: sourceInstructor.full_name || 'מדריך', dateString: currentDate, lessons, breaks: instructorBreaks })
+      : buildInstructorDayMessage({ instructorName: sourceInstructor.full_name || 'מדריך', dateString: currentDate, lessons, breaks: instructorBreaks });
 
     setWhatsAppCompose({
       mode,
@@ -345,7 +360,7 @@ export default function CalendarPage() {
       phone: sourceInstructor.phone || '',
       message,
     });
-  }, [currentDate, instructors, instances, selectedInstance, viewMode]);
+  }, [breaks, currentDate, instructors, instances, selectedInstance, viewMode]);
   const handleFixAvailabilityIssue = useCallback((issue) => {
     if (!issue?.instructorId || !issue?.focusServiceId) {
       toast.error('לא נמצא שירות מתאים לתיקון הזמינות.');
@@ -409,10 +424,26 @@ export default function CalendarPage() {
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex flex-wrap items-center gap-3">
               <h1 className="shrink-0 text-lg font-semibold text-neutral-900">לוח זמנים</h1>
-              <Button onClick={handleOpenBlankCreateLesson} className="gap-2">
-                <Plus className="h-4 w-4" />
-                שיעור חדש
-              </Button>
+              {/* Split button: primary = new lesson, dropdown = new break */}
+              <div className="flex">
+                <Button onClick={handleOpenBlankCreateLesson} className="gap-2 rounded-e-none border-e-0">
+                  <Plus className="h-4 w-4" />
+                  שיעור חדש
+                </Button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button className="rounded-s-none px-2" data-testid="calendar-add-break-trigger">
+                      <ChevronDown className="h-4 w-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem onClick={() => setShowAddBreakDialog(true)}>
+                      <Coffee className="me-2 h-4 w-4" />
+                      הוסף הפסקה
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
               <Button variant="outline" onClick={() => setShowGenerationDialog(true)} className="gap-2">
                 <Wand2 className="h-4 w-4" />
                 יצירה מתבניות
@@ -516,6 +547,7 @@ export default function CalendarPage() {
                   currentDate={currentDate}
                   viewMode={viewMode}
                   instances={instances}
+                  breaks={breaks}
                   instructors={instructors}
                   isLoading={isCalendarLoading}
                   calendarNavigationRef={calendarNavigationRef}
@@ -528,6 +560,8 @@ export default function CalendarPage() {
                   onOpenInstructorWhatsApp={openInstructorWhatsApp}
                   emptyState={workspaceSummary.emptyState}
                   onEmptyStateAction={handleCalendarEmptyStateAction}
+                  onBreakUpdated={refetchBreaks}
+                  onBreakClick={setSelectedBreak}
                 />
               </div>
             </div>
@@ -613,6 +647,22 @@ export default function CalendarPage() {
         introMessage={availabilityFixIssue?.blocksVisibility
           ? 'למדריך/ה אין חלונות זמינות מוגדרים לשירות זה, ולכן הוא/היא לא מופיעים כרגע בלוח.'
           : 'לשירות זה חסרה זמינות מוגדרת. אפשר לעדכן כאן ולהמשיך לעבוד בלוח.'}
+      />
+
+      <AddBreakDialog
+        open={showAddBreakDialog}
+        onClose={() => setShowAddBreakDialog(false)}
+        onSuccess={handleBreakAdded}
+        instructors={instructors}
+        defaultDate={currentDate}
+      />
+
+      <EditBreakDialog
+        open={selectedBreak !== null}
+        breakItem={selectedBreak}
+        instructorName={instructors.find((i) => String(i.id) === String(selectedBreak?.instructor_employee_id))?.full_name || ''}
+        onClose={() => setSelectedBreak(null)}
+        onSuccess={() => { setSelectedBreak(null); refetchBreaks(); }}
       />
     </div>
   );

@@ -284,6 +284,99 @@ function validateNoEnglishProseError(filePath, source, response) {
   }
 }
 
+// ─── Rule: respondTracked must not be used for 2xx success responses ────────
+//
+// respondTracked routes through respondTrackedError when error-tracking is
+// attached.  That pipeline normalises the HTTP status into the 4xx/5xx range,
+// generates a support code, inserts into error_events, and returns
+// { message, error_id } instead of the actual data — so callers see a
+// support-code error even on a fully successful operation.
+// Use plain respond() for 2xx; reserve respondTracked for 4xx/5xx paths.
+//
+function collectRespondTrackedCalls(source) {
+  const calls = [];
+  let searchFrom = 0;
+
+  while (searchFrom < source.length) {
+    const callIndex = source.indexOf('respondTracked(', searchFrom);
+    if (callIndex === -1) break;
+
+    // Skip respondTrackedError — that's the correct error helper
+    const charAfter = source.slice(callIndex + 'respondTracked('.length - 1, callIndex + 'respondTrackedError('.length);
+    if (charAfter.startsWith('Error(')) {
+      searchFrom = callIndex + 'respondTracked('.length;
+      continue;
+    }
+
+    const openIndex = source.indexOf('(', callIndex);
+    const closeIndex = findMatchingDelimiter(source, openIndex, '(', ')');
+    if (closeIndex === -1) {
+      searchFrom = callIndex + 'respondTracked('.length;
+      continue;
+    }
+
+    const args = splitTopLevelArgs(source.slice(openIndex + 1, closeIndex));
+    const status = parseStatus(args[1]);
+    if (status !== null) {
+      calls.push({ status, args, index: callIndex });
+    }
+    searchFrom = closeIndex + 1;
+  }
+
+  return calls;
+}
+
+function validateRespondTrackedNotUsedFor2xx(filePath, source) {
+  const calls = collectRespondTrackedCalls(source);
+  for (const call of calls) {
+    if (call.status >= 200 && call.status <= 299) {
+      const line = lineNumberFor(source, call.index);
+      errors.push(
+        `${toRepoPath(filePath)}:${line}: respondTracked() called with ${call.status} — ` +
+        `use respond() for success responses. respondTracked routes through respondTrackedError ` +
+        `when error-tracking is attached, which overwrites the status and returns a support-code ` +
+        `error payload instead of the actual data.`,
+      );
+    }
+  }
+}
+
+// ─── Rule: attachErrorTracking must receive req and supabase ─────────────────
+//
+// attachErrorTracking(context) with only one argument sets up no supabase
+// client.  respondTracked then detects no tracking client and silently
+// degrades to respond(), meaning error events are never stored and
+// support-code diagnostics are silently skipped.
+//
+function validateAttachErrorTrackingArgs(filePath, source) {
+  let searchFrom = 0;
+
+  while (searchFrom < source.length) {
+    const callIndex = source.indexOf('attachErrorTracking(', searchFrom);
+    if (callIndex === -1) break;
+
+    const openIndex = source.indexOf('(', callIndex);
+    const closeIndex = findMatchingDelimiter(source, openIndex, '(', ')');
+    if (closeIndex === -1) {
+      searchFrom = callIndex + 'attachErrorTracking('.length;
+      continue;
+    }
+
+    const args = splitTopLevelArgs(source.slice(openIndex + 1, closeIndex));
+    // Needs at least: context, req, supabase  (3 args minimum)
+    if (args.length < 3) {
+      const line = lineNumberFor(source, callIndex);
+      errors.push(
+        `${toRepoPath(filePath)}:${line}: attachErrorTracking() called with only ${args.length} arg(s). ` +
+        `It requires (context, req, supabase[, options]) — without req and a supabase client, ` +
+        `error events are never persisted and respondTracked silently skips tracking.`,
+      );
+    }
+
+    searchFrom = closeIndex + 1;
+  }
+}
+
 async function validateFile(filePath) {
   const source = await readFile(filePath, 'utf8');
   const repoPath = toRepoPath(filePath);
@@ -301,6 +394,9 @@ async function validateFile(filePath) {
     validateTracked5xxForCriticalFunctions(filePath, source, response, trackedFunctionRanges);
     validateNoEnglishProseError(filePath, source, response);
   }
+
+  validateRespondTrackedNotUsedFor2xx(filePath, source);
+  validateAttachErrorTrackingArgs(filePath, source);
 }
 
 async function main() {

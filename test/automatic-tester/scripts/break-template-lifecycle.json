@@ -1,0 +1,285 @@
+{
+  "meta": {
+    "id": "break-template-lifecycle",
+    "name": "Break Templates — CRUD + UI",
+    "description": "Full lifecycle test for recurring break templates: API CRUD (create, read, update, soft-deactivate) via direct API calls, then UI smoke test — navigate to the Templates page, open AddBreakTemplateDialog via the 'הפסקה חדשה' button, verify all required fields are present, and cancel.",
+    "version": "1.0.0",
+    "last_validated_at": "2026-05-27T12:00:00Z",
+    "author": "claude-ai",
+    "dependencies": {
+      "routes": [
+        "/calendar/templates"
+      ],
+      "api_endpoints": [
+        "GET /api/instructors",
+        "POST /api/instructor-break-templates",
+        "GET /api/instructor-break-templates",
+        "PUT /api/instructor-break-templates",
+        "DELETE /api/instructor-break-templates"
+      ]
+    }
+  },
+  "config": {
+    "timeout_ms": 15000,
+    "screenshot_on_failure": true,
+    "continue_on_step_failure": false,
+    "continue_on_workflow_failure": true
+  },
+  "variables": {},
+
+  "workflows": [
+
+    {
+      "id": "login",
+      "name": "Login as Admin",
+      "steps": [
+        {
+          "id": "do-login",
+          "description": "Sign in with admin credentials",
+          "action": "login",
+          "role": "admin"
+        },
+        {
+          "id": "assert-dashboard",
+          "description": "Confirm landing on dashboard",
+          "action": "assert",
+          "type": "url",
+          "pattern": "#/dashboard"
+        },
+        {
+          "id": "screenshot",
+          "action": "screenshot",
+          "name": "01-dashboard"
+        }
+      ]
+    },
+
+    {
+      "id": "resolve-instructor",
+      "name": "Resolve Test Instructor",
+      "description": "Fetch the instructor roster and store the first instructor employee ID for use in API tests.",
+      "steps": [
+        {
+          "id": "get-instructors",
+          "description": "GET /api/instructors and store the first employee ID",
+          "action": "apiCall",
+          "method": "GET",
+          "endpoint": "/api/instructors",
+          "store": "INSTRUCTOR_ID",
+          "storeField": "0.id"
+        },
+        {
+          "id": "screenshot",
+          "action": "screenshot",
+          "name": "02-instructor-resolved"
+        }
+      ]
+    },
+
+    {
+      "id": "api-crud",
+      "name": "Break Templates — API CRUD",
+      "description": "Create a recurring break template via POST, verify it appears in GET, update it via PUT, then soft-deactivate it via DELETE.",
+      "steps": [
+        {
+          "id": "create-break-template",
+          "description": "POST /api/instructor-break-templates — create a Monday 30-minute break template",
+          "action": "apiCall",
+          "method": "POST",
+          "endpoint": "/api/instructor-break-templates",
+          "body": {
+            "instructor_employee_id": "{{INSTRUCTOR_ID}}",
+            "day_of_week": "monday",
+            "time_of_day": "10:00",
+            "duration_minutes": 30,
+            "break_type": "break",
+            "note": "בדיקה אוטומטית {{RUN_ID}}"
+          },
+          "store": "BREAK_TEMPLATE_ID",
+          "storeField": "id"
+        },
+        {
+          "id": "screenshot-after-create",
+          "action": "screenshot",
+          "name": "03-break-template-created"
+        },
+        {
+          "id": "get-break-templates",
+          "description": "GET /api/instructor-break-templates — verify the created template is returned",
+          "action": "apiCall",
+          "method": "GET",
+          "endpoint": "/api/instructor-break-templates?instructor_employee_id={{INSTRUCTOR_ID}}"
+        },
+        {
+          "id": "update-break-template",
+          "description": "PUT /api/instructor-break-templates — update duration and note",
+          "action": "apiCall",
+          "method": "PUT",
+          "endpoint": "/api/instructor-break-templates",
+          "body": {
+            "id": "{{BREAK_TEMPLATE_ID}}",
+            "duration_minutes": 45,
+            "break_type": "meeting",
+            "note": "עדכון בדיקה {{RUN_ID}}"
+          }
+        },
+        {
+          "id": "screenshot-after-update",
+          "action": "screenshot",
+          "name": "04-break-template-updated"
+        },
+        {
+          "id": "delete-break-template",
+          "description": "DELETE /api/instructor-break-templates — soft-deactivate by ID (sets is_active=false)",
+          "action": "apiCall",
+          "method": "DELETE",
+          "endpoint": "/api/instructor-break-templates?id={{BREAK_TEMPLATE_ID}}",
+          "ignoreStatus": [204]
+        },
+        {
+          "id": "screenshot-after-delete",
+          "action": "screenshot",
+          "name": "05-break-template-deactivated"
+        },
+        {
+          "id": "get-after-deactivate",
+          "description": "GET with show_inactive=true — verify the deactivated template is still returned",
+          "action": "apiCall",
+          "method": "GET",
+          "endpoint": "/api/instructor-break-templates?instructor_employee_id={{INSTRUCTOR_ID}}&show_inactive=true"
+        }
+      ]
+    },
+
+    {
+      "id": "templates-ui",
+      "name": "Template Manager UI — AddBreakTemplateDialog smoke test",
+      "description": "Navigate to the Templates page, click 'הפסקה חדשה', verify the AddBreakTemplateDialog opens with all required fields, then cancel.",
+      "steps": [
+        {
+          "id": "navigate-templates",
+          "description": "Navigate to the Template Manager page",
+          "action": "navigate",
+          "url": "{{BASE_URL}}/#/calendar/templates"
+        },
+        {
+          "id": "wait-for-page",
+          "description": "Wait for the template page main content to appear",
+          "action": "waitForSelector",
+          "selector": "main, [role='main']"
+        },
+        {
+          "id": "assert-url",
+          "action": "assert",
+          "type": "url",
+          "pattern": "#/calendar/templates"
+        },
+        {
+          "id": "screenshot-templates",
+          "action": "screenshot",
+          "name": "06-templates-page"
+        },
+        {
+          "id": "wait-for-new-break-button",
+          "description": "Wait for the 'הפסקה חדשה' button to appear in the toolbar",
+          "action": "waitForSelector",
+          "selector": "button:has-text('הפסקה חדשה')"
+        },
+        {
+          "id": "click-new-break-button",
+          "description": "Click the 'הפסקה חדשה' toolbar button",
+          "action": "click",
+          "selector": "button:has-text('הפסקה חדשה')"
+        },
+        {
+          "id": "wait-for-dialog",
+          "description": "Wait for the AddBreakTemplateDialog to open",
+          "action": "waitForSelector",
+          "selector": "[role='dialog']"
+        },
+        {
+          "id": "assert-dialog-title",
+          "description": "Verify the dialog title is 'הוסף תבנית הפסקה'",
+          "action": "assert",
+          "type": "text",
+          "selector": "[role='dialog'] [data-slot='dialog-title'], [role='dialog'] h2",
+          "value": "הוסף תבנית הפסקה"
+        },
+        {
+          "id": "assert-instructor-select",
+          "description": "Verify the instructor select field is visible",
+          "action": "assert",
+          "type": "visible",
+          "selector": "#brt-instructor"
+        },
+        {
+          "id": "assert-day-select",
+          "description": "Verify the day-of-week select field is visible",
+          "action": "assert",
+          "type": "visible",
+          "selector": "#brt-day"
+        },
+        {
+          "id": "assert-time-input",
+          "description": "Verify the time input is visible",
+          "action": "assert",
+          "type": "visible",
+          "selector": "#brt-time"
+        },
+        {
+          "id": "assert-break-type-select",
+          "description": "Verify the break type selector is visible",
+          "action": "assert",
+          "type": "visible",
+          "selector": "#brt-type"
+        },
+        {
+          "id": "screenshot-dialog-open",
+          "action": "screenshot",
+          "name": "07-add-break-template-dialog"
+        },
+        {
+          "id": "close-dialog",
+          "description": "Close the dialog by clicking the Cancel button",
+          "action": "click",
+          "selector": "[role='dialog'] button:has-text('ביטול')"
+        },
+        {
+          "id": "wait-for-dialog-close",
+          "description": "Verify the dialog closes",
+          "action": "waitForSelector",
+          "selector": "[role='dialog']",
+          "state": "hidden"
+        },
+        {
+          "id": "screenshot-after-close",
+          "action": "screenshot",
+          "name": "08-dialog-closed"
+        }
+      ]
+    },
+
+    {
+      "id": "logout",
+      "name": "Logout",
+      "steps": [
+        {
+          "id": "do-logout",
+          "action": "logout"
+        },
+        {
+          "id": "assert-login-page",
+          "action": "assert",
+          "type": "url",
+          "pattern": "#/login"
+        },
+        {
+          "id": "screenshot",
+          "action": "screenshot",
+          "name": "09-logged-out"
+        }
+      ]
+    }
+
+  ]
+}

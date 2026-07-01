@@ -20,6 +20,10 @@ import ResendOtpDialog from '@/features/students/components/ResendOtpDialog.jsx'
 import SendRequiredFormDialog from '@/features/students/components/SendRequiredFormDialog.jsx';
 import { toast } from '@/lib/toast.jsx';
 import { findQuestionLabel, normalizeFormSchema } from '@/features/forms/lib/form-schema.js';
+import {
+  buildFormAccessWhatsAppMessage,
+  buildWaitingListInviteWhatsAppMessage,
+} from '@/lib/whatsapp-message-templates.js';
 
 const WAITING_LIST_RELATIONSHIP_LABELS = {
   self: 'התלמיד/ה עצמו/ה',
@@ -65,44 +69,34 @@ function buildSubmissionLink({ accessIdentifier = '', otp = '' } = {}) {
   return `${origin}/#/submit${query ? `?${query}` : ''}`;
 }
 
-function buildWhatsAppLink(phone, otp, submitLink, accessIdentifier, formName, expiresAt) {
+function buildWhatsAppLink(phone, otp, submitLink, accessIdentifier, formName, expiresAt, organizationName) {
   const normalizedPhone = normalizeWaPhone(phone);
   const expiryText = formatDateTime(expiresAt);
-  const message = [
-    'שלום,',
-    '',
-    `שם הטופס למילוי: ${formName || 'טופס'}`,
-    '',
-    'מצורף קישור למילוי טופס:',
+  const message = buildFormAccessWhatsAppMessage({
+    formName,
     submitLink,
-    '',
-    `מזהה גישה: ${accessIdentifier}`,
-    `קוד אימות: ${otp}`,
-    `תוקף הקישור עד: ${expiryText}`,
-    '',
-    'אפשר לפתוח את הקישור ולשלוח את הטופס.',
-  ].join('\n');
+    accessIdentifier,
+    otp,
+    expiresText: expiryText,
+    organizationName,
+  });
   return {
     normalizedPhone,
     url: `https://wa.me/${normalizedPhone}?text=${encodeURIComponent(message)}`,
   };
 }
 
-function buildWaitingListInviteWhatsAppLink(phone, inviteUrl, formName, expiresAt, studentName = '', serviceName = '') {
+function buildWaitingListInviteWhatsAppLink(phone, inviteUrl, formName, expiresAt, studentName = '', serviceName = '', organizationName = '') {
   const normalizedPhone = normalizeWaPhone(phone);
   const expiryText = formatDateTime(expiresAt);
-  const message = [
-    `שלום${studentName ? ` ${studentName}` : ''},`,
-    '',
-    'שמחים שיצרתם קשר איתנו.',
-    serviceName
-      ? `כדי שנוכל לקדם את הבקשה להצטרפות לשירות ${serviceName}, נשמח שתמלאו את טופס ההצטרפות בקישור הבא:`
-      : `כדי שנוכל לקדם את ההצטרפות, נשמח שתמלאו את ${formName || 'טופס רשימת המתנה'} בקישור הבא:`,
+  const message = buildWaitingListInviteWhatsAppMessage({
     inviteUrl,
-    '',
-    expiryText ? `הקישור זמין עד ${expiryText}.` : '',
-    'אם יש שאלות, אפשר לחזור אלינו בהודעה חוזרת.',
-  ].filter(Boolean).join('\n');
+    expiresText: expiryText,
+    formName,
+    serviceName,
+    studentName,
+    organizationName,
+  });
 
   return {
     normalizedPhone,
@@ -499,6 +493,7 @@ export default function SubjectFormsTab({
           expiresAt,
           studentName,
           String(response?.desired_service_name || ''),
+          activeOrg?.name,
         );
         window.open(wa.url, '_blank', 'noopener,noreferrer');
         toast.success('קישור רשימת ההמתנה נוצר מחדש ונפתחה הודעת וואטסאפ');
@@ -512,7 +507,7 @@ export default function SubjectFormsTab({
         }
 
         const submitLink = buildSubmissionLink({ accessIdentifier, otp });
-        const wa = buildWhatsAppLink(phone, otp, submitLink, accessIdentifier, submission?.form_name || 'טופס', expiresAt);
+        const wa = buildWhatsAppLink(phone, otp, submitLink, accessIdentifier, submission?.form_name || 'טופס', expiresAt, activeOrg?.name);
         window.open(wa.url, '_blank', 'noopener,noreferrer');
         toast.success('OTP נוצר מחדש ונפתחה הודעת וואטסאפ');
       }
@@ -530,7 +525,7 @@ export default function SubjectFormsTab({
     } finally {
       setResendState({ submissionId: '', deliveryMethod: '' });
     }
-  }, [activeOrgId, loadSubmissions, session, subject?.identity_number, subject?.national_id]);
+  }, [activeOrg?.name, activeOrgId, loadSubmissions, session, subject?.identity_number, subject?.national_id]);
 
   const submissionsWithMeta = useMemo(() => submissions.map((submission) => ({
     ...submission,

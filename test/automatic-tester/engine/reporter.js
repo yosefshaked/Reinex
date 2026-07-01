@@ -91,8 +91,7 @@ function renderStepRow(step) {
     </tr>`;
 }
 
-function renderWorkflow(wf, scriptId, wfIndex) {
-  const detailId = `wf-${scriptId}-${wfIndex}`;
+function renderWorkflow(wf) {
   const stepRows = wf.steps.map(renderStepRow).join('');
   const passCount = wf.steps.filter(s => s.status === 'pass').length;
   const failCount = wf.steps.filter(s => s.status === 'fail').length;
@@ -128,7 +127,6 @@ function renderScript(sr) {
     .join('');
 
   const passWf = sr.workflows.filter(w => w.status === 'pass').length;
-  const failWf = sr.workflows.filter(w => w.status === 'fail').length;
 
   return `
     <section class="script-section">
@@ -144,17 +142,15 @@ function renderScript(sr) {
 // ─── Summary bar ─────────────────────────────────────────────────────────
 
 function renderSummary(runResults, timestamp) {
-  let totalWf = 0, passWf = 0, failWf = 0;
-  let totalSteps = 0, passSteps = 0, failSteps = 0;
+  let passWf = 0, failWf = 0;
+  let totalSteps = 0, passSteps = 0;
 
   for (const sr of runResults) {
     for (const wf of sr.workflows) {
-      totalWf++;
       if (wf.status === 'pass') passWf++; else failWf++;
       for (const s of wf.steps) {
         totalSteps++;
         if (s.status === 'pass') passSteps++;
-        else if (s.status === 'fail') failSteps++;
       }
     }
   }

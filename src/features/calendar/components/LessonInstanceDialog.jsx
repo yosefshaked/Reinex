@@ -31,6 +31,7 @@ import {
 } from '../utils/schedulingOverride.js';
 import { getParticipantDisplayName, resolveParticipantReminderContact } from '../utils/participantDisplay.js';
 import { getLessonOpenActions } from '../utils/calendarWorkspace.js';
+import { buildLessonReminderWhatsAppMessage } from '@/lib/whatsapp-message-templates.js';
 
 const DEFAULT_BILLING_POLICY = {
   attended: true,
@@ -752,13 +753,13 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
     const dayDate = formatReminderDayDate(lessonInstance.datetime_start);
     const time = formatTimeDisplay(lessonInstance.datetime_start);
     const service = lessonInstance.service?.service_name || 'אצלנו';
-    return [
-      `שלום,`,
-      `רצינו להזכיר שיש ל${studentName} מפגש ${service}.`,
-      `ניפגש ב${dayDate} בשעה ${time}.`,
-      'נשמח לאישור הגעתך.',
-      'תודה רבה!',
-    ].join('\n');
+    return buildLessonReminderWhatsAppMessage({
+      studentName,
+      serviceName: service,
+      dayDate,
+      time,
+      organizationName: org?.name,
+    });
   }
 
   function resolveReminderContact(participant) {
