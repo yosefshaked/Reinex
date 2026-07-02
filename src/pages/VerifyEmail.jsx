@@ -16,13 +16,13 @@ export default function VerifyEmail() {
 
       if (!tokenHash || !type) {
         setStatus('error');
-        setErrorMessage('Invalid verification link. Missing required parameters.');
+        setErrorMessage('קישור האימות אינו תקין — חסרים בו פרטים נדרשים. בקשו קישור חדש ונסו שוב.');
         return;
       }
 
       if (!authClient) {
         setStatus('error');
-        setErrorMessage('Authentication service is not available.');
+        setErrorMessage('שירות ההתחברות אינו זמין כרגע. המתינו רגע ונסו שוב.');
         return;
       }
 
@@ -43,14 +43,13 @@ export default function VerifyEmail() {
             navigate('/', { replace: true });
           }, 2000);
         } else {
-          throw new Error('Verification completed but no user data returned.');
+          throw new Error('האימות הסתיים אך לא התקבלו פרטי המשתמש. נסו להתחבר מחדש.');
         }
       } catch (error) {
         console.error('Email verification failed:', error);
         setStatus('error');
-        setErrorMessage(
-          error.message || 'Failed to verify email. The link may have expired or is invalid.'
-        );
+        // Show a plain-Hebrew message rather than the raw (English) Supabase error.
+        setErrorMessage('אימות המייל נכשל. ייתכן שהקישור פג תוקף או אינו תקין — בקשו קישור חדש ונסו שוב.');
       }
     }
 
@@ -61,7 +60,7 @@ export default function VerifyEmail() {
     <div style={styles.container}>
       <div style={styles.card}>
         <div style={styles.logoContainer}>
-          <img src="/icon.svg" alt="Logo" style={styles.logo} />
+          <img src="/icon.svg" alt="Reinex" style={styles.logo} />
         </div>
 
         {status === 'verifying' && (

@@ -196,7 +196,7 @@ export default function LocalExportImportManager({ session, orgId }) {
         <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
           <div className="mb-2 flex items-center gap-2 font-semibold">
             <AlertTriangle className="h-4 w-4" />
-            מגבלות חשובות לשלב MVP
+            מגבלות חשובות בגרסה הנוכחית
           </div>
           <ul className="list-inside list-disc space-y-1 leading-relaxed">
             <li>הייצוא המקומי אינו מחליף גיבוי תשתיתי, גיבוי ספק או תהליך שחזור מלא.</li>
@@ -214,7 +214,7 @@ export default function LocalExportImportManager({ session, orgId }) {
                 יוצר קובץ JSON מסונן לארגון הנוכחי בלבד. הייצוא אינו כולל סודות מערכת או קבצים בינאריים.
               </p>
             </div>
-            <Badge variant="outline" className="shrink-0 border-slate-300 text-slate-700">Admin/Owner</Badge>
+            <Badge variant="outline" className="shrink-0 border-slate-300 text-slate-700">מנהל/בעלים</Badge>
           </div>
           <Button onClick={handleExport} disabled={!canAct || exportState === REQUEST.loading} className="gap-xs">
             {exportState === REQUEST.loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
@@ -230,7 +230,7 @@ export default function LocalExportImportManager({ session, orgId }) {
                 הייבוא מתבצע בשני שלבים: קודם בדיקה וספירה, ורק לאחר אישור מפורש הכנסת רשומות חדשות לארגון הנוכחי.
               </p>
             </div>
-            <Badge variant="outline" className="shrink-0 border-slate-300 text-slate-700">Dry-run first</Badge>
+            <Badge variant="outline" className="shrink-0 border-slate-300 text-slate-700">בדיקה לפני ייבוא</Badge>
           </div>
 
           <div className="grid gap-sm sm:grid-cols-[1fr_auto] sm:items-end">

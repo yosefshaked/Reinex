@@ -142,7 +142,7 @@ export default function LogoManager({ session, orgId }) {
           <div className="space-y-sm">
             <Label className="text-slate-700">לוגו נוכחי</Label>
             <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 flex items-center justify-center">
-              <img src={logoUrl} alt="Organization Logo" className="max-h-32 max-w-full object-contain" />
+              <img src={logoUrl} alt="לוגו הארגון" className="max-h-32 max-w-full object-contain" />
             </div>
             <div className="text-xs text-slate-500 break-all">
               <strong>URL:</strong> {logoUrl}

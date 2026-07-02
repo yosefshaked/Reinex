@@ -447,7 +447,7 @@ export default function Settings() {
   if (loading || !authClient) {
     return (
       <div className="p-6 text-center text-slate-500">
-        טוען חיבור Supabase...
+        טוען את חיבור המערכת...
       </div>
     );
   }

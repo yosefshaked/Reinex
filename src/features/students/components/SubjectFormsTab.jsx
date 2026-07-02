@@ -473,7 +473,7 @@ export default function SubjectFormsTab({
         || String(response?.mode || '').toLowerCase() === 'waiting_list_intake';
 
       if (deliveryMethod === 'email') {
-        toast.success(isWaitingListInvite ? 'קישור רשימת ההמתנה נשלח מחדש במייל' : 'OTP נשלח מחדש במייל');
+        toast.success(isWaitingListInvite ? 'קישור רשימת ההמתנה נשלח מחדש במייל' : 'קוד האימות החד-פעמי נשלח מחדש במייל');
       } else if (isWaitingListInvite) {
         const inviteUrl = String(response?.invite_url || '');
         const phone = String(response?.phone || '');

@@ -1241,7 +1241,7 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
                       ) : getEmployeeType(currentEmployee) !== 'instructor' ? (
                         <EmptyState title="אין לו״ז למשרה משרדית" body="כרטיס זה לא משויך ללוח שיעורים של מדריך." />
                       ) : (
-                        <MonthGroup groups={upcomingMonthGroups} services={services} emptyTitle="אין שיעורים מתוכננים" emptyBody="לא נמצאו מופעי lesson_instances עתידיים בטווח הטעינה הנוכחי." />
+                        <MonthGroup groups={upcomingMonthGroups} services={services} emptyTitle="אין שיעורים מתוכננים" emptyBody="לא נמצאו שיעורים עתידיים בטווח הטעינה הנוכחי." />
                       )}
                     </SectionCard>
 
@@ -1276,9 +1276,9 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
                     {instancesLoading ? (
                       <div className="flex items-center gap-2 text-sm text-slate-500"><Loader2 className="h-4 w-4 animate-spin" />טוען היסטוריה...</div>
                     ) : getEmployeeType(currentEmployee) !== 'instructor' ? (
-                      <EmptyState title="אין היסטוריית שיעורים" body="כרטיס זה אינו משויך ל-history של lesson_instances." />
+                      <EmptyState title="אין היסטוריית שיעורים" body="כרטיס זה אינו משויך להיסטוריית שיעורים." />
                     ) : (
-                      <MonthGroup groups={historyMonthGroups} services={services} emptyTitle="אין היסטוריית שיעורים" emptyBody="לא נמצאו completed / no_show בטווח הטעינה הנוכחי." />
+                      <MonthGroup groups={historyMonthGroups} services={services} emptyTitle="אין היסטוריית שיעורים" emptyBody="לא נמצאו שיעורים שהתקיימו או שהתלמיד לא הגיע אליהם בטווח הטעינה הנוכחי." />
                     )}
                   </SectionCard>
                 </TabsContent>

@@ -49,7 +49,7 @@ function EmptyState({ canCreate, onCreate }) {
             <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 flex items-start gap-3 text-sm text-blue-900" role="status">
               <AlertCircle className="w-4 h-4 mt-0.5" aria-hidden="true" />
               <p>
-                לאחר יצירת הארגון ניתן יהיה להגדיר את חיבור ה-Supabase ולצרף מנהלים נוספים מתוך מסך ההגדרות.
+                לאחר יצירת הארגון ניתן יהיה להגדיר את חיבור המערכת ולצרף מנהלים נוספים מתוך מסך ההגדרות.
               </p>
             </div>
           </>

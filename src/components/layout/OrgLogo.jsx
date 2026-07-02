@@ -68,7 +68,7 @@ export default function OrgLogo({ className = '' }) {
   return (
     <img 
       src={logoUrl} 
-      alt="Organization Logo" 
+      alt="לוגו הארגון"
       className={`h-12 w-12 rounded-2xl object-contain bg-white p-1 ${className}`}
     />
   );

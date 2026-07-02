@@ -5,6 +5,7 @@ import { useSupabase } from '@/context/SupabaseContext.jsx';
 import AuthLayout from '@/components/layouts/AuthLayout.jsx';
 import { buildInvitationSearch, extractRegistrationTokens } from '@/lib/invite-tokens.js';
 import { getInvitationByToken } from '@/api/invitations.js';
+import { hebrewMessageOrFallback } from '@/lib/errorText.js';
 
 export default function CompleteRegistrationPage() {
   const location = useLocation();
@@ -141,7 +142,7 @@ export default function CompleteRegistrationPage() {
         const message =
           error?.message === 'Password should be at least 6 characters'
             ? 'הסיסמה חייבת להכיל לפחות 6 תווים.'
-            : error?.message || 'שמירת הסיסמה נכשלה. נסה שוב או בחר סיסמה אחרת.';
+            : hebrewMessageOrFallback(error?.message, 'שמירת הסיסמה נכשלה. נסה שוב או בחר סיסמה אחרת.');
         setPasswordError(message);
         return;
       }

@@ -33,7 +33,7 @@ export default function AuthLayout({ children, cardClassName = '', contentClassN
             <nav className="mt-5 flex flex-wrap justify-center gap-4 text-xs text-slate-500">
               <Link to="/legal/terms" className="underline-offset-4 hover:text-blue-700 hover:underline">תנאי שימוש</Link>
               <Link to="/legal/privacy" className="underline-offset-4 hover:text-blue-700 hover:underline">מדיניות פרטיות</Link>
-              <Link to="/legal/cookies" className="underline-offset-4 hover:text-blue-700 hover:underline">Cookies ואחסון בדפדפן</Link>
+              <Link to="/legal/cookies" className="underline-offset-4 hover:text-blue-700 hover:underline">עוגיות ואחסון בדפדפן</Link>
             </nav>
           </div>
         </main>

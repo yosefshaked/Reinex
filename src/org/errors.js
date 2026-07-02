@@ -28,8 +28,11 @@ export function mapSupabaseError(error) {
     return 'אין הרשאה לביצוע הפעולה.';
   }
 
-  if (error && typeof error.message === 'string' && error.message.trim()) {
-    return error.message.trim();
+  // Pass the message through only when it's already Hebrew (our mapped API errors);
+  // raw English Supabase text falls back to the generic Hebrew message.
+  const trimmed = error && typeof error.message === 'string' ? error.message.trim() : '';
+  if (trimmed && /[֐-׿]/.test(trimmed)) {
+    return trimmed;
   }
 
   return 'קרתה תקלה ביצירת הארגון.';

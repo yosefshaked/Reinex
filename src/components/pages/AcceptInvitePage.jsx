@@ -15,6 +15,7 @@ import { useAccount } from '@/account/AccountContext.jsx';
 import { useAuth } from '@/auth/AuthContext.jsx';
 import { acceptInvitation, declineInvitation, getInvitationByToken } from '@/api/invitations.js';
 import { buildInvitationSearch, extractRegistrationTokens } from '@/lib/invite-tokens.js';
+import { hebrewMessageOrFallback } from '@/lib/errorText.js';
 import { useOrg } from '@/org/OrgContext.jsx';
 
 const STATUS_LOADING = 'loading';
@@ -68,7 +69,7 @@ export default function AcceptInvitePage() {
           return;
         }
         console.error('Failed to load invitation by token', error);
-        const message = error?.message || 'טעינת ההזמנה נכשלה. נסה שוב מאוחר יותר.';
+        const message = hebrewMessageOrFallback(error?.message, 'טעינת ההזמנה נכשלה. נסה שוב מאוחר יותר.');
         setLoadError(message);
         setStatus(STATUS_ERROR);
       });
@@ -138,7 +139,7 @@ export default function AcceptInvitePage() {
       setInvitation((previous) => (previous ? { ...previous, status: 'accepted' } : previous));
     } catch (error) {
       console.error('Failed to accept invitation', error);
-      setActionError(error?.message || 'אישור ההזמנה נכשל. נסה שוב מאוחר יותר.');
+      setActionError(hebrewMessageOrFallback(error?.message, 'אישור ההזמנה נכשל. נסה שוב מאוחר יותר.'));
     } finally {
       setActionState('idle');
     }
@@ -157,7 +158,7 @@ export default function AcceptInvitePage() {
       setInvitation((previous) => (previous ? { ...previous, status: 'declined' } : previous));
     } catch (error) {
       console.error('Failed to decline invitation', error);
-      setActionError(error?.message || 'דחיית ההזמנה נכשלה. נסה שוב מאוחר יותר.');
+      setActionError(hebrewMessageOrFallback(error?.message, 'דחיית ההזמנה נכשלה. נסה שוב מאוחר יותר.'));
     } finally {
       setActionState('idle');
     }

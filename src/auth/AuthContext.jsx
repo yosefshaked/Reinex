@@ -82,10 +82,10 @@ export function AuthProvider({ children }) {
 
   const ensureAuthClient = useCallback(() => {
     if (loading) {
-      throw new Error('Supabase authentication is still initializing.');
+      throw new Error('המערכת עדיין נטענת. המתינו רגע ונסו שוב.');
     }
     if (!authClient) {
-      throw new Error('Supabase authentication client is unavailable.');
+      throw new Error('שירות ההתחברות אינו זמין כרגע. רעננו את הדף ונסו שוב.');
     }
     return authClient;
   }, [authClient, loading]);

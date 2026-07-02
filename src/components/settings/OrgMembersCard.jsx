@@ -324,7 +324,7 @@ export default function OrgMembersCard() {
           <div className="flex-1">
             <CardTitle className="text-xl font-semibold text-slate-900">חברי ארגון</CardTitle>
             <p className="text-sm text-slate-600 mt-2">
-              כל המשתמשים בארגון חולקים את אותו חיבור Supabase. מנהלים יכולים להזמין ולנהל חברים נוספים.
+              כל המשתמשים בארגון חולקים את אותו חיבור למערכת. מנהלים יכולים להזמין ולנהל חברים נוספים.
             </p>
             {/* Deprecation Notice */}
             <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg">
