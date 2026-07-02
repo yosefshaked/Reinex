@@ -3,8 +3,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge.jsx';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
-import { Plus, LayoutTemplate, Wand2, PanelRight, ChevronDown, Coffee } from 'lucide-react';
+import { Plus, LayoutTemplate, Wand2, ChevronDown, Coffee } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { DateNavigator } from '../components/CalendarHeader/DateNavigator.jsx';
@@ -15,7 +14,7 @@ import { useCalendarInstances, useCalendarInstructors, useInstructorBreaks } fro
 import AddBreakDialog from '../components/AddBreakDialog';
 import EditBreakDialog from '../components/EditBreakDialog';
 import ReinexFullCalendar from '../components/ReinexFullCalendar';
-import CalendarWorkspaceDock from '../components/CalendarWorkspaceDock.jsx';
+import CalendarServicePalette from '../components/CalendarServicePalette.jsx';
 import InstructorWhatsAppDialog from '../components/InstructorWhatsAppDialog.jsx';
 import EditServiceCapabilitiesDialog from '@/components/settings/employee-management/EditServiceCapabilitiesDialog.jsx';
 import { useOrg } from '@/org/OrgContext.jsx';
@@ -66,7 +65,6 @@ export default function CalendarPage() {
   const [pendingServiceId, setPendingServiceId] = useState('');
   const [whatsAppCompose, setWhatsAppCompose] = useState(null);
   const [availabilityFixIssue, setAvailabilityFixIssue] = useState(null);
-  const [mobileDockOpen, setMobileDockOpen] = useState(false);
   const [showAddBreakDialog, setShowAddBreakDialog] = useState(false);
   const [selectedBreak, setSelectedBreak] = useState(null);
 
@@ -188,13 +186,6 @@ export default function CalendarPage() {
     setShowInstanceDialog(false);
   }, [instances, instancesLoading, selectedInstance?.id]);
 
-  const clearSelections = useCallback(() => {
-    setPendingSlotSelection(null);
-    setPendingServiceId('');
-    setSelectedInstance(null);
-    setShowInstanceDialog(false);
-  }, []);
-
   useEffect(() => {
     setPendingSlotSelection(null);
     setPendingServiceId('');
@@ -211,17 +202,6 @@ export default function CalendarPage() {
   const handleCloseDialog = () => {
     setShowInstanceDialog(false);
   };
-
-  const handleOpenSelectedLesson = useCallback(() => {
-    if (selectedInstance) {
-      setShowInstanceDialog(true);
-    }
-  }, [selectedInstance]);
-
-  const handleOpenCreateLesson = useCallback(() => {
-    setPendingServiceId('');
-    setShowAddDialog(true);
-  }, []);
 
   const handleOpenBlankCreateLesson = useCallback(() => {
     setPendingSlotSelection(null);
@@ -302,18 +282,6 @@ export default function CalendarPage() {
     setShowAddDialog(true);
   }, []);
 
-  const selectedSlotSummary = useMemo(() => {
-    if (!pendingSlotSelection?.start || !pendingSlotSelection?.end) {
-      return null;
-    }
-
-    const instructor = instructors.find((entry) => String(entry.id) === String(pendingSlotSelection.resourceId || ''));
-    return {
-      ...pendingSlotSelection,
-      startDateString: toLocalDateString(pendingSlotSelection.start),
-      instructorName: instructor?.full_name || 'מדריך/ה',
-    };
-  }, [instructors, pendingSlotSelection]);
   const availabilityFixInstructor = useMemo(
     () => instructors.find((instructor) => String(instructor.id) === String(availabilityFixIssue?.instructorId || '')) || null,
     [availabilityFixIssue?.instructorId, instructors],
@@ -373,19 +341,6 @@ export default function CalendarPage() {
     setAvailabilityFixIssue(null);
     refetchInstructors();
   }, [refetchInstructors]);
-
-  const handleOpenAttentionItem = useCallback((item) => {
-    if (item?.availabilityIssue) {
-      handleFixAvailabilityIssue(item.availabilityIssue);
-      return;
-    }
-
-    if (item?.instance) {
-      setPendingSlotSelection(null);
-      setSelectedInstance(item.instance);
-      setShowInstanceDialog(false);
-    }
-  }, [handleFixAvailabilityIssue]);
 
   const handleCalendarEmptyStateAction = useCallback((action, payload = null) => {
     if (action === 'fix_availability') {
@@ -452,6 +407,7 @@ export default function CalendarPage() {
                 <LayoutTemplate className="h-4 w-4" />
                 תבניות
               </Button>
+              <CalendarServicePalette triggerClassName="gap-2" />
             </div>
 
             <div className="flex justify-center lg:flex-1">
@@ -476,16 +432,6 @@ export default function CalendarPage() {
               <Badge variant="outline" className="rounded-full border-slate-200 bg-slate-50 text-slate-700">
                 דורש תשומת לב: {workspaceSummary.attentionCount}
               </Badge>
-              {/* Workspace toggle — visible only below lg where the dock is hidden */}
-              <Button
-                variant="outline"
-                size="sm"
-                className="lg:hidden"
-                onClick={() => setMobileDockOpen(true)}
-              >
-                <PanelRight className="h-4 w-4 ms-1" />
-                מרכז תפעול
-              </Button>
             </div>
           </div>
         </div>
@@ -524,25 +470,9 @@ export default function CalendarPage() {
       {!instructorsError && !instancesError ? (
         <div className="min-h-0 flex-1 overflow-hidden px-4 pb-4 pt-3">
           <div className="mx-auto h-full" style={{ maxWidth: "min(1680px, calc(100vw - 1.5rem))" }}>
-            <div className="grid h-full gap-4 lg:grid-cols-[20rem_minmax(0,1fr)]">
-              {/* Dock — hidden below lg; shown as side panel on lg+ */}
-              <div className="hidden lg:block min-h-0 overflow-y-auto lg:pe-1">
-                <CalendarWorkspaceDock
-                  currentDate={currentDate}
-                  viewMode={viewMode}
-                  summary={workspaceSummary}
-                  selectedInstance={selectedInstance}
-                  selectedSlot={selectedSlotSummary}
-                  onClearSelection={clearSelections}
-                  onOpenCreateLesson={handleOpenCreateLesson}
-                  onOpenSelectedLesson={handleOpenSelectedLesson}
-                  onOpenInstructorWhatsApp={openInstructorWhatsApp}
-                  onOpenAttentionItem={handleOpenAttentionItem}
-                />
-              </div>
-
-              {/* Calendar card — fills remaining height */}
-              <div className="flex min-h-0 flex-col rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="h-full">
+              {/* Calendar card — full width now the operations dock is gone */}
+              <div className="flex h-full min-h-0 flex-col rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
                 <ReinexFullCalendar
                   currentDate={currentDate}
                   viewMode={viewMode}
@@ -568,27 +498,6 @@ export default function CalendarPage() {
           </div>
         </div>
       ) : null}
-
-      {/* Mobile/tablet workspace dock — drawer accessible via top-bar button below lg */}
-      <Sheet open={mobileDockOpen} onOpenChange={setMobileDockOpen}>
-        <SheetContent side="right" className="w-[22rem] max-w-full overflow-y-auto p-4">
-          <SheetHeader className="mb-4">
-            <SheetTitle>מרכז תפעול</SheetTitle>
-          </SheetHeader>
-          <CalendarWorkspaceDock
-            currentDate={currentDate}
-            viewMode={viewMode}
-            summary={workspaceSummary}
-            selectedInstance={selectedInstance}
-            selectedSlot={selectedSlotSummary}
-            onClearSelection={() => { clearSelections(); setMobileDockOpen(false); }}
-            onOpenCreateLesson={() => { handleOpenCreateLesson(); setMobileDockOpen(false); }}
-            onOpenSelectedLesson={() => { handleOpenSelectedLesson(); setMobileDockOpen(false); }}
-            onOpenInstructorWhatsApp={openInstructorWhatsApp}
-            onOpenAttentionItem={(item) => { handleOpenAttentionItem(item); setMobileDockOpen(false); }}
-          />
-        </SheetContent>
-      </Sheet>
 
       <LessonInstanceDialog
         instance={selectedInstance}

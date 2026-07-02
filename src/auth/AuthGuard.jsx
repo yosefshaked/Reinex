@@ -60,7 +60,12 @@ export default function AuthGuard() {
   const requiresOrgCreation = orgStatus === 'needs-org';
   const requiresOrgSelection = orgStatus === 'needs-selection';
 
-  if (requiresOrgCreation && location.pathname !== '/select-org') {
+  // Never yank the user off the setup/reactivation pages to go create an org —
+  // a brand-new account has BOTH needsSetup=true and orgStatus='needs-org', and
+  // without this exemption the two rules ping-pong (/account/setup ⇄ /select-org)
+  // in an infinite replace-navigation loop (white screen + Chrome nav throttling).
+  // Account setup completes first; only then does the org redirect apply.
+  if (requiresOrgCreation && location.pathname !== '/select-org' && !exemptFromSetup) {
     return <Navigate to="/select-org" replace state={{ from: location }} />;
   }
 

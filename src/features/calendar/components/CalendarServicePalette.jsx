@@ -26,7 +26,7 @@ function toDurationString(totalMinutes) {
   return `${String(hours).padStart(2, '0')}:${String(remainder).padStart(2, '0')}`;
 }
 
-export default function CalendarServicePalette() {
+export default function CalendarServicePalette({ triggerClassName = 'w-full justify-between' }) {
   const draggableRef = useRef(null);
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
@@ -121,7 +121,7 @@ export default function CalendarServicePalette() {
         <PopoverTrigger asChild>
           <Button
             variant={open ? 'default' : 'outline'}
-            className="w-full justify-between"
+            className={triggerClassName}
           >
             <span className="flex items-center gap-2">
               <Sparkles className="h-4 w-4" />

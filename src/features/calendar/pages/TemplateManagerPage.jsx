@@ -39,6 +39,13 @@ const EMPTY_WAITING_MATCHES = {
   candidates: [],
 };
 
+// The templates page opens on the day matching the user's browser "today" (falling
+// back to Sunday), so the most relevant day shows first without needing a query param.
+function getBrowserDayToken() {
+  const jsDay = new Date().getDay();
+  return DAY_OPTIONS.find((day) => day.jsDay === jsDay)?.value || 'sunday';
+}
+
 function formatWaitDays(days) {
   const value = Number(days) || 0;
   if (value <= 0) return 'נוסף היום';
@@ -107,8 +114,11 @@ export default function TemplateManagerPage() {
   const [showInactive, setShowInactive] = useState(false);
   const [showUnavailable, setShowUnavailable] = useState(false);
   const [showWaitingMatches, setShowWaitingMatches] = useState(() => searchParams.get('waiting_matches') !== '0');
-  const [templateViewMode, setTemplateViewMode] = useState(() => (searchParams.get('view') === 'day' ? 'day' : 'week'));
-  const [selectedDay, setSelectedDay] = useState(() => searchParams.get('day') || 'sunday');
+  const [templateViewMode, setTemplateViewMode] = useState(() => (searchParams.get('view') === 'week' ? 'week' : 'day'));
+  const [selectedDay, setSelectedDay] = useState(() => {
+    const param = searchParams.get('day');
+    return DAY_OPTIONS.some((day) => day.value === param) ? param : getBrowserDayToken();
+  });
   const [waitingMatches, setWaitingMatches] = useState({
     capacity: EMPTY_WAITING_MATCHES,
     clear_space: EMPTY_WAITING_MATCHES,
@@ -168,9 +178,9 @@ export default function TemplateManagerPage() {
     if (searchParams.has('waiting_matches')) {
       setShowWaitingMatches(searchParams.get('waiting_matches') !== '0');
     }
-    setTemplateViewMode(searchParams.get('view') === 'day' ? 'day' : 'week');
-    const nextDay = searchParams.get('day') || 'sunday';
-    setSelectedDay(DAY_OPTIONS.some((day) => day.value === nextDay) ? nextDay : 'sunday');
+    setTemplateViewMode(searchParams.get('view') === 'week' ? 'week' : 'day');
+    const nextDay = searchParams.get('day');
+    setSelectedDay(DAY_OPTIONS.some((day) => day.value === nextDay) ? nextDay : getBrowserDayToken());
   }, [searchParams]);
 
   useEffect(() => {
