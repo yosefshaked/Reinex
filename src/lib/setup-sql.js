@@ -1100,6 +1100,16 @@ CREATE TABLE IF NOT EXISTS public."Services" (
 ALTER TABLE public."Services"
   ADD COLUMN IF NOT EXISTS required_forms jsonb NOT NULL DEFAULT '[]'::jsonb;
 
+-- Migration: add report_form_id (per-service session-report template) to Services
+-- (Session Reports Phase 2; see implementations/session-reports/implementation-plan.md)
+-- NOTE: the foreign key to forms(id) is added later via ALTER TABLE, after the
+-- forms table is defined (forms is created after Services in this file).
+ALTER TABLE public."Services"
+  ADD COLUMN IF NOT EXISTS report_form_id uuid NULL;
+
+CREATE INDEX IF NOT EXISTS services_report_form_id_idx
+  ON public."Services" (org_id, report_form_id) WHERE report_form_id IS NOT NULL;
+
 
 -- -----------------------------------------------------------------
 -- public.RateHistory (rate tracking per employee/service/date)
@@ -2466,6 +2476,29 @@ ALTER TABLE public.forms
   ADD CONSTRAINT forms_form_usage_check
     CHECK (form_usage IN ('general','waiting_list_intake','required_form'));
 
+-- Migration: expand form_usage to include session_report
+-- (Session Reports Phase 2; see implementations/session-reports/implementation-plan.md)
+UPDATE public.forms
+SET form_usage = COALESCE(NULLIF(form_usage, ''), 'general')
+WHERE form_usage IS NULL OR form_usage = '';
+
+ALTER TABLE public.forms
+  DROP CONSTRAINT IF EXISTS forms_form_usage_check,
+  ADD CONSTRAINT forms_form_usage_check
+    CHECK (form_usage IN ('general','waiting_list_intake','required_form','session_report'));
+
+-- Deferred FK: Services.report_form_id -> public.forms(id) (added here because
+-- public.forms is defined after public.Services in this file; see Services block above)
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'Services_report_form_id_fkey'
+  ) THEN
+    ALTER TABLE public."Services"
+      ADD CONSTRAINT "Services_report_form_id_fkey" FOREIGN KEY (report_form_id) REFERENCES public.forms(id);
+  END IF;
+END $$;
+
 
 CREATE INDEX IF NOT EXISTS forms_is_active_idx ON public.forms (org_id, is_active);
 CREATE INDEX IF NOT EXISTS forms_form_usage_idx ON public.forms (org_id, form_usage);
@@ -2579,6 +2612,27 @@ ALTER TABLE public.form_submissions
 
 CREATE INDEX IF NOT EXISTS form_submissions_service_id_idx
   ON public.form_submissions (org_id, service_id) WHERE service_id IS NOT NULL;
+
+-- Migration: session-report anchoring — lesson_participant_id, form_version, is_legacy
+-- (Session Reports Phase 2; see implementations/session-reports/implementation-plan.md)
+ALTER TABLE public.form_submissions
+  ADD COLUMN IF NOT EXISTS lesson_participant_id uuid NULL
+    REFERENCES public.lesson_participants(id);
+
+ALTER TABLE public.form_submissions
+  ADD COLUMN IF NOT EXISTS form_version int NULL;
+
+ALTER TABLE public.form_submissions
+  ADD COLUMN IF NOT EXISTS is_legacy boolean NOT NULL DEFAULT false;
+
+CREATE INDEX IF NOT EXISTS form_submissions_lesson_participant_id_idx
+  ON public.form_submissions (org_id, lesson_participant_id)
+  WHERE lesson_participant_id IS NOT NULL;
+
+-- Enforce: at most one non-legacy report per lesson_participant_id (Invariant)
+CREATE UNIQUE INDEX IF NOT EXISTS form_submissions_report_participant_uidx
+  ON public.form_submissions (lesson_participant_id)
+  WHERE lesson_participant_id IS NOT NULL AND is_legacy = false;
 
 -- -----------------------------------------------------------------
 -- public.otp_challenges
@@ -4623,6 +4677,16 @@ INSERT INTO public.permission_registry (
     'true'::jsonb,
     'features',
     false
+  ),
+  (
+    'session_reports_enabled',
+    'Session Reports',
+    'דיווחי מפגשים',
+    'Allow organization instructors to document lesson sessions via session reports',
+    'אפשר למדריכי הארגון לתעד מפגשי שיעורים באמצעות דיווחי מפגשים',
+    'false'::jsonb,
+    'features',
+    true
   ),
   (
     'storage_access_level',

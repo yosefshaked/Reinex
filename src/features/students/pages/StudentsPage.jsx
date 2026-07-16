@@ -29,11 +29,10 @@ import { useStudentTags } from '@/features/students/hooks/useStudentTags.js';
 import { STUDENT_SORT_OPTIONS } from '@/features/students/utils/sorting.js';
 import { saveFilterState, loadFilterState } from '@/features/students/utils/filter-state.js';
 import { normalizeMembershipRole, isAdminRole } from '@/features/students/utils/endpoints.js';
-import { fetchLooseSessions } from '@/features/sessions/api/loose-sessions.js';
 import MyPendingReportsCard from '@/features/sessions/components/MyPendingReportsCard.jsx';
 import { formatStudentName } from '@/features/students/utils/name-utils.js';
 import { toAgorot } from '@/lib/currency.js';
-import { isSessionRecordsEnabled } from '@/features/sessions/config/session-records.js';
+import { useSessionReportsEnabled } from '@/features/sessions/config/session-reports-permission.js';
 
 function getPaymentSourceBadge(source) {
   const type = String(source?.type || '').toLowerCase();
@@ -83,7 +82,7 @@ export default function StudentsPage() {
   const [pendingReportsCount, setPendingReportsCount] = useState(0); // Count of loose reports awaiting assignment
   const [pendingReportsDialogOpen, setPendingReportsDialogOpen] = useState(false); // For instructor's pending reports dialog
   const [canViewInactive, setCanViewInactive] = useState(false); // For instructors - permission to view inactive students
-  const sessionRecordsEnabled = isSessionRecordsEnabled();
+  const sessionReportsEnabled = useSessionReportsEnabled();
 
   // Mobile fix: prevent Dialog close when Select is open/closing
   const openSelectCountRef = useRef(0);
@@ -148,24 +147,24 @@ export default function StudentsPage() {
   }, [canFetch, isAdmin, activeOrgId, session]);
 
   const fetchPendingReportsCount = useCallback(async () => {
-    if (!canFetch || !sessionRecordsEnabled) {
+    if (!canFetch || !sessionReportsEnabled) {
       setPendingReportsCount(0);
       return;
     }
 
     try {
-      const reports = await fetchLooseSessions({ orgId: activeOrgId, session });
-      // Count only pending reports (not rejected, not accepted)
-      const pendingOnly = Array.isArray(reports) 
-        ? reports.filter(r => !r.student_id && !r.deleted && !r.isRejected)
-        : [];
-      setPendingReportsCount(pendingOnly.length);
+      const payload = await authenticatedFetch('session-reports', {
+        session,
+        params: { org_id: activeOrgId, mode: 'pending', scope: isAdmin ? 'all' : 'mine', page: 1 },
+      });
+      const items = Array.isArray(payload?.items) ? payload.items : [];
+      setPendingReportsCount(items.length);
     } catch (error) {
       console.error('Failed to load pending reports count', error);
       // Don't show error toast - this is supplementary data
       setPendingReportsCount(0);
     }
-  }, [canFetch, activeOrgId, session, sessionRecordsEnabled]);
+  }, [canFetch, activeOrgId, session, sessionReportsEnabled, isAdmin]);
 
   const refreshRoster = useCallback(async () => {
     const promises = [
@@ -578,7 +577,7 @@ export default function StudentsPage() {
                 {isAdmin ? 'רשימת תלמידים' : 'רשימת התלמידים שלי'}
               </CardTitle>
               <div className="flex items-center gap-2">
-                {isAdmin && sessionRecordsEnabled && (
+                {isAdmin && sessionReportsEnabled && (
                   <Button
                     type="button"
                     variant="outline"
@@ -594,7 +593,7 @@ export default function StudentsPage() {
                     )}
                   </Button>
                 )}
-                {!isAdmin && sessionRecordsEnabled && (
+                {!isAdmin && sessionReportsEnabled && (
                   <Button
                     type="button"
                     variant="outline"
@@ -961,13 +960,13 @@ export default function StudentsPage() {
       )}
 
       {/* Instructor-only: Pending Reports Dialog */}
-      {!isAdmin && sessionRecordsEnabled && (
+      {!isAdmin && sessionReportsEnabled && (
         <Dialog open={pendingReportsDialogOpen} onOpenChange={setPendingReportsDialogOpen}>
           <DialogContent className="sm:max-w-4xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>דיווחים ממתינים</DialogTitle>
             </DialogHeader>
-            <MyPendingReportsCard onResolve={() => void fetchPendingReportsCount()} />
+            <MyPendingReportsCard onCountChange={(count) => setPendingReportsCount(count)} />
           </DialogContent>
         </Dialog>
       )}

@@ -103,6 +103,23 @@ function normalizeOptionalJson(value) {
   return { value, valid: true };
 }
 
+function normalizeOptionalUuid(value) {
+  if (value === null || value === undefined || value === '') {
+    return { value: null, valid: true };
+  }
+  if (typeof value !== 'string') {
+    return { value: null, valid: false };
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return { value: null, valid: true };
+  }
+  if (!UUID_PATTERN.test(trimmed)) {
+    return { value: null, valid: false };
+  }
+  return { value: trimmed, valid: true };
+}
+
 function normalizeOptionalBoolean(value) {
   if (value === null || value === undefined || value === '') {
     return { value: null, valid: true };
@@ -183,7 +200,7 @@ export default async function services(context, req) {
 
   if (method === 'GET') {
     const { data, error } = await withOrgScope(supabase, 'Services', orgId)
-      .select('id, name, duration_minutes, payment_model, default_customer_charge_amount, color, is_active, metadata, required_forms')
+      .select('id, name, duration_minutes, payment_model, default_customer_charge_amount, color, is_active, metadata, required_forms, report_form_id')
       .order('name', { ascending: true });
 
     if (error) {
@@ -241,6 +258,11 @@ export default async function services(context, req) {
       return respond(context, 400, { message: 'invalid_required_forms' });
     }
 
+    const reportFormIdResult = normalizeOptionalUuid(body?.report_form_id ?? body?.reportFormId);
+    if (!reportFormIdResult.valid) {
+      return respond(context, 400, { message: 'invalid_report_form_id' });
+    }
+
     const { data, error } = await withOrgScope(supabase, 'Services', orgId)
       .insert({
         name,
@@ -251,8 +273,9 @@ export default async function services(context, req) {
         is_active: isActiveResult.value === null ? true : isActiveResult.value,
         metadata: metadataResult.value,
         required_forms: requiredFormsResult.value ?? [],
+        report_form_id: reportFormIdResult.value,
       })
-      .select('id, name, duration_minutes, payment_model, default_customer_charge_amount, color, is_active, metadata, required_forms')
+      .select('id, name, duration_minutes, payment_model, default_customer_charge_amount, color, is_active, metadata, required_forms, report_form_id')
       .single();
 
     if (error) {
@@ -342,6 +365,14 @@ export default async function services(context, req) {
       updates.required_forms = requiredFormsResult.value ?? [];
     }
 
+    if (Object.prototype.hasOwnProperty.call(body, 'report_form_id') || Object.prototype.hasOwnProperty.call(body, 'reportFormId')) {
+      const reportFormIdResult = normalizeOptionalUuid(body?.report_form_id ?? body?.reportFormId);
+      if (!reportFormIdResult.valid) {
+        return respond(context, 400, { message: 'invalid_report_form_id' });
+      }
+      updates.report_form_id = reportFormIdResult.value;
+    }
+
     if (Object.keys(updates).length === 0) {
       return respond(context, 400, { message: 'missing_updates' });
     }
@@ -349,7 +380,7 @@ export default async function services(context, req) {
     const { data, error } = await withOrgScope(supabase, 'Services', orgId)
       .update(updates)
       .eq('id', serviceId)
-      .select('id, name, duration_minutes, payment_model, default_customer_charge_amount, color, is_active, metadata, required_forms')
+      .select('id, name, duration_minutes, payment_model, default_customer_charge_amount, color, is_active, metadata, required_forms, report_form_id')
       .maybeSingle();
 
     if (error) {

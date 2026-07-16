@@ -37,6 +37,7 @@ import {
   normalizeLessonInstanceStatus,
 } from '../_shared/lesson-instance-status.js';
 import { attachErrorTracking, respondTracked } from '../_shared/error-events.js';
+import { findBlockingReportParticipantIds } from '../_shared/session-reports-guards.js';
 
 function respondLessonInstanceError(context, status, message, error, metadata = {}) {
   return respondTracked(context, status, { message }, undefined, {
@@ -716,6 +717,45 @@ export default async function lessonInstances(context, req) {
         return respond(context, 400, { message: 'invalid_status' });
       }
       if (nextStatus === 'cancelled') {
+        // E2 (session-reports LOCKED policy): block cancelling a lesson while any of
+        // its participants has a non-legacy report on file. See
+        // implementations/session-reports/implementation-plan.md.
+        const { data: guardParticipantRows, error: guardParticipantRowsError } = await withOrgScope(supabase, 'lesson_participants', orgId)
+          .select('id')
+          .eq('lesson_instance_id', lessonInstanceId);
+
+        if (guardParticipantRowsError) {
+          context.log?.error?.('lesson-instances failed to load participants for session-report guard', {
+            message: guardParticipantRowsError.message,
+            lessonInstanceId,
+          });
+          return respondLessonInstanceError(context, 500, 'failed_to_cancel_instance', guardParticipantRowsError, {
+            action: 'load_participants_for_session_report_guard',
+            lesson_instance_id: lessonInstanceId,
+          });
+        }
+
+        let guardBlockingReportIds;
+        try {
+          guardBlockingReportIds = await findBlockingReportParticipantIds(
+            supabase,
+            orgId,
+            (guardParticipantRows || []).map((row) => row.id),
+          );
+        } catch (guardError) {
+          context.log?.error?.('lesson-instances failed to check session-report guard', { message: guardError?.message, lessonInstanceId });
+          return respondLessonInstanceError(context, 500, 'failed_to_cancel_instance', guardError, {
+            action: 'check_session_report_guard',
+            lesson_instance_id: lessonInstanceId,
+          });
+        }
+        if (guardBlockingReportIds.length) {
+          return respond(context, 409, {
+            message: 'report_has_documentation',
+            documented_participant_ids: guardBlockingReportIds,
+          });
+        }
+
         try {
           const cancellationResult = await cancelLessonInstanceWithParticipants(supabase, {
             orgId,
@@ -1287,6 +1327,31 @@ export default async function lessonInstances(context, req) {
         participantsByInstanceId.set(participant.lesson_instance_id, []);
       }
       participantsByInstanceId.get(participant.lesson_instance_id).push(participant.id);
+    }
+
+    // E1 (session-reports LOCKED policy): block bulk-cancelling any participant that
+    // already has a non-legacy report on file. See
+    // implementations/session-reports/implementation-plan.md.
+    let bulkCancelBlockingReportIds;
+    try {
+      bulkCancelBlockingReportIds = await findBlockingReportParticipantIds(
+        client,
+        orgId,
+        matchedParticipants.map((p) => p.id),
+      );
+    } catch (guardError) {
+      context.log?.error?.('lesson-instances bulk-cancel failed to check session-report guard', { message: guardError?.message });
+      return respondLessonInstanceError(context, 500, 'failed_to_cancel_participants', guardError, {
+        action: 'check_session_report_guard_bulk_cancel',
+        student_id: studentId || null,
+        client_profile_id: clientProfileId || null,
+      });
+    }
+    if (bulkCancelBlockingReportIds.length) {
+      return respond(context, 409, {
+        message: 'report_has_documentation',
+        documented_participant_ids: bulkCancelBlockingReportIds,
+      });
     }
 
     const uniqueInstanceIds = [...participantsByInstanceId.keys()];

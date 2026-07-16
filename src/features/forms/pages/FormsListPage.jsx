@@ -46,6 +46,13 @@ function getDraftDefaultsByUsage(usage) {
     };
   }
 
+  if (usage === 'session_report') {
+    return {
+      name: 'דוח מפגש חדש',
+      description: 'טופס שממלא המדריך לתיעוד מפגש.',
+    };
+  }
+
   return {
     name: 'טופס כללי חדש',
     description: 'טופס כללי למילוי ושליחת מידע נוסף.',
@@ -115,7 +122,8 @@ export default function FormsListPage() {
       const generalDefaults = getDraftDefaultsByUsage('general');
       const waitingListDefaults = getDraftDefaultsByUsage('waiting_list_intake');
       const requiredFormDefaults = getDraftDefaultsByUsage('required_form');
-      if (!prev.trim() || prev === generalDefaults.name || prev === waitingListDefaults.name || prev === requiredFormDefaults.name) {
+      const sessionReportDefaults = getDraftDefaultsByUsage('session_report');
+      if (!prev.trim() || prev === generalDefaults.name || prev === waitingListDefaults.name || prev === requiredFormDefaults.name || prev === sessionReportDefaults.name) {
         return defaults.name;
       }
       return prev;
@@ -124,7 +132,8 @@ export default function FormsListPage() {
       const generalDefaults = getDraftDefaultsByUsage('general');
       const waitingListDefaults = getDraftDefaultsByUsage('waiting_list_intake');
       const requiredFormDefaults = getDraftDefaultsByUsage('required_form');
-      if (!prev.trim() || prev === generalDefaults.description || prev === waitingListDefaults.description || prev === requiredFormDefaults.description) {
+      const sessionReportDefaults = getDraftDefaultsByUsage('session_report');
+      if (!prev.trim() || prev === generalDefaults.description || prev === waitingListDefaults.description || prev === requiredFormDefaults.description || prev === sessionReportDefaults.description) {
         return defaults.description;
       }
       return prev;
@@ -209,6 +218,7 @@ export default function FormsListPage() {
   function getUsageLabel(value) {
     if (value === 'waiting_list_intake') return 'טופס רשימת המתנה';
     if (value === 'required_form') return 'טופס חובה';
+    if (value === 'session_report') return 'דוח מפגש';
     return 'טופס כללי';
   }
 
@@ -327,7 +337,7 @@ export default function FormsListPage() {
                     {form.description || '—'}
                   </TableCell>
                   <TableCell className="text-center">
-                    <Badge variant={form.form_usage === 'waiting_list_intake' ? 'default' : form.form_usage === 'required_form' ? 'secondary' : 'outline'}>
+                    <Badge variant={form.form_usage === 'waiting_list_intake' ? 'default' : form.form_usage === 'required_form' || form.form_usage === 'session_report' ? 'secondary' : 'outline'}>
                       {getUsageLabel(form.form_usage)}
                     </Badge>
                   </TableCell>
@@ -427,6 +437,7 @@ export default function FormsListPage() {
                   <SelectItem value="general">טופס כללי</SelectItem>
                   <SelectItem value="waiting_list_intake">טופס רשימת המתנה</SelectItem>
                   <SelectItem value="required_form">טופס חובה</SelectItem>
+                  <SelectItem value="session_report">דוח מפגש</SelectItem>
                 </SelectContent>
               </Select>
             </div>
