@@ -189,7 +189,7 @@ async function createReport(context, req, { supabase, orgId, userId, role }) {
 
   // Load the participant.
   const { data: participant, error: participantError } = await withOrgScope(supabase, 'lesson_participants', orgId)
-    .select('id, lesson_instance_id, client_profile_id, student_id, participant_status, service_id')
+    .select('id, lesson_instance_id, client_profile_id, student_id, participant_status')
     .eq('id', lessonParticipantId)
     .maybeSingle();
 

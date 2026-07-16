@@ -104,6 +104,9 @@ export default function ServicesPage() {
   const [reportFormQuestions, setReportFormQuestions] = useState([]);
   const [loadingReportFormQuestions, setLoadingReportFormQuestions] = useState(false);
   const [newPreanswerDrafts, setNewPreanswerDrafts] = useState({});
+  // The preconfigured-answers editor lives in its own modal so the service form
+  // stays uncluttered; this only opens it.
+  const [preanswersDialogOpen, setPreanswersDialogOpen] = useState(false);
 
   // Gated specifically by session_form_preanswers_enabled (not the broader
   // session_reports_enabled) — see Phase 4 in implementations/session-reports/
@@ -113,6 +116,8 @@ export default function ServicesPage() {
     && Number(orgSettings.permissions.session_form_preanswers_cap) > 0
     ? Number(orgSettings.permissions.session_form_preanswers_cap)
     : 50;
+  const preanswersCount = Object.values(formValues.reportPreanswers || {})
+    .reduce((sum, arr) => sum + (Array.isArray(arr) ? arr.length : 0), 0);
 
   const canFetch = Boolean(session && activeOrgId);
 
@@ -215,6 +220,7 @@ export default function ServicesPage() {
     setEditRFEntry(EMPTY_NEW_REQUIRED_FORM);
     setNewPreanswerDrafts({});
     setReportFormQuestions([]);
+    setPreanswersDialogOpen(false);
     setDialogOpen(true);
     void loadAvailableRequiredForms();
     void loadAvailableReportForms();
@@ -228,6 +234,7 @@ export default function ServicesPage() {
     setEditingRFIndex(null);
     setEditRFEntry(EMPTY_NEW_REQUIRED_FORM);
     setNewPreanswerDrafts({});
+    setPreanswersDialogOpen(false);
     setDialogOpen(true);
     void loadAvailableRequiredForms();
     void loadAvailableReportForms();
@@ -889,18 +896,41 @@ export default function ServicesPage() {
               <p className="text-xs text-neutral-500">
                 ניתן לתעד מפגשים של שירות זה רק אם יוגדר לו טופס דיווח.
               </p>
+
+              {preanswersFeatureEnabled && formValues.reportFormId ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="w-full justify-between gap-2"
+                  onClick={() => setPreanswersDialogOpen(true)}
+                  disabled={isSubmitting}
+                >
+                  <span className="flex items-center gap-2">
+                    <Sparkles className="h-4 w-4" />
+                    תשובות מוכנות ארגוניות
+                  </span>
+                  {preanswersCount > 0 ? (
+                    <Badge variant="secondary">{preanswersCount}</Badge>
+                  ) : null}
+                </Button>
+              ) : null}
             </div>
 
-            {/* Preanswers Bank Section (Phase 4 — service-universal bank) */}
-            {preanswersFeatureEnabled && formValues.reportFormId ? (
-              <div className="space-y-3 rounded-lg border border-border p-3">
-                <div className="flex items-center gap-2">
-                  <Sparkles className="h-4 w-4 text-neutral-500" />
-                  <span className="text-sm font-medium text-foreground">תשובות מוכנות ארגוניות</span>
-                </div>
-                <p className="text-xs text-neutral-500">
-                  תשובות אלה יוצעו לכל המדריכים בעת מילוי דוח מפגש לשירות זה.
-                </p>
+            {/* Preanswers editor — its own modal (opened from the report-form section)
+                to keep the service form uncluttered (Phase 4 — service-universal bank). */}
+            <Dialog
+              open={preanswersDialogOpen && preanswersFeatureEnabled && Boolean(formValues.reportFormId)}
+              onOpenChange={setPreanswersDialogOpen}
+            >
+              <DialogContent className="sm:max-w-lg max-h-[85vh] overflow-y-auto">
+                <DialogHeader>
+                  <DialogTitle>תשובות מוכנות ארגוניות</DialogTitle>
+                  <DialogDescription>
+                    תשובות אלה יוצעו לכל המדריכים בעת מילוי דוח מפגש לשירות זה. השינויים יישמרו עם שמירת השירות.
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-3 rounded-lg border border-border p-3">
                 {loadingReportFormQuestions ? (
                   <div className="flex items-center gap-2 text-xs text-neutral-500">
                     <Loader2 className="h-3 w-3 animate-spin" />
@@ -965,8 +995,14 @@ export default function ServicesPage() {
                     );
                   })
                 )}
-              </div>
-            ) : null}
+                </div>
+                <div className="flex justify-end pt-2">
+                  <Button type="button" onClick={() => setPreanswersDialogOpen(false)}>
+                    סיום
+                  </Button>
+                </div>
+              </DialogContent>
+            </Dialog>
 
             <div className="flex items-center justify-between rounded-lg border border-border bg-muted/20 px-3 py-2">
               <div>

@@ -15,6 +15,8 @@ import {
   ThumbsUp,
   ThumbsDown,
   RotateCcw,
+  FileEdit,
+  FileCheck,
 } from 'lucide-react';
 import { getParticipantDisplayName } from '../utils/participantDisplay.js';
 
@@ -101,6 +103,10 @@ export function LessonParticipantRoster({
   groupPreviewImpacts,
   shortId,
   formatAgorotPreview,
+  sessionReportsEnabled = false,
+  reportsByParticipant = {},
+  lessonStarted = false,
+  onOpenSessionReport,
 }) {
   if (displayParticipants.length === 0) return null;
 
@@ -201,6 +207,19 @@ export function LessonParticipantRoster({
         // Show reminder zone only when appropriate: scheduled, has permission, not in a form
         const showReminderZone =
           showReminderActions && isScheduled && canManageAll && !isAbsenceFormOpen && !isRestorePreviewOpen;
+
+        // ── Session report affordance ─────────────────────────────
+        // A report can be filed once the lesson has started and the
+        // participant is attended/scheduled (not a no-show/cancellation).
+        // When one already exists we surface a "documented" marker instead.
+        const participantHasReport = Boolean(reportsByParticipant?.[participant.id]);
+        const reportEligible =
+          lessonStarted && ['attended', 'scheduled'].includes(participant.participant_status);
+        const showReportZone =
+          sessionReportsEnabled &&
+          (participantHasReport || reportEligible) &&
+          !isAbsenceFormOpen &&
+          !isRestorePreviewOpen;
 
         return (
           <article
@@ -352,6 +371,34 @@ export function LessonParticipantRoster({
                     </span>
                   )}
                 </div>
+              </div>
+            )}
+
+            {/* ── SESSION REPORT ZONE ─────────────────────────────── */}
+            {showReportZone && (
+              <div className="flex items-center justify-between gap-3 border-t border-indigo-100 bg-indigo-50/40 px-4 py-2.5">
+                {participantHasReport ? (
+                  <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-700">
+                    <FileCheck className="h-4 w-4" />
+                    דיווח מפגש מתועד
+                  </span>
+                ) : (
+                  <>
+                    <span className="inline-flex items-center gap-1.5 text-xs text-indigo-900/70">
+                      <FileEdit className="h-3.5 w-3.5" />
+                      טרם תועד דיווח מפגש
+                    </span>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      className="h-8 shrink-0 gap-1.5 text-xs"
+                      onClick={() => onOpenSessionReport?.(participant)}
+                    >
+                      <FileEdit className="h-3.5 w-3.5" />
+                      תעד דיווח
+                    </Button>
+                  </>
+                )}
               </div>
             )}
 
