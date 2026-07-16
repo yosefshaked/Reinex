@@ -158,7 +158,8 @@ export default function StudentsPage() {
         params: { org_id: activeOrgId, mode: 'pending', scope: isAdmin ? 'all' : 'mine', page: 1 },
       });
       const items = Array.isArray(payload?.items) ? payload.items : [];
-      setPendingReportsCount(items.length);
+      const total = Number(payload?.total);
+      setPendingReportsCount(Number.isFinite(total) && total >= 0 ? total : items.length);
     } catch (error) {
       console.error('Failed to load pending reports count', error);
       // Don't show error toast - this is supplementary data

@@ -2,10 +2,12 @@ import js from '@eslint/js'
 import globals from 'globals'
 import reactHooks from 'eslint-plugin-react-hooks'
 import reactRefresh from 'eslint-plugin-react-refresh'
+import progress from 'eslint-plugin-file-progress'
 import { defineConfig, globalIgnores } from 'eslint/config'
 import importPlugin from 'eslint-plugin-import'
 
 export default defineConfig([
+  progress.configs.recommended,
   globalIgnores(['dist']),
   {
     files: ['**/*.{js,jsx}'],

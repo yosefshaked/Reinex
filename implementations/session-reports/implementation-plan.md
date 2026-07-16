@@ -371,6 +371,13 @@ first, falling back to a passed-in current schema only when no snapshot exists (
 `form_version` is still stored and still useful for audit/debugging, but the snapshot — not a
 version-keyed schema lookup — is what actually drives rendering.
 
+**Post-handoff hardening (Codex, 2026-07-16):** report fill now resolves only the canonical
+`metadata.published_form_schema` contract (never the editable draft), resolves and materializes
+active shared blocks, and snapshots visibility and alert rules alongside the schema. The drawer
+uses the published visibility rules for rendering and validation, while `ReportView` reuses the
+captured visibility snapshot. Deactivated, legacy-published-but-not-migrated, cross-org, and
+non-`session_report` form assignments are rejected server-side.
+
 Verification: service with a report form → drawer shows it; submit stores versioned answers under
 `form_id`; bumping the form version leaves old reports rendering correctly against their version.
 Confirmed via code trace (no live DB in this pass, matching Phase 2's verification style): the
@@ -412,6 +419,9 @@ applies when no personal template exists; cap enforced (`session_form_preanswers
 server-side in both the picker's context payload and the personal-bank write endpoint). Confirmed
 via code trace (no live DB in this pass, matching Phases 2/3's verification style).
 
+Post-handoff hardening also applies the same cap to service-bank metadata in `api/services` and
+prevents "copy last report" from copying signature or approval answers into a new report.
+
 ---
 
 ## Phase 5 — "Pending reports" + enable end-to-end
@@ -419,8 +429,10 @@ via code trace (no live DB in this pass, matching Phases 2/3's verification styl
 - [x] Redefine pending: `lesson_participants` with `participant_status IN ('attended','scheduled')`
       on **past** lessons (`datetime_start <= now()`) whose service has a `report_form_id`, with
       **no** report `form_submissions` row yet. `GET /api/session-reports?mode=pending&scope=
-      mine|all&page=` in `api/session-reports/index.js` (`resolvePendingReports`) — paginated via
-      `.range()` (50/page), same `session_reports_disabled` gate as every other mode, `scope=all`
+      mine|all&page=` in `api/session-reports/index.js` (`resolvePendingReports`) — exact
+      report-excluding pagination (50/page) is performed by the org-scoped
+      `list_pending_session_reports` SQL function and returns a top-level `total`; the same
+      `session_reports_disabled` gate applies as every other mode, and `scope=all` is
       restricted to admin/office (403 otherwise). Drives the rewritten
       `src/features/sessions/pages/PendingReportsPage.jsx` and
       `src/features/sessions/components/MyPendingReportsCard.jsx` — both now open the existing
@@ -430,6 +442,10 @@ via code trace (no live DB in this pass, matching Phases 2/3's verification styl
       drift signal (`documented_unconfirmed` — reported but `participant_status` still
       `'scheduled'`) for admin/office, rendered as a modest dashed-border section on
       `PendingReportsPage.jsx`.
+      Post-handoff hardening fixed two edge cases in the original implementation: documented
+      participants are excluded before pagination/counting, and an admin/office user without a
+      linked `Employees` row receives an empty `scope=mine` result instead of accidentally seeing
+      the organization-wide queue.
 - [x] Wire the "דוחות" nav to it: `src/components/layout/Sidebar.jsx` gained a "דוחות מפגשים" item
       (`sessionReportsOnly: true`, filtered by `useSessionReportsEnabled()`); dashboard "my pending
       reports" card (`MyPendingReportsCard`) and `StudentsPage.jsx`'s own pending-count badge/dialog

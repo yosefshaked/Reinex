@@ -16,6 +16,8 @@ const REQUEST_STATE = Object.freeze({
   error: 'error',
 });
 
+const NON_ARRIVAL_STATUSES = new Set(['no_show', 'cancelled_student', 'cancelled_clinic']);
+
 function formatLessonDateTime(isoString) {
   if (!isoString) return '';
   try {
@@ -181,7 +183,18 @@ export default function NewSessionModal({
 
   const isLoadingContext = contextState === REQUEST_STATE.loading;
   const hasContextError = contextState === REQUEST_STATE.error;
-  const canRenderForm = !isLoadingContext && !hasContextError && Boolean(reportContext?.form) && !successReport;
+  const participantStatus = reportContext?.participant?.participant_status || '';
+  const lessonCancelled = reportContext?.lesson?.status === 'cancelled';
+  const lessonNotStarted = reportContext?.lesson && reportContext.lesson.has_started !== true;
+  const participantDidNotAttend = NON_ARRIVAL_STATUSES.has(participantStatus);
+  const canRenderForm = !isLoadingContext
+    && !hasContextError
+    && Boolean(reportContext?.form)
+    && !reportContext?.existing_report_id
+    && !lessonCancelled
+    && !lessonNotStarted
+    && !participantDidNotAttend
+    && !successReport;
 
   const footer = canRenderForm ? (
     <NewSessionFormFooter
@@ -233,15 +246,29 @@ export default function NewSessionModal({
           <div className="rounded-lg bg-amber-50 p-md text-sm text-amber-800" role="alert">
             כבר קיים דיווח עבור מפגש זה.
           </div>
+        ) : lessonCancelled ? (
+          <div className="rounded-lg bg-amber-50 p-md text-sm text-amber-800" role="alert">
+            לא ניתן לדווח על שיעור שבוטל.
+          </div>
+        ) : participantDidNotAttend ? (
+          <div className="rounded-lg bg-amber-50 p-md text-sm text-amber-800" role="alert">
+            לא ניתן לדווח עבור משתתף שסומן כמי שלא הגיע או שביטל.
+          </div>
+        ) : lessonNotStarted ? (
+          <div className="rounded-lg bg-amber-50 p-md text-sm text-amber-800" role="alert">
+            ניתן למלא דיווח רק לאחר תחילת המפגש.
+          </div>
         ) : (
           <NewSessionForm
             formSchema={reportContext.form.form_schema}
+            visibilityRules={reportContext.form.visibility_rules || []}
             answers={answers}
             onAnswersChange={setAnswers}
             onSubmit={handleSubmit}
             onCancel={onClose}
             isSubmitting={submitState === REQUEST_STATE.loading}
             error={submitError}
+            validationErrors={validationErrors}
             renderFooterOutside
             servicePreanswers={reportContext.preanswers?.service || null}
             personalPreanswers={personalPreanswers}

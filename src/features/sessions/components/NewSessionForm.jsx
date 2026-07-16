@@ -26,12 +26,14 @@ const PREANSWERABLE_TYPES = new Set(['short_text', 'long_text']);
  */
 export default function NewSessionForm({
   formSchema,
+  visibilityRules = [],
   answers,
   onAnswersChange,
   onSubmit,
   onCancel,
   isSubmitting = false,
   error = '',
+  validationErrors = {},
   renderFooterOutside = false,
   servicePreanswers = null,
   personalPreanswers = {},
@@ -44,8 +46,8 @@ export default function NewSessionForm({
   const [pickerFieldKey, setPickerFieldKey] = useState('');
 
   const visibleSections = useMemo(
-    () => (formSchema ? getVisibleSections(formSchema, [], answers) : []),
-    [formSchema, answers],
+    () => (formSchema ? getVisibleSections(formSchema, visibilityRules, answers) : []),
+    [formSchema, visibilityRules, answers],
   );
 
   const preanswerableQuestions = useMemo(() => {
@@ -115,9 +117,11 @@ export default function NewSessionForm({
 
       <SectionedFormRenderer
         schema={formSchema}
+        visibilityRules={visibilityRules}
         answers={answers}
         onAnswersChange={onAnswersChange}
         readOnly={isSubmitting}
+        validationErrors={validationErrors}
       />
 
       {error ? (

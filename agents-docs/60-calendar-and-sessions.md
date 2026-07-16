@@ -11,8 +11,9 @@
 - [`../src/features/calendar/components/`](../src/features/calendar/components/)
 - [`../src/features/calendar/utils/`](../src/features/calendar/utils/)
 - [`../src/features/sessions/pages/PendingReportsPage.jsx`](../src/features/sessions/pages/PendingReportsPage.jsx)
-- [`../src/features/sessions/api/loose-sessions.js`](../src/features/sessions/api/loose-sessions.js)
-- [`../src/features/sessions/utils/`](../src/features/sessions/utils/)
+- [`../src/features/sessions/components/NewSessionModal.jsx`](../src/features/sessions/components/NewSessionModal.jsx)
+- [`../src/features/sessions/components/ReportView.jsx`](../src/features/sessions/components/ReportView.jsx)
+- [`../src/features/sessions/config/session-reports-permission.js`](../src/features/sessions/config/session-reports-permission.js)
 - [`../api/calendar/index.js`](../api/calendar/index.js)
 - [`../api/calendar-attendance/index.js`](../api/calendar-attendance/index.js)
 - [`../api/calendar-corrections/index.js`](../api/calendar-corrections/index.js)
@@ -20,7 +21,7 @@
 - [`../api/lesson-instances/index.js`](../api/lesson-instances/index.js)
 - [`../api/lesson-templates/index.js`](../api/lesson-templates/index.js)
 - [`../api/lesson-template-overrides/index.js`](../api/lesson-template-overrides/index.js)
-- [`../api/loose-sessions/index.js`](../api/loose-sessions/index.js)
+- [`../api/session-reports/index.js`](../api/session-reports/index.js)
 - [`../api/_shared/BillingLedgerService.js`](../api/_shared/BillingLedgerService.js)
 - [`../api/_shared/calendar-editing.js`](../api/_shared/calendar-editing.js)
 - [`../api/_shared/calendar-workflow.js`](../api/_shared/calendar-workflow.js)
@@ -28,7 +29,7 @@
 - [`../api/_shared/calendar-workflow-decisions.js`](../api/_shared/calendar-workflow-decisions.js)
 - [`../api/_shared/lesson-instance-status.js`](../api/_shared/lesson-instance-status.js)
 - [`../api/_shared/session-metadata.js`](../api/_shared/session-metadata.js)
-- [`../api/_shared/version-lookup.js`](../api/_shared/version-lookup.js)
+- [`../api/_shared/session-reports-guards.js`](../api/_shared/session-reports-guards.js)
 
 ## Shared helpers to reuse
 - `useCalendarInstances`, `useCalendarInstructors`
@@ -38,10 +39,9 @@
 - `syncLessonClosureState`, correction helpers, lesson-status helpers
 - `enrichLessonInstancesWithHmoCoverage` in [`../api/_shared/calendar-hmo-coverage.js`](../api/_shared/calendar-hmo-coverage.js) for read-only calendar response enrichment of participant HMO coverage context.
 - `cancelLessonInstanceWithParticipants`, `completeLessonInstanceWithParticipants`, and `cancelSelectedScheduledParticipantsAndReconcileInstance` in [`../api/_shared/lesson-instance-status.js`](../api/_shared/lesson-instance-status.js) are RPC wrappers over org-scoped SQL functions and must always receive `orgId` alongside `instanceId`
-- `fetchLooseSessions`, `assignLooseSession`, `createAndAssignLooseSession`, `rejectLooseSession`
-- `buildSessionMetadata`, session form version helpers
+- `useSessionReportsEnabled`, `openSessionReportModal`
+- `findBlockingReportParticipantIds`, `hasBlockingReportForParticipants`
 - `normalizeWorkflowDecision`, `readParticipantWorkflowMetadata`, `shouldParticipantTriggerInstructorCompensation` in [`../api/_shared/calendar-workflow-decisions.js`](../api/_shared/calendar-workflow-decisions.js)
-- `extractQuestionsForVersion` in [`../api/_shared/version-lookup.js`](../api/_shared/version-lookup.js) — backend mirror of `src/features/sessions/utils/version-lookup.js`; keep both in sync
 
 ## Known patterns / do not reinvent
 - Calendar writes must enforce membership scope and instructor self-scope for non-admin users.
@@ -79,5 +79,8 @@
 - Template creation UI should also warn/block before submit when the selected instructor/day/time overlaps an existing active template; the backend remains the final source of truth for overlap enforcement.
 - Cancellation modal uses a server-backed preview action (`PUT /api/calendar/instances` with `action: 'preview-cancel-instance'`) before submitting cancellation, so UI impact text is based on current server state.
 - Lesson `is_closed` is a workflow-state flag and does not hard-lock edits by itself. Hard lock enforcement for mutations uses finance lock sources only (`payroll_run`, `claim_batch`).
-- Pending reports / loose sessions already have shared API wrappers and error mapping.
-- Session Records / loose-session flows are currently feature-disabled in the frontend via `src/features/sessions/config/session-records.js`. Do not remove the backend endpoints, but do not mount UI flows or fire API calls while the feature is off.
+- Session reports are internal `form_submissions` rows with `source='internal'`, a non-null `lesson_participant_id`, and a per-service `Services.report_form_id`. Do not reintroduce `SessionRecords`, loose reports, or the admin assign/reject workflow; those endpoints and clients are retired.
+- Report writes and reads must fail closed unless `organizations.permissions.session_reports_enabled === true`. Non-admin instructors are self-scoped through `lesson_instances.instructor_employee_id` resolved from their own `Employees.user_id`.
+- Report creation may document a past `scheduled` or `attended` participant, never creates or mutates lesson/attendance rows, and must reject future lessons plus `no_show`/`cancelled_*` participants.
+- E1/E2 are blocking policies: attendance/cancellation paths must call the shared session-report guard before moving a documented participant to a non-arrival state or cancelling a documented lesson. The guard only considers non-legacy anchored reports.
+- Pending reports come from `GET /api/session-reports?mode=pending&scope=mine|all&page=...`; they are past eligible participants with an assigned service report form and no non-legacy report. Exact report-excluding pagination/counting lives in the org-scoped `list_pending_session_reports` SQL function in `setup-sql.js`; do not paginate candidates before removing documented rows. `scope=all` is office/admin only, while instructors see only their own lessons. Admin/office page 1 also receives the E7 `documented_unconfirmed` drift set.

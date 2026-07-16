@@ -16,7 +16,11 @@ import { authenticatedFetch } from '@/lib/api-client.js';
 import { normalizeMembershipRole, isAdminRole } from '@/features/students/utils/endpoints.js';
 import { toShekel, toAgorot } from '@/lib/currency.js';
 import { toast } from '@/lib/toast.jsx';
-import { getQuestionsInOrder } from '@/features/forms/lib/form-schema.js';
+import {
+  buildSharedBlockMap,
+  getQuestionsInOrder,
+  resolveSchemaWithSharedBlocks,
+} from '@/features/forms/lib/form-schema.js';
 import {
   buildDefaultReportFormSchema,
   DEFAULT_REPORT_FORM_DESCRIPTION,
@@ -105,6 +109,10 @@ export default function ServicesPage() {
   // session_reports_enabled) — see Phase 4 in implementations/session-reports/
   // implementation-plan.md.
   const preanswersFeatureEnabled = orgSettings?.permissions?.session_form_preanswers_enabled === true;
+  const preanswersCap = Number.isFinite(Number(orgSettings?.permissions?.session_form_preanswers_cap))
+    && Number(orgSettings.permissions.session_form_preanswers_cap) > 0
+    ? Number(orgSettings.permissions.session_form_preanswers_cap)
+    : 50;
 
   const canFetch = Boolean(session && activeOrgId);
 
@@ -153,13 +161,18 @@ export default function ServicesPage() {
     try {
       const payload = await authenticatedFetch('forms', {
         session,
-        params: { org_id: activeOrgId, form_usage: 'session_report', is_active: true },
+        params: {
+          org_id: activeOrgId,
+          form_usage: 'session_report',
+          is_active: true,
+          selection_mode: 'delivery',
+        },
       });
       const rows = Array.isArray(payload) ? payload : [];
       // Only published forms can back a live report drawer (see api/session-reports
       // POST: report_form_not_published). Draft session_report forms still show in
       // the main Forms list, but shouldn't be selectable here.
-      setAvailableReportForms(rows.filter((form) => Boolean(form?.published_at)));
+      setAvailableReportForms(rows.filter((form) => form?.is_published === true));
     } catch {
       setAvailableReportForms([]);
     } finally {
@@ -178,8 +191,12 @@ export default function ServicesPage() {
         session,
         params: { org_id: activeOrgId },
       });
-      const questions = payload?.form_schema
-        ? getQuestionsInOrder(payload.form_schema).filter((q) => PREANSWERABLE_TYPES.has(q.type))
+      const publishedSchema = payload?.metadata?.published_form_schema;
+      const resolvedPublishedSchema = publishedSchema
+        ? resolveSchemaWithSharedBlocks(publishedSchema, buildSharedBlockMap(payload?.shared_blocks || []))
+        : null;
+      const questions = resolvedPublishedSchema
+        ? getQuestionsInOrder(resolvedPublishedSchema).filter((q) => PREANSWERABLE_TYPES.has(q.type))
         : [];
       setReportFormQuestions(questions);
     } catch {
@@ -343,6 +360,10 @@ export default function ServicesPage() {
     setFormValues((prev) => {
       const existing = Array.isArray(prev.reportPreanswers[questionId]) ? prev.reportPreanswers[questionId] : [];
       if (existing.includes(draft)) return prev;
+      if (existing.length >= preanswersCap) {
+        toast.error(`ניתן לשמור עד ${preanswersCap} תשובות מוכנות לכל שדה.`);
+        return prev;
+      }
       return {
         ...prev,
         reportPreanswers: {
@@ -925,18 +946,21 @@ export default function ServicesPage() {
                               }
                             }}
                             placeholder="הוספת תשובה מוכנה"
-                            disabled={isSubmitting}
+                            disabled={isSubmitting || entries.length >= preanswersCap}
                           />
                           <Button
                             type="button"
                             variant="outline"
                             size="sm"
                             onClick={() => handleAddPreanswer(question.id)}
-                            disabled={isSubmitting || !(newPreanswerDrafts[question.id] || '').trim()}
+                            disabled={isSubmitting || entries.length >= preanswersCap || !(newPreanswerDrafts[question.id] || '').trim()}
                           >
                             <Plus className="h-4 w-4" />
                           </Button>
                         </div>
+                        {entries.length >= preanswersCap ? (
+                          <p className="text-xs text-amber-700">הגעת למכסה של {preanswersCap} תשובות מוכנות לשדה.</p>
+                        ) : null}
                       </div>
                     );
                   })

@@ -625,6 +625,8 @@ export default async function (context, req) {
     const { data, error } = await withOrgScope(supabase, 'form_submissions', orgId)
       .select('id, submitted_at, service_id, answers, metadata, is_legacy, lesson_participant_id, lesson_participants(lesson_instance_id, lesson_instances(datetime_start))')
       .eq('student_id', studentId)
+      .eq('source', 'internal')
+      .not('lesson_participant_id', 'is', null)
       .order('submitted_at', { ascending: false });
 
     if (error) {

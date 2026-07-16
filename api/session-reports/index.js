@@ -31,9 +31,16 @@ import {
 import { attachErrorTracking, respondTracked } from '../_shared/error-events.js';
 import { ensureOrgPermissions } from '../_shared/permissions-utils.js';
 import {
+  buildSharedBlockMap,
+  collectSharedBlockIds,
   evaluateAlertFlags,
+  findMissingSharedBlockIds,
+  getQuestionsInOrder,
+  materializeSchemaForSnapshot,
   normalizeFormSchema,
   prepareAnswersForStorage,
+  resolvePublicFormState,
+  resolveSchemaWithSharedBlocks,
 } from '../_shared/forms-runtime.js';
 
 const NON_ARRIVAL_STATUSES = new Set(['no_show', 'cancelled_student', 'cancelled_clinic']);
@@ -70,6 +77,36 @@ async function resolveActingEmployee(supabase, orgId, userId) {
 function normalizePositiveInt(value, fallback) {
   const parsed = Number.parseInt(value, 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+async function resolveSessionReportFormState(supabase, orgId, formRecord) {
+  const initialState = resolvePublicFormState(formRecord, {
+    allowDraftFallback: false,
+    sharedBlocksById: {},
+  });
+  const rawSchema = initialState.raw_form_schema || initialState.form_schema;
+  const blockIds = collectSharedBlockIds(rawSchema);
+  if (!blockIds.length) {
+    return initialState;
+  }
+
+  const { data, error } = await withOrgScope(supabase, 'shared_form_blocks', orgId)
+    .select('id, block_type, name, content_schema, is_active, metadata')
+    .eq('is_active', true)
+    .in('id', blockIds);
+
+  if (error) throw error;
+
+  const sharedBlocksById = buildSharedBlockMap(data);
+  const missingBlockIds = findMissingSharedBlockIds(rawSchema, sharedBlocksById);
+  if (missingBlockIds.length) {
+    throw new Error(`missing_shared_blocks:${missingBlockIds.join(',')}`);
+  }
+
+  return {
+    ...initialState,
+    form_schema: resolveSchemaWithSharedBlocks(rawSchema, sharedBlocksById),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -253,7 +290,7 @@ async function createReport(context, req, { supabase, orgId, userId, role }) {
   }
 
   const { data: form, error: formError } = await withOrgScope(supabase, 'forms', orgId)
-    .select('id, form_usage, form_schema, alert_rules, version, published_at, archived_at')
+    .select('id, form_usage, form_schema, alert_rules, visibility_rules, version, published_at, archived_at, is_active, metadata')
     .eq('id', service.report_form_id)
     .maybeSingle();
 
@@ -270,11 +307,25 @@ async function createReport(context, req, { supabase, orgId, userId, role }) {
   if (normalizeString(form.form_usage) !== 'session_report') {
     return respond(context, 409, { message: 'form_not_session_report' });
   }
-  if (!form.published_at || form.archived_at) {
+  if (form.is_active === false || form.archived_at) {
     return respond(context, 409, { message: 'report_form_not_published' });
   }
 
-  const formSchema = normalizeFormSchema(form.form_schema);
+  let publicFormState;
+  try {
+    publicFormState = await resolveSessionReportFormState(supabase, orgId, form);
+  } catch (formStateError) {
+    context.log?.error?.('session-reports: failed to resolve published form state', { message: formStateError?.message });
+    return respondReportsError(context, 500, 'failed_to_load_form', formStateError, {
+      action: 'resolve_published_form_state',
+      form_id: form.id,
+    });
+  }
+  if (!publicFormState.is_published) {
+    return respond(context, 409, { message: 'report_form_not_published' });
+  }
+
+  const formSchema = materializeSchemaForSnapshot(publicFormState.form_schema);
   const preparedAnswers = prepareAnswersForStorage({
     formSchema,
     answers: answersInput,
@@ -282,14 +333,14 @@ async function createReport(context, req, { supabase, orgId, userId, role }) {
   });
   const alertFlags = evaluateAlertFlags({
     formSchema,
-    alertRules: form.alert_rules,
+    alertRules: publicFormState.alert_rules,
     answers: preparedAnswers,
   });
 
   const nowIso = now.toISOString();
   const insertPayload = {
     form_id: form.id,
-    form_version: form.version,
+    form_version: publicFormState.published_version || form.version,
     client_profile_id: participant.client_profile_id,
     student_id: participant.student_id,
     service_id: serviceId,
@@ -309,6 +360,8 @@ async function createReport(context, req, { supabase, orgId, userId, role }) {
       // untrimmed, at create time. See implementations/session-reports/
       // implementation-plan.md ("The report entity" section).
       form_schema_snapshot: formSchema,
+      visibility_rules_snapshot: publicFormState.visibility_rules,
+      alert_rules_snapshot: publicFormState.alert_rules,
       ...(notes ? { notes } : {}),
     },
   };
@@ -345,8 +398,10 @@ async function updateReport(context, req, { supabase, orgId, userId, role, repor
   const body = parseRequestBody(req);
 
   const { data: report, error: reportError } = await withOrgScope(supabase, 'form_submissions', orgId)
-    .select('id, answers, metadata, locked_at, is_legacy')
+    .select('id, form_id, answers, alert_flags, metadata, locked_at, is_legacy, source, lesson_participant_id')
     .eq('id', reportId)
+    .eq('source', 'internal')
+    .not('lesson_participant_id', 'is', null)
     .maybeSingle();
 
   if (reportError) {
@@ -377,7 +432,22 @@ async function updateReport(context, req, { supabase, orgId, userId, role, repor
 
   if (Object.prototype.hasOwnProperty.call(body || {}, 'answers')) {
     const answersInput = normalizeJsonObject(body.answers, {});
-    updates.answers = answersInput;
+    const schemaSnapshot = normalizeJsonObject(currentMetadata.form_schema_snapshot, null);
+    if (schemaSnapshot && !report.is_legacy) {
+      const normalizedSnapshot = normalizeFormSchema(schemaSnapshot);
+      updates.answers = prepareAnswersForStorage({
+        formSchema: normalizedSnapshot,
+        answers: answersInput,
+        env: readEnv(context),
+      });
+      updates.alert_flags = evaluateAlertFlags({
+        formSchema: normalizedSnapshot,
+        alertRules: currentMetadata.alert_rules_snapshot,
+        answers: updates.answers,
+      });
+    } else {
+      updates.answers = answersInput;
+    }
   }
 
   const notes = normalizeString(body?.notes);
@@ -523,7 +593,7 @@ async function resolveReportContext(context, req, { supabase, orgId, userId, rol
   let form = null;
   if (service?.report_form_id) {
     const { data: formRow, error: formError } = await withOrgScope(supabase, 'forms', orgId)
-      .select('id, name, form_usage, form_schema, alert_rules, version, published_at, archived_at')
+      .select('id, name, form_usage, form_schema, alert_rules, visibility_rules, version, published_at, archived_at, is_active, metadata')
       .eq('id', service.report_form_id)
       .maybeSingle();
 
@@ -535,14 +605,27 @@ async function resolveReportContext(context, req, { supabase, orgId, userId, rol
       });
     }
 
-    if (formRow && normalizeString(formRow.form_usage) === 'session_report' && formRow.published_at && !formRow.archived_at) {
-      form = {
-        id: formRow.id,
-        name: formRow.name,
-        version: formRow.version,
-        form_schema: normalizeFormSchema(formRow.form_schema),
-        alert_rules: formRow.alert_rules,
-      };
+    if (formRow && normalizeString(formRow.form_usage) === 'session_report' && formRow.is_active !== false && !formRow.archived_at) {
+      let publicFormState;
+      try {
+        publicFormState = await resolveSessionReportFormState(supabase, orgId, formRow);
+      } catch (formStateError) {
+        context.log?.error?.('session-reports: failed to resolve published form state for context', { message: formStateError?.message });
+        return respondReportsError(context, 500, 'failed_to_load_form', formStateError, {
+          action: 'resolve_published_form_state_context',
+          form_id: formRow.id,
+        });
+      }
+      if (publicFormState.is_published) {
+        form = {
+          id: formRow.id,
+          name: formRow.name,
+          version: publicFormState.published_version || formRow.version,
+          form_schema: materializeSchemaForSnapshot(publicFormState.form_schema),
+          alert_rules: publicFormState.alert_rules,
+          visibility_rules: publicFormState.visibility_rules,
+        };
+      }
     }
   }
 
@@ -606,11 +689,23 @@ async function resolveReportContext(context, req, { supabase, orgId, userId, rol
         .eq('student_id', participant.student_id)
         .eq('service_id', service.id)
         .eq('is_legacy', false)
+        .eq('source', 'internal')
         .neq('lesson_participant_id', lessonParticipantId)
         .order('submitted_at', { ascending: false })
         .limit(1);
       if (!priorReportsError && priorReports?.[0]) {
-        lastReportAnswers = priorReports[0].answers || null;
+        const copyableQuestionIds = new Set(
+          getQuestionsInOrder(form.form_schema)
+            .filter((question) => !['signature', 'approval'].includes(question.type))
+            .map((question) => question.id),
+        );
+        const priorAnswers = normalizeJsonObject(priorReports[0].answers, {});
+        lastReportAnswers = Object.fromEntries(
+          Object.entries(priorAnswers).filter(([questionId]) => copyableQuestionIds.has(questionId)),
+        );
+        if (!Object.keys(lastReportAnswers).length) {
+          lastReportAnswers = null;
+        }
       }
     }
   }
@@ -655,6 +750,7 @@ async function resolveReportContext(context, req, { supabase, orgId, userId, rol
 async function resolvePendingReports(context, req, { supabase, orgId, userId, role }) {
   const requestedScope = normalizeString(req.query?.scope).toLowerCase();
   const callerIsAdminOrOffice = isAdminOrOffice(role);
+  const scopeIsAll = callerIsAdminOrOffice && requestedScope === 'all';
 
   let instructorEmployeeId = null;
   if (!callerIsAdminOrOffice) {
@@ -688,63 +784,37 @@ async function resolvePendingReports(context, req, { supabase, orgId, userId, ro
 
   const page = normalizePositiveInt(req.query?.page, 1);
   const from = (page - 1) * PENDING_PAGE_SIZE;
-  const to = from + PENDING_PAGE_SIZE - 1;
-
-  // Services with a report_form_id — pending items only exist for these.
-  const { data: services, error: servicesError } = await withOrgScope(supabase, 'Services', orgId)
-    .select('id, name, report_form_id')
-    .not('report_form_id', 'is', null);
-
-  if (servicesError) {
-    context.log?.error?.('session-reports: failed to load services for pending', { message: servicesError.message });
-    return respondReportsError(context, 500, 'failed_to_load_services', servicesError, { action: 'load_services_pending' });
-  }
-  const serviceMap = new Map((services || []).map((service) => [service.id, service]));
-  const serviceIds = Array.from(serviceMap.keys());
-
-  if (!serviceIds.length) {
-    return respond(context, 200, { items: [], documented_unconfirmed: [], page, page_size: PENDING_PAGE_SIZE, has_more: false });
+  if (callerIsAdminOrOffice && !scopeIsAll && !instructorEmployeeId) {
+    return respond(context, 200, {
+      items: [],
+      documented_unconfirmed: [],
+      page,
+      page_size: PENDING_PAGE_SIZE,
+      total: 0,
+      has_more: false,
+    });
   }
 
-  const nowIso = new Date().toISOString();
+  const { data: pendingRows, error: pendingError } = await supabase.rpc('list_pending_session_reports', {
+    p_org_id: orgId,
+    p_instructor_employee_id: scopeIsAll ? null : instructorEmployeeId,
+    p_limit: PENDING_PAGE_SIZE,
+    p_offset: from,
+  });
 
-  let lessonsQuery = withOrgScope(supabase, 'lesson_instances', orgId)
-    .select('id, datetime_start, status, instructor_employee_id, service_id')
-    .in('service_id', serviceIds)
-    .neq('status', 'cancelled')
-    .lte('datetime_start', nowIso)
-    .order('datetime_start', { ascending: false });
-
-  if (instructorEmployeeId) {
-    lessonsQuery = lessonsQuery.eq('instructor_employee_id', instructorEmployeeId);
+  if (pendingError) {
+    context.log?.error?.('session-reports: failed to load exact pending page', { message: pendingError.message });
+    return respondReportsError(context, 500, 'failed_to_load_participants', pendingError, {
+      action: 'list_pending_session_reports',
+      page,
+      scope: scopeIsAll ? 'all' : 'mine',
+    });
   }
 
-  const { data: lessons, error: lessonsError } = await lessonsQuery;
-  if (lessonsError) {
-    context.log?.error?.('session-reports: failed to load lessons for pending', { message: lessonsError.message });
-    return respondReportsError(context, 500, 'failed_to_load_lessons', lessonsError, { action: 'load_lessons_pending' });
-  }
-  if (!lessons?.length) {
-    return respond(context, 200, { items: [], documented_unconfirmed: [], page, page_size: PENDING_PAGE_SIZE, has_more: false });
-  }
-  const lessonMap = new Map(lessons.map((lesson) => [lesson.id, lesson]));
-  const lessonIds = lessons.map((lesson) => lesson.id);
-
-  // Participants IN ('attended','scheduled') on those lessons, paginated at the
-  // participant level (approximate but bounded — avoids the PostgREST 1000-row cap).
-  const { data: participants, error: participantsError, count } = await withOrgScope(supabase, 'lesson_participants', orgId)
-    .select('id, lesson_instance_id, client_profile_id, student_id, participant_status', { count: 'exact' })
-    .in('lesson_instance_id', lessonIds)
-    .in('participant_status', ['attended', 'scheduled'])
-    .order('lesson_instance_id', { ascending: false })
-    .range(from, to);
-
-  if (participantsError) {
-    context.log?.error?.('session-reports: failed to load participants for pending', { message: participantsError.message });
-    return respondReportsError(context, 500, 'failed_to_load_participants', participantsError, { action: 'load_participants_pending' });
-  }
-
-  const participantIds = (participants || []).map((row) => row.id);
+  const totalCount = Number(pendingRows?.[0]?.total_count || 0);
+  const items = (pendingRows || []).map((row) => Object.fromEntries(
+    Object.entries(row).filter(([key]) => key !== 'total_count'),
+  ));
 
   // For the E7 drift signal (documented_unconfirmed), we need a broader set:
   // ALL scheduled participants on in-scope lessons (not just this page), so it
@@ -752,6 +822,50 @@ async function resolvePendingReports(context, req, { supabase, orgId, userId, ro
   // (page 1) to avoid repeating an unbounded scan per page.
   let documentedUnconfirmed = [];
   if (callerIsAdminOrOffice && page === 1) {
+    const { data: services, error: servicesError } = await withOrgScope(supabase, 'Services', orgId)
+      .select('id, name, report_form_id')
+      .not('report_form_id', 'is', null);
+
+    if (servicesError) {
+      context.log?.error?.('session-reports: failed to load services for drift signal', { message: servicesError.message });
+      return respondReportsError(context, 500, 'failed_to_load_services', servicesError, { action: 'load_services_drift' });
+    }
+    const serviceMap = new Map((services || []).map((service) => [service.id, service]));
+    const serviceIds = Array.from(serviceMap.keys());
+    const nowIso = new Date().toISOString();
+
+    let lessons = [];
+    if (serviceIds.length) {
+      let lessonsQuery = withOrgScope(supabase, 'lesson_instances', orgId)
+        .select('id, datetime_start, status, instructor_employee_id, service_id')
+        .in('service_id', serviceIds)
+        .neq('status', 'cancelled')
+        .lte('datetime_start', nowIso)
+        .order('datetime_start', { ascending: false });
+      if (!scopeIsAll && instructorEmployeeId) {
+        lessonsQuery = lessonsQuery.eq('instructor_employee_id', instructorEmployeeId);
+      }
+      const lessonsResult = await lessonsQuery;
+      if (lessonsResult.error) {
+        context.log?.error?.('session-reports: failed to load lessons for drift signal', { message: lessonsResult.error.message });
+        return respondReportsError(context, 500, 'failed_to_load_lessons', lessonsResult.error, { action: 'load_lessons_drift' });
+      }
+      lessons = lessonsResult.data || [];
+    }
+
+    const lessonMap = new Map(lessons.map((lesson) => [lesson.id, lesson]));
+    const lessonIds = lessons.map((lesson) => lesson.id);
+    if (!lessonIds.length) {
+      return respond(context, 200, {
+        items,
+        documented_unconfirmed: [],
+        page,
+        page_size: PENDING_PAGE_SIZE,
+        total: totalCount,
+        has_more: from + items.length < totalCount,
+      });
+    }
+
     const { data: scheduledParticipants, error: scheduledError } = await withOrgScope(supabase, 'lesson_participants', orgId)
       .select('id, lesson_instance_id, client_profile_id, student_id, participant_status')
       .in('lesson_instance_id', lessonIds)
@@ -764,7 +878,8 @@ async function resolvePendingReports(context, req, { supabase, orgId, userId, ro
       const { data: reportedRows, error: reportedError } = await withOrgScope(supabase, 'form_submissions', orgId)
         .select('id, lesson_participant_id, submitted_at')
         .in('lesson_participant_id', scheduledIds)
-        .eq('is_legacy', false);
+        .eq('is_legacy', false)
+        .eq('source', 'internal');
 
       if (reportedError) {
         context.log?.error?.('session-reports: failed to load reports for drift signal', { message: reportedError.message });
@@ -778,37 +893,13 @@ async function resolvePendingReports(context, req, { supabase, orgId, userId, ro
     }
   }
 
-  if (!participantIds.length) {
-    return respond(context, 200, {
-      items: [],
-      documented_unconfirmed: documentedUnconfirmed,
-      page,
-      page_size: PENDING_PAGE_SIZE,
-      has_more: false,
-    });
-  }
-
-  // Exclude participants that already have a non-legacy report.
-  const { data: existingReports, error: existingReportsError } = await withOrgScope(supabase, 'form_submissions', orgId)
-    .select('lesson_participant_id')
-    .in('lesson_participant_id', participantIds)
-    .eq('is_legacy', false);
-
-  if (existingReportsError) {
-    context.log?.error?.('session-reports: failed to check existing reports for pending', { message: existingReportsError.message });
-    return respondReportsError(context, 500, 'failed_to_check_existing_report', existingReportsError, { action: 'check_existing_reports_pending' });
-  }
-  const reportedParticipantIds = new Set((existingReports || []).map((row) => row.lesson_participant_id));
-  const pendingParticipants = (participants || []).filter((row) => !reportedParticipantIds.has(row.id));
-
-  const items = await enrichParticipants(supabase, orgId, pendingParticipants, lessonMap, serviceMap);
-
   return respond(context, 200, {
     items,
     documented_unconfirmed: documentedUnconfirmed,
     page,
     page_size: PENDING_PAGE_SIZE,
-    has_more: typeof count === 'number' ? to + 1 < count : (participants || []).length === PENDING_PAGE_SIZE,
+    total: totalCount,
+    has_more: from + items.length < totalCount,
   });
 }
 
@@ -900,6 +991,8 @@ async function listReports(context, req, { supabase, orgId, userId, role }) {
     let query = withOrgScope(supabase, 'form_submissions', orgId)
       .select(`${selectColumns}, lesson_participants!inner(id, lesson_instance_id, lesson_instances!inner(id, datetime_start, instructor_employee_id))`)
       .eq('student_id', studentId)
+      .eq('source', 'internal')
+      .not('lesson_participant_id', 'is', null)
       .order('submitted_at', { ascending: false });
 
     if (instructorEmployeeId) {
@@ -955,6 +1048,7 @@ async function listReports(context, req, { supabase, orgId, userId, role }) {
   const { data, error } = await withOrgScope(supabase, 'form_submissions', orgId)
     .select(selectColumns)
     .in('lesson_participant_id', participantIds)
+    .eq('source', 'internal')
     .order('submitted_at', { ascending: false });
 
   if (error) {

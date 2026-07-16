@@ -42,6 +42,13 @@ export default function ReportView({ report, currentFormSchema = null, loading =
     return null;
   }, [report, currentFormSchema]);
 
+  const visibilityRules = useMemo(() => {
+    const metadata = report?.metadata && typeof report.metadata === 'object' && !Array.isArray(report.metadata)
+      ? report.metadata
+      : {};
+    return Array.isArray(metadata.visibility_rules_snapshot) ? metadata.visibility_rules_snapshot : [];
+  }, [report]);
+
   if (loading) {
     return (
       <div className="flex items-center justify-center gap-2 py-10 text-sm text-neutral-500" role="status">
@@ -87,7 +94,7 @@ export default function ReportView({ report, currentFormSchema = null, loading =
       {report.is_legacy ? (
         <p className="mb-3 text-xs text-amber-700 text-end">דיווח זה יובא ממערכת קודמת (דיווח ישן).</p>
       ) : null}
-      <SectionedFormRenderer schema={schema} answers={answers} readOnly />
+      <SectionedFormRenderer schema={schema} visibilityRules={visibilityRules} answers={answers} readOnly />
     </div>
   );
 }

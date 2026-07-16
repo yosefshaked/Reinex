@@ -66,9 +66,13 @@ export default function MyPendingReportsCard({ onCountChange } = {}) {
         params: { org_id: activeOrgId, mode: 'pending', scope: 'mine', page: 1 },
       });
       const nextItems = Array.isArray(payload?.items) ? payload.items : [];
+      const total = Number(payload?.total);
       setItems(nextItems);
       setHasMore(Boolean(payload?.has_more));
-      onCountChange?.(nextItems.length, Boolean(payload?.has_more));
+      onCountChange?.(
+        Number.isFinite(total) && total >= 0 ? total : nextItems.length,
+        Boolean(payload?.has_more),
+      );
       setState(REQUEST_STATE.idle);
     } catch (err) {
       if (err?.name === 'AbortError') return;
