@@ -29,6 +29,7 @@ import {
   withOrgScope,
 } from '../_shared/org-bff.js';
 import { attachErrorTracking, respondTracked } from '../_shared/error-events.js';
+import { logTenantAuditEvent, TENANT_AUDIT_RETENTION } from '../_shared/tenant-audit.js';
 import { ensureOrgPermissions } from '../_shared/permissions-utils.js';
 import {
   buildSharedBlockMap,
@@ -384,6 +385,36 @@ async function createReport(context, req, { supabase, orgId, userId, role }) {
     });
   }
 
+  try {
+    await logTenantAuditEvent(supabase, {
+      orgId,
+      actorUserId: userId,
+      eventType: 'session_report.created',
+      retentionCategory: TENANT_AUDIT_RETENTION.STANDARD,
+      resourceType: 'session_report',
+      resourceId: created.id,
+      beforeState: null,
+      afterState: {
+        lesson_participant_id: lessonParticipantId,
+        lesson_instance_id: participant.lesson_instance_id,
+        form_id: form.id,
+        form_version: insertPayload.form_version,
+        service_id: serviceId,
+        student_id: participant.student_id,
+      },
+      details: {
+        origin: 'api/session-reports',
+        authored_role: role,
+        has_red_flags: Boolean(alertFlags?.has_red_flags),
+      },
+    });
+  } catch (auditError) {
+    context.log?.warn?.('session-reports: failed to write tenant audit event (create)', {
+      message: auditError?.message,
+      report_id: created.id,
+    });
+  }
+
   return respond(context, 201, created);
 }
 
@@ -398,7 +429,7 @@ async function updateReport(context, req, { supabase, orgId, userId, role, repor
   const body = parseRequestBody(req);
 
   const { data: report, error: reportError } = await withOrgScope(supabase, 'form_submissions', orgId)
-    .select('id, form_id, answers, alert_flags, metadata, locked_at, is_legacy, source, lesson_participant_id')
+    .select('id, form_id, answers, alert_flags, metadata, locked_at, is_legacy, source, lesson_participant_id, reviewed_by, reviewed_at')
     .eq('id', reportId)
     .eq('source', 'internal')
     .not('lesson_participant_id', 'is', null)
@@ -483,6 +514,43 @@ async function updateReport(context, req, { supabase, orgId, userId, role, repor
     context.log?.error?.('session-reports: failed to update report', { message: updateError.message });
     return respondReportsError(context, 500, 'failed_to_update_report', updateError, {
       action: 'update_report',
+      report_id: reportId,
+    });
+  }
+
+  const wasReviewed = body?.mark_reviewed === true;
+  const answersChanged = Object.prototype.hasOwnProperty.call(updates, 'answers');
+  const notesChanged = Object.prototype.hasOwnProperty.call(body || {}, 'notes');
+  try {
+    await logTenantAuditEvent(supabase, {
+      orgId,
+      actorUserId: userId,
+      eventType: wasReviewed ? 'session_report.reviewed' : 'session_report.updated',
+      retentionCategory: TENANT_AUDIT_RETENTION.STANDARD,
+      resourceType: 'session_report',
+      resourceId: reportId,
+      beforeState: {
+        answers: report.answers,
+        reviewed_by: report.reviewed_by ?? null,
+        reviewed_at: report.reviewed_at ?? null,
+      },
+      afterState: {
+        answers: updated.answers,
+        reviewed_by: updated.reviewed_by ?? null,
+        reviewed_at: updated.reviewed_at ?? null,
+      },
+      details: {
+        origin: 'api/session-reports',
+        actor_role: role,
+        actor_is_author: isAuthor,
+        answers_changed: answersChanged,
+        notes_changed: notesChanged,
+        marked_reviewed: wasReviewed,
+      },
+    });
+  } catch (auditError) {
+    context.log?.warn?.('session-reports: failed to write tenant audit event (update)', {
+      message: auditError?.message,
       report_id: reportId,
     });
   }
