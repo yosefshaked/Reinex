@@ -105,8 +105,11 @@ export function LessonParticipantRoster({
   formatAgorotPreview,
   sessionReportsEnabled = false,
   reportsByParticipant = {},
+  sessionReportsLoading = false,
+  sessionReportsLoadFailed = false,
   lessonStarted = false,
   onOpenSessionReport,
+  onRetrySessionReports,
 }) {
   if (displayParticipants.length === 0) return null;
 
@@ -382,6 +385,23 @@ export function LessonParticipantRoster({
                     <FileCheck className="h-4 w-4" />
                     דיווח מפגש מתועד
                   </span>
+                ) : sessionReportsLoading ? (
+                  <span className="inline-flex items-center gap-1.5 text-xs text-indigo-900/70">
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    בודקים את סטטוס הדיווח...
+                  </span>
+                ) : sessionReportsLoadFailed ? (
+                  <>
+                    <span className="text-xs text-red-700">לא ניתן היה לבדוק את סטטוס הדיווח.</span>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-8 shrink-0 text-xs"
+                      onClick={onRetrySessionReports}
+                    >
+                      נסו שוב
+                    </Button>
+                  </>
                 ) : (
                   <>
                     <span className="inline-flex items-center gap-1.5 text-xs text-indigo-900/70">
