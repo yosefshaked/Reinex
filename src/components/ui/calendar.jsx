@@ -73,7 +73,7 @@ function Calendar({
         month_grid: cn("w-full border-collapse", defaultClassNames.month_grid),
         weekdays: cn("grid grid-cols-7 w-full", defaultClassNames.weekdays),
         weekday: cn(
-          "text-muted-foreground flex-1 select-none rounded-md text-[0.8rem] font-normal",
+          "text-muted-foreground flex-1 select-none rounded-md text-center text-[0.8rem] font-normal",
           defaultClassNames.weekday
         ),
         week: cn("mt-2 grid grid-cols-7 w-full", defaultClassNames.week),
