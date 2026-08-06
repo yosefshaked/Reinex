@@ -44,6 +44,7 @@ export default function AppShell({ children }) {
     studentName: '',
     serviceName: '',
     lessonDateTime: '',
+    continuationQueue: [],
     onCreated: null,
   })
   const [showRefreshSuggestion, setShowRefreshSuggestion] = useState(false)
@@ -56,7 +57,14 @@ export default function AppShell({ children }) {
 
   const openSessionReportModal = useCallback((options = {}) => {
     if (!sessionReportsEnabled) return
-    const { lessonParticipantId = '', studentName = '', serviceName = '', lessonDateTime = '', onCreated = null } = options
+    const {
+      lessonParticipantId = '',
+      studentName = '',
+      serviceName = '',
+      lessonDateTime = '',
+      continuationQueue = [],
+      onCreated = null,
+    } = options
     if (!lessonParticipantId) return
     setSessionModalState({
       isOpen: true,
@@ -64,6 +72,7 @@ export default function AppShell({ children }) {
       studentName,
       serviceName,
       lessonDateTime,
+      continuationQueue: Array.isArray(continuationQueue) ? continuationQueue : [],
       onCreated: typeof onCreated === 'function' ? onCreated : null,
     })
   }, [sessionReportsEnabled])
@@ -75,9 +84,20 @@ export default function AppShell({ children }) {
       studentName: '',
       serviceName: '',
       lessonDateTime: '',
+      continuationQueue: [],
       onCreated: null,
     })
   }, [])
+
+  const continueToNextSessionReport = useCallback(() => {
+    const [nextReport, ...remainingQueue] = sessionModalState.continuationQueue || []
+    if (!nextReport?.lessonParticipantId) return
+    openSessionReportModal({
+      ...nextReport,
+      continuationQueue: remainingQueue,
+      onCreated: sessionModalState.onCreated,
+    })
+  }, [openSessionReportModal, sessionModalState.continuationQueue, sessionModalState.onCreated])
 
   const sessionModalContextValue = useMemo(() => ({
     openSessionReportModal,
@@ -88,6 +108,7 @@ export default function AppShell({ children }) {
       studentName: sessionModalState.studentName,
       serviceName: sessionModalState.serviceName,
       lessonDateTime: sessionModalState.lessonDateTime,
+      continuationQueue: sessionModalState.continuationQueue,
     } : null,
   }), [openSessionReportModal, closeSessionReportModal, sessionModalState])
 
@@ -341,6 +362,8 @@ export default function AppShell({ children }) {
             studentName={sessionModalState.studentName}
             serviceName={sessionModalState.serviceName}
             lessonDateTime={sessionModalState.lessonDateTime}
+            continuationQueue={sessionModalState.continuationQueue}
+            onContinueToNext={continueToNextSessionReport}
             onCreated={sessionModalState.onCreated}
           />
         ) : null}

@@ -9,7 +9,10 @@ import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { authenticatedFetch } from '@/lib/api-client.js';
 import { resolveApiErrorMessage } from '@/lib/error-support.js';
 import { useSessionReportsEnabled } from '@/features/sessions/config/session-reports-permission.js';
-import { useSessionModal } from '@/features/sessions/context/SessionModalContext.jsx';
+import {
+  buildSessionReportContinuationQueue,
+  useSessionModal,
+} from '@/features/sessions/context/SessionModalContext.jsx';
 
 const REQUEST_STATE = Object.freeze({
   idle: 'idle',
@@ -108,9 +111,10 @@ export default function MyPendingReportsCard({ onCountChange } = {}) {
       studentName: item.student_name || '',
       serviceName: item.service_name || '',
       lessonDateTime: item.lesson_datetime_start || '',
+      continuationQueue: buildSessionReportContinuationQueue(items, item.lesson_participant_id),
       onCreated: () => void loadPending(),
     });
-  }, [openSessionReportModal, loadPending]);
+  }, [openSessionReportModal, items, loadPending]);
 
   const isLoading = state === REQUEST_STATE.loading;
   const hasError = state === REQUEST_STATE.error;

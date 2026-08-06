@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Loader2, ListPlus, Copy } from 'lucide-react';
+import { Loader2, ListChecks } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import SectionedFormRenderer from '@/features/forms/components/SectionedFormRenderer.jsx';
 import { getQuestionsInOrder, getVisibleSections, validateVisibleAnswers } from '@/features/forms/lib/form-schema.js';
@@ -40,8 +40,6 @@ export default function NewSessionForm({
   preanswersCap,
   canEditPersonalPreanswers = false,
   onSavePersonalPreanswer,
-  hasLastReportAnswers = false,
-  onCopyFromLastReport,
 }) {
   const [pickerFieldKey, setPickerFieldKey] = useState('');
 
@@ -80,41 +78,6 @@ export default function NewSessionForm({
 
   return (
     <form id="new-session-report-form" className="space-y-lg" onSubmit={handleSubmit}>
-      {hasLastReportAnswers ? (
-        <div className="flex justify-end">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="gap-xs"
-            onClick={onCopyFromLastReport}
-            disabled={isSubmitting}
-          >
-            <Copy className="h-4 w-4" aria-hidden="true" />
-            העתק מהדיווח האחרון
-          </Button>
-        </div>
-      ) : null}
-
-      {preanswerableQuestions.length > 0 ? (
-        <div className="flex flex-wrap justify-end gap-xs">
-          {preanswerableQuestions.map((question) => (
-            <Button
-              key={question.id}
-              type="button"
-              variant="ghost"
-              size="sm"
-              className="gap-xs text-xs text-neutral-600"
-              onClick={() => setPickerFieldKey(question.id)}
-              disabled={isSubmitting}
-            >
-              <ListPlus className="h-3.5 w-3.5" aria-hidden="true" />
-              תשובה מוכנה: {question.label}
-            </Button>
-          ))}
-        </div>
-      ) : null}
-
       <SectionedFormRenderer
         schema={formSchema}
         visibilityRules={visibilityRules}
@@ -122,6 +85,22 @@ export default function NewSessionForm({
         onAnswersChange={onAnswersChange}
         readOnly={isSubmitting}
         validationErrors={validationErrors}
+        renderQuestionInputAction={(question) => (
+          preanswerableQuestions.some((candidate) => candidate.id === question.id) ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 text-neutral-600"
+              onClick={() => setPickerFieldKey(question.id)}
+              disabled={isSubmitting}
+              aria-label={`בחירת תשובה מוכנה עבור ${question.label}`}
+              title="בחרו תשובה מוכנה"
+            >
+              <ListChecks className="h-4 w-4" aria-hidden="true" />
+            </Button>
+          ) : null
+        )}
       />
 
       {error ? (

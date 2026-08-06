@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { Loader2, CheckCircle2 } from 'lucide-react';
+import { Loader2, CheckCircle2, Copy } from 'lucide-react';
 import { toast } from '@/lib/toast.jsx';
 import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { useOrg } from '@/org/OrgContext.jsx';
@@ -55,8 +56,11 @@ export default function NewSessionModal({
   studentName = '',
   serviceName = '',
   lessonDateTime = '',
+  continuationQueue = [],
+  onContinueToNext,
   onCreated,
 }) {
+  const navigate = useNavigate();
   const { session } = useSupabase();
   const { activeOrgId } = useOrg();
 
@@ -114,6 +118,14 @@ export default function NewSessionModal({
       setPersonalPreanswers({});
     }
   }, [open, loadContext]);
+
+  useEffect(() => {
+    if (!open) return;
+    setSubmitState(REQUEST_STATE.idle);
+    setSubmitError('');
+    setValidationErrors({});
+    setSuccessReport(null);
+  }, [open, lessonParticipantId]);
 
   // Phase 4 — inline personal-bank save/delete from the picker. Writes the
   // caller's own Employees.metadata.report_preanswers via the narrow
@@ -196,6 +208,13 @@ export default function NewSessionModal({
     && !participantDidNotAttend
     && !successReport;
 
+  const nextPendingReport = Array.isArray(continuationQueue) ? continuationQueue[0] : null;
+
+  const handleOpenPendingReports = useCallback(() => {
+    onClose?.();
+    navigate('/pending-reports');
+  }, [navigate, onClose]);
+
   const footer = canRenderForm ? (
     <NewSessionFormFooter
       onSubmit={() => document.getElementById('new-session-report-form')?.requestSubmit()}
@@ -203,8 +222,18 @@ export default function NewSessionModal({
       isSubmitting={submitState === REQUEST_STATE.loading}
     />
   ) : successReport ? (
-    <div className="flex justify-end">
-      <Button onClick={onClose}>סגור</Button>
+    <div className="w-full space-y-2">
+      <div className="grid gap-2 sm:grid-cols-2">
+        {nextPendingReport ? (
+          <Button onClick={onContinueToNext}>
+            לדיווח הבא{nextPendingReport.studentName ? ` — ${nextPendingReport.studentName}` : ''}
+          </Button>
+        ) : null}
+        <Button variant={nextPendingReport ? 'outline' : 'default'} onClick={handleOpenPendingReports}>
+          לדיווחים הממתינים
+        </Button>
+      </div>
+      <Button variant="outline" className="w-full" onClick={onClose}>סגור</Button>
     </div>
   ) : null;
 
@@ -212,8 +241,26 @@ export default function NewSessionModal({
     <Dialog open={open} onOpenChange={(next) => { if (!next) onClose?.(); }}>
       <DialogContent className="sm:max-w-xl" footer={footer}>
         <DialogHeader>
-          <DialogTitle>{dialogTitle}</DialogTitle>
-          {dialogDescription ? <DialogDescription>{dialogDescription}</DialogDescription> : null}
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0 space-y-1">
+              <DialogTitle>{dialogTitle}</DialogTitle>
+              {dialogDescription ? <DialogDescription>{dialogDescription}</DialogDescription> : null}
+            </div>
+            {canRenderForm && reportContext?.last_report_answers ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 shrink-0 text-neutral-600"
+                onClick={handleCopyFromLastReport}
+                disabled={submitState === REQUEST_STATE.loading}
+                aria-label="העתק מהדיווח האחרון"
+                title="העתק מהדיווח האחרון"
+              >
+                <Copy className="h-4 w-4" aria-hidden="true" />
+              </Button>
+            ) : null}
+          </div>
         </DialogHeader>
 
         {!lessonParticipantId ? (
@@ -275,8 +322,6 @@ export default function NewSessionModal({
             preanswersCap={reportContext.preanswers?.cap}
             canEditPersonalPreanswers={Boolean(reportContext.preanswers)}
             onSavePersonalPreanswer={handleSavePersonalPreanswer}
-            hasLastReportAnswers={Boolean(reportContext.last_report_answers)}
-            onCopyFromLastReport={handleCopyFromLastReport}
           />
         )}
 
