@@ -409,18 +409,16 @@ renders.
       `NewSessionForm.jsx`/`NewSessionModal.jsx` per short/long-text field; hidden whenever
       `session_form_preanswers_enabled !== true` (the picker is only rendered when
       `reportContext.preanswers` is present, which the API only returns when the permission is on).
-- [x] (Bonus) "copy from my last report for this student/service" prefill: `GET /api/session-reports
-      ?mode=context` returns `last_report_answers` (most recent non-legacy report for the same
-      student+service, excluding the current participant), surfaced as a "העתק מהדיווח האחרון"
-      button in `NewSessionForm.jsx`.
+- [x] Previous-report copying was deliberately removed after mobile-first product review. The
+      report context no longer queries or returns prior answers; repetitive wording should use
+      the explicit service/personal preanswer banks instead of cloning a completed report.
 
 Verification: instructor saves a personal template → one-tap fills a new report; service default
 applies when no personal template exists; cap enforced (`session_form_preanswers_cap`, read
 server-side in both the picker's context payload and the personal-bank write endpoint). Confirmed
 via code trace (no live DB in this pass, matching Phases 2/3's verification style).
 
-Post-handoff hardening also applies the same cap to service-bank metadata in `api/services` and
-prevents "copy last report" from copying signature or approval answers into a new report.
+Post-handoff hardening also applies the same cap to service-bank metadata in `api/services`.
 
 ---
 

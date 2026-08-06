@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { Loader2, CheckCircle2, Copy } from 'lucide-react';
+import { Loader2, CheckCircle2 } from 'lucide-react';
 import { toast } from '@/lib/toast.jsx';
 import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { useOrg } from '@/org/OrgContext.jsx';
@@ -144,12 +144,6 @@ export default function NewSessionModal({
     setPersonalPreanswers(updated?.report_preanswers || {});
   }, [session, activeOrgId]);
 
-  const handleCopyFromLastReport = useCallback(() => {
-    if (reportContext?.last_report_answers) {
-      setAnswers(reportContext.last_report_answers);
-    }
-  }, [reportContext]);
-
   const handleSubmit = useCallback(async ({ answers: submittedAnswers, validationErrors: errors }) => {
     if (errors && Object.keys(errors).length > 0) {
       setValidationErrors(errors);
@@ -241,26 +235,8 @@ export default function NewSessionModal({
     <Dialog open={open} onOpenChange={(next) => { if (!next) onClose?.(); }}>
       <DialogContent className="sm:max-w-xl" footer={footer}>
         <DialogHeader>
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0 space-y-1">
-              <DialogTitle>{dialogTitle}</DialogTitle>
-              {dialogDescription ? <DialogDescription>{dialogDescription}</DialogDescription> : null}
-            </div>
-            {canRenderForm && reportContext?.last_report_answers ? (
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8 shrink-0 text-neutral-600"
-                onClick={handleCopyFromLastReport}
-                disabled={submitState === REQUEST_STATE.loading}
-                aria-label="העתק מהדיווח האחרון"
-                title="העתק מהדיווח האחרון"
-              >
-                <Copy className="h-4 w-4" aria-hidden="true" />
-              </Button>
-            ) : null}
-          </div>
+          <DialogTitle>{dialogTitle}</DialogTitle>
+          {dialogDescription ? <DialogDescription>{dialogDescription}</DialogDescription> : null}
         </DialogHeader>
 
         {!lessonParticipantId ? (

@@ -298,12 +298,12 @@ function QuestionField({ question, value, onChange, readOnly, error, inputAction
               placeholder={question.placeholder}
               className={cn(
                 'min-h-[120px] rounded-xl border bg-white px-3 py-2 text-sm shadow-sm',
-                inputAction ? 'ps-12' : '',
+                inputAction ? 'pe-12' : '',
                 error ? 'border-red-300' : 'border-slate-200',
               )}
               onChange={(event) => onChange(event.target.value)}
             />
-            {inputAction ? <div className="absolute start-1 top-1">{inputAction}</div> : null}
+            {inputAction ? <div className="absolute end-1 top-1">{inputAction}</div> : null}
           </div>
           {error ? <p className="text-xs text-red-600">{error}</p> : null}
         </div>
@@ -363,10 +363,10 @@ function QuestionField({ question, value, onChange, readOnly, error, inputAction
               value={value ?? ''}
               disabled={readOnly}
               placeholder={question.placeholder}
-              className={cn(getInputClass(Boolean(error)), inputAction ? 'ps-12' : '')}
+              className={cn(getInputClass(Boolean(error)), inputAction ? 'pe-12' : '')}
               onChange={(event) => onChange(event.target.value)}
             />
-            {inputAction ? <div className="absolute start-1 top-1/2 -translate-y-1/2">{inputAction}</div> : null}
+            {inputAction ? <div className="absolute end-1 top-1/2 -translate-y-1/2">{inputAction}</div> : null}
           </div>
           {error ? <p className="text-xs text-red-600">{error}</p> : null}
         </div>

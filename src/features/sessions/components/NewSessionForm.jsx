@@ -21,8 +21,7 @@ const PREANSWERABLE_TYPES = new Set(['short_text', 'long_text']);
  *
  * Phase 4 adds a "תשובות מוכנות" (preconfigured answers) affordance per
  * text/textarea field, sourced from the service-universal bank first and the
- * caller's personal bank second (see PreanswersPickerDialog), plus a
- * one-click "copy from my last report for this student/service" prefill.
+ * caller's personal bank second (see PreanswersPickerDialog).
  */
 export default function NewSessionForm({
   formSchema,

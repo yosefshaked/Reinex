@@ -36,7 +36,6 @@ import {
   collectSharedBlockIds,
   evaluateAlertFlags,
   findMissingSharedBlockIds,
-  getQuestionsInOrder,
   materializeSchemaForSnapshot,
   normalizeFormSchema,
   prepareAnswersForStorage,
@@ -719,7 +718,6 @@ async function resolveReportContext(context, req, { supabase, orgId, userId, rol
   // Phase 4 — preanswers banks (service-universal + caller's personal bank).
   // Only resolved when the org has the feature on, to avoid unnecessary reads.
   let preanswers = null;
-  let lastReportAnswers = null;
   if (preanswersEnabled && form) {
     const servicePreanswers = normalizeJsonObject(
       normalizeJsonObject(service?.metadata, {}).report_preanswers,
@@ -747,35 +745,6 @@ async function resolveReportContext(context, req, { supabase, orgId, userId, rol
       service: servicePreanswers,
       personal: personalPreanswers,
     };
-
-    // Bonus (Phase 4 task 4): "copy from my last report for this student+service".
-    // Reuse the same student_id+service_id filter client-side would use; here we
-    // do it server-side since we already have both ids.
-    if (participant.student_id) {
-      const { data: priorReports, error: priorReportsError } = await withOrgScope(supabase, 'form_submissions', orgId)
-        .select('id, answers, submitted_at, lesson_participant_id')
-        .eq('student_id', participant.student_id)
-        .eq('service_id', service.id)
-        .eq('is_legacy', false)
-        .eq('source', 'internal')
-        .neq('lesson_participant_id', lessonParticipantId)
-        .order('submitted_at', { ascending: false })
-        .limit(1);
-      if (!priorReportsError && priorReports?.[0]) {
-        const copyableQuestionIds = new Set(
-          getQuestionsInOrder(form.form_schema)
-            .filter((question) => !['signature', 'approval'].includes(question.type))
-            .map((question) => question.id),
-        );
-        const priorAnswers = normalizeJsonObject(priorReports[0].answers, {});
-        lastReportAnswers = Object.fromEntries(
-          Object.entries(priorAnswers).filter(([questionId]) => copyableQuestionIds.has(questionId)),
-        );
-        if (!Object.keys(lastReportAnswers).length) {
-          lastReportAnswers = null;
-        }
-      }
-    }
   }
 
   return respond(context, 200, {
@@ -798,7 +767,6 @@ async function resolveReportContext(context, req, { supabase, orgId, userId, rol
     form,
     existing_report_id: existingReport?.id || null,
     preanswers,
-    last_report_answers: lastReportAnswers,
   });
 }
 
