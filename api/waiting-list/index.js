@@ -196,6 +196,99 @@ async function enrichWaitingListEntriesWithIntakeSubmissions(client, orgId, entr
   });
 }
 
+async function loadPendingWaitingListIntakeInvites(client, orgId) {
+  const { data: submissions, error: submissionsError } = await withOrgScope(client, 'form_submissions', orgId)
+    .select('id, form_id, client_profile_id, student_id, otp_metadata, metadata, submitted_at')
+    .contains('metadata', { workflow_kind: 'waiting_list_intake', workflow_status: 'pending' })
+    .order('submitted_at', { ascending: false });
+
+  if (submissionsError) throw submissionsError;
+  const rows = Array.isArray(submissions) ? submissions : [];
+  if (rows.length === 0) return [];
+
+  const formIds = Array.from(new Set(rows.map((row) => normalizeUuid(row?.form_id)).filter(Boolean)));
+  const clientProfileIds = Array.from(new Set(rows.map((row) => normalizeUuid(row?.client_profile_id)).filter(Boolean)));
+  const serviceIds = Array.from(new Set(rows
+    .map((row) => normalizeUuid(normalizeJsonObject(row?.metadata, {}).primary_service_id))
+    .filter(Boolean)));
+
+  const [formsResult, profilesResult, servicesResult] = await Promise.all([
+    formIds.length > 0
+      ? withOrgScope(client, 'forms', orgId)
+        .select('id, name, form_usage')
+        .in('id', formIds)
+        .eq('form_usage', 'waiting_list_intake')
+      : Promise.resolve({ data: [], error: null }),
+    clientProfileIds.length > 0
+      ? withOrgScope(client, 'client_profiles', orgId)
+        .select('id, first_name, middle_name, last_name, identity_number, phone, email, onboarding_status, is_active, tags')
+        .in('id', clientProfileIds)
+      : Promise.resolve({ data: [], error: null }),
+    serviceIds.length > 0
+      ? withOrgScope(client, 'Services', orgId)
+        .select('id, name')
+        .in('id', serviceIds)
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+
+  if (formsResult.error) throw formsResult.error;
+  if (profilesResult.error) throw profilesResult.error;
+  if (servicesResult.error) throw servicesResult.error;
+
+  const formsById = new Map((formsResult.data || []).map((form) => [form.id, form]));
+  const profilesById = new Map((profilesResult.data || []).map((profile) => [profile.id, profile]));
+  const servicesById = new Map((servicesResult.data || []).map((service) => [service.id, service]));
+
+  return rows.flatMap((submission) => {
+    const form = formsById.get(submission.form_id);
+    if (!form) return [];
+
+    const metadata = normalizeJsonObject(submission.metadata, {});
+    const serviceId = normalizeUuid(metadata.primary_service_id);
+    const clientProfile = profilesById.get(submission.client_profile_id) || null;
+    const createdAt = normalizeString(metadata.initiated_at) || submission.submitted_at || null;
+
+    return [{
+      id: `pending-form:${submission.id}`,
+      client_profile_id: submission.client_profile_id || null,
+      student_id: submission.student_id || null,
+      latest_submission_id: submission.id,
+      desired_service_id: serviceId || null,
+      preferred_days: null,
+      preferred_times: null,
+      priority_flag: false,
+      notes: normalizeString(metadata.internal_note) || null,
+      status: 'pending_form',
+      created_at: createdAt,
+      metadata: {
+        ...metadata,
+        source: 'waiting_list_intake_pending',
+        form_submission_id: submission.id,
+      },
+      student: submission.student_id
+        ? { id: submission.student_id, client_profile_id: submission.client_profile_id || null }
+        : null,
+      client_profile: clientProfile,
+      service: servicesById.get(serviceId) || null,
+      intake_submission: {
+        id: submission.id,
+        form_id: submission.form_id,
+        form_name: form.name || null,
+        submitted_at: null,
+        answer_count: 0,
+        alert_count: 0,
+        custom_answers: {},
+        answer_search_text: '',
+      },
+      pending_invite: {
+        delivery_method: normalizeString(metadata.delivery_method)
+          || normalizeString(normalizeJsonObject(submission.otp_metadata, {}).delivery_method)
+          || null,
+      },
+    }];
+  });
+}
+
 function buildWaitingListSelect() {
   return [
     'id',
@@ -300,6 +393,20 @@ export default async function waitingList(context, req) {
 
   if (method === 'GET') {
     const rawStatus = req?.query?.status ?? body?.status ?? 'active';
+    const rawStatusFilter = normalizeString(rawStatus).toLowerCase();
+
+    if (rawStatusFilter === 'pending_form') {
+      try {
+        return respond(context, 200, await loadPendingWaitingListIntakeInvites(supabase, orgId));
+      } catch (pendingInvitesError) {
+        context.log?.error?.('waiting-list failed to load pending intake invites', { message: pendingInvitesError?.message });
+        return respondWaitingListError(context, 500, 'failed_to_load_waiting_list', pendingInvitesError, {
+          action: 'load_pending_waiting_list_intake_invites',
+          status_filter: rawStatusFilter,
+        });
+      }
+    }
+
     const statusFilter = normalizeStatus(rawStatus, { allowAll: true }) || 'active';
 
     if (!statusFilter) {

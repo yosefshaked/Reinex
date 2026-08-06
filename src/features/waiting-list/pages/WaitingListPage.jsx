@@ -57,6 +57,7 @@ const STATUS_OPTIONS = [
 
 const STATUS_FILTER_OPTIONS = [
   { value: 'active', label: 'חדשים ופתוחים' },
+  { value: 'pending_form', label: 'ממתין למילוי' },
   { value: 'new', label: 'חדשים בלבד' },
   { value: 'open', label: 'פתוחים בלבד' },
   { value: 'matched', label: 'שובצו בלבד' },
@@ -65,6 +66,7 @@ const STATUS_FILTER_OPTIONS = [
 ];
 
 const STATUS_BADGE_VARIANTS = {
+  pending_form: 'outline',
   new: 'default',
   open: 'secondary',
   matched: 'default',
@@ -345,6 +347,7 @@ function entryMatchesSearch(entry, query) {
 }
 
 function getStatusLabel(status) {
+  if (status === 'pending_form') return 'ממתין למילוי';
   return STATUS_OPTIONS.find((option) => option.value === status)?.label || '—';
 }
 
@@ -1306,14 +1309,20 @@ export default function WaitingListPage() {
             </div>
             <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
               <span>מוצגות: {sortedEntries.length}</span>
-              <span>•</span>
-              <span>חדשות: {entries.filter((entry) => entry.status === 'new').length}</span>
-              <span>•</span>
-              <span>נבדקו: {entries.filter((entry) => entry.status === 'open').length}</span>
-              <span>•</span>
-              <span>דחופות: {entries.filter((entry) => entry.priority_flag).length}</span>
-              <span>•</span>
-              <span>מעל 14 יום: {entries.filter((entry) => ['new', 'open'].includes(entry.status) && getWaitingDays(entry.created_at) >= 14).length}</span>
+              {statusFilter === 'pending_form' ? (
+                <><span>•</span><span>טפסים ממתינים: {entries.length}</span></>
+              ) : (
+                <>
+                  <span>•</span>
+                  <span>חדשות: {entries.filter((entry) => entry.status === 'new').length}</span>
+                  <span>•</span>
+                  <span>נבדקו: {entries.filter((entry) => entry.status === 'open').length}</span>
+                  <span>•</span>
+                  <span>דחופות: {entries.filter((entry) => entry.priority_flag).length}</span>
+                  <span>•</span>
+                  <span>מעל 14 יום: {entries.filter((entry) => ['new', 'open'].includes(entry.status) && getWaitingDays(entry.created_at) >= 14).length}</span>
+                </>
+              )}
               {loadingMeta ? <span>• טוען נתוני עזר...</span> : null}
             </div>
           </div>
@@ -1327,7 +1336,7 @@ export default function WaitingListPage() {
       <div className="grid gap-4 xl:grid-cols-[320px_minmax(0,1fr)_380px]">
         <Card className="min-h-[70vh]">
           <CardHeader className="pb-3">
-            <CardTitle className="text-base">תור טיפול</CardTitle>
+            <CardTitle className="text-base">{statusFilter === 'pending_form' ? 'טפסים ממתינים למילוי' : 'תור טיפול'}</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
             {loading ? (
@@ -1351,7 +1360,7 @@ export default function WaitingListPage() {
                     type="button"
                     onClick={() => {
                       setSelectedEntryId(entry.id);
-                      setAutoReviewEligibleEntryId(entry.id);
+                      setAutoReviewEligibleEntryId(entry.status === 'pending_form' ? '' : entry.id);
                     }}
                     className={cn(
                       'w-full rounded-2xl border p-4 text-right transition-colors',
@@ -1378,14 +1387,19 @@ export default function WaitingListPage() {
                     </div>
 
                     <div className="space-y-1 text-xs text-muted-foreground">
-                      <div>נוצר: {formatEntryCreatedAt(entry.created_at)}</div>
+                      <div>{entry.status === 'pending_form' ? 'נשלח' : 'נוצר'}: {formatEntryCreatedAt(entry.created_at)}</div>
                       <div>ימי זמינות: {formatPreferredDays(entry.preferred_days)}</div>
                       <div>טווחים: {formatPreferredTimes(entry.preferred_times)}</div>
                     </div>
 
                     <div className="mt-3 flex flex-wrap items-center gap-2">
-                      {!entry?.student_id ? <Badge variant="outline">טרם הומר/ה לתלמיד/ה</Badge> : null}
+                      {!entry?.student_id ? (
+                        <Badge variant="outline">
+                          {entry.status === 'pending_form' ? 'לקוח/ה חד-פעמי/ת' : 'טרם הומר/ה לתלמיד/ה'}
+                        </Badge>
+                      ) : null}
                       {intakeMeta.source === 'waiting_list_intake' ? <Badge variant="secondary">נוצר מטופס</Badge> : null}
+                      {entry.status === 'pending_form' ? <Badge variant="secondary">נשלח וממתין למילוי</Badge> : null}
                       {additionalAnswerCount > 0 ? (
                         <span
                           role="button"
@@ -1413,7 +1427,7 @@ export default function WaitingListPage() {
                       ) : null}
                       {alertAnswerCount > 0 ? <Badge variant="destructive">דורש תשומת לב</Badge> : null}
                     </div>
-                    <div className="mt-3 flex flex-wrap gap-2">
+                    {entry.status !== 'pending_form' ? <div className="mt-3 flex flex-wrap gap-2">
                       {entry.status === 'new' ? (
                         <span
                           role="button"
@@ -1472,7 +1486,7 @@ export default function WaitingListPage() {
                       >
                         {entry.priority_flag ? 'הסר דחיפות' : 'סמן דחוף'}
                       </span>
-                    </div>
+                    </div> : null}
                   </button>
                 );
               })
@@ -1509,12 +1523,21 @@ export default function WaitingListPage() {
                           <h2 className="text-lg font-semibold text-foreground">{buildStudentName(person)}</h2>
                         </div>
                         <div className="text-sm text-muted-foreground">{selectedEntry.service?.name || 'ללא שירות מוגדר'}</div>
+                        {selectedEntry.status === 'pending_form' ? (
+                          <div className="text-sm text-muted-foreground">
+                            טופס: {intakeSubmission.form_name || 'טופס רשימת המתנה'}
+                          </div>
+                        ) : null}
                         <div className="flex flex-wrap items-center gap-2">
                           <Badge variant={STATUS_BADGE_VARIANTS[selectedEntry.status] || 'outline'}>
                             {getStatusLabel(selectedEntry.status)}
                           </Badge>
                           {selectedEntry.priority_flag ? <Badge variant="destructive">עדיפות גבוהה</Badge> : null}
-                          {!selectedEntry?.student_id ? <Badge variant="outline">טרם הומר/ה לתלמיד/ה</Badge> : null}
+                          {!selectedEntry?.student_id ? (
+                            <Badge variant="outline">
+                              {selectedEntry.status === 'pending_form' ? 'לקוח/ה חד-פעמי/ת' : 'טרם הומר/ה לתלמיד/ה'}
+                            </Badge>
+                          ) : null}
                           {intakeMeta.source === 'waiting_list_intake' ? <Badge variant="secondary">נוצר מטופס</Badge> : null}
                           {additionalAnswerCount > 0 ? (
                             <button
@@ -1555,18 +1578,26 @@ export default function WaitingListPage() {
                             לא מעוניין
                           </Button>
                         ) : null}
-                        <Button variant="outline" size="sm" onClick={() => handleTogglePriority(selectedEntry)} className="gap-2">
-                          <AlertTriangle className="h-4 w-4" />
-                          {selectedEntry.priority_flag ? 'הסר דחיפות' : 'סמן דחוף'}
-                        </Button>
-                        <Button variant="outline" size="sm" onClick={() => openEditDialog(selectedEntry)} className="gap-2">
-                          <Pencil className="h-4 w-4" />
-                          עריכת רשומה
-                        </Button>
+                        {selectedEntry.status !== 'pending_form' ? (
+                          <>
+                            <Button variant="outline" size="sm" onClick={() => handleTogglePriority(selectedEntry)} className="gap-2">
+                              <AlertTriangle className="h-4 w-4" />
+                              {selectedEntry.priority_flag ? 'הסר דחיפות' : 'סמן דחוף'}
+                            </Button>
+                            <Button variant="outline" size="sm" onClick={() => openEditDialog(selectedEntry)} className="gap-2">
+                              <Pencil className="h-4 w-4" />
+                              עריכת רשומה
+                            </Button>
+                          </>
+                        ) : null}
                         <Button asChild variant="outline" size="sm" className="gap-2">
-                      <Link to={selectedEntry.student_id ? `/students/${selectedEntry.student_id}` : `/one-time-customers/${selectedEntry.client_profile_id}`}>
+                      <Link to={selectedEntry.student_id
+                        ? `/students/${selectedEntry.student_id}${selectedEntry.status === 'pending_form' ? '/forms' : ''}`
+                        : `/one-time-customers/${selectedEntry.client_profile_id}${selectedEntry.status === 'pending_form' ? '/forms' : ''}`}>
                         <ArrowLeft className="h-4 w-4" />
-                        {selectedEntry.student_id ? 'פתח כרטיס תלמיד' : 'פתח כרטיס לקוח/ה'}
+                        {selectedEntry.status === 'pending_form'
+                          ? 'פתח טפסים'
+                          : selectedEntry.student_id ? 'פתח כרטיס תלמיד' : 'פתח כרטיס לקוח/ה'}
                       </Link>
                         </Button>
                       </div>
@@ -1579,8 +1610,8 @@ export default function WaitingListPage() {
                           זמינות והעדפות
                         </div>
                         <div className="space-y-2 text-sm text-muted-foreground">
-                          <div>ימי זמינות: <span className="font-medium text-foreground">{formatPreferredDays(selectedEntry.preferred_days)}</span></div>
-                          <div>טווחי זמן: <span className="font-medium text-foreground">{formatPreferredTimes(selectedEntry.preferred_times)}</span></div>
+                          <div>ימי זמינות: <span className="font-medium text-foreground">{selectedEntry.status === 'pending_form' ? 'טרם מולא' : formatPreferredDays(selectedEntry.preferred_days)}</span></div>
+                          <div>טווחי זמן: <span className="font-medium text-foreground">{selectedEntry.status === 'pending_form' ? 'טרם מולא' : formatPreferredTimes(selectedEntry.preferred_times)}</span></div>
                           <div>נוצר: <span className="font-medium text-foreground">{formatEntryCreatedAt(selectedEntry.created_at)}</span></div>
                           <div>זמן המתנה: <span className={cn('rounded-full border px-2 py-0.5 text-xs font-medium', getWaitingAgeTone(getWaitingDays(selectedEntry.created_at)))}>{formatWaitingAge(selectedEntry.created_at)}</span></div>
                         </div>
@@ -1680,6 +1711,10 @@ export default function WaitingListPage() {
             {!selectedEntry ? (
               <div className="rounded-xl border border-dashed border-border p-6 text-sm text-muted-foreground">
                 בחרו רשומה מהתור כדי לראות הצעות שיבוץ.
+              </div>
+            ) : selectedEntry.status === 'pending_form' ? (
+              <div className="rounded-xl border border-dashed border-border p-6 text-sm text-muted-foreground">
+                הצעות שיבוץ יהיו זמינות לאחר מילוי טופס רשימת ההמתנה.
               </div>
             ) : !['new', 'open'].includes(String(selectedEntry.status || '').toLowerCase()) ? (
               <div className="rounded-xl border border-dashed border-border p-6 text-sm text-muted-foreground">
