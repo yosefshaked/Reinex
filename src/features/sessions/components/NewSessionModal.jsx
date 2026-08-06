@@ -1,17 +1,15 @@
-import React, { useCallback, useEffect, useMemo, useState, useRef } from 'react';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { Loader2, Calendar, CalendarCheck, CalendarClock } from 'lucide-react';
+import { Loader2, CheckCircle2 } from 'lucide-react';
 import { toast } from '@/lib/toast.jsx';
-import { useAuth } from '@/auth/AuthContext.jsx';
-import { useOrg } from '@/org/OrgContext.jsx';
 import { useSupabase } from '@/context/SupabaseContext.jsx';
+import { useOrg } from '@/org/OrgContext.jsx';
 import { authenticatedFetch } from '@/lib/api-client.js';
-import { extractSupportCode, resolveApiErrorMessage } from '@/lib/error-support.js';
+import { resolveApiErrorMessage } from '@/lib/error-support.js';
 import NewSessionForm, { NewSessionFormFooter } from './NewSessionForm.jsx';
-import { ensureSessionFormFallback, parseSessionFormConfig } from '@/features/sessions/utils/form-config.js';
-import { normalizeMembershipRole, isAdminRole } from '@/features/students/utils/endpoints.js';
-import { useInstructors, useServices } from '@/hooks/useOrgData.js';
+import { buildInitialAnswers } from '@/features/forms/lib/form-schema.js';
 
 const REQUEST_STATE = Object.freeze({
   idle: 'idle',
@@ -19,823 +17,293 @@ const REQUEST_STATE = Object.freeze({
   error: 'error',
 });
 
+const NON_ARRIVAL_STATUSES = new Set(['no_show', 'cancelled_student', 'cancelled_clinic']);
 
-/**
- * Format date as DD/MM/YYYY for display
- */
-function formatDateForDisplay(dateStr) {
-  if (!dateStr) return '';
-  const [year, month, day] = dateStr.split('-');
-  return `${day}/${month}/${year}`;
-}
-
-/**
- * Get today's date in YYYY-MM-DD format
- */
-function getTodayDate() {
-  const today = new Date();
-  const year = today.getFullYear();
-  const month = String(today.getMonth() + 1).padStart(2, '0');
-  const day = String(today.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-}
-
-function DateChoiceFooter({ lastReportDate, studentName, onClose, onNewReport, onNewReportSameStudent, allowSameStudent = true }) {
-  const [selectedDate, setSelectedDate] = useState(null);
-  const [mode, setMode] = useState(allowSameStudent ? 'choose' : 'other-student'); // 'choose' | 'same-student' | 'other-student'
-  const todayDate = getTodayDate();
-  const showSameDate = lastReportDate && lastReportDate !== todayDate;
-
-  const handleChooseSameStudent = () => {
-    setMode('same-student');
-    setSelectedDate(null);
-  };
-
-  const handleChooseOtherStudent = () => {
-    setMode('other-student');
-    setSelectedDate(null);
-  };
-
-  const handleBack = () => {
-    setMode('choose');
-    setSelectedDate(null);
-  };
-
-  const handleContinue = () => {
-    if (!selectedDate) return;
-    
-    const dateValue = selectedDate === 'same' ? lastReportDate : 
-                     selectedDate === 'today' ? todayDate : 
-                     null; // 'other' - let user pick in form
-    
-    if (mode === 'same-student') {
-      onNewReportSameStudent({ date: dateValue });
-    } else {
-      onNewReport({ date: dateValue });
-    }
-  };
-
-  // Initial choice: same student or other student
-  if (mode === 'choose') {
-    return (
-      <div className="flex flex-col gap-3">
-        <p className="text-sm font-medium text-center text-neutral-700">
-          מה תרצו לעשות?
-        </p>
-        <div className="flex flex-col sm:flex-row gap-2">
-          <Button 
-            onClick={handleChooseSameStudent}
-            className="flex-1 gap-xs shadow-md hover:shadow-lg transition-shadow"
-          >
-            דיווח נוסף - {studentName}
-          </Button>
-          <Button 
-            onClick={handleChooseOtherStudent}
-            className="flex-1 gap-xs shadow-md hover:shadow-lg transition-shadow"
-          >
-            דיווח נוסף - תלמיד אחר
-          </Button>
-        </div>
-        <Button 
-          onClick={onClose}
-          variant="outline"
-          className="hover:shadow-sm"
-        >
-          סגור
-        </Button>
-      </div>
-    );
+function formatLessonDateTime(isoString) {
+  if (!isoString) return '';
+  try {
+    return new Intl.DateTimeFormat('he-IL', {
+      dateStyle: 'short',
+      timeStyle: 'short',
+    }).format(new Date(isoString));
+  } catch {
+    return '';
   }
-
-  // Date selection for chosen mode
-  return (
-    <div className="flex flex-col gap-4">
-      <div className="space-y-3">
-        <p className="text-sm font-medium text-center text-neutral-700">
-          בחרו תאריך לדיווח הבא:
-        </p>
-        
-        <div className="grid gap-2">
-          {showSameDate && (
-            <Button
-              variant={selectedDate === 'same' ? 'default' : 'outline'}
-              onClick={() => setSelectedDate('same')}
-              className="justify-start gap-2 h-auto py-3"
-            >
-              <CalendarCheck className="h-4 w-4 shrink-0" />
-              <div className="flex flex-col items-start text-end">
-                <span className="font-medium">אותו התאריך</span>
-                <span className="text-xs opacity-80">{formatDateForDisplay(lastReportDate)}</span>
-              </div>
-            </Button>
-          )}
-          
-          <Button
-            variant={selectedDate === 'today' ? 'default' : 'outline'}
-            onClick={() => setSelectedDate('today')}
-            className="justify-start gap-2 h-auto py-3"
-          >
-            <CalendarClock className="h-4 w-4 shrink-0" />
-            <div className="flex flex-col items-start text-end">
-              <span className="font-medium">היום</span>
-              <span className="text-xs opacity-80">{formatDateForDisplay(todayDate)}</span>
-            </div>
-          </Button>
-          
-          <Button
-            variant={selectedDate === 'other' ? 'default' : 'outline'}
-            onClick={() => setSelectedDate('other')}
-            className="justify-start gap-2 h-auto py-3"
-          >
-            <Calendar className="h-4 w-4 shrink-0" />
-            <div className="flex flex-col items-start text-end">
-              <span className="font-medium">תאריך אחר</span>
-              <span className="text-xs opacity-80">בחירה חופשית</span>
-            </div>
-          </Button>
-        </div>
-      </div>
-
-      <div className="flex flex-col sm:flex-row gap-2">
-        <Button 
-          onClick={handleContinue}
-          disabled={!selectedDate}
-          className="flex-1"
-        >
-          המשך לדיווח
-        </Button>
-        {allowSameStudent ? (
-          <Button 
-            onClick={handleBack}
-            variant="outline"
-            className="flex-1"
-          >
-            חזור
-          </Button>
-        ) : null}
-        <Button 
-          onClick={onClose}
-          variant="outline"
-          className="flex-1"
-        >
-          סגור
-        </Button>
-      </div>
-    </div>
-  );
 }
 
-function SuccessFooter({ studentName, onClose, onNewReport, onNewReportSameStudent }) {
-  return (
-    <div className="flex flex-col gap-sm items-center">
-      <div className="flex flex-col sm:flex-row gap-sm w-full sm:w-auto sm:justify-center">
-        <Button 
-          onClick={onNewReportSameStudent}
-          className="gap-xs shadow-md hover:shadow-lg transition-shadow"
-        >
-          דיווח נוסף - {studentName}
-        </Button>
-        <Button 
-          onClick={onNewReport}
-        >
-          דיווח נוסף - תלמיד אחר
-        </Button>
-      </div>
-      <Button 
-        onClick={onClose}
-        variant="outline"
-        className="hover:shadow-sm w-full sm:w-auto"
-      >
-        סגור
-      </Button>
-    </div>
-  );
-}
-
+/**
+ * Session Reports Phase 3 — the report drawer (fill + submit).
+ *
+ * Anchored entry contract: the modal opens with a lesson-participant
+ * context, never a bare student/date. See
+ * src/features/sessions/context/SessionModalContext.jsx for the shared
+ * `openSessionReportModal({ lessonParticipantId, studentName, serviceName,
+ * lessonDateTime })` contract that Phase 5's pending-reports page will use
+ * to open this same modal.
+ *
+ * On open, resolves the form to fill via
+ * GET /api/session-reports?lesson_participant_id=X&mode=context (added in
+ * Task 5), which carries the same permission/role guards as POST. Renders
+ * the resolved schema with SectionedFormRenderer and submits via
+ * POST /api/session-reports. There is no loose/unassigned-student flow
+ * anymore (Decision #4 in the implementation plan) — every 409 the API can
+ * return is mapped to a Hebrew message in src/lib/api-client.js.
+ */
 export default function NewSessionModal({
   open,
   onClose,
-  initialStudentId = '',
-  initialStudentStatus = 'active',
-  initialDate = '', // YYYY-MM-DD format
+  lessonParticipantId = '',
+  studentName = '',
+  serviceName = '',
+  lessonDateTime = '',
+  continuationQueue = [],
+  onContinueToNext,
   onCreated,
 }) {
-  const { session, loading: supabaseLoading } = useSupabase();
-  const { user } = useAuth();
-  const { activeOrg } = useOrg();
-  const [studentsState, setStudentsState] = useState(REQUEST_STATE.idle);
-  const [studentsError, setStudentsError] = useState('');
-  const [students, setStudents] = useState([]);
-  const [questionsState, setQuestionsState] = useState(REQUEST_STATE.idle);
-  const [questionError, setQuestionError] = useState('');
-  const [questions, setQuestions] = useState([]);
-  const [suggestions, setSuggestions] = useState({});
+  const navigate = useNavigate();
+  const { session } = useSupabase();
+  const { activeOrgId } = useOrg();
+
+  const [contextState, setContextState] = useState(REQUEST_STATE.idle);
+  const [contextError, setContextError] = useState('');
+  const [reportContext, setReportContext] = useState(null);
+  const [answers, setAnswers] = useState({});
   const [submitState, setSubmitState] = useState(REQUEST_STATE.idle);
   const [submitError, setSubmitError] = useState('');
-  const [studentScope, setStudentScope] = useState('all'); // 'all' | 'mine' | `inst:<id>`
-  const [statusFilter, setStatusFilter] = useState('active'); // 'active' | 'inactive' | 'all'
-  const [canViewInactive, setCanViewInactive] = useState(false);
-  const [visibilityLoaded, setVisibilityLoaded] = useState(false);
-  const [initialStatusApplied, setInitialStatusApplied] = useState(false);
-  const [successState, setSuccessState] = useState(null); // { studentId, studentName, date }
+  const [validationErrors, setValidationErrors] = useState({});
+  const [successReport, setSuccessReport] = useState(null);
+  // Phase 4 — personal preanswers bank kept in local state so inline
+  // save/delete (from the picker) reflects immediately without a re-fetch.
   const [personalPreanswers, setPersonalPreanswers] = useState({});
-  const formResetRef = useRef(null); // Will hold the form's reset function
-  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false); // Track advanced filter visibility
-  const personalFetchAbortRef = useRef(null);
 
-  // Fix for mobile: prevent Dialog close when Select is open/closing
-  const openSelectCountRef = useRef(0);
-  const isClosingSelectRef = useRef(false);
+  const canFetchContext = Boolean(open && session && activeOrgId && lessonParticipantId);
 
-  const activeOrgId = activeOrg?.id || null;
-  const membershipRole = normalizeMembershipRole(activeOrg?.membership?.role);
-  const canAdmin = isAdminRole(membershipRole);
-  const userId = user?.id || null;
-  
-  const canFetchStudents = useMemo(() => {
-    return (
-      open &&
-      Boolean(session) &&
-      Boolean(activeOrgId) &&
-      !supabaseLoading
-    );
-  }, [open, session, activeOrgId, supabaseLoading]);
-
-  // Fetch instructors for BOTH admins and non-admin instructors.
-  // Backend enforces: non-admin users only receive their own instructor record.
-  const { instructors } = useInstructors({
-    enabled: open && Boolean(activeOrgId),
-    orgId: activeOrgId,
-  });
-
-  const { services } = useServices({
-    enabled: open && canFetchStudents,
-    orgId: activeOrgId,
-  });
-
-  // Check if the logged-in user is an instructor (must be after instructors is defined)
-  const userIsInstructor = useMemo(() => {
-    if (!userId) return false;
-    if (Array.isArray(instructors) && instructors.length > 0) {
-      return instructors.some((inst) => inst.id === userId);
-    }
-    const roleFromMembership = normalizeMembershipRole(activeOrg?.membership?.role);
-    return roleFromMembership === 'instructor';
-  }, [userId, instructors, activeOrg]);
-
-  const canEditPersonalPreanswers = userIsInstructor; // Only instructors can maintain personal snippets
-
-  // Extract preanswers cap from permissions (must come from permission registry). If permissions are
-  // stored as a JSON string, parse locally to avoid changing user-context API.
-  const preanswersCapLimit = useMemo(() => {
-    const rawPerms = activeOrg?.permissions ?? activeOrg?.connection?.permissions;
-    let perms = null;
-
-    if (typeof rawPerms === 'string') {
-      try {
-        perms = JSON.parse(rawPerms);
-      } catch {
-        perms = null;
-      }
-    } else if (rawPerms && typeof rawPerms === 'object') {
-      perms = rawPerms;
-    }
-
-    if (!perms) {
-      return undefined;
-    }
-
-    const capRaw = perms.session_form_preanswers_cap;
-    if (typeof capRaw === 'number' && capRaw > 0) {
-      return capRaw;
-    }
-    return undefined;
-  }, [activeOrg]);
-
-  useEffect(() => {
-    if (!open) {
-      setStatusFilter('active');
-      setCanViewInactive(canAdmin);
-      setVisibilityLoaded(false);
-      setInitialStatusApplied(false);
-      return;
-    }
-
-    if (canAdmin) {
-      setCanViewInactive(true);
-      setVisibilityLoaded(true);
-      return;
-    }
-
-    if (!activeOrgId || !session) {
-      setCanViewInactive(false);
-      setVisibilityLoaded(false);
-      if (statusFilter !== 'active') {
-        setStatusFilter('active');
-      }
-      setInitialStatusApplied(false);
-      return;
-    }
-
-    let cancelled = false;
-    const abortController = new AbortController();
-
-    const loadVisibilitySetting = async () => {
-      try {
-        const searchParams = new URLSearchParams({ org_id: activeOrgId, keys: 'instructors_can_view_inactive_students' });
-        const payload = await authenticatedFetch(`settings?${searchParams.toString()}`, {
-          signal: abortController.signal,
-        });
-        const entry = payload?.settings?.instructors_can_view_inactive_students;
-        const value = entry && typeof entry === 'object' && Object.prototype.hasOwnProperty.call(entry, 'value')
-          ? entry.value
-          : entry;
-        const allowed = value === true;
-        if (!cancelled) {
-          setCanViewInactive(allowed);
-          setVisibilityLoaded(true);
-          if (!allowed && statusFilter !== 'active') {
-            setStatusFilter('active');
-          }
-          if (!allowed) {
-            setInitialStatusApplied(false);
-          }
-        }
-      } catch (error) {
-        if (error?.name === 'AbortError') {
-          return;
-        }
-        console.error('Failed to load inactive visibility setting for session modal', error);
-        if (!cancelled) {
-          setCanViewInactive(false);
-          setVisibilityLoaded(true);
-          if (statusFilter !== 'active') {
-            setStatusFilter('active');
-          }
-          setInitialStatusApplied(false);
-        }
-      }
-    };
-
-    void loadVisibilitySetting();
-
-    return () => {
-      cancelled = true;
-      abortController.abort();
-    };
-  }, [open, membershipRole, activeOrgId, session, statusFilter, canAdmin]);
-
-  useEffect(() => {
-    if (!open) {
-      setSubmitState(REQUEST_STATE.idle);
-      setSubmitError('');
-      setSuccessState(null);
-      setShowAdvancedFilters(false); // Reset advanced filters visibility when modal closes
-      setPersonalPreanswers({});
-      if (personalFetchAbortRef.current) {
-        personalFetchAbortRef.current.abort();
-        personalFetchAbortRef.current = null;
-      }
-    }
-  }, [open]);
-
-  const loadStudents = useCallback(async (options = {}) => {
-    if (!canFetchStudents) {
-      return;
-    }
-
-    setStudentsState(REQUEST_STATE.loading);
-    setStudentsError('');
-
+  const loadContext = useCallback(async () => {
+    if (!canFetchContext) return;
+    setContextState(REQUEST_STATE.loading);
+    setContextError('');
     try {
-      // Use unified students-list endpoint for all scenarios
-      const overrideStatus = typeof options.status === 'string' ? options.status : null;
-      const statusParam = canViewInactive ? (overrideStatus || statusFilter) : 'active';
-      
-      const searchParams = new URLSearchParams();
-      if (activeOrgId) searchParams.set('org_id', activeOrgId);
-      if (statusParam) searchParams.set('status', statusParam);
-      
-      // Admin can filter by instructor via assigned_instructor_id parameter
-      if (canAdmin && studentScope.startsWith('inst:')) {
-        const instructorId = studentScope.slice(5);
-        if (instructorId) searchParams.set('assigned_instructor_id', instructorId);
-      }
-      
-      const endpoint = searchParams.toString() ? `students-list?${searchParams}` : 'students-list';
-      const payload = await authenticatedFetch(endpoint);
-      setStudents(Array.isArray(payload) ? payload : []);
-      setStudentsState(REQUEST_STATE.idle);
+      const payload = await authenticatedFetch('session-reports', {
+        session,
+        params: {
+          org_id: activeOrgId,
+          lesson_participant_id: lessonParticipantId,
+          mode: 'context',
+        },
+      });
+      setReportContext(payload);
+      setAnswers(payload?.form?.form_schema ? buildInitialAnswers(payload.form.form_schema) : {});
+      setPersonalPreanswers(payload?.preanswers?.personal || {});
+      setContextState(REQUEST_STATE.idle);
     } catch (error) {
-      console.error('Failed to load session students', error);
-      setStudents([]);
-      setStudentsState(REQUEST_STATE.error);
-      setStudentsError(error?.message || 'טעינת רשימת התלמידים נכשלה.');
+      console.error('Failed to load session report context', error);
+      setReportContext(null);
+      setContextState(REQUEST_STATE.error);
+      setContextError(resolveApiErrorMessage(error) || 'טעינת נתוני הדיווח נכשלה.');
     }
-  }, [activeOrgId, canFetchStudents, studentScope, statusFilter, canViewInactive, canAdmin]);
-
-  const loadQuestions = useCallback(async () => {
-    if (!open || !canFetchStudents) {
-      return;
-    }
-
-    setQuestionsState(REQUEST_STATE.loading);
-    setQuestionError('');
-
-    try {
-      const searchParams = new URLSearchParams({ keys: 'session_form_config', include_metadata: '1' });
-      if (activeOrgId) {
-        searchParams.set('org_id', activeOrgId);
-      }
-      const payload = await authenticatedFetch(`settings?${searchParams.toString()}`);
-      const entry = payload?.settings?.session_form_config ?? null;
-      const settingsValue = entry && typeof entry === 'object' && Object.prototype.hasOwnProperty.call(entry, 'value') ? entry.value : entry;
-      const normalized = ensureSessionFormFallback(parseSessionFormConfig(settingsValue));
-      const metadata = entry && typeof entry === 'object' && Object.prototype.hasOwnProperty.call(entry, 'metadata') ? entry.metadata : null;
-      const preanswers = metadata && typeof metadata === 'object' && metadata.preconfigured_answers && typeof metadata.preconfigured_answers === 'object'
-        ? metadata.preconfigured_answers
-        : {};
-      setQuestions(normalized);
-      setSuggestions(preanswers);
-      setQuestionsState(REQUEST_STATE.idle);
-    } catch (error) {
-      console.error('Failed to load session form configuration', error);
-      setQuestions(ensureSessionFormFallback([]));
-      setQuestionsState(REQUEST_STATE.error);
-      setQuestionError(error?.message || 'טעינת שאלות המפגש נכשלה.');
-    }
-  }, [open, canFetchStudents, activeOrgId]);
+  }, [canFetchContext, session, activeOrgId, lessonParticipantId]);
 
   useEffect(() => {
     if (open) {
-      void loadQuestions();
+      void loadContext();
     } else {
-      setStudentsState(REQUEST_STATE.idle);
-      setStudentsError('');
-      setStudents([]);
-      setInitialStatusApplied(false);
-      setQuestionsState(REQUEST_STATE.idle);
-      setQuestionError('');
-      setQuestions([]);
-      setSuggestions({});
-      setStudentScope('all');
+      setContextState(REQUEST_STATE.idle);
+      setContextError('');
+      setReportContext(null);
+      setAnswers({});
+      setSubmitState(REQUEST_STATE.idle);
+      setSubmitError('');
+      setValidationErrors({});
+      setSuccessReport(null);
+      setPersonalPreanswers({});
     }
-  }, [open, loadQuestions]);
+  }, [open, loadContext]);
 
   useEffect(() => {
-    if (!open || !canFetchStudents || !userId || !activeOrgId) {
+    if (!open) return;
+    setSubmitState(REQUEST_STATE.idle);
+    setSubmitError('');
+    setValidationErrors({});
+    setSuccessReport(null);
+  }, [open, lessonParticipantId]);
+
+  // Phase 4 — inline personal-bank save/delete from the picker. Writes the
+  // caller's own Employees.metadata.report_preanswers via the narrow
+  // POST /session-reports/preanswers endpoint, then mirrors the result into
+  // local state so the picker reflects it immediately.
+  const handleSavePersonalPreanswer = useCallback(async (fieldKey, nextEntries) => {
+    const updated = await authenticatedFetch('session-reports/preanswers', {
+      session,
+      method: 'POST',
+      body: {
+        org_id: activeOrgId,
+        field_key: fieldKey,
+        answers: nextEntries,
+      },
+    });
+    setPersonalPreanswers(updated?.report_preanswers || {});
+  }, [session, activeOrgId]);
+
+  const handleSubmit = useCallback(async ({ answers: submittedAnswers, validationErrors: errors }) => {
+    if (errors && Object.keys(errors).length > 0) {
+      setValidationErrors(errors);
       return;
     }
-
-    const abortController = new AbortController();
-    personalFetchAbortRef.current = abortController;
-
-    const extractCustomPreanswers = (record) => {
-      if (!record || typeof record !== 'object') return {};
-      const meta = record.metadata && typeof record.metadata === 'object' ? record.metadata : {};
-      const custom = meta.custom_preanswers && typeof meta.custom_preanswers === 'object' ? meta.custom_preanswers : {};
-      return custom;
-    };
-
-    const loadPersonal = async () => {
-      try {
-        if (canAdmin && Array.isArray(instructors) && instructors.length > 0) {
-          const mine = instructors.find((inst) => inst?.id === userId);
-          if (mine) {
-            setPersonalPreanswers(extractCustomPreanswers(mine));
-            return;
-          }
-        }
-
-        const searchParams = new URLSearchParams({ org_id: activeOrgId });
-        const payload = await authenticatedFetch(`instructors?${searchParams.toString()}`, {
-          signal: abortController.signal,
-        });
-        const record = Array.isArray(payload) ? payload.find((row) => row?.id === userId) || payload[0] : null;
-        setPersonalPreanswers(extractCustomPreanswers(record));
-      } catch (error) {
-        if (error?.name === 'AbortError') return;
-        console.error('Failed to load instructor preanswers', error);
-        setPersonalPreanswers({});
-      }
-    };
-
-    void loadPersonal();
-
-    return () => {
-      abortController.abort();
-    };
-  }, [open, canFetchStudents, canAdmin, instructors, userId, activeOrgId]);
-
-  useEffect(() => {
-    if (!open || !canFetchStudents) {
-      return;
-    }
-
-    if (!canViewInactive && statusFilter !== 'active') {
-      setStatusFilter('active');
-      setInitialStatusApplied(false);
-      return;
-    }
-
-    const shouldForceInactive = (
-      canViewInactive &&
-      initialStudentId &&
-      initialStudentStatus === 'inactive' &&
-      !initialStatusApplied
-    );
-
-    if (shouldForceInactive && statusFilter !== 'inactive') {
-      setStatusFilter('inactive');
-      setInitialStatusApplied(true);
-      return;
-    }
-
-    if (shouldForceInactive && statusFilter === 'inactive') {
-      setInitialStatusApplied(true);
-    }
-
-    const effectiveStatus = canViewInactive ? statusFilter : 'active';
-    void loadStudents({ status: effectiveStatus });
-  }, [
-    open,
-    canFetchStudents,
-    canViewInactive,
-    statusFilter,
-    initialStudentId,
-    initialStudentStatus,
-    initialStatusApplied,
-    loadStudents,
-  ]);
-
-  // Mobile fix: Track Select open/close state to prevent Dialog from closing
-  const handleSelectOpenChange = useCallback((isOpen) => {
-    if (!isOpen && openSelectCountRef.current > 0) {
-      isClosingSelectRef.current = true;
-      setTimeout(() => {
-        openSelectCountRef.current -= 1;
-        if (openSelectCountRef.current < 0) {
-          openSelectCountRef.current = 0;
-        }
-        isClosingSelectRef.current = false;
-      }, 100);
-    } else if (isOpen) {
-      openSelectCountRef.current += 1;
-    }
-  }, []);
-
-  // Mobile fix: Prevent Dialog close if Select is open or closing
-  const handleDialogInteractOutside = useCallback((event) => {
-    if (openSelectCountRef.current > 0 || isClosingSelectRef.current) {
-      event.preventDefault();
-    }
-  }, []);
-
-  const handleSubmit = async ({ studentId, date, time, serviceContext, answers, unassignedDetails, instructorId }) => {
+    setValidationErrors({});
     setSubmitState(REQUEST_STATE.loading);
     setSubmitError('');
-
     try {
-      const body = {
-        student_id: studentId,
-        date,
-        time,
-        service_context: serviceContext,
-        content: answers,
-        org_id: activeOrgId,
-        ...(unassignedDetails ? { unassigned_details: unassignedDetails } : {}),
-        ...(instructorId ? { instructor_id: instructorId } : {}),
-      };
-      const record = await authenticatedFetch('sessions', {
+      const created = await authenticatedFetch('session-reports', {
+        session,
         method: 'POST',
-        body,
-      });
-      
-      // Enhanced toast with longer duration for mobile visibility
-      toast.success('המפגש נשמר בהצלחה.', { 
-        duration: 2500,
-        position: 'top-center',
-      });
-      
-      // Wait for the onCreated callback to complete
-      // This ensures any data refresh in the parent component completes
-      await Promise.resolve(onCreated?.(record));
-      
-      // Dispatch global event for pages that need to refetch data
-      window.dispatchEvent(new CustomEvent('session-created', { detail: { record } }));
-      
-      const isLoose = !studentId;
-      const student = students.find(s => s.id === studentId);
-      const studentName = isLoose ? (unassignedDetails?.name || 'תלמיד/ה') : (student?.name || 'תלמיד');
-      
-      // Show success state instead of closing, preserving loose report metadata for additional reports
-      setSuccessState({
-        studentId,
-        studentName,
-        date,
-        allowSameStudent: Boolean(studentId),
-        // Preserve loose report metadata if creating a loose report
-        ...(isLoose && {
-          looseName: unassignedDetails?.name,
-          looseReason: unassignedDetails?.reason,
-          looseReasonOther: unassignedDetails?.reason_other,
-          looseService: serviceContext,
-        }),
-      });
-      setSubmitState(REQUEST_STATE.idle);
-    } catch (error) {
-      console.error('Failed to save session record', error);
-      setSubmitState(REQUEST_STATE.error);
-      // Map known server messages to clear, localized explanations
-      const serverMessage = resolveApiErrorMessage(error);
-      let friendly = extractSupportCode(serverMessage) ? serverMessage : 'שמירת המפגש נכשלה.';
-      if (serverMessage === 'student_missing_instructor') {
-        friendly = 'לא ניתן לתעד מפגש: לתלמיד זה לא משויך מדריך פעיל. נא לשייך מדריך תחילה.';
-      } else if (serverMessage === 'student_not_assigned_to_user') {
-        friendly = 'לא ניתן לתעד: תלמיד זה לא משויך אליך.';
-      } else if (serverMessage === 'missing_unassigned_name') {
-        friendly = 'יש למלא שם תלמיד עבור דיווח לא משויך.';
-      } else if (serverMessage === 'missing_unassigned_reason') {
-        friendly = 'בחרו סיבת דיווח לא משויך.';
-      } else if (serverMessage === 'missing_unassigned_reason_detail') {
-        friendly = 'השלימו פירוט עבור סיבת "אחר".';
-      } else if (serverMessage === 'missing_time') {
-        friendly = 'יש להזין שעה עבור דיווח לא משויך.';
-      }
-      setSubmitError(friendly);
-    }
-  };
-
-  const handleCloseAfterSuccess = useCallback(() => {
-    setSuccessState(null);
-    onClose?.();
-  }, [onClose]);
-
-  const handleNewReport = useCallback(({ date = null } = {}) => {
-    setSuccessState(null);
-    // Reset form using the ref, clearing student but preserving date selection
-    if (formResetRef.current) {
-      formResetRef.current({ 
-        date,
-      });
-    }
-  }, []);
-
-  const handleNewReportSameStudent = useCallback(({ date = null } = {}) => {
-    if (!successState) return;
-    setSuccessState(null);
-    // Reset form but keep the same student and optionally set date
-    // For loose reports, also preserve name, reason, and service
-    if (formResetRef.current) {
-      formResetRef.current({ 
-        keepStudent: true, 
-        studentId: successState.studentId,
-        date,
-        // Preserve loose report metadata for follow-up loose reports
-        ...(successState.looseName && {
-          looseName: successState.looseName,
-          looseReason: successState.looseReason,
-          looseReasonOther: successState.looseReasonOther,
-          looseService: successState.looseService,
-        }),
-      });
-    }
-  }, [successState]);
-
-  const handleSavePersonalPreanswers = useCallback(async (questionKey, list) => {
-    if (!questionKey || !userId || !activeOrgId) return;
-
-    const normalizeList = (raw) => {
-      if (!Array.isArray(raw)) return [];
-      const unique = [];
-      const seen = new Set();
-      for (const entry of raw) {
-        if (typeof entry !== 'string') continue;
-        const trimmed = entry.trim();
-        if (!trimmed || seen.has(trimmed)) continue;
-        seen.add(trimmed);
-        unique.push(trimmed);
-        if (unique.length >= preanswersCapLimit) break;
-      }
-      return unique;
-    };
-
-    const normalizedList = normalizeList(list);
-    const nextMap = { ...personalPreanswers };
-    
-    // Find the question and use its id if available, otherwise use the key
-    const question = questions.find((q) => q?.key === questionKey);
-    const storageKey = question?.id || questionKey;
-    nextMap[storageKey] = normalizedList;
-
-    setPersonalPreanswers(nextMap);
-    try {
-      await authenticatedFetch('instructors', {
-        method: 'PUT',
         body: {
-          id: userId,
           org_id: activeOrgId,
-          metadata: { custom_preanswers: nextMap },
+          lesson_participant_id: lessonParticipantId,
+          answers: submittedAnswers,
         },
       });
-      toast.success('התשובות האישיות נשמרו');
+      toast.success('הדיווח נשמר בהצלחה.', { duration: 2500, position: 'top-center' });
+      setSuccessReport(created);
+      setSubmitState(REQUEST_STATE.idle);
+      await Promise.resolve(onCreated?.(created));
+      window.dispatchEvent(new CustomEvent('session-report-created', { detail: { report: created } }));
     } catch (error) {
-      console.error('Failed to save personal preanswers', error);
-      toast.error('שמירת התשובות האישיות נכשלה');
+      console.error('Failed to save session report', error);
+      setSubmitState(REQUEST_STATE.error);
+      setSubmitError(resolveApiErrorMessage(error) || 'שמירת הדיווח נכשלה.');
     }
-  }, [activeOrgId, personalPreanswers, questions, userId, preanswersCapLimit]);
+  }, [session, activeOrgId, lessonParticipantId, onCreated]);
 
-  const dialogTitle = canFetchStudents
-    ? 'רישום מפגש חדש'
-    : 'לא ניתן ליצור מפגש חדש';
+  const resolvedStudentName = reportContext?.participant?.student_name || studentName;
+  const resolvedServiceName = reportContext?.service?.name || serviceName;
+  const resolvedLessonDateTime = reportContext?.lesson?.datetime_start || lessonDateTime;
 
-  const isLoadingStudents = studentsState === REQUEST_STATE.loading;
-  const isLoadingQuestions = questionsState === REQUEST_STATE.loading;
-  const showLoading = isLoadingStudents || isLoadingQuestions;
+  const dialogTitle = resolvedStudentName ? `דיווח מפגש — ${resolvedStudentName}` : 'דיווח מפגש';
+  const dialogDescription = useMemo(() => {
+    const parts = [];
+    if (resolvedServiceName) parts.push(resolvedServiceName);
+    const formattedDate = formatLessonDateTime(resolvedLessonDateTime);
+    if (formattedDate) parts.push(formattedDate);
+    return parts.join(' · ');
+  }, [resolvedServiceName, resolvedLessonDateTime]);
 
-  const [isFormValid, setIsFormValid] = useState(false);
+  const isLoadingContext = contextState === REQUEST_STATE.loading;
+  const hasContextError = contextState === REQUEST_STATE.error;
+  const participantStatus = reportContext?.participant?.participant_status || '';
+  const lessonCancelled = reportContext?.lesson?.status === 'cancelled';
+  const lessonNotStarted = reportContext?.lesson && reportContext.lesson.has_started !== true;
+  const participantDidNotAttend = NON_ARRIVAL_STATUSES.has(participantStatus);
+  const canRenderForm = !isLoadingContext
+    && !hasContextError
+    && Boolean(reportContext?.form)
+    && !reportContext?.existing_report_id
+    && !lessonCancelled
+    && !lessonNotStarted
+    && !participantDidNotAttend
+    && !successReport;
 
-  const footer = canFetchStudents && !showLoading && studentsState !== REQUEST_STATE.error ? (
-    successState ? (
-      <DateChoiceFooter
-        lastReportDate={successState.date}
-        studentName={successState.studentName}
-        onClose={handleCloseAfterSuccess}
-        onNewReport={handleNewReport}
-        onNewReportSameStudent={handleNewReportSameStudent}
-      />
-    ) : (
-      <NewSessionFormFooter
-        onSubmit={() => {
-          // Trigger form submission via form id
-          document.getElementById('new-session-form')?.requestSubmit();
-        }}
-        onCancel={onClose}
-        isSubmitting={submitState === REQUEST_STATE.loading}
-        isFormValid={isFormValid}
-      />
-    )
+  const nextPendingReport = Array.isArray(continuationQueue) ? continuationQueue[0] : null;
+
+  const handleOpenPendingReports = useCallback(() => {
+    onClose?.();
+    navigate('/pending-reports');
+  }, [navigate, onClose]);
+
+  const footer = canRenderForm ? (
+    <NewSessionFormFooter
+      onSubmit={() => document.getElementById('new-session-report-form')?.requestSubmit()}
+      onCancel={onClose}
+      isSubmitting={submitState === REQUEST_STATE.loading}
+    />
+  ) : successReport ? (
+    <div className="w-full space-y-2">
+      <div className="grid gap-2 sm:grid-cols-2">
+        {nextPendingReport ? (
+          <Button onClick={onContinueToNext}>
+            לדיווח הבא{nextPendingReport.studentName ? ` — ${nextPendingReport.studentName}` : ''}
+          </Button>
+        ) : null}
+        <Button variant={nextPendingReport ? 'outline' : 'default'} onClick={handleOpenPendingReports}>
+          לדיווחים הממתינים
+        </Button>
+      </div>
+      <Button variant="outline" className="w-full" onClick={onClose}>סגור</Button>
+    </div>
   ) : null;
 
   return (
-    <Dialog open={open} onOpenChange={(next) => { if (!next) { onClose?.(); } }}>
-      <DialogContent 
-        className="sm:max-w-xl" 
-        footer={footer}
-        onInteractOutside={handleDialogInteractOutside}
-      >
+    <Dialog open={open} onOpenChange={(next) => { if (!next) onClose?.(); }}>
+      <DialogContent className="sm:max-w-xl" footer={footer}>
         <DialogHeader>
           <DialogTitle>{dialogTitle}</DialogTitle>
+          {dialogDescription ? <DialogDescription>{dialogDescription}</DialogDescription> : null}
         </DialogHeader>
 
-        {!canFetchStudents ? (
+        {!lessonParticipantId ? (
           <div className="space-y-sm text-sm text-neutral-600">
-            <p>יש לבחור ארגון פעיל כדי ליצור מפגש חדש.</p>
+            <p>לא נמצא מפגש לתיעוד.</p>
           </div>
-        ) : showLoading ? (
+        ) : isLoadingContext ? (
           <div className="flex items-center justify-center gap-sm py-lg text-neutral-600" role="status">
             <Loader2 className="h-5 w-5 animate-spin" aria-hidden="true" />
-            <span>טוען נתונים...</span>
+            <span>טוען נתוני מפגש...</span>
           </div>
-        ) : studentsState === REQUEST_STATE.error ? (
+        ) : hasContextError ? (
           <div className="rounded-lg bg-red-50 p-md text-sm text-red-700" role="alert">
-            {studentsError || 'טעינת רשימת התלמידים נכשלה.'}
+            {contextError}
+          </div>
+        ) : successReport ? (
+          <div className="flex flex-col items-center gap-sm py-lg text-center">
+            <CheckCircle2 className="h-10 w-10 text-success-600" aria-hidden="true" />
+            <p className="text-base font-semibold text-success-700">הדיווח נשמר בהצלחה</p>
+          </div>
+        ) : !reportContext?.service?.report_form_id ? (
+          <div className="rounded-lg bg-amber-50 p-md text-sm text-amber-800" role="alert">
+            לשירות זה לא הוגדר טופס דיווח. יש להגדיר טופס דיווח בהגדרות השירות לפני תיעוד מפגשים.
+          </div>
+        ) : !reportContext?.form ? (
+          <div className="rounded-lg bg-amber-50 p-md text-sm text-amber-800" role="alert">
+            טופס הדיווח של השירות עדיין לא פורסם.
+          </div>
+        ) : reportContext?.existing_report_id ? (
+          <div className="rounded-lg bg-amber-50 p-md text-sm text-amber-800" role="alert">
+            כבר קיים דיווח עבור מפגש זה.
+          </div>
+        ) : lessonCancelled ? (
+          <div className="rounded-lg bg-amber-50 p-md text-sm text-amber-800" role="alert">
+            לא ניתן לדווח על שיעור שבוטל.
+          </div>
+        ) : participantDidNotAttend ? (
+          <div className="rounded-lg bg-amber-50 p-md text-sm text-amber-800" role="alert">
+            לא ניתן לדווח עבור משתתף שסומן כמי שלא הגיע או שביטל.
+          </div>
+        ) : lessonNotStarted ? (
+          <div className="rounded-lg bg-amber-50 p-md text-sm text-amber-800" role="alert">
+            ניתן למלא דיווח רק לאחר תחילת המפגש.
           </div>
         ) : (
           <NewSessionForm
-            students={students}
-            questions={questions}
-            suggestions={suggestions}
-            personalPreanswers={personalPreanswers}
-            onSavePersonalPreanswers={handleSavePersonalPreanswers}
-            canEditPersonalPreanswers={canEditPersonalPreanswers}
-            preanswersCapLimit={preanswersCapLimit}
-            services={services}
-            instructors={instructors}
-            canFilterByInstructor={isAdminRole(membershipRole)}
-            userIsInstructor={userIsInstructor}
-            studentScope={studentScope}
-            onScopeChange={(next) => setStudentScope(next)}
-            statusFilter={statusFilter}
-            onStatusFilterChange={setStatusFilter}
-            canViewInactive={canViewInactive}
-            visibilityLoaded={visibilityLoaded}
-            initialStudentId={initialStudentId}
-            initialDate={initialDate}
-            isLoadingStudents={isLoadingStudents}
+            formSchema={reportContext.form.form_schema}
+            visibilityRules={reportContext.form.visibility_rules || []}
+            answers={answers}
+            onAnswersChange={setAnswers}
             onSubmit={handleSubmit}
             onCancel={onClose}
             isSubmitting={submitState === REQUEST_STATE.loading}
-            error={submitError || (questionsState === REQUEST_STATE.error ? questionError : '')}
-            renderFooterOutside={true}
-            onFormValidityChange={setIsFormValid}
-            onSelectOpenChange={handleSelectOpenChange}
-            formResetRef={formResetRef}
-            successState={successState}
-            showAdvancedFilters={showAdvancedFilters}
-            onShowAdvancedFiltersChange={setShowAdvancedFilters}
+            error={submitError}
+            validationErrors={validationErrors}
+            renderFooterOutside
+            servicePreanswers={reportContext.preanswers?.service || null}
+            personalPreanswers={personalPreanswers}
+            preanswersCap={reportContext.preanswers?.cap}
+            canEditPersonalPreanswers={Boolean(reportContext.preanswers)}
+            onSavePersonalPreanswer={handleSavePersonalPreanswer}
           />
         )}
+
+        {Object.keys(validationErrors).length > 0 ? (
+          <p className="text-xs text-red-600 text-end">יש להשלים את כל השדות הנדרשים.</p>
+        ) : null}
       </DialogContent>
     </Dialog>
   );

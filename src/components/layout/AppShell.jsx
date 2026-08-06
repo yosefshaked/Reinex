@@ -12,6 +12,7 @@ import { useAuth } from "@/auth/AuthContext.jsx"
 import { useOrg } from "@/org/OrgContext.jsx"
 import NewSessionModal from "@/features/sessions/components/NewSessionModal.jsx"
 import { SessionModalContext } from "@/features/sessions/context/SessionModalContext.jsx"
+import { useSessionReportsEnabled } from "@/features/sessions/config/session-reports-permission.js"
 import OrgLogo from "@/components/layout/OrgLogo.jsx"
 import { WelcomeTour } from "@/features/onboarding/components/WelcomeTour.jsx"
 import CustomTourRenderer from "@/features/onboarding/components/CustomTourRenderer.jsx"
@@ -36,10 +37,14 @@ export default function AppShell({ children }) {
     if (typeof window === 'undefined') return false
     return window.localStorage.getItem('app:sidebarHidden') === 'true'
   })
+  const sessionReportsEnabled = useSessionReportsEnabled()
   const [sessionModalState, setSessionModalState] = useState({
     isOpen: false,
-    studentId: '',
-    studentStatus: 'active',
+    lessonParticipantId: '',
+    studentName: '',
+    serviceName: '',
+    lessonDateTime: '',
+    continuationQueue: [],
     onCreated: null,
   })
   const [showRefreshSuggestion, setShowRefreshSuggestion] = useState(false)
@@ -50,33 +55,62 @@ export default function AppShell({ children }) {
     window.localStorage.setItem('app:sidebarHidden', isSidebarHidden ? 'true' : 'false')
   }, [isSidebarHidden])
 
-  const openSessionModal = useCallback((options = {}) => {
-    const { studentId = '', studentStatus = 'active', onCreated = null } = options
-    const normalizedStatus = studentStatus === 'inactive' ? 'inactive' : 'active'
+  const openSessionReportModal = useCallback((options = {}) => {
+    if (!sessionReportsEnabled) return
+    const {
+      lessonParticipantId = '',
+      studentName = '',
+      serviceName = '',
+      lessonDateTime = '',
+      continuationQueue = [],
+      onCreated = null,
+    } = options
+    if (!lessonParticipantId) return
     setSessionModalState({
       isOpen: true,
-      studentId,
-      studentStatus: normalizedStatus,
+      lessonParticipantId,
+      studentName,
+      serviceName,
+      lessonDateTime,
+      continuationQueue: Array.isArray(continuationQueue) ? continuationQueue : [],
       onCreated: typeof onCreated === 'function' ? onCreated : null,
     })
-  }, [])
+  }, [sessionReportsEnabled])
 
-  const closeSessionModal = useCallback(() => {
+  const closeSessionReportModal = useCallback(() => {
     setSessionModalState({
       isOpen: false,
-      studentId: '',
-      studentStatus: 'active',
+      lessonParticipantId: '',
+      studentName: '',
+      serviceName: '',
+      lessonDateTime: '',
+      continuationQueue: [],
       onCreated: null,
     })
   }, [])
 
+  const continueToNextSessionReport = useCallback(() => {
+    const [nextReport, ...remainingQueue] = sessionModalState.continuationQueue || []
+    if (!nextReport?.lessonParticipantId) return
+    openSessionReportModal({
+      ...nextReport,
+      continuationQueue: remainingQueue,
+      onCreated: sessionModalState.onCreated,
+    })
+  }, [openSessionReportModal, sessionModalState.continuationQueue, sessionModalState.onCreated])
+
   const sessionModalContextValue = useMemo(() => ({
-    openSessionModal,
-    closeSessionModal,
-    isSessionModalOpen: sessionModalState.isOpen,
-    sessionModalStudentId: sessionModalState.studentId,
-    sessionModalStudentStatus: sessionModalState.studentStatus,
-  }), [openSessionModal, closeSessionModal, sessionModalState.isOpen, sessionModalState.studentId, sessionModalState.studentStatus])
+    openSessionReportModal,
+    closeSessionReportModal,
+    isSessionReportModalOpen: sessionModalState.isOpen,
+    sessionReportModalContext: sessionModalState.isOpen ? {
+      lessonParticipantId: sessionModalState.lessonParticipantId,
+      studentName: sessionModalState.studentName,
+      serviceName: sessionModalState.serviceName,
+      lessonDateTime: sessionModalState.lessonDateTime,
+      continuationQueue: sessionModalState.continuationQueue,
+    } : null,
+  }), [openSessionReportModal, closeSessionReportModal, sessionModalState])
 
   const handleSignOut = async () => {
     try {
@@ -320,13 +354,19 @@ export default function AppShell({ children }) {
 
         <ChangelogModal open={isChangelogOpen} onClose={() => setIsChangelogOpen(false)} />
         <Toaster richColors position="top-right" closeButton />
-        <NewSessionModal
-          open={sessionModalState.isOpen}
-          onClose={closeSessionModal}
-          initialStudentId={sessionModalState.studentId}
-          initialStudentStatus={sessionModalState.studentStatus}
-          onCreated={sessionModalState.onCreated}
-        />
+        {sessionReportsEnabled ? (
+          <NewSessionModal
+            open={sessionModalState.isOpen}
+            onClose={closeSessionReportModal}
+            lessonParticipantId={sessionModalState.lessonParticipantId}
+            studentName={sessionModalState.studentName}
+            serviceName={sessionModalState.serviceName}
+            lessonDateTime={sessionModalState.lessonDateTime}
+            continuationQueue={sessionModalState.continuationQueue}
+            onContinueToNext={continueToNextSessionReport}
+            onCreated={sessionModalState.onCreated}
+          />
+        ) : null}
       </div>
       </AccessibilityProvider>
     </SessionModalContext.Provider>

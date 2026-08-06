@@ -31,6 +31,8 @@ import {
 } from '../utils/schedulingOverride.js';
 import { getParticipantDisplayName, resolveParticipantReminderContact } from '../utils/participantDisplay.js';
 import { getLessonOpenActions } from '../utils/calendarWorkspace.js';
+import { useSessionModal } from '@/features/sessions/context/SessionModalContext.jsx';
+import { useSessionReportsEnabled } from '@/features/sessions/config/session-reports-permission.js';
 import { buildLessonReminderWhatsAppMessage } from '@/lib/whatsapp-message-templates.js';
 
 const DEFAULT_BILLING_POLICY = {
@@ -524,6 +526,24 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
   const displayInstance = useMemo(() => getDisplayInstance(instance), [instance]);
   const displayParticipants = useMemo(() => getDisplayParticipants(instance), [instance]);
   const dialogScopeKey = `${instance?.id || ''}:${instance?.latest_correction?.id || ''}`;
+
+  const sessionReportsEnabled = useSessionReportsEnabled();
+  const { openSessionReportModal } = useSessionModal();
+  const [reportsByParticipant, setReportsByParticipant] = useState({});
+  const [sessionReportsLoadState, setSessionReportsLoadState] = useState({
+    scopeKey: '',
+    status: 'idle',
+  });
+  const sessionReportsRequestIdRef = useRef(0);
+  const sessionReportsScopeKey = sessionReportsEnabled && open && instance?.id && org?.id
+    ? `${org.id}:${instance.id}`
+    : '';
+  const sessionReportsLoading = Boolean(sessionReportsScopeKey) && (
+    sessionReportsLoadState.scopeKey !== sessionReportsScopeKey
+    || sessionReportsLoadState.status === 'loading'
+  );
+  const sessionReportsLoadFailed = sessionReportsLoadState.scopeKey === sessionReportsScopeKey
+    && sessionReportsLoadState.status === 'error';
   
   const [isEditMode, setIsEditMode] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -578,6 +598,69 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
     setEditPreviewLoading(false);
     setPendingEditBody(null);
   }, [formData, useSchedulingOverride, selectedOverrideReasonCode, customOverrideReason]);
+
+  // Session Reports — load which participants already have a (non-legacy)
+  // report so the roster can show "documented" vs. an open "file report"
+  // action. Only fetched when the feature is enabled and the dialog is open.
+  const loadSessionReports = useCallback(async () => {
+    const scopeKey = sessionReportsScopeKey;
+    const requestId = ++sessionReportsRequestIdRef.current;
+
+    if (!scopeKey) {
+      setReportsByParticipant({});
+      setSessionReportsLoadState({ scopeKey: '', status: 'idle' });
+      return;
+    }
+
+    setSessionReportsLoadState({ scopeKey, status: 'loading' });
+    try {
+      const payload = await authenticatedFetch('session-reports', {
+        params: { org_id: org.id, lesson_instance_id: instance.id },
+      });
+      if (requestId !== sessionReportsRequestIdRef.current) return;
+
+      const map = {};
+      for (const report of Array.isArray(payload?.reports) ? payload.reports : []) {
+        if (report?.lesson_participant_id && !report?.is_legacy) {
+          map[report.lesson_participant_id] = report;
+        }
+      }
+      setReportsByParticipant(map);
+      setSessionReportsLoadState({ scopeKey, status: 'ready' });
+    } catch (err) {
+      if (requestId !== sessionReportsRequestIdRef.current) return;
+
+      console.error('Failed to load session reports for lesson', err);
+      setReportsByParticipant({});
+      setSessionReportsLoadState({ scopeKey, status: 'error' });
+    }
+  }, [instance?.id, org?.id, sessionReportsScopeKey]);
+
+  useEffect(() => {
+    void loadSessionReports();
+    return () => {
+      sessionReportsRequestIdRef.current += 1;
+    };
+  }, [loadSessionReports]);
+
+  const handleOpenSessionReport = useCallback((participant) => {
+    if (!participant?.id) return;
+    openSessionReportModal({
+      lessonParticipantId: participant.id,
+      studentName: getParticipantDisplayName(participant, ''),
+      serviceName: displayInstance?.service_name || '',
+      lessonDateTime: displayInstance?.datetime_start || '',
+      onCreated: (report) => {
+        if (report?.lesson_participant_id) {
+          setReportsByParticipant((current) => ({
+            ...current,
+            [report.lesson_participant_id]: report,
+          }));
+        }
+        void loadSessionReports();
+      },
+    });
+  }, [openSessionReportModal, displayInstance?.service_name, displayInstance?.datetime_start, loadSessionReports]);
 
   const resetEditState = useCallback((instanceValue = displayInstance) => {
     if (!instanceValue) {
@@ -1700,6 +1783,9 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
   const canEdit = canManageAll && isOperationallyOpen;
   const canMarkAttendance = isOperationallyOpen;
   const canQuickReport = isReportable && isOperationallyOpen;
+  const lessonStarted = displayInstance?.datetime_start
+    ? new Date(displayInstance.datetime_start).getTime() <= Date.now()
+    : false;
 
   const scheduledParticipantsCount = displayParticipants.filter(
     (p) => p.participant_status === 'scheduled'
@@ -1781,6 +1867,13 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
       groupPreviewImpacts={groupPreviewImpacts}
       shortId={shortId}
       formatAgorotPreview={formatAgorotPreview}
+      sessionReportsEnabled={sessionReportsEnabled}
+      reportsByParticipant={reportsByParticipant}
+      sessionReportsLoading={sessionReportsLoading}
+      sessionReportsLoadFailed={sessionReportsLoadFailed}
+      lessonStarted={lessonStarted}
+      onOpenSessionReport={handleOpenSessionReport}
+      onRetrySessionReports={() => void loadSessionReports()}
     />
   );
   const openActionsPanel = openActions.length > 0 ? (

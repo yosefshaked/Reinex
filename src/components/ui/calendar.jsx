@@ -70,13 +70,13 @@ function Calendar({
         caption_label: cn("select-none font-medium", captionLayout === "label"
           ? "text-sm"
           : "[&>svg]:text-muted-foreground flex h-8 items-center gap-1 rounded-md ps-2 pe-1 text-sm [&>svg]:size-3.5", defaultClassNames.caption_label),
-        table: "w-full border-collapse",
-        weekdays: cn("flex", defaultClassNames.weekdays),
+        month_grid: cn("w-full border-collapse", defaultClassNames.month_grid),
+        weekdays: cn("grid grid-cols-7 w-full", defaultClassNames.weekdays),
         weekday: cn(
-          "text-muted-foreground flex-1 select-none rounded-md text-[0.8rem] font-normal",
+          "text-muted-foreground flex-1 select-none rounded-md text-center text-[0.8rem] font-normal",
           defaultClassNames.weekday
         ),
-        week: cn("mt-2 flex w-full", defaultClassNames.week),
+        week: cn("mt-2 grid grid-cols-7 w-full", defaultClassNames.week),
         week_number_header: cn("w-[--cell-size] select-none", defaultClassNames.week_number_header),
         week_number: cn(
           "text-muted-foreground select-none text-[0.8rem]",

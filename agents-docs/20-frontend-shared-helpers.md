@@ -19,7 +19,6 @@
 - [`../src/lib/time-grid.js`](../src/lib/time-grid.js)
 - [`../src/lib/utils.js`](../src/lib/utils.js)
 - [`../src/lib/error-utils.js`](../src/lib/error-utils.js)
-- [`../src/lib/error-mapping.js`](../src/lib/error-mapping.js)
 - [`../src/lib/invite-tokens.js`](../src/lib/invite-tokens.js)
 - [`../src/lib/external-links.js`](../src/lib/external-links.js)
 
@@ -39,7 +38,6 @@
 - `formatUserAccountName`
 - `normalizeAvailabilityWindows`, `getAvailabilitySummary`, `buildAvailabilityTimeSlots`
 - `ceilClockTimeToGrid`, `normalizePreferredTimeRangeToGrid` for 15-minute calendar/waiting-list time normalization
-- `mapLooseSessionError`
 - `extractRegistrationTokens`, `extractInvitationToken`, `buildInvitationSearch`
 - `normalizeExternalHttpUrl`
 - WhatsApp message text helpers in [`../src/lib/whatsapp-message-templates.js`](../src/lib/whatsapp-message-templates.js) for organization signatures and shared form / waiting-list / reminder wording.

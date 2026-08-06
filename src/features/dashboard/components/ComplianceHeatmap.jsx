@@ -16,7 +16,15 @@ import { useInstructors } from '@/hooks/useOrgData.js'
 import { isAdminRole, normalizeMembershipRole } from '@/features/students/utils/endpoints.js'
 import SessionCardList from './SessionCardList.jsx'
 import { SessionListDrawer } from './SessionListDrawer'
-import NewSessionModal from '@/features/sessions/components/NewSessionModal'
+// NOTE: the "document now" quick-fill affordance below predates the anchored
+// report model (Session Reports Phase 3). NewSessionModal now requires an
+// anchored lessonParticipantId and no longer accepts loose student/date fill
+// (see implementations/session-reports/implementation-plan.md, Decision #4).
+// This heatmap only carries a studentId/date pair, not a
+// lesson_participant_id, so it cannot supply a valid anchor today. Rewiring
+// it to real lesson/participant data is Phase 5 scope ("pending reports"
+// redefinition) — until then the trigger is disabled here rather than
+// mounting a modal that could never resolve a report to fill.
 
 function formatFullHebrewDate(isoDate) {
   if (!isoDate) {
@@ -62,7 +70,6 @@ export function ComplianceHeatmap() {
   const [mobileSelectedDate, setMobileSelectedDate] = useState(() =>
     format(new Date(), 'yyyy-MM-dd')
   )
-  const [detailQuickDoc, setDetailQuickDoc] = useState(null)
   const [selectedInstructorId, setSelectedInstructorId] = useState('all')
 
   // Check if user is admin/owner
@@ -319,13 +326,6 @@ export function ComplianceHeatmap() {
     navigate(`/students/${session.studentId}`)
   }
 
-  function handleDetailDocumentNow(session) {
-    if (!session?.studentId) {
-      return
-    }
-    setDetailQuickDoc({ studentId: session.studentId, date: detailedDayData?.date || detailRequestDate })
-  }
-
   const handleDrawerSessionCreated = useCallback(async () => {
     // Refetch the heatmap data when a session is created through the drawer
     if (!activeOrg?.id) return
@@ -350,13 +350,6 @@ export function ComplianceHeatmap() {
       setIsLoading(false)
     }
   }, [activeOrg?.id, currentWeekStart, selectedCell, rebuildSelectedCell])
-
-  function handleDetailDocCreated() {
-    // Modal now stays open with success state - refresh data but don't close modal
-    if (detailRequestDate) {
-      loadDetailDay(detailRequestDate, { preserveView: true, keepData: true })
-    }
-  }
 
   return (
     <Card className="w-full">
@@ -636,7 +629,6 @@ export function ComplianceHeatmap() {
                 sessions={detailedDayData.sessions}
                 timeSlots={detailedDayData.timeSlots}
                 onOpenStudent={handleDetailViewStudent}
-                onDocumentNow={handleDetailDocumentNow}
                 emptyMessage="אין שיעורים מתוכננים ליום זה."
               />
             ) : (
@@ -653,22 +645,6 @@ export function ComplianceHeatmap() {
           cellData={selectedCell}
           orgId={activeOrg?.id}
           onSessionCreated={handleDrawerSessionCreated}
-        />
-      )}
-
-      {detailQuickDoc && (
-        <NewSessionModal
-          open={!!detailQuickDoc}
-          onClose={() => {
-            setDetailQuickDoc(null)
-            // Refresh data one final time when modal closes
-            if (detailRequestDate) {
-              loadDetailDay(detailRequestDate, { preserveView: true, keepData: false })
-            }
-          }}
-          initialStudentId={detailQuickDoc.studentId}
-          initialDate={detailQuickDoc.date}
-          onCreated={handleDetailDocCreated}
         />
       )}
     </Card>

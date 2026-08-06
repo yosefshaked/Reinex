@@ -44,6 +44,7 @@ import { normalizeLessonInstanceStatus } from '../_shared/lesson-instance-status
 import { buildUtcBoundsForTimezoneDateRange, getDateKeyInTimezone } from '../_shared/instructor-availability.js';
 import { buildAttendanceTransitionAuditChanges } from '../_shared/attendance-audit.js';
 import { attachErrorTracking, respondTracked } from '../_shared/error-events.js';
+import { findBlockingReportParticipantIds } from '../_shared/session-reports-guards.js';
 
 
 const MAX_BODY_BYTES = 64 * 1024;
@@ -1155,6 +1156,28 @@ async function handleMarkAttendance(context, body, dbContext, userId, isAdmin, a
         message: 'invalid_grace_excuse_status',
         code: 'invalid_grace_excuse_status',
       });
+    }
+
+    // E1 (session-reports LOCKED policy): block late no_show/cancelled_* transitions
+    // while a non-legacy report exists for this participant. See
+    // implementations/session-reports/implementation-plan.md.
+    if (
+      ['no_show', 'cancelled_student', 'cancelled_clinic'].includes(participantStatus)
+      && participant.participant_status !== participantStatus
+    ) {
+      let blockingReportIds;
+      try {
+        blockingReportIds = await findBlockingReportParticipantIds(client, orgId, [body.participant_id]);
+      } catch (guardError) {
+        context.log?.error?.('calendar/attendance failed to check session-report guard', { message: guardError?.message });
+        return respondTracked(context, 500, { message: 'failed_to_check_session_reports' }, undefined, { error: guardError });
+      }
+      if (blockingReportIds.length) {
+        return respond(context, 409, {
+          message: 'report_has_documentation',
+          documented_participant_ids: blockingReportIds,
+        });
+      }
     }
 
     participantUpdate.participant_status = participantStatus;

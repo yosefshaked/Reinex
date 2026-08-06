@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React from 'react'
 import { format } from 'date-fns'
 import { he } from 'date-fns/locale'
 import { useNavigate } from 'react-router-dom'
@@ -9,33 +9,30 @@ import {
   SheetHeader,
   SheetTitle,
 } from '@/components/ui/sheet'
-import NewSessionModal from '@/features/sessions/components/NewSessionModal'
 import SessionCardList from './SessionCardList.jsx'
+
+// NOTE: this heatmap's "quick documentation" affordance predates the
+// anchored report model (Session Reports Phase 3). NewSessionModal now
+// requires an anchored lessonParticipantId and no longer accepts loose
+// student/date fill (see implementations/session-reports/
+// implementation-plan.md, Decision #4). This drawer only carries a
+// studentId/date pair, not a lesson_participant_id, so it cannot supply a
+// valid anchor today. Rewiring this heatmap to real lesson/participant data
+// is Phase 5 scope ("pending reports" redefinition) — until then the
+// "document now" trigger is disabled here rather than mounting a modal that
+// could never resolve a report to fill.
 
 export function SessionListDrawer({ isOpen, onClose, cellData, orgId, onSessionCreated }) {
   const navigate = useNavigate()
-  const [quickDocModal, setQuickDocModal] = useState(null) // { studentId, date }
   // Intentionally unused for now; keep in signature for future enhancements
   void orgId
+  void onSessionCreated
 
   if (!cellData) return null
 
   const dateObj = new Date(cellData.date)
   const dayName = format(dateObj, 'EEEE', { locale: he })
   const fullDate = format(dateObj, 'dd.MM.yyyy', { locale: he })
-
-  function handleDocumentNow(studentId, date) {
-    setQuickDocModal({ studentId, date })
-  }
-
-  function handleQuickDocComplete() {
-    // Modal now stays open with success state - no need to close it here
-    // Data refresh will happen when user finally closes the modal
-    // Trigger parent heatmap refresh to show updated compliance data
-    if (onSessionCreated) {
-      onSessionCreated()
-    }
-  }
 
   function handleViewStudent(studentId) {
     navigate(`/students/${studentId}`)
@@ -59,24 +56,9 @@ export function SessionListDrawer({ isOpen, onClose, cellData, orgId, onSessionC
           <SessionCardList
             sessions={cellData.sessions}
             onOpenStudent={session => handleViewStudent(session.studentId)}
-            onDocumentNow={session => handleDocumentNow(session.studentId, cellData.date)}
           />
         </div>
       </SheetContent>
-
-      {/* Quick Documentation Modal */}
-      {quickDocModal && (
-        <NewSessionModal
-          open={!!quickDocModal}
-          onClose={() => {
-            setQuickDocModal(null)
-            // Don't close the drawer - let it stay open after modal closes
-          }}
-          initialStudentId={quickDocModal.studentId}
-          initialDate={quickDocModal.date}
-          onCreated={handleQuickDocComplete}
-        />
-      )}
     </Sheet>
   )
 }

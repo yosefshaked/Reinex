@@ -11,6 +11,7 @@ import { resolveApiErrorMessage } from '@/lib/error-support.js';
 import HiddenUatAdminToolsDialog from '@/features/admin/components/HiddenUatAdminToolsDialog.jsx';
 import { useOrg } from '@/org/OrgContext.jsx';
 import { normalizeMembershipRole, isAdminOrOffice, isAdminRole } from '@/features/students/utils/endpoints.js';
+import { useSessionReportsEnabled } from '@/features/sessions/config/session-reports-permission.js';
 import {
   LayoutDashboard,
   Calendar,
@@ -21,6 +22,7 @@ import {
   ClipboardList,
   Coins,
   FileText,
+  FileEdit,
   Settings,
   Pin,
   PinOff,
@@ -40,6 +42,7 @@ const NAV_ITEMS = [
   { key: 'services', label: 'שירותים', to: '/services', icon: ListChecks },
   { key: 'financials', label: 'כספים', to: '/financials', icon: Coins },
   { key: 'forms', label: 'טפסים', to: '/forms', icon: FileText },
+  { key: 'pending-reports', label: 'דוחות מפגשים', to: '/pending-reports', icon: FileEdit, sessionReportsOnly: true },
   { key: 'import', label: 'ייבוא נתונים', to: '/import-workspaces', icon: FolderInput, adminOnly: true },
   { key: 'settings', label: 'הגדרות', to: '/Settings', icon: Settings },
 ];
@@ -66,14 +69,16 @@ export default function Sidebar({ hidden = false, onToggleHidden }) {
   const membershipRole = normalizeMembershipRole(activeOrg?.membership?.role || '');
   const canManageClients = isAdminOrOffice(membershipRole);
   const isAdmin = isAdminRole(membershipRole);
+  const sessionReportsEnabled = useSessionReportsEnabled();
 
   const items = useMemo(
     () => NAV_ITEMS.filter((item) => (
       (canManageClients || !['one-time-customers', 'waiting-list'].includes(item.key))
       && (isAdmin || item.key !== 'forms')
       && (isAdmin || !item.adminOnly)
+      && (sessionReportsEnabled || !item.sessionReportsOnly)
     )),
-    [canManageClients, isAdmin],
+    [canManageClients, isAdmin, sessionReportsEnabled],
   );
 
   function resetSequence() {

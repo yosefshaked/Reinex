@@ -195,7 +195,7 @@ export function DateNavigator({ currentDate, onDateChange, onNavigate, viewMode 
                 classNames={{
                   month_caption: 'flex h-9 w-full items-center justify-center px-9',
                   caption_label: 'text-sm font-semibold text-slate-900',
-                  weekday: 'flex-1 select-none rounded-md text-[0.78rem] font-medium text-slate-400',
+                  weekday: 'flex-1 select-none rounded-md text-center text-[0.78rem] font-medium text-slate-400',
                   day: 'group/day relative aspect-square h-full w-full select-none p-0 text-center',
                   today: 'rounded-xl bg-blue-50 text-blue-700 data-[selected=true]:bg-primary data-[selected=true]:text-primary-foreground',
                   outside: 'text-slate-300 aria-selected:text-slate-300',

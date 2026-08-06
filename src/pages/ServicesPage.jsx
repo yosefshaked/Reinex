@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Plus, Pencil, Trash2 } from 'lucide-react';
+import { Plus, Pencil, Trash2, FileText, Sparkles, Loader2, X } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import PageLayout from '@/components/ui/PageLayout.jsx';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -8,12 +8,27 @@ import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { SelectField, TextField } from '@/components/ui/forms-ui';
+import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { useOrg } from '@/org/OrgContext.jsx';
 import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { authenticatedFetch } from '@/lib/api-client.js';
 import { normalizeMembershipRole, isAdminRole } from '@/features/students/utils/endpoints.js';
 import { toShekel, toAgorot } from '@/lib/currency.js';
+import { toast } from '@/lib/toast.jsx';
+import {
+  buildSharedBlockMap,
+  getQuestionsInOrder,
+  resolveSchemaWithSharedBlocks,
+} from '@/features/forms/lib/form-schema.js';
+import {
+  buildDefaultReportFormSchema,
+  DEFAULT_REPORT_FORM_DESCRIPTION,
+  DEFAULT_REPORT_FORM_NAME,
+} from '@/features/sessions/config/default-report-form.js';
+
+const NO_REPORT_FORM_VALUE = '__none__';
+const PREANSWERABLE_TYPES = new Set(['short_text', 'long_text']);
 
 const PAYMENT_MODEL_OPTIONS = [
   { value: 'fixed_rate', label: 'תעריף קבוע' },
@@ -36,6 +51,17 @@ const ENFORCEMENT_OPTIONS = [
 
 const EMPTY_NEW_REQUIRED_FORM = { label: '', formId: '', enforcement: 'warn', allowResubmit: true };
 
+function normalizeReportPreanswers(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  const normalized = {};
+  for (const [key, entries] of Object.entries(value)) {
+    if (Array.isArray(entries)) {
+      normalized[key] = entries.filter((entry) => typeof entry === 'string' && entry.trim());
+    }
+  }
+  return normalized;
+}
+
 function buildInitialForm(service) {
   return {
     id: service?.id || '',
@@ -46,11 +72,14 @@ function buildInitialForm(service) {
     color: service?.color || '#3b82f6',
     isActive: service?.is_active ?? true,
     requiredForms: Array.isArray(service?.required_forms) ? service.required_forms : [],
+    reportFormId: service?.report_form_id || '',
+    reportPreanswers: normalizeReportPreanswers(service?.metadata?.report_preanswers),
+    metadata: service?.metadata && typeof service.metadata === 'object' ? service.metadata : {},
   };
 }
 
 export default function ServicesPage() {
-  const { activeOrg, activeOrgId } = useOrg();
+  const { activeOrg, activeOrgId, orgSettings } = useOrg();
   const { session } = useSupabase();
 
   const membershipRole = normalizeMembershipRole(activeOrg?.membership?.role || null);
@@ -69,6 +98,26 @@ export default function ServicesPage() {
   const [newRequiredFormEntry, setNewRequiredFormEntry] = useState(EMPTY_NEW_REQUIRED_FORM);
   const [editingRFIndex, setEditingRFIndex] = useState(null);
   const [editRFEntry, setEditRFEntry] = useState(EMPTY_NEW_REQUIRED_FORM);
+  const [availableReportForms, setAvailableReportForms] = useState([]);
+  const [loadingReportForms, setLoadingReportForms] = useState(false);
+  const [creatingDefaultReportForm, setCreatingDefaultReportForm] = useState(false);
+  const [reportFormQuestions, setReportFormQuestions] = useState([]);
+  const [loadingReportFormQuestions, setLoadingReportFormQuestions] = useState(false);
+  const [newPreanswerDrafts, setNewPreanswerDrafts] = useState({});
+  // The preconfigured-answers editor lives in its own modal so the service form
+  // stays uncluttered; this only opens it.
+  const [preanswersDialogOpen, setPreanswersDialogOpen] = useState(false);
+
+  // Gated specifically by session_form_preanswers_enabled (not the broader
+  // session_reports_enabled) — see Phase 4 in implementations/session-reports/
+  // implementation-plan.md.
+  const preanswersFeatureEnabled = orgSettings?.permissions?.session_form_preanswers_enabled === true;
+  const preanswersCap = Number.isFinite(Number(orgSettings?.permissions?.session_form_preanswers_cap))
+    && Number(orgSettings.permissions.session_form_preanswers_cap) > 0
+    ? Number(orgSettings.permissions.session_form_preanswers_cap)
+    : 50;
+  const preanswersCount = Object.values(formValues.reportPreanswers || {})
+    .reduce((sum, arr) => sum + (Array.isArray(arr) ? arr.length : 0), 0);
 
   const canFetch = Boolean(session && activeOrgId);
 
@@ -111,6 +160,57 @@ export default function ServicesPage() {
     }
   }, [canFetch, session, activeOrgId]);
 
+  const loadAvailableReportForms = useCallback(async () => {
+    if (!canFetch) return;
+    setLoadingReportForms(true);
+    try {
+      const payload = await authenticatedFetch('forms', {
+        session,
+        params: {
+          org_id: activeOrgId,
+          form_usage: 'session_report',
+          is_active: true,
+          selection_mode: 'delivery',
+        },
+      });
+      const rows = Array.isArray(payload) ? payload : [];
+      // Only published forms can back a live report drawer (see api/session-reports
+      // POST: report_form_not_published). Draft session_report forms still show in
+      // the main Forms list, but shouldn't be selectable here.
+      setAvailableReportForms(rows.filter((form) => form?.is_published === true));
+    } catch {
+      setAvailableReportForms([]);
+    } finally {
+      setLoadingReportForms(false);
+    }
+  }, [canFetch, session, activeOrgId]);
+
+  const loadReportFormQuestions = useCallback(async (formId) => {
+    if (!canFetch || !formId) {
+      setReportFormQuestions([]);
+      return;
+    }
+    setLoadingReportFormQuestions(true);
+    try {
+      const payload = await authenticatedFetch(`forms/${formId}`, {
+        session,
+        params: { org_id: activeOrgId },
+      });
+      const publishedSchema = payload?.metadata?.published_form_schema;
+      const resolvedPublishedSchema = publishedSchema
+        ? resolveSchemaWithSharedBlocks(publishedSchema, buildSharedBlockMap(payload?.shared_blocks || []))
+        : null;
+      const questions = resolvedPublishedSchema
+        ? getQuestionsInOrder(resolvedPublishedSchema).filter((q) => PREANSWERABLE_TYPES.has(q.type))
+        : [];
+      setReportFormQuestions(questions);
+    } catch {
+      setReportFormQuestions([]);
+    } finally {
+      setLoadingReportFormQuestions(false);
+    }
+  }, [canFetch, session, activeOrgId]);
+
   const openCreateDialog = useCallback(() => {
     setFormValues(buildInitialForm());
     setTouched({});
@@ -118,9 +218,13 @@ export default function ServicesPage() {
     setNewRequiredFormEntry(EMPTY_NEW_REQUIRED_FORM);
     setEditingRFIndex(null);
     setEditRFEntry(EMPTY_NEW_REQUIRED_FORM);
+    setNewPreanswerDrafts({});
+    setReportFormQuestions([]);
+    setPreanswersDialogOpen(false);
     setDialogOpen(true);
     void loadAvailableRequiredForms();
-  }, [loadAvailableRequiredForms]);
+    void loadAvailableReportForms();
+  }, [loadAvailableRequiredForms, loadAvailableReportForms]);
 
   const openEditDialog = (service) => {
     setFormValues(buildInitialForm(service));
@@ -129,9 +233,21 @@ export default function ServicesPage() {
     setNewRequiredFormEntry(EMPTY_NEW_REQUIRED_FORM);
     setEditingRFIndex(null);
     setEditRFEntry(EMPTY_NEW_REQUIRED_FORM);
+    setNewPreanswerDrafts({});
+    setPreanswersDialogOpen(false);
     setDialogOpen(true);
     void loadAvailableRequiredForms();
+    void loadAvailableReportForms();
+    void loadReportFormQuestions(service?.report_form_id || '');
   };
+
+  useEffect(() => {
+    if (!dialogOpen) return;
+    void loadReportFormQuestions(formValues.reportFormId);
+    // Only re-run when the selected report form actually changes while the
+    // dialog is open (e.g. via the picker or the "create default form" button).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dialogOpen, formValues.reportFormId]);
 
   const handleChange = (event) => {
     const { name, value } = event.target;
@@ -169,6 +285,11 @@ export default function ServicesPage() {
     setIsSubmitting(true);
     setError('');
 
+    const nextMetadata = {
+      ...formValues.metadata,
+      report_preanswers: formValues.reportPreanswers,
+    };
+
     const payload = {
       org_id: activeOrgId,
       name: formValues.name.trim(),
@@ -178,6 +299,8 @@ export default function ServicesPage() {
       color: formValues.color || null,
       is_active: formValues.isActive,
       required_forms: formValues.requiredForms,
+      report_form_id: formValues.reportFormId || null,
+      metadata: nextMetadata,
     };
 
     const endpoint = formValues.id ? `services/${formValues.id}` : 'services';
@@ -196,6 +319,80 @@ export default function ServicesPage() {
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  const handleCreateDefaultReportForm = async () => {
+    setCreatingDefaultReportForm(true);
+    try {
+      const created = await authenticatedFetch('forms', {
+        session,
+        method: 'POST',
+        body: {
+          org_id: activeOrgId,
+          name: DEFAULT_REPORT_FORM_NAME,
+          description: DEFAULT_REPORT_FORM_DESCRIPTION,
+          form_usage: 'session_report',
+          form_schema: buildDefaultReportFormSchema(),
+        },
+      });
+      if (!created?.id) {
+        throw new Error('missing_form_id');
+      }
+      // Publish immediately so it's usable right away — the picker only
+      // lists published session_report forms (report drawer requires a
+      // published form, see api/session-reports POST).
+      const published = await authenticatedFetch(`forms/${created.id}`, {
+        session,
+        method: 'PUT',
+        body: {
+          org_id: activeOrgId,
+          form_schema: created.form_schema,
+          action: 'publish',
+          publish: true,
+        },
+      });
+      toast.success('טופס דיווח ברירת המחדל נוצר ופורסם בהצלחה');
+      await loadAvailableReportForms();
+      setFormValues((prev) => ({ ...prev, reportFormId: published?.id || created.id }));
+    } catch (err) {
+      toast.error(err?.message || 'יצירת טופס דיווח ברירת המחדל נכשלה.');
+    } finally {
+      setCreatingDefaultReportForm(false);
+    }
+  };
+
+  const handleAddPreanswer = (questionId) => {
+    const draft = (newPreanswerDrafts[questionId] || '').trim();
+    if (!draft) return;
+    setFormValues((prev) => {
+      const existing = Array.isArray(prev.reportPreanswers[questionId]) ? prev.reportPreanswers[questionId] : [];
+      if (existing.includes(draft)) return prev;
+      if (existing.length >= preanswersCap) {
+        toast.error(`ניתן לשמור עד ${preanswersCap} תשובות מוכנות לכל שדה.`);
+        return prev;
+      }
+      return {
+        ...prev,
+        reportPreanswers: {
+          ...prev.reportPreanswers,
+          [questionId]: [...existing, draft],
+        },
+      };
+    });
+    setNewPreanswerDrafts((prev) => ({ ...prev, [questionId]: '' }));
+  };
+
+  const handleRemovePreanswer = (questionId, value) => {
+    setFormValues((prev) => {
+      const existing = Array.isArray(prev.reportPreanswers[questionId]) ? prev.reportPreanswers[questionId] : [];
+      return {
+        ...prev,
+        reportPreanswers: {
+          ...prev.reportPreanswers,
+          [questionId]: existing.filter((entry) => entry !== value),
+        },
+      };
+    });
   };
 
   const nameError = touched.name && !formValues.name.trim() ? 'יש להזין שם שירות.' : '';
@@ -646,6 +843,166 @@ export default function ServicesPage() {
                 </div>
               )}
             </div>
+
+            {/* Report Form Section */}
+            <div className="space-y-2 rounded-lg border border-border p-3">
+              <div className="flex items-center gap-2">
+                <FileText className="h-4 w-4 text-neutral-500" />
+                <span className="text-sm font-medium text-foreground">טופס דיווח</span>
+              </div>
+
+              {availableReportForms.length > 0 ? (
+                <SelectField
+                  id="service-report-form"
+                  label="טופס דיווח"
+                  value={formValues.reportFormId || NO_REPORT_FORM_VALUE}
+                  onChange={(value) => setFormValues((prev) => ({
+                    ...prev,
+                    reportFormId: value === NO_REPORT_FORM_VALUE ? '' : value,
+                  }))}
+                  options={[
+                    { value: NO_REPORT_FORM_VALUE, label: 'ללא טופס דיווח' },
+                    ...availableReportForms.map((form) => ({ value: form.id, label: form.name })),
+                  ]}
+                  disabled={isSubmitting || loadingReportForms}
+                />
+              ) : (
+                <div className="space-y-2">
+                  <p className="text-xs text-neutral-500">
+                    {loadingReportForms
+                      ? 'טוען טפסי דיווח...'
+                      : 'אין טפסי דיווח מפורסמים בארגון. אפשר ליצור טופס דיווח ברירת מחדל (זהה לשאלון המקורי) כדי להתחיל.'}
+                  </p>
+                  {!loadingReportForms && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="gap-2"
+                      onClick={handleCreateDefaultReportForm}
+                      disabled={isSubmitting || creatingDefaultReportForm}
+                    >
+                      {creatingDefaultReportForm ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Sparkles className="h-4 w-4" />
+                      )}
+                      צור טופס דיווח ברירת מחדל
+                    </Button>
+                  )}
+                </div>
+              )}
+
+              <p className="text-xs text-neutral-500">
+                ניתן לתעד מפגשים של שירות זה רק אם יוגדר לו טופס דיווח.
+              </p>
+
+              {preanswersFeatureEnabled && formValues.reportFormId ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="w-full justify-between gap-2"
+                  onClick={() => setPreanswersDialogOpen(true)}
+                  disabled={isSubmitting}
+                >
+                  <span className="flex items-center gap-2">
+                    <Sparkles className="h-4 w-4" />
+                    תשובות מוכנות ארגוניות
+                  </span>
+                  {preanswersCount > 0 ? (
+                    <Badge variant="secondary">{preanswersCount}</Badge>
+                  ) : null}
+                </Button>
+              ) : null}
+            </div>
+
+            {/* Preanswers editor — its own modal (opened from the report-form section)
+                to keep the service form uncluttered (Phase 4 — service-universal bank). */}
+            <Dialog
+              open={preanswersDialogOpen && preanswersFeatureEnabled && Boolean(formValues.reportFormId)}
+              onOpenChange={setPreanswersDialogOpen}
+            >
+              <DialogContent className="sm:max-w-lg max-h-[85vh] overflow-y-auto">
+                <DialogHeader>
+                  <DialogTitle>תשובות מוכנות ארגוניות</DialogTitle>
+                  <DialogDescription>
+                    תשובות אלה יוצעו לכל המדריכים בעת מילוי דוח מפגש לשירות זה. השינויים יישמרו עם שמירת השירות.
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-3 rounded-lg border border-border p-3">
+                {loadingReportFormQuestions ? (
+                  <div className="flex items-center gap-2 text-xs text-neutral-500">
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    טוען שאלות מהטופס...
+                  </div>
+                ) : reportFormQuestions.length === 0 ? (
+                  <p className="text-xs text-neutral-500">לטופס הדיווח שנבחר אין שדות טקסט חופשי שניתן להגדיר עבורם תשובות מוכנות.</p>
+                ) : (
+                  reportFormQuestions.map((question) => {
+                    const entries = formValues.reportPreanswers[question.id] || [];
+                    return (
+                      <div key={question.id} className="space-y-2 rounded-md border border-border bg-muted/10 p-3">
+                        <span className="block text-sm font-medium text-foreground">{question.label}</span>
+                        {entries.length > 0 ? (
+                          <ul className="space-y-1">
+                            {entries.map((entry) => (
+                              <li key={entry} className="flex items-center justify-between gap-2 rounded-md bg-white px-2 py-1 text-sm">
+                                <span className="flex-1 break-words">{entry}</span>
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-6 w-6 text-destructive hover:text-destructive"
+                                  onClick={() => handleRemovePreanswer(question.id, entry)}
+                                  disabled={isSubmitting}
+                                >
+                                  <X className="h-3 w-3" />
+                                </Button>
+                              </li>
+                            ))}
+                          </ul>
+                        ) : (
+                          <p className="text-xs text-neutral-500">אין תשובות מוכנות לשדה זה.</p>
+                        )}
+                        <div className="flex gap-2">
+                          <Input
+                            value={newPreanswerDrafts[question.id] || ''}
+                            onChange={(e) => setNewPreanswerDrafts((prev) => ({ ...prev, [question.id]: e.target.value }))}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault();
+                                handleAddPreanswer(question.id);
+                              }
+                            }}
+                            placeholder="הוספת תשובה מוכנה"
+                            disabled={isSubmitting || entries.length >= preanswersCap}
+                          />
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleAddPreanswer(question.id)}
+                            disabled={isSubmitting || entries.length >= preanswersCap || !(newPreanswerDrafts[question.id] || '').trim()}
+                          >
+                            <Plus className="h-4 w-4" />
+                          </Button>
+                        </div>
+                        {entries.length >= preanswersCap ? (
+                          <p className="text-xs text-amber-700">הגעת למכסה של {preanswersCap} תשובות מוכנות לשדה.</p>
+                        ) : null}
+                      </div>
+                    );
+                  })
+                )}
+                </div>
+                <div className="flex justify-end pt-2">
+                  <Button type="button" onClick={() => setPreanswersDialogOpen(false)}>
+                    סיום
+                  </Button>
+                </div>
+              </DialogContent>
+            </Dialog>
 
             <div className="flex items-center justify-between rounded-lg border border-border bg-muted/20 px-3 py-2">
               <div>

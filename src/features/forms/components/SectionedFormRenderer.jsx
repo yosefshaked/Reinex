@@ -284,20 +284,27 @@ function ApprovalField({ question, value, onChange, readOnly, error }) {
   );
 }
 
-function QuestionField({ question, value, onChange, readOnly, error }) {
+function QuestionField({ question, value, onChange, readOnly, error, inputAction = null }) {
   switch (question.type) {
     case 'long_text':
       return (
         <div className="space-y-2">
-          <Textarea
-            id={question.id}
-            rows={4}
-            value={value ?? ''}
-            disabled={readOnly}
-            placeholder={question.placeholder}
-            className={cn('min-h-[120px] rounded-xl border bg-white px-3 py-2 text-sm shadow-sm', error ? 'border-red-300' : 'border-slate-200')}
-            onChange={(event) => onChange(event.target.value)}
-          />
+          <div className="relative">
+            <Textarea
+              id={question.id}
+              rows={4}
+              value={value ?? ''}
+              disabled={readOnly}
+              placeholder={question.placeholder}
+              className={cn(
+                'min-h-[120px] rounded-xl border bg-white px-3 py-2 text-sm shadow-sm',
+                inputAction ? 'pe-12' : '',
+                error ? 'border-red-300' : 'border-slate-200',
+              )}
+              onChange={(event) => onChange(event.target.value)}
+            />
+            {inputAction ? <div className="absolute end-1 top-1">{inputAction}</div> : null}
+          </div>
           {error ? <p className="text-xs text-red-600">{error}</p> : null}
         </div>
       );
@@ -350,7 +357,17 @@ function QuestionField({ question, value, onChange, readOnly, error }) {
     default:
       return (
         <div className="space-y-2">
-          <Input id={question.id} value={value ?? ''} disabled={readOnly} placeholder={question.placeholder} className={getInputClass(Boolean(error))} onChange={(event) => onChange(event.target.value)} />
+          <div className="relative">
+            <Input
+              id={question.id}
+              value={value ?? ''}
+              disabled={readOnly}
+              placeholder={question.placeholder}
+              className={cn(getInputClass(Boolean(error)), inputAction ? 'pe-12' : '')}
+              onChange={(event) => onChange(event.target.value)}
+            />
+            {inputAction ? <div className="absolute end-1 top-1/2 -translate-y-1/2">{inputAction}</div> : null}
+          </div>
           {error ? <p className="text-xs text-red-600">{error}</p> : null}
         </div>
       );
@@ -394,6 +411,7 @@ export default function SectionedFormRenderer({
   evaluationAnswers,
   onAnswersChange,
   onSharedItemSelect,
+  renderQuestionInputAction,
   readOnly = false,
   validationErrors = {},
   className,
@@ -430,6 +448,7 @@ export default function SectionedFormRenderer({
                 ...item,
                 type: item.question_type,
               };
+              const inputAction = renderQuestionInputAction?.(question) || null;
 
               return (
                 <div key={question.id} className="space-y-2">
@@ -455,6 +474,7 @@ export default function SectionedFormRenderer({
                       onChange={(nextValue) => updateAnswer(question.id, nextValue)}
                       readOnly={readOnly}
                       error={validationErrors?.[question.id] || ''}
+                      inputAction={inputAction}
                     />
                   ) : null}
                 </div>

@@ -13,7 +13,6 @@ import {
   withOrgScope,
 } from '../_shared/org-bff.js';
 import { ensureOrgPermissions } from '../_shared/permissions-utils.js';
-import { extractQuestionsForVersion } from '../_shared/version-lookup.js';
 import { attachErrorTracking, respondTracked } from '../_shared/error-events.js';
 import puppeteer from 'puppeteer-core';
 import chromium from '@sparticuz/chromium-min';
@@ -160,49 +159,39 @@ function formatSessionDate(value) {
 }
 
 /**
- * Parse session form config
- * Currently unused but kept for potential future use
+ * Session Reports Phase 5 — flatten a Reinex Form schema (sections[].questions[])
+ * into a flat question list, in the shape buildAnswerList already expects
+ * (objects with .label/.id/.key). Each report carries its own rendering
+ * contract in metadata.form_schema_snapshot (captured at submit time — see
+ * api/session-reports/index.js createReport), so there is no version-history
+ * lookup needed anymore (that was the old TutTiud session_form_config model).
  */
-function _parseSessionFormConfig(value) {
-  if (value === null || value === undefined) {
-    return [];
-  }
-  if (typeof value === 'string') {
-    const trimmed = value.trim();
-    if (!trimmed) {
-      return [];
-    }
-    try {
-      const parsed = JSON.parse(trimmed);
-      if (Array.isArray(parsed)) {
-        return parsed;
+function flattenSchemaQuestions(schema) {
+  if (!schema || typeof schema !== 'object') return [];
+  const sections = Array.isArray(schema.sections) ? schema.sections : [];
+  const out = [];
+  for (const section of sections) {
+    const questions = Array.isArray(section?.questions) ? section.questions : [];
+    for (const question of questions) {
+      if (question && typeof question === 'object') {
+        out.push(question);
       }
-    } catch {
-      return [];
     }
-    return [];
   }
-  if (Array.isArray(value)) {
-    return value;
-  }
-  return [];
+  return out;
 }
 
-// getQuestionsForVersion is now imported from shared utility (extractQuestionsForVersion)
-// No need for duplicate implementation here
-
 /**
- * Generate HTML content for PDF
+ * Generate HTML content for PDF.
+ *
+ * `reports` are form_submissions rows (Session Reports Phase 2+), each
+ * pre-shaped by loadReportsForExport below into
+ * { date, service_name, answers, is_legacy, form_schema_snapshot }.
  */
-function generatePdfHtml(student, sessions, formConfig, logoUrl, customLogoUrl) {
-  const sessionsHtml = sessions.map(session => {
-    // Extract form version from session metadata
-    const formVersion = session.metadata?.form_version ?? null;
-    
-    // Get questions for this specific session's form version (using shared utility)
-    const questions = extractQuestionsForVersion(formConfig, formVersion);
-    
-  const answers = buildAnswerList(session.content, questions, { isLegacy: Boolean(session?.is_legacy) });
+function generatePdfHtml(student, reports, logoUrl, customLogoUrl) {
+  const sessionsHtml = reports.map(report => {
+    const questions = flattenSchemaQuestions(report.form_schema_snapshot);
+    const answers = buildAnswerList(report.answers, questions, { isLegacy: Boolean(report?.is_legacy) && questions.length === 0 });
     const answersHtml = answers.length ? answers.map(entry => `
       <div class="answer-item">
         <div class="answer-label">${escapeHtml(entry.label)}</div>
@@ -214,8 +203,8 @@ function generatePdfHtml(student, sessions, formConfig, logoUrl, customLogoUrl) 
     return `
       <div class="session-card">
         <div class="session-header">
-          <h3>${formatSessionDate(session.date)}</h3>
-          <p class="session-service">${session.service_context ? escapeHtml(session.service_context) : 'ללא שירות מוגדר'}</p>
+          <h3>${formatSessionDate(report.date)}</h3>
+          <p class="session-service">${report.service_name ? escapeHtml(report.service_name) : 'ללא שירות מוגדר'}</p>
         </div>
         <div class="session-content">
           ${answersHtml}
@@ -460,7 +449,7 @@ function generatePdfHtml(student, sessions, formConfig, logoUrl, customLogoUrl) 
   </div>
   
   <div class="sessions-section">
-    <h2>היסטוריית מפגשים (${sessions.length})</h2>
+    <h2>היסטוריית מפגשים (${reports.length})</h2>
     ${sessionsHtml}
   </div>
   
@@ -626,45 +615,53 @@ export default async function (context, req) {
     });
   }
 
-  // Fetch session records
-  let sessions;
+  // Fetch session reports (Session Reports Phase 2+ — form_submissions rows
+  // bound to lesson_participant_id; is_legacy rows are TutTiud/Amir imports).
+  // The old SessionRecords table this used to read from was never created
+  // (see implementations/session-reports/phase0-delta-audit.md) — this export
+  // was dead code until now.
+  let reports = [];
   try {
-    const { data, error } = await withOrgScope(supabase, 'SessionRecords', orgId)
-      .select('*')
+    const { data, error } = await withOrgScope(supabase, 'form_submissions', orgId)
+      .select('id, submitted_at, service_id, answers, metadata, is_legacy, lesson_participant_id, lesson_participants(lesson_instance_id, lesson_instances(datetime_start))')
       .eq('student_id', studentId)
-      .order('date', { ascending: false });
+      .eq('source', 'internal')
+      .not('lesson_participant_id', 'is', null)
+      .order('submitted_at', { ascending: false });
 
     if (error) {
-      context.log?.error?.('students-export failed to fetch sessions', { message: error.message, studentId });
+      context.log?.error?.('students-export failed to fetch reports', { message: error.message, studentId });
       return respondStudentsExportError(context, 500, 'failed_to_load_sessions', error, {
-        action: 'load_sessions',
+        action: 'load_reports',
         student_id: studentId,
       });
     }
 
-  sessions = Array.isArray(data) ? data : [];
+    const rawReports = Array.isArray(data) ? data : [];
+    const serviceIds = Array.from(new Set(rawReports.map((row) => row.service_id).filter(Boolean)));
+    let serviceNameById = new Map();
+    if (serviceIds.length) {
+      const { data: serviceRows, error: servicesError } = await withOrgScope(supabase, 'Services', orgId)
+        .select('id, name')
+        .in('id', serviceIds);
+      if (!servicesError && serviceRows) {
+        serviceNameById = new Map(serviceRows.map((row) => [row.id, row.name]));
+      }
+    }
+
+    reports = rawReports.map((row) => ({
+      date: row?.lesson_participants?.lesson_instances?.datetime_start || row.submitted_at,
+      service_name: serviceNameById.get(row.service_id) || null,
+      answers: row.answers,
+      is_legacy: Boolean(row.is_legacy),
+      form_schema_snapshot: row?.metadata?.form_schema_snapshot || null,
+    }));
   } catch (error) {
-    context.log?.error?.('students-export failed to fetch sessions', { message: error?.message, studentId });
+    context.log?.error?.('students-export failed to fetch reports', { message: error?.message, studentId });
     return respondStudentsExportError(context, 500, 'failed_to_load_sessions', error, {
-      action: 'load_sessions',
+      action: 'load_reports',
       student_id: studentId,
     });
-  }
-
-  // Fetch session form config (complete with version history)
-  let formConfig = null;
-  try {
-    const { data, error } = await withOrgScope(supabase, 'Settings', orgId)
-      .select('settings_value')
-      .eq('key', 'session_form_config')
-      .maybeSingle();
-
-    if (!error && data?.settings_value) {
-      formConfig = data.settings_value;
-    }
-  } catch (error) {
-    context.log?.warn?.('students-export failed to fetch form config', { message: error?.message });
-    // Continue without form config
   }
 
   // Fetch organization logo URL
@@ -710,10 +707,10 @@ export default async function (context, req) {
     });
 
   const page = await browser.newPage();
-  const html = generatePdfHtml(student, sessions, formConfig, tuttiudLogoUrl, customLogoUrl);
-    
+  const html = generatePdfHtml(student, reports, tuttiudLogoUrl, customLogoUrl);
+
     await page.setContent(html, { waitUntil: 'networkidle0' });
-    
+
     const pdfBuffer = await page.pdf({
       format: 'A4',
       printBackground: true,
@@ -730,7 +727,7 @@ export default async function (context, req) {
     context.log?.info?.('students-export PDF generated successfully', {
       studentId,
       filename,
-      sessionCount: sessions.length,
+      sessionCount: reports.length,
     });
 
     context.res = {
@@ -754,7 +751,7 @@ export default async function (context, req) {
     return respondStudentsExportError(context, 500, 'failed_to_generate_pdf', error, {
       action: 'generate_pdf',
       student_id: studentId,
-      session_count: Array.isArray(sessions) ? sessions.length : null,
+      session_count: Array.isArray(reports) ? reports.length : null,
     });
   } finally {
     if (browser) {

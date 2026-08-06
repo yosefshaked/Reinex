@@ -1,6 +1,8 @@
 /* eslint-env node */
 import { resolveBearerAuthorization } from '../_shared/http.js';
 import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../_shared/supabase-admin.js';
+import { attachErrorTracking, respondTracked } from '../_shared/error-events.js';
+import { ensureOrgPermissions } from '../_shared/permissions-utils.js';
 import {
   UUID_PATTERN,
   ensureMembership,
@@ -42,6 +44,46 @@ function normalizeOptionalText(value) {
 
 const PAYMENT_MODELS = new Set(['fixed_rate', 'per_student']);
 const REQUIRED_FORM_ENFORCEMENT_VALUES = new Set(['warn', 'block']);
+
+function respondServicesError(context, status, message, error, metadata = {}) {
+  return respondTracked(context, status, { message }, undefined, { error, metadata });
+}
+
+function normalizePositiveInt(value, fallback) {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function capReportPreanswers(metadata, cap) {
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return metadata;
+  if (!Object.prototype.hasOwnProperty.call(metadata, 'report_preanswers')) return metadata;
+
+  const bank = metadata.report_preanswers && typeof metadata.report_preanswers === 'object' && !Array.isArray(metadata.report_preanswers)
+    ? metadata.report_preanswers
+    : {};
+  const normalizedBank = {};
+  for (const [fieldKey, entries] of Object.entries(bank)) {
+    if (!normalizeString(fieldKey) || !Array.isArray(entries)) continue;
+    const normalizedEntries = Array.from(new Set(
+      entries
+        .filter((entry) => typeof entry === 'string')
+        .map((entry) => entry.trim())
+        .filter(Boolean),
+    )).slice(0, cap);
+    if (normalizedEntries.length) normalizedBank[fieldKey] = normalizedEntries;
+  }
+
+  return { ...metadata, report_preanswers: normalizedBank };
+}
+
+async function loadAssignableReportForm(supabase, orgId, formId) {
+  if (!formId) return { form: null, error: null };
+  const { data, error } = await withOrgScope(supabase, 'forms', orgId)
+    .select('id, form_usage, is_active, archived_at, metadata')
+    .eq('id', formId)
+    .maybeSingle();
+  return { form: data || null, error };
+}
 
 function normalizeRequiredForms(value) {
   if (value === null || value === undefined) {
@@ -101,6 +143,23 @@ function normalizeOptionalJson(value) {
     return { value: null, valid: false };
   }
   return { value, valid: true };
+}
+
+function normalizeOptionalUuid(value) {
+  if (value === null || value === undefined || value === '') {
+    return { value: null, valid: true };
+  }
+  if (typeof value !== 'string') {
+    return { value: null, valid: false };
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return { value: null, valid: true };
+  }
+  if (!UUID_PATTERN.test(trimmed)) {
+    return { value: null, valid: false };
+  }
+  return { value: trimmed, valid: true };
 }
 
 function normalizeOptionalBoolean(value) {
@@ -179,11 +238,17 @@ export default async function services(context, req) {
     return respond(context, 403, { message: 'forbidden' });
   }
 
+  attachErrorTracking(context, req, supabase, {
+    orgId,
+    userId: authResult.data.user.id,
+    metadata: { endpoint: 'services' },
+  });
+
   const isAdmin = isAdminRole(role);
 
   if (method === 'GET') {
     const { data, error } = await withOrgScope(supabase, 'Services', orgId)
-      .select('id, name, duration_minutes, payment_model, default_customer_charge_amount, color, is_active, metadata, required_forms')
+      .select('id, name, duration_minutes, payment_model, default_customer_charge_amount, color, is_active, metadata, required_forms, report_form_id')
       .order('name', { ascending: true });
 
     if (error) {
@@ -196,6 +261,19 @@ export default async function services(context, req) {
 
   if (!isAdmin) {
     return respond(context, 403, { message: 'forbidden' });
+  }
+
+  let preanswersCap = 50;
+  if (method === 'POST' || method === 'PUT') {
+    try {
+      const permissions = await ensureOrgPermissions(supabase, orgId);
+      preanswersCap = normalizePositiveInt(permissions?.session_form_preanswers_cap, 50);
+    } catch (permissionsError) {
+      context.log?.error?.('services failed to load permissions for report preanswers', { message: permissionsError?.message });
+      return respondServicesError(context, 500, 'failed_to_verify_membership', permissionsError, {
+        action: 'resolve_report_preanswers_cap',
+      });
+    }
   }
 
   if (method === 'POST') {
@@ -241,6 +319,28 @@ export default async function services(context, req) {
       return respond(context, 400, { message: 'invalid_required_forms' });
     }
 
+    const reportFormIdResult = normalizeOptionalUuid(body?.report_form_id ?? body?.reportFormId);
+    if (!reportFormIdResult.valid) {
+      return respond(context, 400, { message: 'invalid_report_form_id' });
+    }
+
+    if (reportFormIdResult.value) {
+      const { form: reportForm, error: reportFormError } = await loadAssignableReportForm(supabase, orgId, reportFormIdResult.value);
+      if (reportFormError) {
+        return respondServicesError(context, 500, 'failed_to_load_form', reportFormError, {
+          action: 'validate_report_form_assignment',
+          form_id: reportFormIdResult.value,
+        });
+      }
+      if (!reportForm) return respond(context, 400, { message: 'invalid_report_form_id' });
+      if (normalizeString(reportForm.form_usage) !== 'session_report') {
+        return respond(context, 409, { message: 'form_not_session_report' });
+      }
+      if (reportForm.is_active === false || reportForm.archived_at || !reportForm.metadata?.published_form_schema) {
+        return respond(context, 409, { message: 'report_form_not_published' });
+      }
+    }
+
     const { data, error } = await withOrgScope(supabase, 'Services', orgId)
       .insert({
         name,
@@ -249,10 +349,11 @@ export default async function services(context, req) {
         default_customer_charge_amount: defaultCustomerChargeAmountResult.value,
         color: colorResult.value,
         is_active: isActiveResult.value === null ? true : isActiveResult.value,
-        metadata: metadataResult.value,
+        metadata: capReportPreanswers(metadataResult.value, preanswersCap),
         required_forms: requiredFormsResult.value ?? [],
+        report_form_id: reportFormIdResult.value,
       })
-      .select('id, name, duration_minutes, payment_model, default_customer_charge_amount, color, is_active, metadata, required_forms')
+      .select('id, name, duration_minutes, payment_model, default_customer_charge_amount, color, is_active, metadata, required_forms, report_form_id')
       .single();
 
     if (error) {
@@ -323,7 +424,7 @@ export default async function services(context, req) {
       if (!metadataResult.valid) {
         return respond(context, 400, { message: 'invalid_metadata' });
       }
-      updates.metadata = metadataResult.value;
+      updates.metadata = capReportPreanswers(metadataResult.value, preanswersCap);
     }
 
     if (Object.prototype.hasOwnProperty.call(body, 'is_active') || Object.prototype.hasOwnProperty.call(body, 'isActive')) {
@@ -342,6 +443,30 @@ export default async function services(context, req) {
       updates.required_forms = requiredFormsResult.value ?? [];
     }
 
+    if (Object.prototype.hasOwnProperty.call(body, 'report_form_id') || Object.prototype.hasOwnProperty.call(body, 'reportFormId')) {
+      const reportFormIdResult = normalizeOptionalUuid(body?.report_form_id ?? body?.reportFormId);
+      if (!reportFormIdResult.valid) {
+        return respond(context, 400, { message: 'invalid_report_form_id' });
+      }
+      if (reportFormIdResult.value) {
+        const { form: reportForm, error: reportFormError } = await loadAssignableReportForm(supabase, orgId, reportFormIdResult.value);
+        if (reportFormError) {
+          return respondServicesError(context, 500, 'failed_to_load_form', reportFormError, {
+            action: 'validate_report_form_assignment',
+            form_id: reportFormIdResult.value,
+          });
+        }
+        if (!reportForm) return respond(context, 400, { message: 'invalid_report_form_id' });
+        if (normalizeString(reportForm.form_usage) !== 'session_report') {
+          return respond(context, 409, { message: 'form_not_session_report' });
+        }
+        if (reportForm.is_active === false || reportForm.archived_at || !reportForm.metadata?.published_form_schema) {
+          return respond(context, 409, { message: 'report_form_not_published' });
+        }
+      }
+      updates.report_form_id = reportFormIdResult.value;
+    }
+
     if (Object.keys(updates).length === 0) {
       return respond(context, 400, { message: 'missing_updates' });
     }
@@ -349,7 +474,7 @@ export default async function services(context, req) {
     const { data, error } = await withOrgScope(supabase, 'Services', orgId)
       .update(updates)
       .eq('id', serviceId)
-      .select('id, name, duration_minutes, payment_model, default_customer_charge_amount, color, is_active, metadata, required_forms')
+      .select('id, name, duration_minutes, payment_model, default_customer_charge_amount, color, is_active, metadata, required_forms, report_form_id')
       .maybeSingle();
 
     if (error) {

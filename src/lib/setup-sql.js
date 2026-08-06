@@ -1100,6 +1100,16 @@ CREATE TABLE IF NOT EXISTS public."Services" (
 ALTER TABLE public."Services"
   ADD COLUMN IF NOT EXISTS required_forms jsonb NOT NULL DEFAULT '[]'::jsonb;
 
+-- Migration: add report_form_id (per-service session-report template) to Services
+-- (Session Reports Phase 2; see implementations/session-reports/implementation-plan.md)
+-- NOTE: the foreign key to forms(id) is added later via ALTER TABLE, after the
+-- forms table is defined (forms is created after Services in this file).
+ALTER TABLE public."Services"
+  ADD COLUMN IF NOT EXISTS report_form_id uuid NULL;
+
+CREATE INDEX IF NOT EXISTS services_report_form_id_idx
+  ON public."Services" (org_id, report_form_id) WHERE report_form_id IS NOT NULL;
+
 
 -- -----------------------------------------------------------------
 -- public.RateHistory (rate tracking per employee/service/date)
@@ -2466,6 +2476,29 @@ ALTER TABLE public.forms
   ADD CONSTRAINT forms_form_usage_check
     CHECK (form_usage IN ('general','waiting_list_intake','required_form'));
 
+-- Migration: expand form_usage to include session_report
+-- (Session Reports Phase 2; see implementations/session-reports/implementation-plan.md)
+UPDATE public.forms
+SET form_usage = COALESCE(NULLIF(form_usage, ''), 'general')
+WHERE form_usage IS NULL OR form_usage = '';
+
+ALTER TABLE public.forms
+  DROP CONSTRAINT IF EXISTS forms_form_usage_check,
+  ADD CONSTRAINT forms_form_usage_check
+    CHECK (form_usage IN ('general','waiting_list_intake','required_form','session_report'));
+
+-- Deferred FK: Services.report_form_id -> public.forms(id) (added here because
+-- public.forms is defined after public.Services in this file; see Services block above)
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'Services_report_form_id_fkey'
+  ) THEN
+    ALTER TABLE public."Services"
+      ADD CONSTRAINT "Services_report_form_id_fkey" FOREIGN KEY (report_form_id) REFERENCES public.forms(id);
+  END IF;
+END $$;
+
 
 CREATE INDEX IF NOT EXISTS forms_is_active_idx ON public.forms (org_id, is_active);
 CREATE INDEX IF NOT EXISTS forms_form_usage_idx ON public.forms (org_id, form_usage);
@@ -2579,6 +2612,106 @@ ALTER TABLE public.form_submissions
 
 CREATE INDEX IF NOT EXISTS form_submissions_service_id_idx
   ON public.form_submissions (org_id, service_id) WHERE service_id IS NOT NULL;
+
+-- Migration: session-report anchoring — lesson_participant_id, form_version, is_legacy
+-- (Session Reports Phase 2; see implementations/session-reports/implementation-plan.md)
+ALTER TABLE public.form_submissions
+  ADD COLUMN IF NOT EXISTS lesson_participant_id uuid NULL
+    REFERENCES public.lesson_participants(id);
+
+ALTER TABLE public.form_submissions
+  ADD COLUMN IF NOT EXISTS form_version int NULL;
+
+ALTER TABLE public.form_submissions
+  ADD COLUMN IF NOT EXISTS is_legacy boolean NOT NULL DEFAULT false;
+
+CREATE INDEX IF NOT EXISTS form_submissions_lesson_participant_id_idx
+  ON public.form_submissions (org_id, lesson_participant_id)
+  WHERE lesson_participant_id IS NOT NULL;
+
+-- Enforce: at most one non-legacy report per lesson_participant_id (Invariant)
+CREATE UNIQUE INDEX IF NOT EXISTS form_submissions_report_participant_uidx
+  ON public.form_submissions (lesson_participant_id)
+  WHERE lesson_participant_id IS NOT NULL AND is_legacy = false;
+
+-- Exact, database-side pagination for the session-reports pending queue.
+-- Filtering documented participants before LIMIT/OFFSET keeps pages and
+-- has_more counts stable even when most historical lessons are already reported.
+CREATE OR REPLACE FUNCTION public.list_pending_session_reports(
+  p_org_id uuid,
+  p_instructor_employee_id uuid DEFAULT NULL,
+  p_limit integer DEFAULT 50,
+  p_offset integer DEFAULT 0
+)
+RETURNS TABLE (
+  lesson_participant_id uuid,
+  participant_status text,
+  student_id uuid,
+  client_profile_id uuid,
+  student_name text,
+  lesson_instance_id uuid,
+  lesson_datetime_start timestamptz,
+  instructor_employee_id uuid,
+  instructor_name text,
+  service_id uuid,
+  service_name text,
+  total_count bigint
+)
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $function$
+  SELECT
+    lp.id,
+    lp.participant_status,
+    lp.student_id,
+    lp.client_profile_id,
+    NULLIF(trim(concat_ws(' ', cp.first_name, cp.last_name)), ''),
+    li.id,
+    li.datetime_start,
+    li.instructor_employee_id,
+    NULLIF(trim(concat_ws(' ', employee.first_name, employee.last_name)), ''),
+    service.id,
+    service.name,
+    count(*) OVER () AS total_count
+  FROM public.lesson_participants AS lp
+  JOIN public.lesson_instances AS li
+    ON li.id = lp.lesson_instance_id
+   AND li.org_id = p_org_id
+  JOIN public."Services" AS service
+    ON service.id = li.service_id
+   AND service.org_id = p_org_id
+  JOIN public.client_profiles AS cp
+    ON cp.id = lp.client_profile_id
+   AND cp.org_id = p_org_id
+  LEFT JOIN public."Employees" AS employee
+    ON employee.id = li.instructor_employee_id
+   AND employee.org_id = p_org_id
+  WHERE lp.org_id = p_org_id
+    AND lp.participant_status IN ('attended', 'scheduled')
+    AND li.status <> 'cancelled'
+    AND li.datetime_start <= now()
+    AND service.report_form_id IS NOT NULL
+    AND (
+      p_instructor_employee_id IS NULL
+      OR li.instructor_employee_id = p_instructor_employee_id
+    )
+    AND NOT EXISTS (
+      SELECT 1
+      FROM public.form_submissions AS report
+      WHERE report.org_id = p_org_id
+        AND report.lesson_participant_id = lp.id
+        AND report.source = 'internal'
+        AND report.is_legacy = false
+    )
+  ORDER BY li.datetime_start DESC, lp.id
+  LIMIT LEAST(GREATEST(COALESCE(p_limit, 50), 1), 100)
+  OFFSET GREATEST(COALESCE(p_offset, 0), 0);
+$function$;
+
+REVOKE ALL ON FUNCTION public.list_pending_session_reports(uuid, uuid, integer, integer) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.list_pending_session_reports(uuid, uuid, integer, integer) TO service_role;
 
 -- -----------------------------------------------------------------
 -- public.otp_challenges
@@ -4623,6 +4756,16 @@ INSERT INTO public.permission_registry (
     'true'::jsonb,
     'features',
     false
+  ),
+  (
+    'session_reports_enabled',
+    'Session Reports',
+    'דיווחי מפגשים',
+    'Allow organization instructors to document lesson sessions via session reports',
+    'אפשר למדריכי הארגון לתעד מפגשי שיעורים באמצעות דיווחי מפגשים',
+    'false'::jsonb,
+    'features',
+    true
   ),
   (
     'storage_access_level',

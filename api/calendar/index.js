@@ -40,6 +40,7 @@ import {
   normalizeLessonInstanceStatus,
 } from '../_shared/lesson-instance-status.js';
 import { attachErrorTracking, respondTracked, respondTrackedError } from '../_shared/error-events.js';
+import { findBlockingReportParticipantIds } from '../_shared/session-reports-guards.js';
 
 const MAX_BODY_BYTES = 128 * 1024;
 
@@ -1444,6 +1445,45 @@ async function handleUpdateInstance(context, req, body, dbContext, supabase, aut
   let completedParticipantAuditRows = [];
 
   if (requestedCancellation) {
+    // E2 (session-reports LOCKED policy): block cancelling a lesson while any of its
+    // participants has a non-legacy report on file. See
+    // implementations/session-reports/implementation-plan.md.
+    const { data: participantIdRows, error: participantIdRowsError } = await withOrgScope(client, 'lesson_participants', orgId)
+      .select('id')
+      .eq('lesson_instance_id', body.id);
+
+    if (participantIdRowsError) {
+      context.log?.error?.('calendar/instances failed to load participants for session-report guard', {
+        message: participantIdRowsError.message,
+        instanceId: body.id,
+      });
+      return respondTrackedCalendarError({
+        message: 'failed_to_cancel_instance',
+        error: participantIdRowsError,
+      });
+    }
+
+    let blockingReportIds;
+    try {
+      blockingReportIds = await findBlockingReportParticipantIds(
+        client,
+        orgId,
+        (participantIdRows || []).map((row) => row.id),
+      );
+    } catch (guardError) {
+      context.log?.error?.('calendar/instances failed to check session-report guard', { message: guardError?.message, instanceId: body.id });
+      return respondTrackedCalendarError({
+        message: 'failed_to_cancel_instance',
+        error: guardError,
+      });
+    }
+    if (blockingReportIds.length) {
+      return respond(context, 409, {
+        message: 'report_has_documentation',
+        documented_participant_ids: blockingReportIds,
+      });
+    }
+
     try {
       const cancellationResult = await cancelLessonInstanceWithParticipants(client, {
         orgId,

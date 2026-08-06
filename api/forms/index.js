@@ -58,7 +58,7 @@ function normalizeBooleanFlag(value) {
 function normalizeFormUsage(value) {
   const normalized = normalizeString(value).toLowerCase();
   if (!normalized) return '';
-  return ['general', 'waiting_list_intake', 'required_form'].includes(normalized) ? normalized : '';
+  return ['general', 'waiting_list_intake', 'required_form', 'session_report'].includes(normalized) ? normalized : '';
 }
 
 function normalizeSelectionMode(value) {

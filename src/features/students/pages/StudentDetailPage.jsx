@@ -16,7 +16,9 @@ import StudentHistoryTab from '@/features/students/components/StudentHistoryTab.
 import StudentDocumentsTab from '@/features/students/components/StudentDocumentsTab.jsx';
 import StudentFinancialTab from '@/features/students/components/StudentFinancialTab.jsx';
 import StudentFormsTab from '@/features/students/components/StudentFormsTab.jsx';
+import StudentReportsTab from '@/features/students/components/StudentReportsTab.jsx';
 import DetailTabsShell from '@/components/ui/DetailTabsShell.jsx';
+import { useSessionReportsEnabled } from '@/features/sessions/config/session-reports-permission.js';
 
 const REQUEST_STATE = {
   idle: 'idle',
@@ -60,6 +62,7 @@ export default function StudentDetailPage() {
   const membershipRole = normalizeMembershipRole(activeOrg?.membership?.role);
   const canEdit = isAdminRole(membershipRole);
   const isFetchingStudent = studentState === REQUEST_STATE.loading;
+  const sessionReportsEnabled = useSessionReportsEnabled();
 
   const canFetch = Boolean(
     studentId &&
@@ -188,6 +191,9 @@ export default function StudentDetailPage() {
     },
     { key: 'financial', label: 'כספים', content: <StudentFinancialTab studentId={studentId} student={student} /> },
     { key: 'forms', label: 'טפסים', content: <StudentFormsTab studentId={studentId} student={student} canEdit={canEdit} requiredFormsCompliance={requiredFormsCompliance} onComplianceRefresh={() => loadCompliance(studentId)} /> },
+    ...(sessionReportsEnabled
+      ? [{ key: 'reports', label: 'דוחות מפגשים', content: <StudentReportsTab studentId={studentId} /> }]
+      : []),
   ];
 
   // Loading states
