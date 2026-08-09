@@ -2693,6 +2693,7 @@ AS $function$
     AND li.status <> 'cancelled'
     AND li.datetime_start <= now()
     AND service.report_form_id IS NOT NULL
+    AND COALESCE(li.metadata -> 'import' ->> 'exclude_from_pending_reports', 'false') <> 'true'
     AND (
       p_instructor_employee_id IS NULL
       OR li.instructor_employee_id = p_instructor_employee_id
@@ -6507,7 +6508,11 @@ CREATE TABLE IF NOT EXISTS public.import_candidates (
       'customer',
       'guardian',
       'guardian_link',
-      'service'
+      'service',
+      'instructor',
+      'lesson',
+      'lesson_participant',
+      'student_note'
     )
   ),
   CONSTRAINT import_candidates_status_check CHECK (
@@ -6579,8 +6584,10 @@ CREATE INDEX IF NOT EXISTS import_candidates_blocking_idx
 CREATE INDEX IF NOT EXISTS import_candidates_merged_rows_gin_idx
   ON public.import_candidates USING gin (merged_from_row_ids);
 
--- ── Migration: collapse legacy import entity types into the canonical four ──────
--- The import pipeline now uses exactly: customer, guardian, guardian_link, service.
+-- ── Migration: collapse legacy import entity types into the supported import set ──
+-- The import pipeline supports customer, guardian, guardian_link, service,
+-- instructor, lesson, and lesson_participant. student_note remains allowed only
+-- for already-committed historical staging rows.
 -- Legacy staging rows (active_student / inactive_student / student_note) and the old
 -- guardian candidate_data shape are converted in-place so no backward-compat code is
 -- needed. Every step is idempotent — each WHERE clause only matches un-migrated rows.
@@ -6640,14 +6647,32 @@ BEGIN
   )
   AND NOT EXISTS (
     SELECT 1 FROM public.import_candidates
-     WHERE entity_type NOT IN ('customer', 'guardian', 'guardian_link', 'service')
+     WHERE entity_type NOT IN (
+       'customer', 'guardian', 'guardian_link', 'service',
+       'instructor', 'lesson', 'lesson_participant', 'student_note'
+     )
   ) THEN
     ALTER TABLE public.import_candidates
       ADD CONSTRAINT import_candidates_entity_type_check CHECK (
-        entity_type IN ('customer', 'guardian', 'guardian_link', 'service')
+        entity_type IN (
+          'customer', 'guardian', 'guardian_link', 'service',
+          'instructor', 'lesson', 'lesson_participant', 'student_note'
+        )
       );
   END IF;
 END $$;
+
+-- Expand environments that already have the former four-entity constraint.
+ALTER TABLE public.import_candidates
+  DROP CONSTRAINT IF EXISTS import_candidates_entity_type_check;
+
+ALTER TABLE public.import_candidates
+  ADD CONSTRAINT import_candidates_entity_type_check CHECK (
+    entity_type IN (
+      'customer', 'guardian', 'guardian_link', 'service',
+      'instructor', 'lesson', 'lesson_participant', 'student_note'
+    )
+  );
 
 -- import_commit_ledger: immutable audit trail for every live record created, updated, or linked
 -- by an import commit. Workspace CASCADE handles bulk cleanup when a workspace is deleted.

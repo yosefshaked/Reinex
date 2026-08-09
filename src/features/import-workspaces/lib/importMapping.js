@@ -2,7 +2,10 @@ export const ENTITY_FIELD_ORDER = {
   customer: ['first_name', 'last_name', 'identity_number', 'customer_type', 'is_active', 'phone', 'email', 'date_of_birth', 'note_text'],
   guardian: ['guardian_first_name', 'guardian_last_name', 'guardian_phone', 'guardian_email'],
   guardian_link: ['identity_number', 'guardian_phone', 'guardian_email', 'relationship', 'is_primary'],
-  service: ['service_name', 'description'],
+  service: ['source_system', 'source_service_id', 'service_name', 'duration_minutes', 'description'],
+  instructor: ['source_system', 'source_instructor_id', 'first_name', 'middle_name', 'last_name', 'is_active'],
+  lesson: ['source_system', 'source_lesson_id', 'datetime_start', 'source_instructor_id', 'service_name', 'lesson_status', 'duration_minutes', 'legacy_note'],
+  lesson_participant: ['source_system', 'source_lesson_id', 'identity_number', 'participant_status', 'legacy_attendance_note', 'status_inference'],
 };
 
 export const ENTITY_GRAIN_FIELDS = {
@@ -10,6 +13,9 @@ export const ENTITY_GRAIN_FIELDS = {
   guardian: ['guardian_first_name', 'guardian_phone'],
   guardian_link: ['guardian_phone', 'guardian_email', 'identity_number'],
   service: ['service_name'],
+  instructor: ['source_instructor_id', 'first_name'],
+  lesson: ['source_lesson_id', 'datetime_start'],
+  lesson_participant: ['source_lesson_id', 'identity_number'],
 };
 
 export function normalizeFieldSource(value) {

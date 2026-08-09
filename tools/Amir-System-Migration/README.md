@@ -10,6 +10,7 @@ For day-to-day work, use the job CLI in `migration_cli.py`.
 - prints columns for a table or query
 - prints sample rows for a table or query
 - surfaces duplicate `RiderParents` rows by `RiderId`
+- builds a complete, checksummed migration bundle with normalized relationship CSVs
 
 ## Usage
 
@@ -24,7 +25,8 @@ python .\tools\Amir-System-Migration\inspect_access_mdb.py compare-rider-parents
 ## Prerequisites
 
 - Run this on **Windows** with Python 3.
-- Install the `pywin32` dependency (provides `win32com`) for the Python you run this with:
+- Install the tool dependencies (`pywin32` for Access COM and `tzdata` for historical
+  `Asia/Jerusalem` daylight-saving conversion) for the Python you run this with:
 
   ```powershell
   python -m pip install -r tools/Amir-System-Migration/requirements.txt
@@ -98,15 +100,16 @@ python .\tools\Amir-System-Migration\migration_cli.py run inventory --mdb C:\pat
 python .\tools\Amir-System-Migration\migration_cli.py run riders-core --mdb C:\path\to\legacy.mdb
 python .\tools\Amir-System-Migration\migration_cli.py run lessons-candidates --mdb C:\path\to\legacy.mdb
 python .\tools\Amir-System-Migration\migration_cli.py run extract --mdb C:\path\to\legacy.mdb
+python .\tools\Amir-System-Migration\migration_cli.py run bundle --mdb C:\path\to\legacy.mdb
 python .\tools\Amir-System-Migration\migration_cli.py run all --mdb C:\path\to\legacy.mdb
 ```
 
-### Extract import-ready CSVs (`extract` job)
+### Raw CSV extraction (`extract` job)
 
-The `extract` job is the one that produces files you upload straight into the app's
-**Import Workspaces** screen. It writes **one full CSV per table** (every row, every
-column) to the output folder, encoded UTF-8 with a BOM so Hebrew survives in both Excel
-and the import parser.
+The `extract` job writes **one complete CSV per requested table or saved query** (every
+row, every column). It is useful for ad-hoc inspection and mapping. For the actual Amir
+migration, prefer `bundle`: a raw `RiderParents` row contains both a father and a mother,
+so mapping that raw file as one guardian entity is not lossless.
 
 ```powershell
 # Default: Riders + RiderParents
@@ -128,27 +131,63 @@ What you get:
 - `YYYYMMDD-HHMMSS_Riders.csv`, `YYYYMMDD-HHMMSS_RiderParents.csv`, … (the data) in the
   output folder.
 - A matching `…_extract.json` **manifest** that records only row counts, column names,
-  and file paths — **no row content** — so it is safe to share.
+  checksums, and relative file names — **no row content or absolute MDB path**.
 
-How it maps to the import:
+The raw riders file can be mapped to a customer. Do not map raw `RiderParents` directly
+unless you intentionally want only one of its two parent column groups.
 
-1. Create one **Import Workspace** and upload **both** CSVs to it (two sources).
-2. Map the **riders** CSV to the **`customer`** entity (first name / last name / id /
-   phone / email / date of birth; set `customer_type` to *student* and `is_active`
-   either by column or as a fixed value).
-3. Map the **rider-parents** CSV to **`guardian`** and **`guardian_link`**. For the link,
-   join the two sources on the shared rider key (e.g. `RiderId`) so the parent resolves
-   to the correct student's identity number — the import never joins by row position.
-4. Review, dry-run, and commit from the app. The columns are mapped in the UI, so the
-   extract intentionally keeps the raw legacy column names rather than guessing them.
+### Reinex migration bundle (`bundle` job, recommended)
 
-`lessons-candidates` now includes `recommended_lesson_source` in the JSON report, prioritizing:
+```powershell
+python .\tools\Amir-System-Migration\migration_cli.py run bundle --mdb C:\path\to\legacy.mdb
 
-1. `qryRiderLessonsDiary`
-2. `qryRidersLessonsDiary`
-3. `qryRiderLessons`
-4. `qryLessonsList`
-5. `qryMasterLessons`
+# Only when automatic lesson-source selection needs a manual override
+python .\tools\Amir-System-Migration\migration_cli.py run bundle --mdb C:\path\to\legacy.mdb --lesson-source qryRiderLessons
+
+.\tools\Amir-System-Migration\run-migration-cli.ps1 -Mode run -Job bundle -MdbPath C:\path\to\legacy.mdb
+```
+
+The bundle produces a timestamped folder and ZIP containing:
+
+- `manifest.json`: source fingerprint, row counts, field names, checksums, relationships,
+  compatibility flags, and validation totals; it contains no row values or local path.
+- `raw/*.csv`: complete source objects, retained so no source fields are lost.
+- `normalized/customers.csv`: one row per rider.
+- `normalized/guardians.csv`: father and mother are expanded into separate rows.
+- `normalized/guardian_links.csv`: explicit guardian-to-student relationships.
+- `normalized/services.csv`: service suggestions from lesson sections/history.
+- `normalized/lessons.csv`, `lesson_participants.csv`, and `instructors.csv`: linked
+  historical and future operational data, including explicit source IDs and status suggestions.
+
+How it maps to the current Import Workspace:
+
+1. Create one workspace and upload the seven normalized CSVs individually: customers,
+   guardians, guardian links, services, instructors, lessons, and lesson participants.
+   ZIP upload is not supported yet.
+2. Map each file to its matching entity; headers already use the canonical field names.
+3. Review all warnings, especially missing/duplicate identities, missing parent contacts,
+   name/surname suggestions, and orphan relationships. Amir usually stores only a parent's
+   first name; the bundle suggests the student's family name in a separately labeled field
+   so it can be reviewed. Nothing is committed automatically.
+   Legacy identity `0` placeholders become empty, and eight-digit numeric identities get
+   a leading-zero suggestion; the original value and normalization action remain in the CSV.
+   Recognized birth dates are exported as date-only `YYYY-MM-DD` values; unrecognized
+   formats are preserved for explicit correction in the Import Workspace.
+4. Review service durations before commit; the legacy source does not provide them.
+   Instructors commit before lessons, and lessons before participants. A new imported
+   instructor has no user account or service capabilities; future lessons require the
+   linked/imported instructor to be active.
+5. The extractor labels its attendance inference and preserves the original attendance
+   note. Historical inferred attendance remains deferred metadata in Reinex while its live
+   participant status stays `scheduled`, until historical finance/payroll behavior is
+   designed. Future lessons enter the normal scheduled-attendance workflow.
+6. Past imported lessons are excluded from pending-report queues. Future imported lessons
+   become eligible normally after they occur.
+
+`lessons-candidates` selects by relationship quality first (`RiderId`, `RecordId`, then
+`WorkerID`, date, time, and service fields), followed by row count. This prevents a
+human-readable diary query with no rider identifier from being selected over a usable
+relational query.
 
 PowerShell launcher equivalent:
 
@@ -158,7 +197,8 @@ PowerShell launcher equivalent:
 
 ### Summarize an existing report (safe sharing)
 
-If you moved the full report to a safe location, create a compact summary that keeps counts and column names but drops raw row content:
+Discovery reports contain sample row values and therefore personal data. Create a compact
+summary that keeps counts and column names but drops raw row content before sharing:
 
 ```powershell
 python .\tools\Amir-System-Migration\migration_cli.py summarize-report --report C:\safe\path\report.json
@@ -186,6 +226,9 @@ python .\tools\Amir-System-Migration\migration_cli.py run all --mdb C:\path\to\l
 Reports are written to:
 
 - `tools/Amir-System-Migration/output`
+
+This directory is ignored by Git. Treat all CSV/ZIP files in it as sensitive. Metadata-only
+extract/bundle manifests are designed for sharing; discovery and failure reports are not.
 
 Each report includes:
 

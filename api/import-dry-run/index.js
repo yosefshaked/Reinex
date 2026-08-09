@@ -9,7 +9,8 @@
  * Returns: { results: [{ candidate_id, outcome, ... }], processed: number }
  *
  * Safety invariant:
- *   - Reads from: client_profiles, students, guardians, "Services", import_candidates
+ *   - Reads from: client_profiles, students, guardians, "Services", "Employees",
+ *     lesson_instances, import_candidates
  *   - Writes to:  import_candidates.candidate_data (dry_run_summary key only)
  *   - Never writes to: client_profiles, students, guardians, or any other live table
  */
@@ -333,6 +334,71 @@ async function simulateService(supabase, orgId, candidateData) {
   };
 }
 
+async function simulateInstructor(supabase, orgId, candidateData) {
+  const sourceSystem = normalizeString(candidateData?.source_system);
+  const sourceInstructorId = normalizeString(candidateData?.source_instructor_id);
+  const { data: existing, error } = await withOrgScope(supabase, 'Employees', orgId)
+    .select('id, first_name, last_name, is_active')
+    .contains('metadata', { import_external_ids: { [sourceSystem]: sourceInstructorId } })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return {
+    outcome: existing?.id ? 'reuse_existing' : 'create',
+    action_description: existing?.id ? 'שימוש חוזר במדריך/ה שכבר יובא/ה' : 'יצירת מדריך/ה ללא חשבון משתמש',
+    target_table: 'Employees',
+    matched_record_id: existing?.id || null,
+    matched_record_summary: existing
+      ? { name: [existing.first_name, existing.last_name].filter(Boolean).join(' '), is_active: existing.is_active }
+      : null,
+    fields_that_would_change: [],
+    simulated_at: nowIso(),
+  };
+}
+
+async function simulateLesson(supabase, orgId, candidateData) {
+  const sourceSystem = normalizeString(candidateData?.source_system);
+  const sourceLessonId = normalizeString(candidateData?.source_lesson_id);
+  const { data: existing, error } = await withOrgScope(supabase, 'lesson_instances', orgId)
+    .select('id, datetime_start, status')
+    .contains('metadata', { import_external_ids: { [sourceSystem]: sourceLessonId } })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return {
+    outcome: existing?.id ? 'reuse_existing' : 'create',
+    action_description: existing?.id ? 'שימוש חוזר במפגש שכבר יובא' : 'יצירת מפגש מקושר למדריך ולשירות',
+    target_table: 'lesson_instances',
+    matched_record_id: existing?.id || null,
+    matched_record_summary: existing ? { datetime_start: existing.datetime_start, status: existing.status } : null,
+    fields_that_would_change: [],
+    simulated_at: nowIso(),
+  };
+}
+
+async function simulateLessonParticipant(supabase, orgId, candidateData) {
+  const identity = normalizeString(candidateData?.identity_number);
+  const { data: profile, error } = await withOrgScope(supabase, 'client_profiles', orgId)
+    .select('id, first_name, last_name')
+    .eq('identity_number', identity)
+    .maybeSingle();
+  if (error) throw error;
+  return {
+    outcome: profile?.id ? 'create' : 'blocked',
+    is_blocked: !profile?.id,
+    action_description: profile?.id
+      ? 'קישור הלקוח/ה למפגש המיובא'
+      : 'לא נמצאה רשומת לקוח/ה עם תעודת הזהות הזו; יש לייבא או לקשר אותה קודם.',
+    target_table: 'lesson_participants',
+    matched_record_id: profile?.id || null,
+    matched_record_summary: profile
+      ? { name: [profile.first_name, profile.last_name].filter(Boolean).join(' ') }
+      : null,
+    fields_that_would_change: [],
+    simulated_at: nowIso(),
+  };
+}
+
 /**
  * Main simulation dispatcher for a single candidate.
  * @param {object} supabase
@@ -438,6 +504,15 @@ async function simulateCandidate(supabase, orgId, candidate) {
 
     case 'service':
       return simulateService(supabase, orgId, candidate_data);
+
+    case 'instructor':
+      return simulateInstructor(supabase, orgId, candidate_data);
+
+    case 'lesson':
+      return simulateLesson(supabase, orgId, candidate_data);
+
+    case 'lesson_participant':
+      return simulateLessonParticipant(supabase, orgId, candidate_data);
 
     default:
       return {

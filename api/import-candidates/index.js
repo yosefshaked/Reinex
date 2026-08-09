@@ -46,6 +46,7 @@ const PATCH_ALLOWED_CANDIDATE_STATUSES = new Set([
 
 const ALLOWED_ENTITY_TYPES = new Set([
   'customer', 'guardian', 'guardian_link', 'service',
+  'instructor', 'lesson', 'lesson_participant',
 ]);
 
 const VALID_CUSTOMER_TYPES = new Set(['student', 'one_time_customer']);
@@ -54,14 +55,20 @@ const EDITABLE_FIELDS_BY_ENTITY = {
   customer: ['first_name', 'last_name', 'identity_number', 'customer_type', 'is_active', 'phone', 'email', 'date_of_birth', 'note_text'],
   guardian: ['guardian_first_name', 'guardian_last_name', 'guardian_phone', 'guardian_email'],
   guardian_link: ['identity_number', 'guardian_phone', 'guardian_email', 'relationship', 'is_primary'],
-  service: ['service_name', 'description'],
+  service: ['source_system', 'source_service_id', 'service_name', 'duration_minutes', 'description'],
+  instructor: ['source_system', 'source_instructor_id', 'first_name', 'middle_name', 'last_name', 'is_active'],
+  lesson: ['source_system', 'source_lesson_id', 'datetime_start', 'source_instructor_id', 'service_name', 'lesson_status', 'duration_minutes', 'legacy_note'],
+  lesson_participant: ['source_system', 'source_lesson_id', 'identity_number', 'participant_status', 'legacy_attendance_note', 'status_inference'],
 };
 
 const REQUIRED_FIELDS_BY_ENTITY = {
   customer: ['first_name', 'last_name', 'identity_number', 'customer_type'],
   guardian: ['guardian_first_name', 'guardian_last_name'],
   guardian_link: ['identity_number', 'guardian_phone'],
-  service: ['service_name'],
+  service: ['service_name', 'duration_minutes'],
+  instructor: ['source_system', 'source_instructor_id', 'first_name'],
+  lesson: ['source_system', 'source_lesson_id', 'datetime_start', 'source_instructor_id', 'service_name', 'lesson_status'],
+  lesson_participant: ['source_system', 'source_lesson_id', 'identity_number', 'participant_status'],
 };
 
 function normalizeUuid(value) {
@@ -200,7 +207,7 @@ function normalizeCandidateDataPatch(entityType, existingData, patch) {
     let valid = true;
     let invalidSeverity = 'blocker';
 
-    if (['first_name', 'last_name', 'guardian_first_name', 'guardian_last_name', 'service_name', 'description', 'note_text'].includes(field)) {
+    if (['first_name', 'middle_name', 'last_name', 'guardian_first_name', 'guardian_last_name', 'service_name', 'description', 'note_text', 'source_system', 'source_service_id', 'source_instructor_id', 'source_lesson_id', 'legacy_note', 'legacy_attendance_note', 'status_inference'].includes(field)) {
       const result = coerceOptionalText(rawValue);
       normalizedValue = result.value;
       valid = result.valid;
@@ -223,6 +230,25 @@ function normalizeCandidateDataPatch(entityType, existingData, patch) {
       const result = coerceOptionalDate(rawValue);
       normalizedValue = result.valid ? result.value : rawValue;
       valid = result.valid;
+    } else if (field === 'datetime_start') {
+      const text = normalizeString(rawValue);
+      const parsed = new Date(text);
+      const hasExplicitZone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(text);
+      normalizedValue = text;
+      valid = Boolean(text) && hasExplicitZone && !Number.isNaN(parsed.getTime());
+      if (valid) normalizedValue = parsed.toISOString();
+    } else if (field === 'duration_minutes') {
+      const parsed = Number.parseInt(rawValue, 10);
+      normalizedValue = parsed;
+      valid = Number.isInteger(parsed) && parsed > 0 && parsed <= 1440;
+    } else if (field === 'lesson_status') {
+      const normalized = normalizeString(rawValue).toLowerCase();
+      normalizedValue = normalized || null;
+      valid = !normalized || ['scheduled', 'completed', 'cancelled'].includes(normalized);
+    } else if (field === 'participant_status') {
+      const normalized = normalizeString(rawValue).toLowerCase();
+      normalizedValue = normalized || null;
+      valid = !normalized || ['scheduled', 'attended', 'cancelled_student', 'cancelled_clinic', 'no_show'].includes(normalized);
     } else if (field === 'customer_type') {
       const ct = normalizeString(String(rawValue ?? '')).toLowerCase().replace(/\s+/g, '_');
       if (ct === '') {

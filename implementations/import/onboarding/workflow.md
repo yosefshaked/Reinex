@@ -59,7 +59,7 @@ User confirms or edits mappings.
 
 Mappings are saved per source reference. Switching from a student sheet to a parent sheet must never overwrite the first sheet's mapping. Parent sources expose first name, last name, phone, and email through the canonical `guardian` candidate fields.
 
-The mapping UI exposes independently enabled collapsible sections for `customer`, `guardian`, `guardian_link`, and `service`. Any combination can be mapped in parallel, and one source row emits one candidate per enabled section. Customer type and active status are mapped or selected inside the customer section. The guardian section uses distinct mapping inputs (`guardian_first_name`, `guardian_last_name`, `guardian_phone`, `guardian_email`) so guardian data cannot be confused with customer fields; the analyzer normalizes these into the canonical guardian record shape.
+The mapping UI exposes independently enabled collapsible sections for `customer`, `guardian`, `guardian_link`, `service`, `instructor`, `lesson`, and `lesson_participant`. Any combination can be mapped in parallel, and one source row emits one candidate per enabled section. Customer type and active status are mapped or selected inside the customer section. The guardian section uses distinct mapping inputs (`guardian_first_name`, `guardian_last_name`, `guardian_phone`, `guardian_email`) so guardian data cannot be confused with customer fields; the analyzer normalizes these into the canonical guardian record shape.
 
 The customer section also exposes optional `note_text`. It is appended to `students.notes_internal` only after a student customer has been created or reused. The commit records the candidate id in student metadata so retrying a partially completed commit cannot append the same imported note twice. One-time customers do not have a student row, so their note is ignored with a warning. There is no standalone note mapping section for new imports.
 
@@ -135,9 +135,12 @@ Commit chunks must be orchestrated in topological entity order:
 
 1. `customer`
 2. `guardian` and `service`
-3. `guardian_link`
+3. `guardian_link` and `lesson`
+4. `lesson_participant`
 
-The frontend must fully finish all chunks of one entity type before starting the next dependent type. Guardian links must never be committed before their related customer and guardian candidates are committed.
+The frontend must fully finish all chunks of one entity wave before starting the next.
+Guardian links wait for customers/guardians; lessons wait for services/instructors; lesson
+participants wait for lessons and matched customers.
 
 ### 10. Continue Later
 The user can close the workspace at any point. On return, the workspace shows:
@@ -159,9 +162,15 @@ Inactive student imports have a separate path:
 Minimum inactive archive policy for Phase 1:
 - first name
 - last name
-- at least one stable locator: identity number, phone, email, or explicit accepted duplicate decision
+- valid identity number
+- valid contact path: a valid student phone, or a linked guardian with a valid phone or email
+- student email alone does not satisfy the contact-path requirement
 - active state resolved to inactive
 - duplicate decision resolved
+
+Users may resolve missing or invalid source data by editing the staged candidate in the
+Import Workspace, or by correcting the source file and uploading it again. Either route
+must be re-analyzed and clear the same blockers before commit.
 
 Inactive committed records:
 - are hidden from active roster by default

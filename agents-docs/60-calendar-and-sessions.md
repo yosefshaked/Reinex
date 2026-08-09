@@ -85,3 +85,12 @@
 - Post-save continuation must remain anchor-based. Pending-report callers may pass an ordered `continuationQueue` of real `lesson_participant_id` contexts; calendar callers without a queue route users to `/pending-reports`. Never restore TutTiud's loose student/date chooser.
 - E1/E2 are blocking policies: attendance/cancellation paths must call the shared session-report guard before moving a documented participant to a non-arrival state or cancelling a documented lesson. The guard only considers non-legacy anchored reports.
 - Pending reports come from `GET /api/session-reports?mode=pending&scope=mine|all&page=...`; they are past eligible participants with an assigned service report form and no non-legacy report. Exact report-excluding pagination/counting lives in the org-scoped `list_pending_session_reports` SQL function in `setup-sql.js`; do not paginate candidates before removing documented rows. `scope=all` is office/admin only, while instructors see only their own lessons. Admin/office page 1 also receives the E7 `documented_unconfirmed` drift set.
+- Import Workspace lessons use `created_source='migration'` and retain source-system IDs in
+  metadata. Past imported lessons set `metadata.import.exclude_from_pending_reports=true`;
+  both the exact pending SQL function and the E7 drift reader must exclude them. Future
+  imported lessons do not set the exclusion and become pending normally after they occur.
+- Historical imported attendance suggestions remain under participant import metadata while
+  live `participant_status` stays `scheduled`; this deliberately avoids invoking or later
+  accidentally triggering historical billing/payroll before that migration policy exists.
+  Future imported participants are also scheduled and enter the normal attendance mutation
+  flow, which remains responsible for billing/payroll synchronization.

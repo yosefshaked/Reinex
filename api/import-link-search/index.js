@@ -147,6 +147,47 @@ export default async function importLinkSearch(context, req) {
 
   const rawIdentity = normalizeString(req.query?.identity_number);
   const rawQuery = normalizeString(req.query?.query || req.query?.q);
+  const entityType = normalizeString(req.query?.entity_type || 'customer');
+
+  if (entityType === 'instructor') {
+    if (!rawQuery || rawQuery.length < 2) {
+      return respond(context, 200, { results: [], matched_by: 'query' });
+    }
+    const normalizedQuery = rawQuery.toLocaleLowerCase('he-IL');
+    const { data: employees, error: employeeError } = await withOrgScope(supabase, 'Employees', orgId)
+      .select('id, first_name, middle_name, last_name, employee_id, email, phone, is_active')
+      .eq('employee_type', 'instructor')
+      .limit(SCAN_LIMIT);
+    if (employeeError) {
+      return respondLinkSearchError(context, 500, 'failed_to_search_instructors', employeeError, {
+        action: 'instructor_search',
+      });
+    }
+    const results = (employees || [])
+      .filter((employee) => (
+        [employee.first_name, employee.middle_name, employee.last_name, employee.employee_id, employee.email, employee.phone]
+          .filter(Boolean)
+          .join(' ')
+          .toLocaleLowerCase('he-IL')
+          .includes(normalizedQuery)
+      ))
+      .slice(0, MAX_RESULTS)
+      .map((employee) => ({
+        employee_id: employee.id,
+        external_employee_id: employee.employee_id || null,
+        first_name: employee.first_name || '',
+        middle_name: employee.middle_name || null,
+        last_name: employee.last_name || '',
+        email: employee.email || null,
+        phone: employee.phone || null,
+        is_active: employee.is_active === true,
+      }));
+    return respond(context, 200, { results, matched_by: 'query' });
+  }
+
+  if (entityType !== 'customer') {
+    return respond(context, 400, { message: 'unsupported_entity_type' });
+  }
 
   // ── Branch 1: exact-identity auto-lookup ──────────────────────────────────
   if (rawIdentity) {

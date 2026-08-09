@@ -266,10 +266,11 @@ export async function createRelationCandidate(workspaceId, { customerCandidateId
  * @param {{ identityNumber?: string, query?: string }} opts
  * @returns {Promise<{ results: object[], matched_by: string }>}
  */
-export async function searchLinkTargets({ identityNumber, query } = {}) {
+export async function searchLinkTargets({ identityNumber, query, entityType } = {}) {
   const params = new URLSearchParams();
   if (identityNumber) params.set('identity_number', identityNumber);
   if (query) params.set('query', query);
+  if (entityType) params.set('entity_type', entityType);
   return authenticatedFetch(`/api/import-link-search?${params}`);
 }
 

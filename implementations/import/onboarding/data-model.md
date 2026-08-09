@@ -88,12 +88,15 @@ For Excel workbooks, every non-empty sheet is a separate source and its label/re
 
 When a candidate uses fields from multiple sources, its anchor row remains `source_row_id` and every matched contributing row is included in `merged_from_row_ids`. Missing joins and non-unique joins are blocking issues; the analyzer must not guess which row to use.
 
-Mapping uses one screen for the whole workspace. Users enable any combination of `customer`, `guardian`, `guardian_link`, and `service`, then map each entity field to a column from any uploaded source. The system infers the anchor source per entity:
+Mapping uses one screen for the whole workspace. Users enable any combination of `customer`, `guardian`, `guardian_link`, `service`, `instructor`, `lesson`, and `lesson_participant`, then map each entity field to a column from any uploaded source. The system infers the anchor source per entity:
 
 - `customer`: `identity_number`, else `first_name`
 - `guardian`: `guardian_first_name`, else `guardian_phone`
 - `guardian_link`: `guardian_phone`, else `identity_number`
 - `service`: `service_name`
+- `instructor`: `source_instructor_id`, else `first_name`
+- `lesson`: `source_lesson_id`, else `datetime_start`
+- `lesson_participant`: `source_lesson_id`, else `identity_number`
 
 If the grain field is unmapped, the anchor falls back to the source that supplies the most mapped fields for that entity; ties use the first field in the entity schema order. Fields from the anchor source are read directly from the iterated row. Fields from another source are resolved through `mappings.join`: normalize the anchor row's join value, look it up in the external source's join column, and require exactly one match. Zero matches create `source_join_not_found`; multiple matches create `ambiguous_source_join`.
 
@@ -130,6 +133,9 @@ Entity types:
 - `guardian`
 - `guardian_link`
 - `service`
+- `instructor`
+- `lesson`
+- `lesson_participant`
 
 Legacy `active_student`, `inactive_student`, and `student_note` candidates remain readable/committable during migration, but new analysis does not emit them.
 
@@ -175,9 +181,14 @@ Statuses:
 - skip reasons
 - inactive archive approval metadata
 
-`depends_on_candidate_id` is the Phase 1 DAG simplification. It supports a single parent dependency per candidate, enough for guardian links. More complex DAGs can be represented in `candidate_data.dependencies` later, but Phase 1 commit gating uses this scalar field.
+`depends_on_candidate_id` remains available for the original Phase 1 single-parent cases.
+The current JS commit engine also enforces relationship dependencies by topological wave and
+org-scoped live lookup: lessons resolve instructors/services, and participants resolve
+lessons/client profiles.
 
-The unique candidate key is `(workspace_id, source_row_id, entity_type)`. One parsed row can therefore emit any enabled combination of customer, guardian, guardian-link, and service candidates while re-analysis remains idempotent.
+The unique candidate key is `(workspace_id, entity_type, import_key)`. Person/service rows
+use stable row-derived keys; instructor, lesson, and participant candidates use their
+source-system IDs so corrected re-uploads remain idempotent within the workspace.
 
 ## Table 4: `import_commit_ledger`
 Tracks live records created/updated/linked by import commits.
@@ -270,11 +281,13 @@ CREATE TABLE IF NOT EXISTS public.import_candidates (
   updated_at timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT import_candidates_entity_type_check CHECK (
     entity_type IN (
-      'active_student',
-      'inactive_student',
+      'customer',
       'guardian',
       'guardian_link',
       'service',
+      'instructor',
+      'lesson',
+      'lesson_participant',
       'student_note'
     )
   ),
@@ -356,22 +369,20 @@ Phase 1 uses client-side orchestration:
 8. Frontend displays queues from `import_candidates`.
 9. Frontend sends user decisions back as updates to `import_candidates.decisions`.
 10. Frontend drives dry-run chunks by candidate IDs.
-11. Frontend drives commit chunks by candidate IDs in topological entity order: `active_student`, `inactive_student`, `guardian`, `guardian_link`, `student_note`.
-12. Backend commit chunk runs through a PostgreSQL RPC transaction and writes live records plus `import_commit_ledger`.
-
-Commit chunks must use a PostgreSQL RPC function, not a loop of `supabase.from(...).insert/update` calls. PostgREST requests through the standard Supabase JS client do not provide `BEGIN` / `COMMIT` transaction blocks across multiple statements. The API/frontend should call an RPC such as `commit_import_chunk(...)` so PostgreSQL processes the whole chunk atomically.
+11. Frontend drives bounded commit chunks in topological waves: customer; guardian/service/
+    instructor; guardian-link/lesson; lesson-participant.
+12. Backend uses the implemented per-candidate idempotent JS orchestrator and records every
+    live resource in `import_commit_ledger`. A row failure is retained and retryable without
+    aborting unrelated clean rows; see `commit-engine-revision.md` for the superseding decision.
 
 ## Inactive Student Commit Invariant
 Inactive students must never be dripped into live tables as incomplete records.
 
-Before committing any chunk, the backend transaction must re-read the requested candidates with `FOR UPDATE` semantics inside the transaction and reject the chunk if any selected candidate has:
-- `entity_type = 'inactive_student'` and `status <> 'ready'`
-- `entity_type = 'inactive_student'` and `blocking_issues_count > 0`
-- `entity_type = 'inactive_student'` and unresolved conflicts inside `candidate_data.field_conflicts`
-- `entity_type = 'inactive_student'` and required archive fields missing from `candidate_data`
-- `entity_type = 'inactive_student'` and `depends_on_candidate_id` points to an uncommitted or blocked parent
-
-If any inactive candidate in the chunk fails these checks, raise an exception and roll back the entire chunk. No partial inactive student, client profile, guardian link, schedule, billing artifact, form requirement, or document requirement may be created.
+Inactive students are represented by `entity_type = 'customer'`, `customer_type = 'student'`, and
+`is_active = false`. Before writing one, the per-candidate commit orchestrator re-checks that it is
+`ready`, has no blocking issues or unresolved field conflicts, satisfies the student identity and
+contact-path rules, and has no unresolved dependency. A failed candidate remains retryable without
+rolling back unrelated successfully committed candidates.
 
 Committed inactive students must be created inactive immediately and hidden from active workflows by default.
 
