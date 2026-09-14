@@ -13,6 +13,7 @@
     "SYSTEM_R2_ENDPOINT": "http://localhost:9000",
     "SYSTEM_R2_ACCESS_KEY": "local-dev-r2-access",
     "SYSTEM_R2_SECRET_KEY": "local-dev-r2-secret",
-    "SYSTEM_R2_BUCKET_NAME": "local-dev-backup"
+    "SYSTEM_R2_BUCKET_NAME": "local-dev-backup",
+    "SYSTEM_ADMIN_ALLOW_WITHOUT_MFA": "false"
   }
 }

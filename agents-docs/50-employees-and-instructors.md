@@ -56,3 +56,8 @@
 - Unified documents treat employee/instructor files as `entity_type='instructor'` with `entity_id = Employees.id` (not `auth.users.id`). Self-service access must be validated through `Employees.user_id` on the backend, not by swapping frontend entity IDs.
 - Leave, attendance, and payroll rules live in [`../api/_shared/employee-finance.js`](../api/_shared/employee-finance.js); do not recode them in UI panels.
 - Personal session-report preanswers live at `Employees.metadata.report_preanswers`. Writes go through the narrow `POST /api/session-reports/preanswers` path, which resolves the employee by the authenticated caller's `Employees.user_id`; never accept a caller-supplied employee id for this self-service bank.
+- Import Workspace instructor candidates may link to an existing instructor or create an
+  `Employees` + `instructor_profiles` overlay with `user_id = null`. Imported external IDs
+  live in `Employees.metadata.import_external_ids`; do not create invitations, membership
+  roles, capabilities, availability, rates, or payroll artifacts during import. Future
+  imported lessons require the resolved instructor to be active.

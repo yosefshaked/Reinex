@@ -12,6 +12,20 @@ async function getAuthenticatorAssuranceLevel(authClient) {
   return { data: null, error: null };
 }
 
+let mfaOptionalPromise = null;
+
+// Local development only: /api/config reports `systemAdminMfaOptional` when the API lets system admins in
+// without MFA (SYSTEM_ADMIN_ALLOW_WITHOUT_MFA + local Supabase + non-Production). The API enforces it anyway.
+function isSystemAdminMfaOptional() {
+  if (!mfaOptionalPromise) {
+    mfaOptionalPromise = fetch('/api/config', { cache: 'no-store' })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((payload) => payload?.systemAdminMfaOptional === true)
+      .catch(() => false);
+  }
+  return mfaOptionalPromise;
+}
+
 async function getSystemAdminPermission(authClient, userId) {
   const { data, error } = await authClient
     .from('profiles')
@@ -83,7 +97,7 @@ export const adminAuthProvider = {
     const pathname = typeof params?.pathname === 'string' ? params.pathname : '';
     const isMfaRoute = pathname.startsWith('/system-admin/mfa');
 
-    if (currentLevel !== 'aal2' && !isMfaRoute) {
+    if (currentLevel !== 'aal2' && !isMfaRoute && !(await isSystemAdminMfaOptional())) {
       return {
         authenticated: true,
         redirectTo: '/system-admin/mfa',

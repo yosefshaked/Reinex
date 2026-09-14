@@ -45,12 +45,19 @@ export async function buildParticipantCoverageById(client, orgId, instances = []
         hmo_provider_name: authorization?.provider?.name || null,
         hmo_provider_track_id: authorization?.provider_track_id || authorization?.provider_track?.id || null,
         hmo_provider_track_name: authorization?.provider_track?.name || null,
+        // Read-only display context for the participant HMO badge; billing never reads these.
+        authorization_reference: normalizeString(authorization?.authorization_reference) || null,
+        authorized_lessons: authorization?.authorized_lessons ?? null,
+        expires_at: authorization?.expires_at || null,
       });
     } catch (coverageError) {
       coverageByParticipantId.set(request.participantId, {
         status: 'unknown',
         reason: coverageError?.message || 'failed_to_resolve_hmo_coverage',
         authorization_id: null,
+        authorization_reference: null,
+        authorized_lessons: null,
+        expires_at: null,
       });
     }
   }));

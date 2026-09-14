@@ -19,37 +19,36 @@ import { authenticatedFetch } from '@/lib/api-client.js'
 import { extractSupportCode, resolveApiErrorMessage } from '@/lib/error-support.js'
 import { AlertTriangle, Loader2, Lock, ShieldAlert } from 'lucide-react'
 import { getParticipantDisplayName } from '../utils/participantDisplay.js'
+import { getDisplayInstance, getDisplayParticipants } from '../utils/lessonDialogModel.js'
 
-function getDisplayInstance(instance) {
-  const resolved = instance?.latest_correction?.effective_state?.instance
-    ? { ...instance, ...instance.latest_correction.effective_state.instance }
-    : instance
-
-  if (!resolved || typeof resolved !== 'object') {
-    return resolved
-  }
-
-  const normalizedStatus = String(resolved.status || '').trim().toLowerCase()
-  const status = ['cancelled_student', 'cancelled_clinic', 'no_show'].includes(normalizedStatus)
-    ? 'cancelled'
-    : normalizedStatus
-
-  return {
-    ...resolved,
-    status: status || resolved.status,
-  }
+const PARTICIPANT_STATUS_LABELS = {
+  scheduled: 'מתוכנן',
+  attended: 'נכח/ה',
+  no_show: 'לא הגיע/ה',
+  cancelled_student: 'בוטל ע"י הלקוח',
+  cancelled_clinic: 'בוטל ע"י המכון',
 }
 
-function getDisplayParticipants(instance) {
-  const baseParticipants = Array.isArray(instance?.participants) ? instance.participants : []
-  const effectiveParticipants = Array.isArray(instance?.latest_correction?.effective_state?.participants)
-    ? instance.latest_correction.effective_state.participants
-    : []
-  const effectiveById = new Map(effectiveParticipants.map((participant) => [participant.id, participant]))
-  return baseParticipants.map((participant) => ({
-    ...participant,
-    ...(effectiveById.get(participant.id) || {}),
-  }))
+const LOCK_SOURCE_LABELS = {
+  payroll_run: 'הרצת שכר',
+  claim_batch: 'אצוות תביעות',
+  manual_compliance_lock: 'נעילת ציות ידנית',
+}
+
+const LOCK_REASON_LABELS = {
+  hmo_claim_submitted: 'התביעה הוגשה לגורם המממן',
+  debug_uat_payroll_lock: 'נעילת בדיקה של שכר',
+  debug_uat_paid_claim_lock: 'נעילת בדיקה של תביעה ששולמה',
+}
+
+function getParticipantStatusLabel(status) {
+  return PARTICIPANT_STATUS_LABELS[String(status || '').trim().toLowerCase()] || '—'
+}
+
+function getLockLabel(lock) {
+  const sourceLabel = LOCK_SOURCE_LABELS[String(lock?.lock_source_type || '').trim().toLowerCase()] || 'נעילה פיננסית'
+  const reasonLabel = LOCK_REASON_LABELS[String(lock?.lock_reason || '').trim().toLowerCase()]
+  return reasonLabel ? `${sourceLabel}: ${reasonLabel}` : sourceLabel
 }
 
 function formatCurrencyDelta(amount) {
@@ -219,7 +218,7 @@ export function LockedCorrectionPanel({ instance, orgId, forceOpen = false, onAp
             {hasLatestCorrection && <Badge className="bg-sky-100 text-sky-800 border-sky-200">תוקן בעבר</Badge>}
           </div>
           <p className="text-sm text-amber-900/80">
-            עריכה ישירה חסומה. השתמשו בתיקון append-only כדי לשמור השפעה תפעולית ופיננסית מלאה.
+            עריכה ישירה חסומה. השתמשו בתיקון: התיקון נשמר כרשומה נוספת ואינו משנה את השיעור המקורי, וההשפעה התפעולית והפיננסית נשמרת במלואה.
           </p>
         </div>
         <Button variant="outline" size="sm" onClick={() => setIsOpen((prev) => !prev)}>
@@ -231,7 +230,7 @@ export function LockedCorrectionPanel({ instance, orgId, forceOpen = false, onAp
         <div className="flex flex-wrap gap-2">
           {lockRows.map((lock) => (
             <Badge key={lock.id} variant="outline" className="border-amber-300 bg-white text-amber-900">
-              {lock.lock_source_type}: {lock.lock_reason}
+              {getLockLabel(lock)}
             </Badge>
           ))}
         </div>
@@ -319,7 +318,7 @@ export function LockedCorrectionPanel({ instance, orgId, forceOpen = false, onAp
                 <div key={participant.id} className="grid gap-2 rounded-lg border border-slate-200 p-3 md:grid-cols-[1fr,220px] md:items-center">
                   <div>
                     <div className="font-medium text-slate-900">{getParticipantDisplayName(participant, 'לקוח/ה')}</div>
-                    <div className="text-xs text-slate-500">מצב נוכחי: {participant.participant_status || '—'}</div>
+                    <div className="text-xs text-slate-500">מצב נוכחי: {getParticipantStatusLabel(participant.participant_status)}</div>
                   </div>
                   <Select
                     value={participantStatuses[participant.id] || participant.participant_status || 'scheduled'}
@@ -333,7 +332,7 @@ export function LockedCorrectionPanel({ instance, orgId, forceOpen = false, onAp
                       <SelectItem value="attended">נכח</SelectItem>
                       <SelectItem value="no_show">אי הגעה</SelectItem>
                       <SelectItem value="cancelled_student">בוטל ע"י תלמיד</SelectItem>
-                      <SelectItem value="cancelled_clinic">בוטל ע"י המרפאה</SelectItem>
+                      <SelectItem value="cancelled_clinic">בוטל ע"י המכון</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -380,7 +379,7 @@ export function LockedCorrectionPanel({ instance, orgId, forceOpen = false, onAp
           <AlertDialogHeader>
             <AlertDialogTitle>אזהרת השפעה</AlertDialogTitle>
             <AlertDialogDescription>
-              פעולה זו תיצור תיקון append-only עם השפעה פיננסית ותפעולית ותישמר ביומן הביקורת.
+              פעולה זו תיצור תיקון עם השפעה פיננסית ותפעולית. התיקון נשמר כרשומה נוספת ואינו משנה את השיעור המקורי. ההשפעה הכספית נשמרת ביומן הביקורת.
             </AlertDialogDescription>
           </AlertDialogHeader>
           {preview && (

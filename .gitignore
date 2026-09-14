@@ -37,6 +37,7 @@ settings.json
 # Temporary data
 /test-data
 /tools/Amir-System-Migration/__pycache__
+/tools/Amir-System-Migration/output/
 /manual-db-backup/backups
 /manual-db-backup/supabase
 /supabase/.temp

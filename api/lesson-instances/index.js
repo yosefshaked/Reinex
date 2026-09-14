@@ -17,6 +17,7 @@ import {
 } from '../_shared/calendar-editing.js';
 import {
   ensureMembership,
+  isAdminOrOffice,
   isAdminRole,
   normalizeString,
   parseRequestBody,
@@ -38,6 +39,7 @@ import {
 } from '../_shared/lesson-instance-status.js';
 import { attachErrorTracking, respondTracked } from '../_shared/error-events.js';
 import { findBlockingReportParticipantIds } from '../_shared/session-reports-guards.js';
+import { buildLessonHistoryEvents, collectLessonHistoryReferenceIds } from '../_shared/lesson-history.js';
 
 function respondLessonInstanceError(context, status, message, error, metadata = {}) {
   return respondTracked(context, status, { message }, undefined, {
@@ -195,6 +197,111 @@ async function loadCreatedInstanceResponse(client, orgId, instanceId, fallbackIn
   }
 }
 
+const LESSON_HISTORY_AUDIT_ROW_LIMIT = 500;
+const LESSON_HISTORY_AUDIT_COLUMNS = 'id, event_type, action_category, resource_type, resource_id, actor_user_id, actor_email, actor_role, before_state, after_state, details, created_at';
+const LESSON_HISTORY_CORRECTION_COLUMNS = 'id, status, reason_text, instance_patch, participant_patches, effective_state, created_by, created_at';
+
+function emptyQueryResult() {
+  return Promise.resolve({ data: [], error: null });
+}
+
+function uniqueUuids(values = []) {
+  return [...new Set(values.map((value) => normalizeUuid(value)).filter(Boolean))];
+}
+
+function buildPersonNameMap(rows) {
+  const names = new Map();
+  for (const row of rows || []) {
+    const name = [row?.first_name, row?.last_name].map((part) => normalizeString(part)).filter(Boolean).join(' ');
+    if (row?.id && name) names.set(String(row.id), name);
+  }
+  return names;
+}
+
+// Lesson history for the dialog history tab: audit rows of the lesson and its participants plus
+// locked-lesson corrections, mapped to typed Hebrew events by lesson-history.js.
+async function loadLessonHistoryEvents(client, orgId, instance, log) {
+  const participantIds = uniqueUuids((instance.participants || []).map((participant) => participant?.id));
+  const auditQuery = () => withOrgScope(client, 'audit_log', orgId).select(LESSON_HISTORY_AUDIT_COLUMNS);
+
+  const [lessonAudit, participantAudit, correctionsResult] = await Promise.all([
+    auditQuery()
+      .eq('resource_type', 'lesson_instance')
+      .eq('resource_id', instance.id)
+      .order('created_at', { ascending: false })
+      .limit(LESSON_HISTORY_AUDIT_ROW_LIMIT),
+    participantIds.length > 0
+      ? auditQuery()
+        .eq('resource_type', 'lesson_participant')
+        .in('resource_id', participantIds)
+        .order('created_at', { ascending: false })
+        .limit(LESSON_HISTORY_AUDIT_ROW_LIMIT)
+      : emptyQueryResult(),
+    withOrgScope(client, 'calendar_instance_corrections', orgId)
+      .select(LESSON_HISTORY_CORRECTION_COLUMNS)
+      .eq('original_instance_id', instance.id)
+      .order('created_at', { ascending: true }),
+  ]);
+  const failed = [lessonAudit, participantAudit, correctionsResult].find((result) => result?.error);
+  if (failed) {
+    throw failed.error;
+  }
+
+  const auditRows = [...(lessonAudit.data || []), ...(participantAudit.data || [])];
+  const corrections = correctionsResult.data || [];
+  const { instructorIds, serviceIds } = collectLessonHistoryReferenceIds({ auditRows, corrections });
+  const employeeIds = uniqueUuids(instructorIds);
+  const serviceUuids = uniqueUuids(serviceIds);
+  const actorIds = uniqueUuids([
+    ...auditRows.map((row) => row?.actor_user_id),
+    ...corrections.map((row) => row?.created_by),
+    instance.created_by,
+  ]);
+
+  // Display names are best-effort: a failed lookup falls back to generic labels / emails.
+  const [employeesResult, servicesResult, profilesResult] = await Promise.all([
+    employeeIds.length > 0
+      ? withOrgScope(client, 'Employees', orgId).select('id, first_name, last_name').in('id', employeeIds)
+      : emptyQueryResult(),
+    serviceUuids.length > 0
+      ? withOrgScope(client, 'Services', orgId).select('id, name').in('id', serviceUuids)
+      : emptyQueryResult(),
+    actorIds.length > 0
+      ? client.from('profiles').select('id, first_name, last_name').in('id', actorIds)
+      : emptyQueryResult(),
+  ]);
+  for (const [lookup, result] of [['employees', employeesResult], ['services', servicesResult], ['profiles', profilesResult]]) {
+    if (result?.error) {
+      log?.warn?.('lesson-instances history name lookup failed', { lookup, message: result.error.message });
+    }
+  }
+
+  const serviceNames = new Map();
+  for (const row of servicesResult.data || []) {
+    const name = normalizeString(row?.name);
+    if (row?.id && name) serviceNames.set(String(row.id), name);
+  }
+
+  // Participant rows carry no email; reuse the one a control row recorded for the same user.
+  const actorEmails = new Map();
+  for (const row of auditRows) {
+    const actorUserId = normalizeUuid(row?.actor_user_id);
+    const actorEmail = normalizeString(row?.actor_email);
+    if (actorUserId && actorEmail && !actorEmails.has(actorUserId)) actorEmails.set(actorUserId, actorEmail);
+  }
+
+  return buildLessonHistoryEvents({
+    instance,
+    participants: instance.participants,
+    auditRows,
+    corrections,
+    actorNamesByUserId: buildPersonNameMap(profilesResult.data),
+    actorEmailsByUserId: actorEmails,
+    instructorNamesById: buildPersonNameMap(employeesResult.data),
+    serviceNamesById: serviceNames,
+  });
+}
+
 export default async function lessonInstances(context, req) {
   const method = String(req.method || 'GET').toUpperCase();
 
@@ -282,6 +389,39 @@ export default async function lessonInstances(context, req) {
     const requestedInstructorId = normalizeUuid(req?.query?.instructor_id || req?.query?.instructorId);
     const requestedStudentId = normalizeUuid(req?.query?.student_id || req?.query?.studentId);
     const requestedClientProfileId = normalizeUuid(req?.query?.client_profile_id || req?.query?.clientProfileId);
+    const requestedView = String(req?.query?.view || '').trim().toLowerCase();
+
+    if (lessonInstanceId && requestedView === 'history') {
+      if (!isAdminOrOffice(role)) {
+        return respond(context, 403, { message: 'forbidden' });
+      }
+
+      const { data: historyInstance, error: historyInstanceError } = await withOrgScope(supabase, 'lesson_instances', orgId)
+        .select(buildInstanceSelect())
+        .eq('id', lessonInstanceId)
+        .maybeSingle();
+      if (historyInstanceError) {
+        context.log?.error?.('lesson-instances failed to fetch lesson for history', { message: historyInstanceError.message, lessonInstanceId });
+        return respondLessonInstanceError(context, 500, 'failed_to_load_lesson_history', historyInstanceError, {
+          action: 'load_lesson_history',
+          lesson_instance_id: lessonInstanceId,
+        });
+      }
+      if (!historyInstance) {
+        return respond(context, 404, { message: 'lesson_instance_not_found' });
+      }
+
+      try {
+        const events = await loadLessonHistoryEvents(supabase, orgId, normalizeLessonInstanceRecord(historyInstance), context.log);
+        return respond(context, 200, { events });
+      } catch (historyError) {
+        context.log?.error?.('lesson-instances failed to build lesson history', { message: historyError?.message, lessonInstanceId });
+        return respondLessonInstanceError(context, 500, 'failed_to_load_lesson_history', historyError, {
+          action: 'build_lesson_history',
+          lesson_instance_id: lessonInstanceId,
+        });
+      }
+    }
 
     if (lessonInstanceId) {
       let builder = withOrgScope(supabase, 'lesson_instances', orgId)

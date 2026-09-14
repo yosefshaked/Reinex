@@ -53,6 +53,13 @@ const FIELD_LABELS = {
   email: 'אימייל',
   date_of_birth: 'תאריך לידה',
   service_name: 'שם השירות',
+  source_system: 'מערכת מקור',
+  source_instructor_id: 'מזהה מדריך במקור',
+  source_lesson_id: 'מזהה מפגש במקור',
+  datetime_start: 'מועד המפגש',
+  lesson_status: 'סטטוס מפגש',
+  participant_status: 'סטטוס השתתפות',
+  duration_minutes: 'משך בדקות',
   description: 'תיאור',
   note_text: 'טקסט הערה',
 };
@@ -86,7 +93,7 @@ function issueMessage(issue) {
     case 'duplicate_email':
       return 'קיימת כבר רשומה עם אותו אימייל. בדוק/י אם מדובר באותו אדם.';
     case 'missing_contact_path':
-      return 'לתלמיד/ה חייב להיות טלפון תקין בתלמיד/ה או באפוטרופוס מקושר.';
+      return 'לתלמיד/ה חייב להיות טלפון תקין, או אפוטרופוס מקושר עם טלפון תקין או אימייל.';
     case 'source_join_not_found':
       return `לא נמצאה רשומה תואמת במקור הנוסף עבור ${label}. בדוק/י את עמודות הקישור שנבחרו.`;
     case 'ambiguous_source_join':
@@ -263,6 +270,52 @@ function normalizeCandidateData(mapped, entityType) {
     data.note_text = coerceOptionalText(data.note_text).value;
   }
 
+  for (const field of ['source_system', 'source_service_id', 'source_instructor_id', 'source_lesson_id', 'middle_name', 'last_name', 'legacy_note', 'legacy_attendance_note', 'status_inference']) {
+    if (data[field] !== null && data[field] !== undefined) {
+      data[field] = coerceOptionalText(data[field]).value;
+    }
+  }
+
+  if (entityType === 'lesson' && data.datetime_start !== null && data.datetime_start !== undefined) {
+    const rawDatetime = normalizeString(data.datetime_start);
+    const parsedDatetime = new Date(rawDatetime);
+    const hasExplicitZone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(rawDatetime);
+    if (!rawDatetime || !hasExplicitZone || Number.isNaN(parsedDatetime.getTime())) {
+      fieldIssues.push({ code: 'invalid_field_format', severity: 'blocker', field: 'datetime_start' });
+    } else {
+      data.datetime_start = parsedDatetime.toISOString();
+    }
+  }
+
+  if (['service', 'lesson'].includes(entityType) && data.duration_minutes !== null && data.duration_minutes !== undefined && data.duration_minutes !== '') {
+    const duration = Number.parseInt(data.duration_minutes, 10);
+    if (!Number.isInteger(duration) || duration <= 0 || duration > 1440) {
+      fieldIssues.push({ code: 'invalid_field_format', severity: 'blocker', field: 'duration_minutes' });
+    } else {
+      data.duration_minutes = duration;
+    }
+  }
+
+  if (entityType === 'lesson') {
+    const lessonStatus = normalizeString(data.lesson_status).toLowerCase();
+    if (lessonStatus && !['scheduled', 'completed', 'cancelled'].includes(lessonStatus)) {
+      fieldIssues.push({ code: 'invalid_field_format', severity: 'blocker', field: 'lesson_status' });
+      data.lesson_status = null;
+    } else {
+      data.lesson_status = lessonStatus || null;
+    }
+  }
+
+  if (entityType === 'lesson_participant') {
+    const participantStatus = normalizeString(data.participant_status).toLowerCase();
+    if (participantStatus && !['scheduled', 'attended', 'cancelled_student', 'cancelled_clinic', 'no_show'].includes(participantStatus)) {
+      fieldIssues.push({ code: 'invalid_field_format', severity: 'blocker', field: 'participant_status' });
+      data.participant_status = null;
+    } else {
+      data.participant_status = participantStatus || null;
+    }
+  }
+
   if (entityType === 'guardian_link') {
     if (data.relationship !== null && data.relationship !== undefined) {
       data.relationship = coerceOptionalText(data.relationship).value;
@@ -305,7 +358,7 @@ function normalizeCandidateData(mapped, entityType) {
   }
 
   // is_active: boolean with lenient coercion; defaults to true when not provided
-  if (entityType === 'customer') {
+  if (entityType === 'customer' || entityType === 'instructor') {
     const rawActive = data.is_active;
     if (rawActive === null || rawActive === undefined || rawActive === '') {
       data.is_active = true;
@@ -465,6 +518,20 @@ function buildImportKey(entityType, rowId, candidateData = {}, join = {}) {
       identity || 'missing_identity',
       guardianContact || 'missing_guardian',
       joinValue || rowId,
+    ].join(':');
+  }
+  if (entityType === 'instructor') {
+    return ['instructor', normalizeString(candidateData.source_system), normalizeString(candidateData.source_instructor_id)].join(':');
+  }
+  if (entityType === 'lesson') {
+    return ['lesson', normalizeString(candidateData.source_system), normalizeString(candidateData.source_lesson_id)].join(':');
+  }
+  if (entityType === 'lesson_participant') {
+    return [
+      'lesson_participant',
+      normalizeString(candidateData.source_system),
+      normalizeString(candidateData.source_lesson_id),
+      normalizeString(candidateData.identity_number),
     ].join(':');
   }
   return `${entityType}:${rowId}`;

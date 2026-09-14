@@ -21,7 +21,7 @@ Deliverables:
 Non-goals:
 - No extra import metadata tables in Phase 1.
 - No historical finance commit.
-- No attendance/session history commit.
+- No activation of historical attendance into live attendance, billing, or payroll state.
 - No direct document upload migration.
 - No fully automated "fix everything" mode.
 - No destructive Undo button until post-import mutation checks exist.
@@ -135,15 +135,21 @@ Deliverables:
 - Mark downstream candidates `blocked_by_dependency` when their parent candidate is blocked or not committed/ready.
 
 Candidate rules:
-- `active_student` and `inactive_student` represent student/client-profile import candidates.
+- `customer` represents both active/inactive students and one-time customers.
 - `guardian_link` depends on the related student candidate.
-- `student_note` depends on the related student candidate.
 - `guardian` can stand alone unless a link is being committed.
+- `instructor` may link to an existing instructor or create an unlinked overlay.
+- `lesson` resolves a committed/existing instructor and service.
+- `lesson_participant` resolves a committed/existing lesson and identified client profile.
 
 Inactive archive rule:
 - inactive candidates with `blocking_issues_count > 0` remain staged
 - inactive candidates with unresolved conflicts remain staged
-- inactive candidates with missing minimum archive fields remain staged
+- inactive candidates require first name, last name, and a valid identity number
+- inactive student candidates require either a valid student phone or a linked guardian
+  with a valid phone or email; student email alone is not a valid contact path
+- upstream corrections may be re-uploaded, and missed exceptions may be repaired in the
+  Import Workspace; both paths must be re-analyzed before commit
 - no inactive candidate mutates live tables before commit
 
 ## Phase 5: Import Workspace UI
@@ -204,35 +210,25 @@ Deliverables:
 - Write `import_commit_ledger` rows for each live create/update/link.
 - Mark committed candidates as `committed`.
 
-Backend transaction requirement:
-- Do not implement a commit chunk as many independent Supabase REST writes from JavaScript.
-- Use a PostgreSQL RPC/function for the commit chunk.
-- The standard Supabase JS client `supabase.from(...).insert/update` uses PostgREST over HTTP and cannot wrap a JavaScript loop in one `BEGIN` / `COMMIT` transaction.
-- The frontend/API must call a function such as `await supabase.rpc('commit_import_chunk', { workspace_id, candidate_ids, commit_scope })`.
-- The PL/pgSQL function is the transaction boundary. If it raises an exception, PostgreSQL automatically rolls back the whole chunk.
-- The API validates auth, membership, `org_id`, chunk size, and requested candidate IDs.
-- The chunk executor re-checks inside the transaction:
-  - all candidates belong to the same `org_id` and workspace
-  - all candidates are in a committable status
-  - `blocking_issues_count = 0`
-  - `status <> 'blocked_by_dependency'`
-  - `depends_on_candidate_id` is null or points to a committed/eligible parent
-  - inactive candidates are complete and conflict-free
-- If any row fails, raise an exception so PostgreSQL rolls back the full chunk.
-- On success, write live records, ledger rows, candidate statuses, and workspace progress in the same transaction.
+Backend commit requirement (superseded by `commit-engine-revision.md`):
+- Use the per-candidate idempotent JavaScript orchestrator so imports reuse the same domain helpers and non-destructive merge behavior as interactive creation.
+- The API validates auth, membership, `org_id`, workspace ownership, chunk size, and requested candidate IDs.
+- Before each write, re-check that the candidate is committable, has no blockers, and has a satisfied dependency.
+- Record every create, update, or link in `import_commit_ledger`.
+- A row failure is retained as retryable import state and does not roll back unrelated successful rows.
+- Idempotent source identifiers and live-record lookups make a retried chunk safe after partial success.
 
 Frontend topological order requirement:
 - The frontend orchestrator must query and commit chunks by entity type in dependency order.
-- Finish all `active_student` chunks first.
-- Then finish all `inactive_student` chunks.
-- Only after all student chunks are 100% complete, commit `guardian` chunks.
-- Only after guardians and students are committed, commit `guardian_link` chunks.
-- Commit `student_note` chunks last.
+- Commit `customer` first.
+- Commit `guardian`, `service`, and `instructor` next.
+- Commit `guardian_link` and `lesson` after their lookup resources exist.
+- Commit `lesson_participant` last.
 - If any earlier entity type has failed or blocked candidates, dependent entity types must pause and surface the blockers.
 - This order is mandatory even though the backend also re-checks `depends_on_candidate_id`.
 
 Inactive archive commit:
-- selected inactive candidates must have `entity_type = 'inactive_student'`
+- selected inactive students use `entity_type = 'customer'`, `customer_type = 'student'`, and `is_active = false`
 - selected inactive candidates must have `status = 'ready'`
 - selected inactive candidates must have `blocking_issues_count = 0`
 - selected inactive candidates must have no unresolved conflicts in `candidate_data.field_conflicts`
@@ -256,8 +252,8 @@ Deliverables:
 
 ## Later Domains
 Add support in separate plans for:
-- schedule/templates import
-- historical attendance
+- recurring schedule/template import
+- historical attendance activation
 - finance opening balances
 - HMO authorizations
 - commitments/packages

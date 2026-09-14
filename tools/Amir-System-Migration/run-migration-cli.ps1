@@ -1,7 +1,7 @@
 Param(
   [ValidateSet("menu", "wizard", "run", "summarize-report")]
   [string]$Mode = "menu",
-  [ValidateSet("inventory", "riders-core", "lessons-candidates", "extract", "all")]
+  [ValidateSet("inventory", "riders-core", "lessons-candidates", "extract", "bundle", "all")]
   [string]$Job = "all",
   [string]$MdbPath = "",
   [string]$ReportPath = "",
@@ -9,6 +9,7 @@ Param(
   [string]$PasswordEnv = "MDB_PASSWORD",
   [int]$SampleRows = 10,
   [string]$Tables = "",
+  [string]$LessonSource = "",
   [string]$OutputDir = "",
   [switch]$NoPause,
   [switch]$NoDepCheck
@@ -88,16 +89,18 @@ if ($resolvedMode -eq "run" -and ($Job -eq "all" -or [string]::IsNullOrWhiteSpac
   Write-Host "  1) inventory"
   Write-Host "  2) riders-core"
   Write-Host "  3) lessons-candidates"
-  Write-Host "  4) extract (import-ready CSVs)"
-  Write-Host "  5) all"
-  $jobChoice = (Read-Host "Enter 1-5 [5]").Trim()
+  Write-Host "  4) extract (complete raw CSVs)"
+  Write-Host "  5) bundle (normalized CSVs + complete raw archive)"
+  Write-Host "  6) all discovery jobs"
+  $jobChoice = (Read-Host "Enter 1-6 [5]").Trim()
   if ([string]::IsNullOrWhiteSpace($jobChoice)) { $jobChoice = "5" }
   switch ($jobChoice) {
     "1" { $Job = "inventory" }
     "2" { $Job = "riders-core" }
     "3" { $Job = "lessons-candidates" }
     "4" { $Job = "extract" }
-    "5" { $Job = "all" }
+    "5" { $Job = "bundle" }
+    "6" { $Job = "all" }
     default {
       Write-Error "Invalid selection: $jobChoice"
       exit 2
@@ -131,6 +134,9 @@ elseif ($resolvedMode -eq "run") {
   $args += @("run", $Job, "--mdb", $effectiveMdbPath, "--password-env", $PasswordEnv, "--sample-rows", "$SampleRows", "--output-dir", $OutputDir)
   if ($Tables -and $Tables.Trim() -ne "") {
     $args += @("--tables", $Tables)
+  }
+  if ($LessonSource -and $LessonSource.Trim() -ne "") {
+    $args += @("--lesson-source", $LessonSource)
   }
 }
 elseif ($resolvedMode -eq "summarize-report") {

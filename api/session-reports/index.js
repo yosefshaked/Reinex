@@ -873,7 +873,7 @@ async function resolvePendingReports(context, req, { supabase, orgId, userId, ro
     let lessons = [];
     if (serviceIds.length) {
       let lessonsQuery = withOrgScope(supabase, 'lesson_instances', orgId)
-        .select('id, datetime_start, status, instructor_employee_id, service_id')
+        .select('id, datetime_start, status, instructor_employee_id, service_id, metadata')
         .in('service_id', serviceIds)
         .neq('status', 'cancelled')
         .lte('datetime_start', nowIso)
@@ -886,7 +886,9 @@ async function resolvePendingReports(context, req, { supabase, orgId, userId, ro
         context.log?.error?.('session-reports: failed to load lessons for drift signal', { message: lessonsResult.error.message });
         return respondReportsError(context, 500, 'failed_to_load_lessons', lessonsResult.error, { action: 'load_lessons_drift' });
       }
-      lessons = lessonsResult.data || [];
+      lessons = (lessonsResult.data || []).filter((lesson) => (
+        normalizeJsonObject(lesson.metadata, {}).import?.exclude_from_pending_reports !== true
+      ));
     }
 
     const lessonMap = new Map(lessons.map((lesson) => [lesson.id, lesson]));

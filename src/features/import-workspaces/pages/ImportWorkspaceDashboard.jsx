@@ -597,6 +597,9 @@ const ENTITY_TYPE_LABELS = {
   guardian: 'הורה',
   guardian_link: 'קישור הורה-תלמיד',
   service: 'שירות',
+  instructor: 'מדריך/ה',
+  lesson: 'מפגש',
+  lesson_participant: 'משתתף/ת במפגש',
 };
 
 const STATUS_LABELS = {
@@ -626,6 +629,13 @@ const FIELD_LABELS = {
   service_name: 'שם השירות',
   name: 'שם השירות',
   description: 'תיאור',
+  source_system: 'מערכת מקור',
+  source_instructor_id: 'מזהה מדריך במקור',
+  source_lesson_id: 'מזהה מפגש במקור',
+  datetime_start: 'מועד המפגש',
+  lesson_status: 'סטטוס מפגש',
+  participant_status: 'סטטוס השתתפות',
+  duration_minutes: 'משך בדקות',
 };
 
 const ISSUE_MESSAGES = {
@@ -649,6 +659,7 @@ function candidateDisplayName(candidate) {
       data.guardian_last_name,
     ].filter(Boolean).join(' ')
     || data.service_name
+    || data.source_lesson_id
     || data.name
     || '—';
 }
@@ -738,8 +749,9 @@ async function fetchAllCandidates(workspaceId, status, sourceReference) {
 // Topological commit waves: each wave depends on the previous one completing first.
 const COMMIT_WAVES = [
   { label: 'לקוחות ותלמידים', types: ['customer'] },
-  { label: 'הורים ושירותים',  types: ['guardian', 'service'] },
-  { label: 'קישורי הורים',    types: ['guardian_link'] },
+  { label: 'הורים, שירותים ומדריכים',  types: ['guardian', 'service', 'instructor'] },
+  { label: 'קישורי הורים ומפגשים',    types: ['guardian_link', 'lesson'] },
+  { label: 'משתתפים במפגשים', types: ['lesson_participant'] },
 ];
 
 // ── Commit Step ────────────────────────────────────────────────────────────
@@ -1272,6 +1284,7 @@ export default function ImportWorkspaceDashboard() {
     const rows = problematic.map(c => {
       const name = [c.candidate_data?.first_name, c.candidate_data?.last_name].filter(Boolean).join(' ')
         || c.candidate_data?.service_name
+        || c.candidate_data?.source_lesson_id
         || c.candidate_data?.name
         || '';
       return [

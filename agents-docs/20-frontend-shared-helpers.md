@@ -52,6 +52,8 @@
 - The private `authenticatedFetch` inside [`../src/org/OrgContext.jsx`](../src/org/OrgContext.jsx) is local to that provider; do not copy it elsewhere.
 - [`../src/hooks/useDocuments.js`](../src/hooks/useDocuments.js) is a special-case raw-fetch hook for document upload/download flows; use it only for document work.
 - Money is carried as agorot integers across API/DB boundaries.
+- Keep text weights at `font-bold` (700) or lighter. Hebrew renders in the system font, which has no 800/900. `font-extrabold` / `font-black` make Chrome fake the weight, and the text looks smeared.
+- `DialogContent` (in [`../src/components/ui/dialog.jsx`](../src/components/ui/dialog.jsx)) wraps children in its own scroll container by default. Pass `bare` only when the dialog owns a fixed header / scrolling body / footer layout (see `LessonInstanceDialog`), and give it `hideDefaultClose` when it renders its own close button.
 - Do not hand-build repeated WhatsApp wording in page components. Reuse the shared WhatsApp message helpers so organization signatures and invite wording stay consistent across send/resend flows.
 - Treat account names as derived values. Use `formatUserAccountName` or the `displayName` returned by `useAccount()` / `fetchMyAccount()`; do not assume `profiles.full_name` exists on the frontend data model.
 - [`../src/lib/selectors.js`](../src/lib/selectors.js) is deprecated; do not reuse or extend it.

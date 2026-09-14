@@ -1,7 +1,7 @@
 /* eslint-env node */
 import { loadFinancePolicies } from './employee-finance.js';
 import { listDashboardTasks } from './dashboard-tasks.js';
-import { normalizeString } from './org-bff.js';
+import { normalizeString, withOrgScope } from './org-bff.js';
 import { isPlainObject, readParticipantWorkflowMetadata, shouldParticipantTriggerInstructorCompensation } from './calendar-workflow-decisions.js';
 import { coerceAgorot } from './currency.js';
 
@@ -80,7 +80,10 @@ function evaluateParticipantSettlement(participant, context) {
     const claimBatch = context?.claimBatchById?.get(lock.lock_source_id) || null;
     return CLAIM_SETTLED_STATUSES.has(normalizeString(claimBatch?.status).toLowerCase());
   });
-  const hmoClaimRequired = ['pending', 'required'].includes(workflow.hmo_claim.decision) || Boolean(openHmoTask) || hmoCommitmentApplies;
+  // calendar-attendance writes hmo_claim.decision = 'pending' for EVERY attended participant, covered or
+  // not, so 'pending' alone is not evidence of a claim. A claim is required only when the lesson produced
+  // an HMO ledger row, an HMO claim task is open, or a decision explicitly says 'required'.
+  const hmoClaimRequired = workflow.hmo_claim.decision === 'required' || Boolean(openHmoTask) || hmoCommitmentApplies;
   const hmoClaimResolved = !hmoClaimRequired || submittedClaimLock;
 
   return {
@@ -329,7 +332,36 @@ export function evaluateLessonClosureState(state) {
   };
 }
 
-export async function syncLessonClosureState(tenantClient, lessonInstanceId, actorUserId = null) {
+function sortObjectKeysReplacer(_key, value) {
+  if (!isPlainObject(value)) return value;
+  return Object.keys(value).sort().reduce((sorted, key) => {
+    sorted[key] = value[key];
+    return sorted;
+  }, {});
+}
+
+// Comparable form of metadata.workflow_state. Excludes evaluated_at (fresh on every
+// evaluation) so an unchanged state does not rewrite lesson_instances and bump `version`
+// (spurious 409 version_conflict). Key order and participant order are normalized because
+// jsonb does not preserve key order and the participants query is unordered.
+function buildWorkflowStateComparisonKey(workflowState) {
+  if (!isPlainObject(workflowState)) return null;
+  const participants = asArray(workflowState.participants)
+    .slice()
+    .sort((a, b) => normalizeString(a?.participant_id).localeCompare(normalizeString(b?.participant_id)));
+  return JSON.stringify({
+    reasons_open: workflowState.reasons_open ?? null,
+    summary: workflowState.summary ?? null,
+    participants,
+  }, sortObjectKeysReplacer);
+}
+
+/**
+ * Evaluate a lesson's closure state and build the lesson_instances update WITHOUT writing it.
+ * Returns null when the lesson does not exist. `hasChanged` is false when the stored state already
+ * matches, so callers never rewrite (and version-bump) an unchanged lesson.
+ */
+export async function planLessonClosureSync(tenantClient, lessonInstanceId, actorUserId = null) {
   const state = await loadLessonWorkflowState(tenantClient, lessonInstanceId);
   if (!state?.instance) {
     return null;
@@ -358,25 +390,49 @@ export async function syncLessonClosureState(tenantClient, lessonInstanceId, act
     state.instance.is_closed !== evaluation.should_close
       || normalizeString(state.instance.closed_at) !== normalizeString(nextPayload.closed_at)
       || normalizeString(state.instance.closed_by) !== normalizeString(nextPayload.closed_by)
-      || JSON.stringify(currentMetadata.workflow_state || null) !== JSON.stringify(nextWorkflowState),
+      || buildWorkflowStateComparisonKey(currentMetadata.workflow_state) !== buildWorkflowStateComparisonKey(nextWorkflowState),
   );
 
-  if (hasChanged) {
-    const { error: updateError } = await tenantClient
-      .from('lesson_instances')
-      .update(nextPayload)
-      .eq('id', lessonInstanceId);
+  return {
+    lessonInstanceId,
+    orgId: state.instance.org_id || null,
+    hasChanged,
+    payload: nextPayload,
+    previousReasonsOpen: isPlainObject(currentMetadata.workflow_state)
+      ? asArray(currentMetadata.workflow_state.reasons_open)
+      : null,
+    result: {
+      lesson_instance_id: lessonInstanceId,
+      is_closed: evaluation.should_close,
+      reasons_open: evaluation.reasons_open,
+      summary: evaluation.summary,
+      participants: evaluation.participants,
+    },
+  };
+}
 
-    if (updateError) {
-      throw updateError;
-    }
+/** Write a plan from planLessonClosureSync. Unchanged plans are skipped; returns whether it wrote. */
+export async function applyLessonClosurePlan(tenantClient, plan) {
+  if (!plan?.hasChanged) {
+    return false;
   }
 
-  return {
-    lesson_instance_id: lessonInstanceId,
-    is_closed: evaluation.should_close,
-    reasons_open: evaluation.reasons_open,
-    summary: evaluation.summary,
-    participants: evaluation.participants,
-  };
+  const { error: updateError } = await withOrgScope(tenantClient, 'lesson_instances', plan.orgId)
+    .update(plan.payload)
+    .eq('id', plan.lessonInstanceId);
+
+  if (updateError) {
+    throw updateError;
+  }
+  return true;
+}
+
+export async function syncLessonClosureState(tenantClient, lessonInstanceId, actorUserId = null) {
+  const plan = await planLessonClosureSync(tenantClient, lessonInstanceId, actorUserId);
+  if (!plan) {
+    return null;
+  }
+
+  await applyLessonClosurePlan(tenantClient, plan);
+  return plan.result;
 }

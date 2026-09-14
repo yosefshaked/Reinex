@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Job-based CLI for trusted, repeatable Access migration discovery.
+"""Job-based CLI for trusted, repeatable Access migration extraction.
 
 This CLI is read-only against the Access database.
-It runs predefined discovery jobs and writes JSON reports to disk.
+It runs predefined discovery/export jobs and writes reports and bundles to disk.
 """
 
 from __future__ import annotations
@@ -19,9 +19,22 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from inspect_access_mdb import fetch_columns, fetch_count, fetch_rows, list_objects, open_connection, quote_access_name
+from migration_bundle import (
+    BUNDLE_FORMAT,
+    BUNDLE_VERSION,
+    build_customers,
+    build_guardians,
+    build_lessons,
+    build_services,
+    choose_lesson_candidate,
+    create_zip,
+    sha256_file,
+    write_csv,
+    write_manifest,
+)
 
 
-TOOL_VERSION = "1.1.0"
+TOOL_VERSION = "1.2.0"
 
 LESSON_CANDIDATES = [
     "qryRiderLessonsDiary",
@@ -88,7 +101,8 @@ def build_base_report(mdb_path: Path | None, provider: str | None, job: str, res
         "tool": "migration-cli",
         "tool_version": TOOL_VERSION,
         "timestamp_utc": iso_now(),
-        "mdb_path": str(mdb_path) if mdb_path else None,
+        # Never expose the user's absolute local path in reports intended for sharing.
+        "mdb_file_name": mdb_path.name if mdb_path else None,
         "provider": provider,
         "job": job,
         "status": status,
@@ -122,13 +136,18 @@ def safe_count(conn, object_name: str) -> dict:
 
 
 def safe_columns(conn, object_name: str) -> dict:
+    top0_error = None
     try:
         columns = fetch_columns(conn, object_name)
         if columns:
             return {"object_name": object_name, "columns": columns, "ok": True, "method": "top0"}
+    except Exception as exc:  # pragma: no cover - provider-specific
+        top0_error = str(exc)
 
-        # Fallback: some Access objects/providers return empty field metadata for TOP 0.
-        # Try TOP 1 field metadata and capture names only.
+    # Saved Access queries can reject TOP 0 even though TOP 1 succeeds. The old
+    # implementation caught the TOP 0 exception outside this fallback, so the
+    # fallback never actually ran for the Amir lesson queries.
+    try:
         sql = f"SELECT TOP 1 * FROM {quote_access_name(object_name)}"
         recordset = conn.Execute(sql)[0]
         fallback_cols = []
@@ -143,9 +162,20 @@ def safe_columns(conn, object_name: str) -> dict:
                     "attributes": getattr(field, "Attributes", None),
                 }
             )
-        return {"object_name": object_name, "columns": fallback_cols, "ok": True, "method": "top1-fallback"}
+        return {
+            "object_name": object_name,
+            "columns": fallback_cols,
+            "ok": True,
+            "method": "top1-fallback",
+            "top0_error": top0_error,
+        }
     except Exception as exc:  # pragma: no cover
-        return {"object_name": object_name, "ok": False, "error": str(exc)}
+        return {
+            "object_name": object_name,
+            "ok": False,
+            "error": str(exc),
+            "top0_error": top0_error,
+        }
 
 
 def safe_sample(conn, object_name: str, rows: int) -> dict:
@@ -222,7 +252,8 @@ def stream_table_to_csv(conn, object_name: str, csv_path: Path) -> dict:
         "ok": True,
         "row_count": row_count,
         "columns": field_names,
-        "csv_file": str(csv_path),
+        "csv_file": csv_path.name,
+        "sha256": sha256_file(csv_path),
     }
 
 
@@ -245,14 +276,239 @@ def run_extract_job(conn, output_dir: Path, tables: list[str]) -> dict:
     return {
         "job": "extract",
         "tables_requested": tables,
-        "output_dir": str(output_dir),
+        "output_dir": output_dir.name,
         "extracted": extracted,
         "import_hint": (
             "Upload the per-table CSVs to one Import Workspace. Map the riders CSV to "
-            "'customer' and the parents CSV to 'guardian' + 'guardian_link', joining the two "
-            "sources on the shared rider key (e.g. RiderId) so guardian-links resolve to the "
-            "correct student. CSVs are UTF-8 (BOM) and ready to upload as-is."
+            "Raw extracts preserve all source fields. For guardian imports, prefer the normalized "
+            "bundle job: RiderParents contains two people per row and cannot be mapped losslessly "
+            "as one guardian candidate. CSVs are UTF-8 (BOM)."
         ),
+    }
+
+
+def export_object_for_bundle(conn, object_name: str, csv_path: Path, collect_rows: bool) -> tuple[dict, list[dict]]:
+    """Export a complete raw object and optionally retain rows for normalization."""
+    sql = f"SELECT * FROM {quote_access_name(object_name)}"
+    recordset = conn.Execute(sql)[0]
+    field_names = [field.Name for field in recordset.Fields]
+    row_count = 0
+    rows = []
+    csv_path.parent.mkdir(parents=True, exist_ok=True)
+    with csv_path.open("w", encoding="utf-8-sig", newline="") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(field_names)
+        while not recordset.EOF:
+            raw_row = {name: recordset.Fields(name).Value for name in field_names}
+            writer.writerow([to_cell(raw_row[name]) for name in field_names])
+            if collect_rows:
+                rows.append(raw_row)
+            row_count += 1
+            recordset.MoveNext()
+
+    count_payload = safe_count(conn, object_name)
+    expected_count = count_payload.get("total_rows") if count_payload.get("ok") else None
+    return (
+        {
+            "object_name": object_name,
+            "file": f"raw/{csv_path.name}",
+            "row_count": row_count,
+            "expected_row_count": expected_count,
+            "complete": int(expected_count) == row_count if expected_count is not None else None,
+            "columns": field_names,
+            "sha256": sha256_file(csv_path),
+        },
+        rows,
+    )
+
+
+def run_bundle_job(
+    conn,
+    output_dir: Path,
+    mdb_path: Path,
+    provider: str | None,
+    lesson_source_override: str | None = None,
+) -> dict:
+    """Build a complete, checksummed folder + zip for staged Reinex migration.
+
+    Current Import Workspaces can directly map all normalized entity CSVs. Historical
+    attendance suggestions are preserved as metadata rather than activated as live
+    attendance until the finance/payroll policy is designed.
+    """
+    ensure_output_dir(output_dir)
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    bundle_dir = output_dir / f"{timestamp}_reinex_import_bundle"
+    raw_dir = bundle_dir / "raw"
+    normalized_dir = bundle_dir / "normalized"
+    raw_dir.mkdir(parents=True, exist_ok=False)
+    normalized_dir.mkdir(parents=True, exist_ok=True)
+
+    candidate_names = list(LESSON_CANDIDATES)
+    if lesson_source_override and lesson_source_override not in candidate_names:
+        candidate_names.insert(0, lesson_source_override)
+    lesson_discovery = run_lessons_candidates_job(conn, 1, candidate_names)
+    recommendation = lesson_discovery.get("recommended_lesson_source")
+    if lesson_source_override:
+        override = next(
+            (
+                item
+                for item in lesson_discovery.get("candidates", [])
+                if item.get("object_name") == lesson_source_override and item.get("exists")
+            ),
+            None,
+        )
+        if not override:
+            raise ValueError(f"lesson_source_not_found: {lesson_source_override}")
+        recommendation = choose_lesson_candidate([override])
+
+    lesson_source = recommendation.get("object_name") if recommendation else None
+    available_names = {
+        str(item.get("TABLE_NAME"))
+        for item in list_objects(conn, include_system=False)
+        if item.get("TABLE_NAME")
+    }
+    if "Riders" not in available_names:
+        raise ValueError("required_source_not_found: Riders")
+
+    requested_objects = ["Riders", "RiderParents", "LessonSections"]
+    if lesson_source:
+        requested_objects.append(lesson_source)
+    if "Workers" in available_names:
+        requested_objects.append("Workers")
+    requested_objects = list(dict.fromkeys(requested_objects))
+
+    raw_exports = []
+    rows_by_object: dict[str, list[dict]] = {}
+    collect_objects = {"Riders", "RiderParents", "LessonSections", "Workers"}
+    if lesson_source:
+        collect_objects.add(lesson_source)
+
+    for object_name in requested_objects:
+        if object_name not in available_names:
+            raw_exports.append(
+                {
+                    "object_name": object_name,
+                    "exists": False,
+                    "complete": False,
+                    "error": "object_not_found",
+                }
+            )
+            rows_by_object[object_name] = []
+            continue
+        csv_path = raw_dir / f"{sanitize_filename(object_name)}.csv"
+        metadata, rows = export_object_for_bundle(
+            conn,
+            object_name,
+            csv_path,
+            collect_rows=object_name in collect_objects,
+        )
+        metadata["exists"] = True
+        raw_exports.append(metadata)
+        rows_by_object[object_name] = rows
+
+    customers, riders_by_id, customer_validation = build_customers(rows_by_object.get("Riders", []))
+    guardians, guardian_links, guardian_validation = build_guardians(
+        rows_by_object.get("RiderParents", []),
+        riders_by_id,
+    )
+    lesson_rows = rows_by_object.get(lesson_source, []) if lesson_source else []
+    services, service_validation = build_services(rows_by_object.get("LessonSections", []), lesson_rows)
+    lessons, participants, instructors, lesson_validation = build_lessons(
+        lesson_rows,
+        riders_by_id,
+        rows_by_object.get("Workers", []),
+    )
+
+    normalized_specs = [
+        ("customers.csv", customers, "current_import_workspace", "customer"),
+        ("guardians.csv", guardians, "current_import_workspace", "guardian"),
+        ("guardian_links.csv", guardian_links, "current_import_workspace", "guardian_link"),
+        ("services.csv", services, "current_import_workspace", "service"),
+        ("lessons.csv", lessons, "current_import_workspace", "lesson"),
+        ("lesson_participants.csv", participants, "current_import_workspace", "lesson_participant"),
+        ("instructors.csv", instructors, "current_import_workspace", "instructor"),
+    ]
+    normalized_files = []
+    for file_name, rows, support, entity_hint in normalized_specs:
+        if not rows:
+            normalized_files.append(
+                {
+                    "file": f"normalized/{file_name}",
+                    "row_count": 0,
+                    "columns": [],
+                    "import_support": support,
+                    "entity_hint": entity_hint,
+                    "written": False,
+                }
+            )
+            continue
+        file_metadata = write_csv(normalized_dir / file_name, rows, list(rows[0].keys()))
+        file_metadata.update(
+            {
+                "file": f"normalized/{file_name}",
+                "import_support": support,
+                "entity_hint": entity_hint,
+                "written": True,
+            }
+        )
+        normalized_files.append(file_metadata)
+
+    validation = {
+        "customers": customer_validation,
+        "guardians": guardian_validation,
+        "services": service_validation,
+        "lessons": lesson_validation,
+        "raw_exports_complete": all(item.get("complete") is True for item in raw_exports),
+    }
+    manifest = {
+        "format": BUNDLE_FORMAT,
+        "format_version": BUNDLE_VERSION,
+        "tool_version": TOOL_VERSION,
+        "generated_at_utc": iso_now(),
+        "source_timezone": "Asia/Jerusalem",
+        "source_database": {
+            "sha256": sha256_file(mdb_path),
+            "size_bytes": mdb_path.stat().st_size,
+            "extension": mdb_path.suffix.lower(),
+        },
+        "provider": provider,
+        "lesson_source": recommendation,
+        "raw_files": raw_exports,
+        "normalized_files": normalized_files,
+        "relationships": [
+            {"from": "normalized/guardian_links.csv.source_rider_id", "to": "normalized/customers.csv.source_rider_id"},
+            {"from": "normalized/lesson_participants.csv.source_lesson_id", "to": "normalized/lessons.csv.source_lesson_id"},
+            {"from": "normalized/lesson_participants.csv.source_rider_id", "to": "normalized/customers.csv.source_rider_id"},
+            {"from": "normalized/lessons.csv.source_instructor_id", "to": "normalized/instructors.csv.source_instructor_id"},
+        ],
+        "validation": validation,
+        "compatibility": {
+            "upload_now": [
+                "normalized/customers.csv",
+                "normalized/guardians.csv",
+                "normalized/guardian_links.csv",
+                "normalized/services.csv",
+                "normalized/instructors.csv",
+                "normalized/lessons.csv",
+                "normalized/lesson_participants.csv",
+            ],
+            "staging_only": [],
+            "zip_upload_supported_by_import_workspace": False,
+        },
+    }
+    manifest_metadata = write_manifest(bundle_dir / "manifest.json", manifest)
+    archive_path = create_zip(bundle_dir)
+
+    return {
+        "job": "bundle",
+        "bundle_directory": bundle_dir.name,
+        "bundle_archive": archive_path.name,
+        "bundle_archive_sha256": sha256_file(archive_path),
+        "manifest": manifest_metadata,
+        "lesson_source": recommendation,
+        "validation": validation,
+        "normalized_files": normalized_files,
+        "privacy_note": "Report and manifest contain metadata only; CSV and ZIP files contain personal data.",
     }
 
 
@@ -306,63 +562,10 @@ def run_lessons_candidates_job(conn, sample_rows: int, candidates: list[str]) ->
             item["sample"] = safe_sample(conn, name, sample_rows)
         report["candidates"].append(item)
 
-    # Auto-recommend the most useful lesson source based on known priority + row count.
-    preferred_order = [
-        "qryRiderLessonsDiary",
-        "qryRidersLessonsDiary",
-        "qryRiderLessons",
-        "qryLessonsList",
-        "qryMasterLessons",
-    ]
-    by_name = {
-        str(item.get("object_name")): item
-        for item in report["candidates"]
-        if isinstance(item, dict)
-    }
-
-    recommendation = None
-    for source_name in preferred_order:
-        source = by_name.get(source_name)
-        if not source or not source.get("exists"):
-            continue
-        count_payload = source.get("count") if isinstance(source.get("count"), dict) else {}
-        row_count = count_payload.get("total_rows") if isinstance(count_payload, dict) else None
-        try:
-            row_count_num = int(row_count)
-        except Exception:
-            row_count_num = 0
-        if row_count_num > 0:
-            recommendation = {
-                "object_name": source_name,
-                "reason": "preferred_named_query_with_rows",
-                "row_count": row_count_num,
-            }
-            break
-
-    if recommendation is None:
-        # Fallback to largest existing candidate.
-        best_name = None
-        best_rows = -1
-        for item in report["candidates"]:
-            if not isinstance(item, dict) or not item.get("exists"):
-                continue
-            count_payload = item.get("count") if isinstance(item.get("count"), dict) else {}
-            row_count = count_payload.get("total_rows") if isinstance(count_payload, dict) else None
-            try:
-                row_count_num = int(row_count)
-            except Exception:
-                row_count_num = 0
-            if row_count_num > best_rows:
-                best_rows = row_count_num
-                best_name = str(item.get("object_name"))
-        if best_name:
-            recommendation = {
-                "object_name": best_name,
-                "reason": "largest_existing_candidate",
-                "row_count": best_rows,
-            }
-
-    report["recommended_lesson_source"] = recommendation
+    # Prefer a source that can reconstruct relationships. Row count and a familiar
+    # query name are not enough: the diary display query omits RiderId, while
+    # qryRiderLessons carries RiderId + RecordId + WorkerID.
+    report["recommended_lesson_source"] = choose_lesson_candidate(report["candidates"])
     return report
 
 
@@ -376,16 +579,16 @@ def run_all_discovery_job(conn, sample_rows: int) -> dict:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Read-only job CLI for Access .mdb migration discovery")
+    parser = argparse.ArgumentParser(description="Read-only job CLI for Access .mdb migration extraction")
     sub = parser.add_subparsers(dest="command", required=False)
 
     run = sub.add_parser("run", help="Run a predefined discovery job")
-    run.add_argument("job", choices=["inventory", "riders-core", "lessons-candidates", "extract", "all"])
+    run.add_argument("job", choices=["inventory", "riders-core", "lessons-candidates", "extract", "bundle", "all"])
     run.add_argument("--mdb", required=True, help="Path to .mdb file")
     run.add_argument("--password", help="MDB password")
     run.add_argument("--password-env", default="MDB_PASSWORD", help="Environment variable for MDB password")
     run.add_argument("--sample-rows", type=int, default=10, help="Rows to sample per object")
-    run.add_argument("--output-dir", default="tools/Amir-System-Migration/output", help="Where reports / extract CSVs are written")
+    run.add_argument("--output-dir", default="tools/Amir-System-Migration/output", help="Where reports, CSVs and bundles are written")
     run.add_argument(
         "--lesson-candidates",
         help="Comma separated override for lessons-candidates job",
@@ -394,13 +597,17 @@ def build_parser() -> argparse.ArgumentParser:
         "--tables",
         help="Comma separated tables for the 'extract' job (default: Riders,RiderParents)",
     )
+    run.add_argument(
+        "--lesson-source",
+        help="Optional saved query override for the bundle job's historical lesson source",
+    )
 
     wizard = sub.add_parser("wizard", help="Interactive prompt to run a job")
     wizard.add_argument("--mdb", help="Path to .mdb file")
     wizard.add_argument("--password", help="MDB password")
     wizard.add_argument("--password-env", default="MDB_PASSWORD", help="Environment variable for MDB password")
     wizard.add_argument("--sample-rows", type=int, default=10, help="Rows to sample per object")
-    wizard.add_argument("--output-dir", default="tools/Amir-System-Migration/output", help="Where JSON reports are written")
+    wizard.add_argument("--output-dir", default="tools/Amir-System-Migration/output", help="Where reports, CSVs and bundles are written")
 
     summarize = sub.add_parser("summarize-report", help="Summarize an existing JSON report without exposing row values")
     summarize.add_argument("--report", required=True, help="Path to a report JSON file generated by this tool")
@@ -416,16 +623,18 @@ def pick_job_interactively() -> str:
         ("2", "riders-core"),
         ("3", "lessons-candidates"),
         ("4", "extract"),
-        ("5", "all"),
+        ("5", "bundle"),
+        ("6", "all"),
     ]
     print("Select job:")
     print("  1) inventory")
     print("  2) riders-core")
     print("  3) lessons-candidates")
-    print("  4) extract (import-ready CSVs)")
-    print("  5) all")
+    print("  4) extract (complete raw CSVs)")
+    print("  5) bundle (normalized CSVs + complete raw archive)")
+    print("  6) all discovery jobs")
     while True:
-        choice = input("Enter 1-5 [5]: ").strip() or "5"
+        choice = input("Enter 1-6 [5]: ").strip() or "5"
         for key, value in options:
             if choice == key:
                 return value
@@ -439,6 +648,9 @@ def run_selected_job(
     lesson_candidates_arg: str | None,
     output_dir: str | None = None,
     tables: list[str] | None = None,
+    lesson_source: str | None = None,
+    mdb_path: Path | None = None,
+    provider: str | None = None,
 ) -> dict:
     if job == "inventory":
         return run_inventory_job(conn)
@@ -453,6 +665,11 @@ def run_selected_job(
     if job == "extract":
         target_dir = Path(output_dir or "tools/Amir-System-Migration/output")
         return run_extract_job(conn, target_dir, tables or DEFAULT_EXTRACT_TABLES)
+    if job == "bundle":
+        if mdb_path is None:
+            raise ValueError("mdb_path_required_for_bundle")
+        target_dir = Path(output_dir or "tools/Amir-System-Migration/output")
+        return run_bundle_job(conn, target_dir, mdb_path, provider, lesson_source_override=lesson_source)
     if job == "all":
         return run_all_discovery_job(conn, sample_rows)
     raise ValueError(f"Unsupported job: {job}")
@@ -474,6 +691,9 @@ def run_noninteractive(args) -> int:
             args.lesson_candidates,
             output_dir=args.output_dir,
             tables=tables,
+            lesson_source=getattr(args, "lesson_source", None),
+            mdb_path=mdb_path,
+            provider=provider,
         )
         report = build_base_report(mdb_path, provider, args.job, result, status="success")
         out = write_report(Path(args.output_dir), args.job, report)
@@ -517,6 +737,8 @@ def run_wizard(args) -> int:
             args.sample_rows,
             lesson_candidates_arg=None,
             output_dir=args.output_dir,
+            mdb_path=mdb_path,
+            provider=provider,
         )
         report = build_base_report(mdb_path, provider, job, result, status="success")
         out = write_report(Path(args.output_dir), job, report)
@@ -641,6 +863,18 @@ def summarize_report_payload(payload: dict) -> dict:
             )
         summary["lessons_candidates"] = compact
         summary["recommended_lesson_source"] = result.get("recommended_lesson_source")
+        return summary
+
+    if payload.get("job") == "bundle":
+        summary["bundle"] = {
+            "bundle_directory": result.get("bundle_directory"),
+            "bundle_archive": result.get("bundle_archive"),
+            "bundle_archive_sha256": result.get("bundle_archive_sha256"),
+            "lesson_source": result.get("lesson_source"),
+            "validation": result.get("validation"),
+            "normalized_files": result.get("normalized_files"),
+            "privacy_note": result.get("privacy_note"),
+        }
         return summary
 
     if payload.get("job") == "all":

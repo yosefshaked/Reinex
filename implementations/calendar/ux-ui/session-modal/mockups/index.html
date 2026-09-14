@@ -1,0 +1,48 @@
+<title>Reinex Lesson Modal Prototype</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@500;600;700;800&family=Noto+Sans+Hebrew:wght@500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="session-modal.css">
+
+<div dir="rtl" lang="he">
+  <header class="rail" id="rail" aria-label="בקרת אב-טיפוס"></header>
+
+  <div class="bd" aria-hidden="true">
+    <div class="bd-top">
+      <h1>לוח זמנים</h1>
+      <span class="bd-chip primary">+ שיעור חדש</span>
+      <span class="bd-chip">יצירה מתבניות</span>
+      <span class="bd-chip">תבניות</span>
+      <span class="bd-chip" style="margin-inline-start:auto">יום שני, 14 בספטמבר 2026</span>
+      <span class="bd-chip primary">יום</span>
+      <span class="bd-chip">שבוע</span>
+    </div>
+    <div class="bd-cal">
+      <div class="bd-hours"><div>08:00</div><div>09:00</div><div>10:00</div><div>11:00</div><div>12:00</div><div>13:00</div><div>14:00</div><div>15:00</div><div>16:00</div></div>
+      <div class="bd-col">
+        <div class="bd-col-head">דנה לוי</div>
+        <div class="bd-ev" style="top:92px;height:36px;background:#5B5BD6">ריפוי בעיסוק פרטני</div>
+        <div class="bd-ev sel" style="top:140px;height:36px;background:#0E9F9A">ריפוי בעיסוק קבוצתי · 4</div>
+        <div class="bd-ev" style="top:236px;height:36px;background:#0E9F9A">ריפוי בעיסוק קבוצתי · 3</div>
+      </div>
+      <div class="bd-col">
+        <div class="bd-col-head">משה אזולאי</div>
+        <div class="bd-ev" style="top:260px;height:48px;background:#D9822B">קלינאות תקשורת – קבוצה</div>
+      </div>
+      <div class="bd-col">
+        <div class="bd-col-head">שירה נחום</div>
+        <div class="bd-ev" style="top:68px;height:48px;background:#D9822B">קלינאות תקשורת – קבוצה</div>
+      </div>
+    </div>
+  </div>
+  <div class="ov" aria-hidden="true"></div>
+
+  <div id="stage"></div>
+  <div class="toasts" id="toasts" role="status" aria-live="polite"></div>
+</div>
+
+<script src="mock-data.js"></script>
+<script src="mock-render.js"></script>
+<script src="mock-app.js"></script>

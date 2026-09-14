@@ -3,3 +3,6 @@
 #
 #   python -m pip install -r tools/Amir-System-Migration/requirements.txt
 pywin32>=306
+# IANA timezone data for zoneinfo on Windows; required to convert historical
+# Asia/Jerusalem lesson times without applying today's UTC offset to old dates.
+tzdata>=2025.2

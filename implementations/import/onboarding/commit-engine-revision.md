@@ -29,7 +29,7 @@ Status: IMPLEMENTING — open questions resolved, all five phases in progress.
 ## 1. Data model (`src/lib/setup-sql.js`)
 - `import_candidates.entity_type`: introduce umbrella value **`customer`**. Guarded
   `DO $$ ... $$` ALTER to drop & recreate `import_candidates_entity_type_check` allowing
-  `customer, guardian, guardian_link, service, student_note`. Keep `active_student`/
+  `customer, guardian, guardian_link, service, instructor, lesson, lesson_participant, student_note`. Keep `active_student`/
   `inactive_student` in the allowed set only if we choose migration-by-compat (see §7).
 - `candidate_data` gains documented keys: `customer_type` (`student`|`one_time_customer`)
   and `is_active` (boolean). No column change — these live in the JSONB.
@@ -39,8 +39,9 @@ Status: IMPLEMENTING — open questions resolved, all five phases in progress.
 
 ## 2. Analyzer (`api/import-workspaces-analyze-chunk/index.js`)
 - `ENTITY_SCHEMA`: replace `active_student`/`inactive_student` with `customer`.
-  Blockers: `first_name`, `last_name` (+ `identity_number` only when `is_active=false`,
-  pending §9 Q1). Warnings: phone/email/date_of_birth.
+  Blockers for students: `first_name`, `last_name`, `identity_number`, and no valid
+  contact path. A contact path is a valid student phone or a linked guardian with a valid
+  phone/email; student email alone is insufficient. `date_of_birth` remains optional.
 - Map `customer_type` and `is_active` from the mapping (fixed value or a source column);
   default per §9 Q2. Write them into `candidate_data`.
 - Emit `entity_type='customer'`. Keep idempotent upsert on `(workspace_id, source_row_id)`
@@ -50,9 +51,11 @@ Status: IMPLEMENTING — open questions resolved, all five phases in progress.
 Replace the `supabase.rpc('commit_import_chunk', …)` call with JS orchestration:
 - Load requested candidates (org + workspace scoped). Pre-validate each: status in
   (`ready`,`skipped`), `blocking_issues_count = 0`, dependency satisfied, and the
-  inactive-completeness rule (§9 Q1).
-- Process in topological order: **customer → guardian / service → guardian_link →
-  student_note** (committed candidates earlier in the same chunk satisfy dependencies).
+  student identity/contact rules (§9 Q1 and Q5).
+- Process in topological order: **customer → guardian / service / instructor →
+  guardian_link / lesson → lesson_participant** (committed candidates earlier in the same
+  chunk satisfy dependencies). Legacy `student_note` candidates remain committable during the
+  compatibility window.
 - Per candidate, inside try/catch (failure does NOT abort the chunk):
   - **customer**: resolve the merge target from `decisions`:
     - `link_to_existing` + `linked_id` → update that profile id with fill-empty.
@@ -122,6 +125,11 @@ Replace the `supabase.rpc('commit_import_chunk', …)` call with JS orchestratio
    `create_as_new` is only available when the duplicate issue is by email/name. A
    `duplicate_identity_number` blocker must be resolved via link-to-existing or ID
    correction before the candidate can commit. Duplicate name/email is a warning only.
+5. **Student contact path**: every student customer, active or inactive, requires either
+   a valid student phone or a linked guardian with a valid phone or email. A student email
+   alone does not satisfy this operational contact requirement. Source corrections may be
+   re-uploaded, and individual exceptions may be repaired in the candidate editor; both
+   routes must be analyzed again before commit.
 
 ## 10. Suggested implementation order
 1. Data-model + analyzer fields (`customer_type`, `is_active`, entity collapse).

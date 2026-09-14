@@ -9,7 +9,8 @@
  * Per-row try/catch: a per-row failure does NOT abort the chunk. Failed candidates are
  * marked 'failed' and returned in failures[]; the caller can retry only those IDs.
  *
- * Commit wave order: customer → guardian / service → guardian_link
+ * Commit wave order: customer → guardian / service / instructor →
+ * guardian_link / lesson → lesson_participant
  *
  * Body:    { candidate_ids: string[], org_id: string }
  * Returns: { committed, failed, workspace_id, results, failures }
@@ -41,9 +42,12 @@ const MAX_CANDIDATES_PER_CALL = 25;
 
 const ENTITY_WAVE = {
   customer:      0,
+  instructor:    1,
   guardian:      1,
   service:       1,
   guardian_link: 2,
+  lesson:        2,
+  lesson_participant: 3,
 };
 
 function normalizeUuid(value) {
@@ -297,20 +301,255 @@ async function commitService(supabase, orgId, candidate) {
   if (!serviceName) throw new Error('service_name_required');
 
   const { data: existing, error: lookupError } = await withOrgScope(supabase, 'Services', orgId)
-    .select('id')
+    .select('id, duration_minutes')
     .ilike('name', serviceName)
     .limit(1)
     .maybeSingle();
   if (lookupError) throw new Error(`failed_to_lookup_service:${lookupError.message}`);
-  if (existing?.id) return { serviceId: existing.id, ledgerAction: 'link' };
+  const durationMinutes = Number.parseInt(data.duration_minutes, 10);
+  const validDuration = Number.isInteger(durationMinutes) && durationMinutes > 0 ? durationMinutes : null;
+  if (existing?.id) {
+    if (!existing.duration_minutes && validDuration) {
+      const { error: updateError } = await withOrgScope(supabase, 'Services', orgId)
+        .update({ duration_minutes: validDuration })
+        .eq('id', existing.id);
+      if (updateError) throw new Error(`failed_to_fill_service_duration:${updateError.message}`);
+      return { serviceId: existing.id, ledgerAction: 'update' };
+    }
+    return { serviceId: existing.id, ledgerAction: 'link' };
+  }
 
   const { data: created, error: createError } = await withOrgScope(supabase, 'Services', orgId)
-    .insert({ org_id: orgId, name: serviceName, is_active: true })
+    .insert({ org_id: orgId, name: serviceName, duration_minutes: validDuration, is_active: true })
     .select('id')
     .single();
   if (createError || !created?.id) throw new Error(`failed_to_create_service:${createError?.message || 'unknown_error'}`);
 
   return { serviceId: created.id, ledgerAction: 'create' };
+}
+
+function importExternalIds(metadata = {}) {
+  return metadata?.import_external_ids && typeof metadata.import_external_ids === 'object'
+    ? metadata.import_external_ids
+    : {};
+}
+
+async function findEmployeeByExternalId(supabase, orgId, sourceSystem, sourceInstructorId) {
+  const { data, error } = await withOrgScope(supabase, 'Employees', orgId)
+    .select('id, first_name, last_name, employee_type, employee_id, is_active, metadata')
+    .contains('metadata', { import_external_ids: { [sourceSystem]: sourceInstructorId } })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw new Error(`failed_to_find_imported_instructor:${error.message}`);
+  return data || null;
+}
+
+async function ensureImportedInstructorProfile(supabase, orgId, employeeId, metadata) {
+  const { data: existing, error: lookupError } = await withOrgScope(supabase, 'instructor_profiles', orgId)
+    .select('employee_id')
+    .eq('employee_id', employeeId)
+    .maybeSingle();
+  if (lookupError) throw new Error(`failed_to_find_instructor_profile:${lookupError.message}`);
+  if (existing?.employee_id) return;
+  const { error: createError } = await withOrgScope(supabase, 'instructor_profiles', orgId)
+    .insert({ employee_id: employeeId, metadata });
+  if (createError) throw new Error(`failed_to_create_instructor_profile:${createError.message}`);
+}
+
+async function commitInstructor(supabase, orgId, workspaceId, candidate) {
+  const { candidate_data: data = {}, decisions = {} } = candidate;
+  const sourceSystem = normalizeString(data.source_system);
+  const sourceInstructorId = normalizeString(data.source_instructor_id);
+  if (!sourceSystem || !sourceInstructorId) throw new Error('instructor_source_id_required');
+
+  let employee = null;
+  let ledgerAction = 'link';
+  const linkedId = normalizeUuid(decisions.linked_id);
+  if (normalizeString(decisions.action) === 'link_to_existing') {
+    if (!linkedId) throw new Error('link_to_existing_missing_linked_id');
+    const { data: linked, error } = await withOrgScope(supabase, 'Employees', orgId)
+      .select('id, first_name, last_name, employee_type, employee_id, is_active, metadata')
+      .eq('id', linkedId)
+      .maybeSingle();
+    if (error) throw new Error(`failed_to_load_linked_instructor:${error.message}`);
+    if (!linked || normalizeString(linked.employee_type) !== 'instructor') {
+      throw new Error('linked_instructor_not_found');
+    }
+    employee = linked;
+  } else {
+    employee = await findEmployeeByExternalId(supabase, orgId, sourceSystem, sourceInstructorId);
+  }
+
+  const importMetadata = {
+    import_external_ids: {
+      ...importExternalIds(employee?.metadata),
+      [sourceSystem]: sourceInstructorId,
+    },
+    import: {
+      source_system: sourceSystem,
+      workspace_id: workspaceId,
+      candidate_id: candidate.id,
+    },
+  };
+
+  if (employee?.id) {
+    const nextMetadata = mergeMetadata(employee.metadata, importMetadata);
+    if (JSON.stringify(nextMetadata) !== JSON.stringify(employee.metadata || {})) {
+      const { error } = await withOrgScope(supabase, 'Employees', orgId)
+        .update({ metadata: nextMetadata })
+        .eq('id', employee.id);
+      if (error) throw new Error(`failed_to_link_imported_instructor:${error.message}`);
+      ledgerAction = 'update';
+    }
+    await ensureImportedInstructorProfile(supabase, orgId, employee.id, importMetadata);
+    return { employeeId: employee.id, ledgerAction };
+  }
+
+  const { data: created, error: createError } = await withOrgScope(supabase, 'Employees', orgId)
+    .insert({
+      org_id: orgId,
+      first_name: normalizeString(data.first_name),
+      middle_name: normalizeString(data.middle_name) || null,
+      last_name: normalizeString(data.last_name) || '',
+      employee_id: `${sourceSystem}:${sourceInstructorId}`,
+      employee_type: 'instructor',
+      payroll_model: null,
+      is_active: data.is_active === true,
+      metadata: importMetadata,
+    })
+    .select('id')
+    .single();
+  if (createError || !created?.id) throw new Error(`failed_to_create_instructor:${createError?.message || 'unknown_error'}`);
+
+  await ensureImportedInstructorProfile(supabase, orgId, created.id, importMetadata);
+  return { employeeId: created.id, ledgerAction: 'create' };
+}
+
+async function findLessonByExternalId(supabase, orgId, sourceSystem, sourceLessonId) {
+  const { data, error } = await withOrgScope(supabase, 'lesson_instances', orgId)
+    .select('id, datetime_start, instructor_employee_id, service_id, status, metadata')
+    .contains('metadata', { import_external_ids: { [sourceSystem]: sourceLessonId } })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw new Error(`failed_to_find_imported_lesson:${error.message}`);
+  return data || null;
+}
+
+async function commitLesson(supabase, orgId, workspaceId, candidate) {
+  const data = candidate.candidate_data || {};
+  const sourceSystem = normalizeString(data.source_system);
+  const sourceLessonId = normalizeString(data.source_lesson_id);
+  const sourceInstructorId = normalizeString(data.source_instructor_id);
+  const serviceName = normalizeString(data.service_name);
+  if (!sourceSystem || !sourceLessonId) throw new Error('lesson_source_id_required');
+
+  const existing = await findLessonByExternalId(supabase, orgId, sourceSystem, sourceLessonId);
+  if (existing?.id) return { lessonInstanceId: existing.id, ledgerAction: 'link' };
+
+  const instructor = await findEmployeeByExternalId(supabase, orgId, sourceSystem, sourceInstructorId);
+  if (!instructor?.id) throw new Error('lesson_instructor_not_found');
+  const { data: service, error: serviceError } = await withOrgScope(supabase, 'Services', orgId)
+    .select('id, duration_minutes')
+    .ilike('name', serviceName)
+    .limit(1)
+    .maybeSingle();
+  if (serviceError) throw new Error(`failed_to_find_lesson_service:${serviceError.message}`);
+  if (!service?.id) throw new Error('lesson_service_not_found');
+
+  const start = new Date(data.datetime_start);
+  if (Number.isNaN(start.getTime())) throw new Error('invalid_lesson_datetime_start');
+  const isFuture = start.getTime() > Date.now();
+  if (isFuture && data.lesson_status !== 'scheduled') throw new Error('future_lesson_must_be_scheduled');
+  if (isFuture && instructor.is_active !== true) throw new Error('future_lesson_requires_active_instructor');
+  const requestedDuration = Number.parseInt(data.duration_minutes, 10);
+  const durationMinutes = Number.isInteger(requestedDuration) && requestedDuration > 0
+    ? requestedDuration
+    : Number.parseInt(service.duration_minutes, 10);
+  if (!Number.isInteger(durationMinutes) || durationMinutes <= 0) throw new Error('lesson_duration_required');
+
+  const metadata = {
+    import_external_ids: { [sourceSystem]: sourceLessonId },
+    import: {
+      source_system: sourceSystem,
+      workspace_id: workspaceId,
+      candidate_id: candidate.id,
+      exclude_from_pending_reports: !isFuture,
+      finance_and_payroll_deferred: !isFuture,
+    },
+    legacy_note: normalizeString(data.legacy_note) || null,
+  };
+  const { data: created, error: createError } = await withOrgScope(supabase, 'lesson_instances', orgId)
+    .insert({
+      org_id: orgId,
+      datetime_start: start.toISOString(),
+      duration_minutes: durationMinutes,
+      instructor_employee_id: instructor.id,
+      service_id: service.id,
+      status: data.lesson_status,
+      documentation_status: 'undocumented',
+      is_closed: false,
+      created_source: 'migration',
+      metadata,
+    })
+    .select('id')
+    .single();
+  if (createError || !created?.id) throw new Error(`failed_to_create_lesson:${createError?.message || 'unknown_error'}`);
+  return { lessonInstanceId: created.id, ledgerAction: 'create' };
+}
+
+async function commitLessonParticipant(supabase, orgId, candidate) {
+  const data = candidate.candidate_data || {};
+  const sourceSystem = normalizeString(data.source_system);
+  const sourceLessonId = normalizeString(data.source_lesson_id);
+  const identityNumber = normalizeString(data.identity_number);
+  const lesson = await findLessonByExternalId(supabase, orgId, sourceSystem, sourceLessonId);
+  if (!lesson?.id) throw new Error('participant_lesson_not_found');
+
+  const { data: profile, error: profileError } = await findClientProfileByIdentityNumber(supabase, identityNumber, { orgId });
+  if (profileError) throw new Error(`failed_to_find_participant_profile:${profileError.message}`);
+  if (!profile?.id) throw new Error('participant_profile_not_found');
+  const { data: student, error: studentError } = await withOrgScope(supabase, 'students', orgId)
+    .select('id')
+    .eq('client_profile_id', profile.id)
+    .maybeSingle();
+  if (studentError) throw new Error(`failed_to_find_participant_student:${studentError.message}`);
+
+  const { data: existing, error: existingError } = await withOrgScope(supabase, 'lesson_participants', orgId)
+    .select('id')
+    .eq('lesson_instance_id', lesson.id)
+    .eq('client_profile_id', profile.id)
+    .maybeSingle();
+  if (existingError) throw new Error(`failed_to_find_imported_participant:${existingError.message}`);
+  if (existing?.id) return { lessonParticipantId: existing.id, ledgerAction: 'link' };
+
+  const isFuture = new Date(lesson.datetime_start).getTime() > Date.now();
+  if (isFuture && data.participant_status !== 'scheduled') throw new Error('future_participant_must_be_scheduled');
+  const sourceParticipantStatus = data.participant_status;
+  const liveParticipantStatus = 'scheduled';
+  const { data: created, error: createError } = await withOrgScope(supabase, 'lesson_participants', orgId)
+    .insert({
+      org_id: orgId,
+      lesson_instance_id: lesson.id,
+      client_profile_id: profile.id,
+      student_id: student?.id || null,
+      participant_status: liveParticipantStatus,
+      metadata: {
+        import: {
+          source_system: sourceSystem,
+          source_lesson_id: sourceLessonId,
+          candidate_id: candidate.id,
+          finance_and_payroll_deferred: !isFuture,
+          source_participant_status: sourceParticipantStatus,
+          status_inference: normalizeString(data.status_inference) || null,
+          historical_status_activation_deferred: !isFuture,
+        },
+        legacy_attendance_note: normalizeString(data.legacy_attendance_note) || null,
+      },
+    })
+    .select('id')
+    .single();
+  if (createError || !created?.id) throw new Error(`failed_to_create_lesson_participant:${createError?.message || 'unknown_error'}`);
+  return { lessonParticipantId: created.id, ledgerAction: 'create' };
 }
 
 // ─── Main handler ─────────────────────────────────────────────────────────────
@@ -484,6 +723,15 @@ export default async function importCommitChunk(context, req) {
       } else if (entity_type === 'service') {
         const result = await commitService(supabase, orgId, candidate);
         ledgerEntries.push({ resourceType: 'Services', resourceId: result.serviceId, action: result.ledgerAction });
+      } else if (entity_type === 'instructor') {
+        const result = await commitInstructor(supabase, orgId, workspaceId, candidate);
+        ledgerEntries.push({ resourceType: 'Employees', resourceId: result.employeeId, action: result.ledgerAction });
+      } else if (entity_type === 'lesson') {
+        const result = await commitLesson(supabase, orgId, workspaceId, candidate);
+        ledgerEntries.push({ resourceType: 'lesson_instances', resourceId: result.lessonInstanceId, action: result.ledgerAction });
+      } else if (entity_type === 'lesson_participant') {
+        const result = await commitLessonParticipant(supabase, orgId, candidate);
+        ledgerEntries.push({ resourceType: 'lesson_participants', resourceId: result.lessonParticipantId, action: result.ledgerAction });
       } else {
         throw new Error(`unsupported_entity_type:${entity_type}`);
       }

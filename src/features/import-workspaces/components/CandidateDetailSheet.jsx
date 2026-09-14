@@ -30,6 +30,16 @@ const FIELD_LABELS = {
   service_name:             'שם השירות',
   name:                     'שם השירות',
   description:              'תיאור',
+  source_system:            'מערכת מקור',
+  source_instructor_id:     'מזהה מדריך במקור',
+  source_lesson_id:         'מזהה מפגש במקור',
+  datetime_start:           'מועד המפגש',
+  lesson_status:            'סטטוס מפגש',
+  participant_status:       'סטטוס השתתפות',
+  duration_minutes:         'משך בדקות',
+  legacy_note:              'הערת מקור',
+  legacy_attendance_note:   'הערת נוכחות במקור',
+  status_inference:         'מקור הצעת הסטטוס',
 };
 
 const CUSTOMER_TYPE_LABELS = {
@@ -41,6 +51,18 @@ const SELECT_FIELD_OPTIONS = {
   customer_type: [
     { value: 'student',           label: 'תלמיד/ה' },
     { value: 'one_time_customer', label: 'לקוח/ה חד-פעמי/ת' },
+  ],
+  lesson_status: [
+    { value: 'scheduled', label: 'מתוכנן' },
+    { value: 'completed', label: 'הושלם' },
+    { value: 'cancelled', label: 'בוטל' },
+  ],
+  participant_status: [
+    { value: 'scheduled', label: 'מתוכנן' },
+    { value: 'attended', label: 'השתתף/ה' },
+    { value: 'no_show', label: 'לא הגיע/ה' },
+    { value: 'cancelled_student', label: 'בוטל על ידי הלקוח/ה' },
+    { value: 'cancelled_clinic', label: 'בוטל על ידי הארגון' },
   ],
 };
 
@@ -64,6 +86,9 @@ const ENTITY_LABELS = {
   guardian:         'הורה',
   guardian_link:    'קישור הורה-תלמיד',
   service:          'שירות',
+  instructor:       'מדריך/ה',
+  lesson:           'מפגש',
+  lesson_participant: 'משתתף/ת במפגש',
 };
 
 const ENTITY_TAB_LABELS = {
@@ -77,6 +102,9 @@ const ENTITY_TAB_ORDER = {
   guardian: 1,
   guardian_link: 2,
   service: 3,
+  instructor: 4,
+  lesson: 5,
+  lesson_participant: 6,
 };
 
 const STATUS_LABELS = {
@@ -103,10 +131,13 @@ const EDITABLE_FIELDS_BY_ENTITY = {
   customer: ['first_name', 'last_name', 'identity_number', 'customer_type', 'is_active', 'phone', 'email', 'date_of_birth', 'note_text'],
   guardian: ['guardian_first_name', 'guardian_last_name', 'guardian_phone', 'guardian_email'],
   guardian_link: ['identity_number', 'guardian_phone', 'guardian_email', 'relationship', 'is_primary'],
-  service: ['service_name', 'description'],
+  service: ['source_system', 'source_service_id', 'service_name', 'duration_minutes', 'description'],
+  instructor: ['source_system', 'source_instructor_id', 'first_name', 'middle_name', 'last_name', 'is_active'],
+  lesson: ['source_system', 'source_lesson_id', 'datetime_start', 'source_instructor_id', 'service_name', 'lesson_status', 'duration_minutes', 'legacy_note'],
+  lesson_participant: ['source_system', 'source_lesson_id', 'identity_number', 'participant_status', 'legacy_attendance_note', 'status_inference'],
 };
 
-const MULTILINE_FIELDS = new Set(['description', 'note_text']);
+const MULTILINE_FIELDS = new Set(['description', 'note_text', 'legacy_note', 'legacy_attendance_note']);
 const BOOLEAN_FIELDS = new Set(['is_primary', 'is_active']);
 
 const DRY_RUN_OUTCOME_LABELS = {
@@ -180,6 +211,7 @@ function candidateTitle(candidate) {
   return [data.first_name, data.last_name].filter(Boolean).join(' ')
     || [data.guardian_first_name, data.guardian_last_name].filter(Boolean).join(' ')
     || data.service_name
+    || data.source_lesson_id
     || 'רשומה';
 }
 
@@ -422,6 +454,7 @@ function ProfileResultCard({ profile, onLink, disabled }) {
       </div>
       <div className="mt-0.5 space-y-0.5 text-xs text-muted-foreground">
         {profile.identity_number && <div>ת״ז: {profile.identity_number}</div>}
+        {profile.external_employee_id && <div>מזהה עובד/ת: {profile.external_employee_id}</div>}
         {profile.phone && <div>טלפון: {profile.phone}</div>}
         {parents && <div>הורה: {parents}</div>}
       </div>
@@ -429,7 +462,7 @@ function ProfileResultCard({ profile, onLink, disabled }) {
         size="sm"
         variant="outline"
         className="mt-2 w-full gap-1.5"
-        onClick={() => onLink(profile.client_profile_id)}
+        onClick={() => onLink(profile.client_profile_id || profile.employee_id)}
         disabled={disabled}
       >
         <Link2 className="h-3.5 w-3.5" />
@@ -512,7 +545,7 @@ export function CandidateDetailSheet({ candidate, workspaceId, open, onClose, on
     setLinkError(null);
     const handle = setTimeout(async () => {
       try {
-        const data = await searchLinkTargets({ query: q });
+        const data = await searchLinkTargets({ query: q, entityType: candidate?.entity_type });
         if (!cancelled) setLinkResults(data?.results || []);
       } catch (err) {
         if (!cancelled) setLinkError(err.message || 'שגיאה בחיפוש');
@@ -521,7 +554,7 @@ export function CandidateDetailSheet({ candidate, workspaceId, open, onClose, on
       }
     }, 300);
     return () => { cancelled = true; clearTimeout(handle); };
-  }, [linkMode, linkStep, linkQuery]);
+  }, [candidate?.entity_type, linkMode, linkStep, linkQuery]);
 
   // Source the family group from the relations hook (if available).
   const relationGroup = relationsHook?.getGroupForCandidate(candidate?.id) ?? null;
@@ -547,6 +580,7 @@ export function CandidateDetailSheet({ candidate, workspaceId, open, onClose, on
     : {};
   const editable = status !== 'committed';
   const busy = saving || savingField !== null;
+  const canLinkExisting = ['customer', 'instructor'].includes(entity_type);
 
   // Rows shown with a value (plus whatever field is currently being edited).
   const valueFields = editableFields.filter((f) => hasValue(f, candidate_data));
@@ -647,7 +681,7 @@ export function CandidateDetailSheet({ candidate, workspaceId, open, onClose, on
     setLinkResults([]);
     setLinkQuery('');
     const identity = candidate_data.identity_number;
-    if (identity) {
+    if (entity_type === 'customer' && identity) {
       runIdentityLookup(identity);
     } else {
       setLinkStep('search');
@@ -1130,36 +1164,43 @@ export function CandidateDetailSheet({ candidate, workspaceId, open, onClose, on
 
             {status !== 'committed' && status !== 'skipped' && !linkMode && (
               <>
-                <p className="text-xs text-muted-foreground">
-                  אם זו אותה רשומה שכבר קיימת במערכת, קשר אותה לרשומה הקיימת. אם זה אדם אחר עם פרט דומה, צור רשומה חדשה. אם לא רוצים לייבא את השורה, דלג עליה.
-                </p>
-                <Button
-                  variant="outline"
-                  className="w-full justify-start gap-2"
-                  onClick={openLinkPanel}
-                  disabled={busy}
-                >
-                  <Link2 className="h-4 w-4" />
-                  קשר לאדם שכבר קיים במערכת
-                </Button>
-                <p className="text-[11px] leading-5 text-muted-foreground">
-                  המערכת תחפש קודם רשומה קיימת לפי תעודת זהות. אם לא תימצא התאמה, אפשר לחפש לפי שם, טלפון, ת״ז או פרטי הורה.
-                </p>
-
-                {!hasIdentityBlocker && (
+                {canLinkExisting && (
                   <>
+                    <p className="text-xs text-muted-foreground">
+                      {entity_type === 'instructor'
+                        ? 'אפשר לקשר את המדריך/ה למדריך/ה שכבר קיים/ת, ליצור רשומה חדשה ללא חשבון משתמש, או לדלג.'
+                        : 'אם זו אותה רשומה שכבר קיימת במערכת, קשר אותה לרשומה הקיימת. אם זה אדם אחר עם פרט דומה, צור רשומה חדשה. אם לא רוצים לייבא את השורה, דלג עליה.'}
+                    </p>
                     <Button
                       variant="outline"
                       className="w-full justify-start gap-2"
-                      onClick={handleCreateAsNew}
+                      onClick={openLinkPanel}
                       disabled={busy}
                     >
-                      <PlusCircle className="h-4 w-4" />
-                      צור אדם חדש אפילו אם זוהה כקיים
+                      <Link2 className="h-4 w-4" />
+                      {entity_type === 'instructor' ? 'קשר למדריך/ה קיים/ת' : 'קשר לאדם שכבר קיים במערכת'}
                     </Button>
                     <p className="text-[11px] leading-5 text-muted-foreground">
-                      מתאים אם זו לא אותה רשומה קיימת, או אם האדם עדיין לא קיים במערכת.
+                      {entity_type === 'instructor'
+                        ? 'החיפוש מתבצע לפי שם, מזהה עובד/ת, טלפון או אימייל.'
+                        : 'המערכת תחפש קודם רשומה קיימת לפי תעודת זהות. אם לא תימצא התאמה, אפשר לחפש לפי שם, טלפון, ת״ז או פרטי הורה.'}
                     </p>
+                    {!hasIdentityBlocker && (
+                      <>
+                        <Button
+                          variant="outline"
+                          className="w-full justify-start gap-2"
+                          onClick={handleCreateAsNew}
+                          disabled={busy}
+                        >
+                          <PlusCircle className="h-4 w-4" />
+                          {entity_type === 'instructor' ? 'צור מדריך/ה חדש/ה' : 'צור אדם חדש אפילו אם זוהה כקיים'}
+                        </Button>
+                        <p className="text-[11px] leading-5 text-muted-foreground">
+                          מתאים אם זו לא אותה רשומה קיימת, או אם האדם עדיין לא קיים במערכת.
+                        </p>
+                      </>
+                    )}
                   </>
                 )}
 
@@ -1175,7 +1216,7 @@ export function CandidateDetailSheet({ candidate, workspaceId, open, onClose, on
               </>
             )}
 
-            {status !== 'committed' && status !== 'skipped' && linkMode && (
+            {status !== 'committed' && status !== 'skipped' && linkMode && canLinkExisting && (
               <div className="rounded-lg border p-3 space-y-3">
                 <div className="flex items-center justify-between">
                   <h4 className="text-sm font-semibold">קישור לרשומה קיימת</h4>
@@ -1228,7 +1269,7 @@ export function CandidateDetailSheet({ candidate, workspaceId, open, onClose, on
                       <Input
                         value={linkQuery}
                         onChange={(e) => setLinkQuery(e.target.value)}
-                        placeholder="חיפוש לפי שם, טלפון, ת״ז או הורה"
+                        placeholder={entity_type === 'instructor' ? 'חיפוש לפי שם או מזהה עובד/ת' : 'חיפוש לפי שם, טלפון, ת״ז או הורה'}
                         className="ps-8"
                         autoFocus
                         disabled={linking}

@@ -2461,7 +2461,7 @@ CREATE TABLE IF NOT EXISTS public.forms (
   updated_at timestamptz NOT NULL DEFAULT now(),
   is_active boolean NOT NULL DEFAULT true,
   metadata jsonb NULL,
-  CONSTRAINT forms_form_usage_check CHECK (form_usage IN ('general','waiting_list_intake','required_form'))
+  CONSTRAINT forms_form_usage_check CHECK (form_usage IN ('general','waiting_list_intake','required_form','session_report'))
 );
 
 
@@ -2470,13 +2470,9 @@ UPDATE public.forms
 SET form_usage = COALESCE(NULLIF(form_usage, ''), 'general')
 WHERE form_usage IS NULL OR form_usage = '';
 
--- Migration: expand form_usage to include required_form
-ALTER TABLE public.forms
-  DROP CONSTRAINT IF EXISTS forms_form_usage_check,
-  ADD CONSTRAINT forms_form_usage_check
-    CHECK (form_usage IN ('general','waiting_list_intake','required_form'));
-
--- Migration: expand form_usage to include session_report
+-- Migration: expand form_usage to the current set (required_form, then session_report).
+-- Only ONE re-creation of this constraint may exist in this file: an older, narrower
+-- re-creation before this one fails on databases that already hold session_report forms.
 -- (Session Reports Phase 2; see implementations/session-reports/implementation-plan.md)
 UPDATE public.forms
 SET form_usage = COALESCE(NULLIF(form_usage, ''), 'general')
@@ -2693,6 +2689,7 @@ AS $function$
     AND li.status <> 'cancelled'
     AND li.datetime_start <= now()
     AND service.report_form_id IS NOT NULL
+    AND COALESCE(li.metadata -> 'import' ->> 'exclude_from_pending_reports', 'false') <> 'true'
     AND (
       p_instructor_employee_id IS NULL
       OR li.instructor_employee_id = p_instructor_employee_id
@@ -6507,7 +6504,11 @@ CREATE TABLE IF NOT EXISTS public.import_candidates (
       'customer',
       'guardian',
       'guardian_link',
-      'service'
+      'service',
+      'instructor',
+      'lesson',
+      'lesson_participant',
+      'student_note'
     )
   ),
   CONSTRAINT import_candidates_status_check CHECK (
@@ -6579,8 +6580,10 @@ CREATE INDEX IF NOT EXISTS import_candidates_blocking_idx
 CREATE INDEX IF NOT EXISTS import_candidates_merged_rows_gin_idx
   ON public.import_candidates USING gin (merged_from_row_ids);
 
--- ── Migration: collapse legacy import entity types into the canonical four ──────
--- The import pipeline now uses exactly: customer, guardian, guardian_link, service.
+-- ── Migration: collapse legacy import entity types into the supported import set ──
+-- The import pipeline supports customer, guardian, guardian_link, service,
+-- instructor, lesson, and lesson_participant. student_note remains allowed only
+-- for already-committed historical staging rows.
 -- Legacy staging rows (active_student / inactive_student / student_note) and the old
 -- guardian candidate_data shape are converted in-place so no backward-compat code is
 -- needed. Every step is idempotent — each WHERE clause only matches un-migrated rows.
@@ -6640,14 +6643,32 @@ BEGIN
   )
   AND NOT EXISTS (
     SELECT 1 FROM public.import_candidates
-     WHERE entity_type NOT IN ('customer', 'guardian', 'guardian_link', 'service')
+     WHERE entity_type NOT IN (
+       'customer', 'guardian', 'guardian_link', 'service',
+       'instructor', 'lesson', 'lesson_participant', 'student_note'
+     )
   ) THEN
     ALTER TABLE public.import_candidates
       ADD CONSTRAINT import_candidates_entity_type_check CHECK (
-        entity_type IN ('customer', 'guardian', 'guardian_link', 'service')
+        entity_type IN (
+          'customer', 'guardian', 'guardian_link', 'service',
+          'instructor', 'lesson', 'lesson_participant', 'student_note'
+        )
       );
   END IF;
 END $$;
+
+-- Expand environments that already have the former four-entity constraint.
+ALTER TABLE public.import_candidates
+  DROP CONSTRAINT IF EXISTS import_candidates_entity_type_check;
+
+ALTER TABLE public.import_candidates
+  ADD CONSTRAINT import_candidates_entity_type_check CHECK (
+    entity_type IN (
+      'customer', 'guardian', 'guardian_link', 'service',
+      'instructor', 'lesson', 'lesson_participant', 'student_note'
+    )
+  );
 
 -- import_commit_ledger: immutable audit trail for every live record created, updated, or linked
 -- by an import commit. Workspace CASCADE handles bulk cleanup when a workspace is deleted.

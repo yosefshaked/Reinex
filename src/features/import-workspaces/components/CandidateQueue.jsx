@@ -11,6 +11,9 @@ const ENTITY_TYPE_LABELS = {
   guardian:         'הורה',
   guardian_link:    'קישור הורה-תלמיד',
   service:          'שירות',
+  instructor:       'מדריך/ה',
+  lesson:           'מפגש',
+  lesson_participant: 'משתתף/ת במפגש',
 };
 
 const STATUS_LABELS = {
@@ -45,6 +48,7 @@ function CandidateRow({ candidate, onSelect }) {
       candidate.candidate_data?.guardian_last_name,
     ].filter(Boolean).join(' ')
     || candidate.candidate_data?.service_name
+    || candidate.candidate_data?.source_lesson_id
     || candidate.candidate_data?.name
     || '—';
 
