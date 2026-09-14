@@ -2461,7 +2461,7 @@ CREATE TABLE IF NOT EXISTS public.forms (
   updated_at timestamptz NOT NULL DEFAULT now(),
   is_active boolean NOT NULL DEFAULT true,
   metadata jsonb NULL,
-  CONSTRAINT forms_form_usage_check CHECK (form_usage IN ('general','waiting_list_intake','required_form'))
+  CONSTRAINT forms_form_usage_check CHECK (form_usage IN ('general','waiting_list_intake','required_form','session_report'))
 );
 
 
@@ -2470,13 +2470,9 @@ UPDATE public.forms
 SET form_usage = COALESCE(NULLIF(form_usage, ''), 'general')
 WHERE form_usage IS NULL OR form_usage = '';
 
--- Migration: expand form_usage to include required_form
-ALTER TABLE public.forms
-  DROP CONSTRAINT IF EXISTS forms_form_usage_check,
-  ADD CONSTRAINT forms_form_usage_check
-    CHECK (form_usage IN ('general','waiting_list_intake','required_form'));
-
--- Migration: expand form_usage to include session_report
+-- Migration: expand form_usage to the current set (required_form, then session_report).
+-- Only ONE re-creation of this constraint may exist in this file: an older, narrower
+-- re-creation before this one fails on databases that already hold session_report forms.
 -- (Session Reports Phase 2; see implementations/session-reports/implementation-plan.md)
 UPDATE public.forms
 SET form_usage = COALESCE(NULLIF(form_usage, ''), 'general')
