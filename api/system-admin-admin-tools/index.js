@@ -3,10 +3,10 @@ import { resolveBearerAuthorization } from '../_shared/http.js';
 import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../_shared/supabase-admin.js';
 import { ensureSystemAdmin, normalizeString, parseRequestBody, readEnv, respond } from '../_shared/org-bff.js';
 import { respondTrackedError } from '../_shared/error-events.js';
-import { logAuditEvent, AUDIT_CATEGORIES } from '../_shared/audit-log.js';
+import { logAuditEvent } from '../_shared/audit-log.js';
 import BillingLedgerService from '../_shared/BillingLedgerService.js';
 import {
-  LESSON_CLOSURE_RESYNC_AUDIT_EVENT,
+  buildLessonClosureResyncAuditEvent,
   LESSON_CLOSURE_RESYNC_TOOL,
   normalizeLessonClosureResyncRequest,
   runLessonClosureResyncBatch,
@@ -51,30 +51,23 @@ async function runMaintenanceTool(context, req, supabase, admin) {
       },
     });
 
-    const changedLessonIds = result.items
-      .filter((item) => item.status === 'changed')
-      .map((item) => item.lesson_instance_id);
-    if (request.mode === 'apply' && changedLessonIds.length > 0) {
-      await logAuditEvent(supabase, {
-        orgId: request.orgId,
-        userId: admin.userId,
-        userEmail: admin.email || 'unknown',
-        userRole: 'system_admin',
-        actionType: LESSON_CLOSURE_RESYNC_AUDIT_EVENT,
-        actionCategory: AUDIT_CATEGORIES.SYSTEM_ADMIN,
-        resourceType: 'maintenance_job',
-        resourceId: LESSON_CLOSURE_RESYNC_TOOL,
-        details: {
-          scope: request.scope,
-          org_id: request.orgId,
-          cursor: request.cursor,
-          totals: result.totals,
-          changed_lesson_instance_ids: changedLessonIds,
-        },
-      });
+    // The page's lessons are already written at this point, so a failed audit write must not turn the
+    // response into an error (the console would stop and hide real progress); report it instead.
+    const auditEvent = buildLessonClosureResyncAuditEvent({ admin, request, result });
+    let auditLogged = null;
+    if (auditEvent) {
+      try {
+        auditLogged = Boolean(await logAuditEvent(supabase, auditEvent));
+      } catch (auditError) {
+        auditLogged = false;
+        context.log?.error?.('system-admin-admin-tools: failed to audit lesson closure re-sync', {
+          message: auditError?.message,
+          changedCount: auditEvent.details.changed_lesson_instance_ids.length,
+        });
+      }
     }
 
-    return respond(context, 200, { ...result, ran_at: new Date().toISOString() });
+    return respond(context, 200, { ...result, audit_logged: auditLogged, ran_at: new Date().toISOString() });
   } catch (error) {
     context.log?.error?.('system-admin-admin-tools: lesson closure re-sync failed', {
       message: error?.message,

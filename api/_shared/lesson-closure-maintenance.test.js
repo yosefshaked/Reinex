@@ -2,11 +2,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  buildLessonClosureResyncAuditEvent,
   LESSON_CLOSURE_RESYNC_DEFAULT_LIMIT,
   LESSON_CLOSURE_RESYNC_MAX_LIMIT,
   normalizeLessonClosureResyncRequest,
   runLessonClosureResyncBatch,
 } from './lesson-closure-maintenance.js';
+import { logAuditEvent } from './audit-log.js';
 
 const ORG_ID = '11111111-1111-4111-8111-111111111111';
 const id = (n) => `aaaaaaaa-aaaa-4aaa-8aaa-${String(n).padStart(12, '0')}`;
@@ -144,6 +146,54 @@ test('a failing or missing lesson is reported and does not stop the page', async
   assert.deepEqual(failures, [[id(1), 'database exploded: raw detail']]);
   assert.equal(result.totals.failed, 2);
   assert.deepEqual(plans.applied, [id(3)]);
+});
+
+test('the apply audit event passes the real logAuditEvent validation', async () => {
+  const request = normalizeLessonClosureResyncRequest({ mode: 'apply' }).request;
+  const result = {
+    totals: { would_change: 0, changed: 1, unchanged: 1, closes: 0, failed: 0 },
+    items: [
+      { lesson_instance_id: id(1), status: 'changed' },
+      { lesson_instance_id: id(2), status: 'unchanged' },
+    ],
+  };
+  const event = buildLessonClosureResyncAuditEvent({ admin: { userId: 'admin-user', email: '' }, request, result });
+
+  for (const field of ['userId', 'userEmail', 'userRole', 'actionType', 'actionCategory']) {
+    assert.ok(event[field], `${field} must be set`);
+  }
+  assert.equal(event.actionCategory, 'admin_control');
+  assert.equal(event.userEmail, 'unknown');
+  assert.deepEqual(event.details.changed_lesson_instance_ids, [id(1)]);
+
+  // Run it through the real logAuditEvent (it throws on missing required fields) with a capturing client.
+  const inserted = [];
+  const client = {
+    from: () => ({
+      insert: (row) => {
+        inserted.push(row);
+        return { select: () => ({ single: async () => ({ data: { id: 'audit-1' }, error: null }) }) };
+      },
+    }),
+  };
+  assert.equal(await logAuditEvent(client, event), 'audit-1');
+  assert.equal(inserted[0].action_category, 'admin_control');
+  assert.equal(inserted[0].retention_category, 'critical');
+});
+
+test('no audit event for a preview or an apply page that changed nothing', () => {
+  const unchanged = { totals: {}, items: [{ lesson_instance_id: id(1), status: 'unchanged' }] };
+  const changed = { totals: {}, items: [{ lesson_instance_id: id(1), status: 'would_change' }] };
+  assert.equal(buildLessonClosureResyncAuditEvent({
+    admin: { userId: 'u', email: 'a@b.c' },
+    request: normalizeLessonClosureResyncRequest({ mode: 'preview' }).request,
+    result: changed,
+  }), null);
+  assert.equal(buildLessonClosureResyncAuditEvent({
+    admin: { userId: 'u', email: 'a@b.c' },
+    request: normalizeLessonClosureResyncRequest({ mode: 'apply' }).request,
+    result: unchanged,
+  }), null);
 });
 
 test('the candidate query scopes by closure, org, reason and cursor, and pages by id', async () => {
