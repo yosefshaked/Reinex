@@ -26,6 +26,8 @@ Every system-admin API endpoint must call `ensureSystemAdmin` before touching da
 4. Check DB flag: `profiles.is_system_admin = true` (only settable via direct DB — no API can set it)
 5. Write audit attempt to `audit_log`
 
+**Local development without MFA:** set `SYSTEM_ADMIN_ALLOW_WITHOUT_MFA=true` in `api/local.settings.json` to let test system admins without an authenticator app skip step 3. `isSystemAdminMfaBypassAllowed` (org-bff.js) honours the flag only when the Supabase URL is a loopback host (`localhost` / `127.0.0.1`) and `AZURE_FUNCTIONS_ENVIRONMENT` is not `Production`, so it can never apply to a deployed environment. `/api/config` returns `systemAdminMfaOptional: true` in that case, and `src/admin/authProvider.js` then skips the redirect to `/system-admin/mfa`. It's a single variable; the API is the gate. Never set it in Azure app settings.
+
 ## API Naming Rule
 
 All system-admin endpoints use the prefix `system-admin-*` (e.g., `system-admin-store`, `system-admin-users`).
@@ -42,6 +44,12 @@ The one exception is the public announcement endpoint (`api/announcement/`) whic
 4. In `AdminApp.jsx`: add import, add to `LIVE_ELEMENTS`, add `<Route path="<name>" element={...} />`
 
 Current example: `Admin Tools` lives at `/system-admin/admin-tools` and is backed by `api/system-admin-admin-tools/`.
+
+Admin Tools has two kinds of tool:
+- **Read-only diagnostics** use `GET`, for example `hmo_claim_readiness`.
+- **Write jobs** use `POST` with `tool` in the body. The first is `lesson_closure_resync` (logic in [`../api/_shared/lesson-closure-maintenance.js`](../api/_shared/lesson-closure-maintenance.js), UI in `src/admin/modules/LessonClosureResyncTool.jsx`). It re-evaluates stored lesson closure state in keyset pages. `preview` never writes. `apply` writes only changed lessons, which bumps their versions, and logs `system_admin.lesson_closure_resync` to `audit_log`.
+
+New write jobs follow the same pattern: preview then apply, one page per request (the console loops on `next_cursor`), shared plan/apply code with the product flow, and an audit row for every apply page that changes data.
 
 If you only add to `LIVE_ELEMENTS` but forget the `<Route>`, navigation will hit the catch-all `path="*"` and redirect loop (triggers repeated `is_system_admin` checks visible as network spam).
 

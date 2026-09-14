@@ -135,6 +135,29 @@ function decodeJwtPayload(token) {
   }
 }
 
+const LOOPBACK_HOSTNAMES = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
+const SUPABASE_URL_ENV_KEYS = ['SUPABASE_URL', 'APP_CONTROL_DB_URL', 'APP_SUPABASE_URL', 'VITE_APP_SUPABASE_URL', 'supabaseUrl'];
+
+/**
+ * Local development only: lets system-admin test accounts without an authenticator app into the
+ * system-admin console without the MFA (AAL2) step. Every condition must hold, so a stray setting can
+ * never weaken a deployed environment:
+ * - SYSTEM_ADMIN_ALLOW_WITHOUT_MFA=true
+ * - the Supabase URL points at a loopback host (the local Supabase stack)
+ * - AZURE_FUNCTIONS_ENVIRONMENT is not "Production"
+ * Reads only the env it is given (no process.env fallback for the URL), so the decision is explicit.
+ */
+export function isSystemAdminMfaBypassAllowed(env = process.env ?? {}) {
+  if (normalizeString(env?.SYSTEM_ADMIN_ALLOW_WITHOUT_MFA).toLowerCase() !== 'true') return false;
+  if (normalizeString(env?.AZURE_FUNCTIONS_ENVIRONMENT).toLowerCase() === 'production') return false;
+  const supabaseUrl = SUPABASE_URL_ENV_KEYS.map((key) => normalizeString(env?.[key])).find(Boolean) || '';
+  try {
+    return LOOPBACK_HOSTNAMES.has(new URL(supabaseUrl).hostname.toLowerCase());
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Verifies that the request comes from a system admin with MFA (AAL2).
  *
@@ -182,8 +205,11 @@ export async function ensureSystemAdmin(req, supabase, authorization, options = 
   const aal = jwtPayload?.aal || 'aal1';
 
   if (aal !== 'aal2') {
-    await logAdminAttempt(supabase, { userId, email, success: false, reason: 'mfa_required', context });
-    throw Object.assign(new Error('mfa_required'), { statusCode: 403 });
+    if (!isSystemAdminMfaBypassAllowed(readEnv(context))) {
+      await logAdminAttempt(supabase, { userId, email, success: false, reason: 'mfa_required', context });
+      throw Object.assign(new Error('mfa_required'), { statusCode: 403 });
+    }
+    context?.log?.warn?.('ensureSystemAdmin: MFA step skipped (local SYSTEM_ADMIN_ALLOW_WITHOUT_MFA)', { userId });
   }
 
   // 3. Verify is_system_admin flag in profiles (service_role bypasses RLS)

@@ -1,4 +1,4 @@
-import { respond, readEnv } from '../_shared/org-bff.js';
+import { isSystemAdminMfaBypassAllowed, respond, readEnv } from '../_shared/org-bff.js';
 import { readSupabasePublicConfig } from '../_shared/supabase-admin.js';
 
 function maskForLog(value) {
@@ -65,6 +65,12 @@ export default async function (context) {
 
     if (posthogHost) {
       payload.posthogHost = posthogHost;
+    }
+
+    // Local development only; tells the system-admin console it may skip the MFA screen.
+    // The API still enforces the same rule in ensureSystemAdmin.
+    if (isSystemAdminMfaBypassAllowed(env)) {
+      payload.systemAdminMfaOptional = true;
     }
 
     return respond(
