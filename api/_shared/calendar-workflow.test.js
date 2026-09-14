@@ -2,7 +2,12 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { evaluateLessonClosureState, syncLessonClosureState } from './calendar-workflow.js';
+import {
+  applyLessonClosurePlan,
+  evaluateLessonClosureState,
+  planLessonClosureSync,
+  syncLessonClosureState,
+} from './calendar-workflow.js';
 
 // ---------------------------------------------------------------------------
 // Minimal in-memory tenant client for loadLessonWorkflowState/syncLessonClosureState.
@@ -244,7 +249,8 @@ describe('syncLessonClosureState change detection', () => {
     const updates = lessonInstanceUpdates(client);
     assert.equal(updates.length, 1);
     const [{ payload, filters }] = updates;
-    assert.deepEqual(filters, [['eq', 'id', INSTANCE_ID]]);
+    // Org-scoped write (withOrgScope adds org_id before the id filter).
+    assert.deepEqual(filters, [['eq', 'org_id', ORG_ID], ['eq', 'id', INSTANCE_ID]]);
     assert.deepEqual(Object.keys(payload).sort(), ['closed_at', 'closed_by', 'is_closed', 'metadata']);
     assert.equal(payload.is_closed, false);
     assert.equal(payload.closed_at, null);
@@ -411,5 +417,31 @@ describe('evaluateLessonClosureState HMO claim requirement', () => {
     const result = evaluateLessonClosureState(attendedClosureState({ decision: 'required' }));
     assert.equal(result.participants[0].hmo_claim_required, true);
     assert.ok(result.reasons_open.includes('hmo_claim_unresolved'));
+  });
+});
+
+describe('planLessonClosureSync / applyLessonClosurePlan', () => {
+  it('plans without writing, and applies only a changed plan', async () => {
+    const client = makeClient();
+
+    const plan = await planLessonClosureSync(client, INSTANCE_ID, ACTOR_USER_ID);
+    assert.equal(lessonInstanceUpdates(client).length, 0, 'planning never writes');
+    assert.equal(plan.hasChanged, true);
+    assert.equal(plan.orgId, ORG_ID);
+    assert.equal(plan.previousReasonsOpen, null, 'never evaluated before');
+    assert.deepEqual(plan.result.reasons_open, ['attendance_unresolved']);
+
+    assert.equal(await applyLessonClosurePlan(client, plan), true);
+    assert.equal(lessonInstanceUpdates(client).length, 1);
+
+    const replanned = await planLessonClosureSync(client, INSTANCE_ID, ACTOR_USER_ID);
+    assert.equal(replanned.hasChanged, false);
+    assert.deepEqual(replanned.previousReasonsOpen, ['attendance_unresolved']);
+    assert.equal(await applyLessonClosurePlan(client, replanned), false);
+    assert.equal(lessonInstanceUpdates(client).length, 1, 'an unchanged plan does not write');
+  });
+
+  it('returns null for a lesson that does not exist', async () => {
+    assert.equal(await planLessonClosureSync(makeClient(), 'missing-instance', ACTOR_USER_ID), null);
   });
 });

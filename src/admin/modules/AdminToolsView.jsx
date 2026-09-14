@@ -8,6 +8,7 @@ import { Textarea } from '@/components/ui/textarea';
 import ModuleShell from '../ui/ModuleShell.jsx';
 import StatusBadge from '../ui/StatusBadge.jsx';
 import { useAdminModuleView } from '../lib/admin-analytics.js';
+import LessonClosureResyncTool from './LessonClosureResyncTool.jsx';
 
 function JsonBlock({ value }) {
   let text = 'null';
@@ -126,7 +127,7 @@ export default function AdminToolsView() {
     <ModuleShell
       title="Admin Tools"
       subtitle="Operations"
-      description="Focused system-admin diagnostics for finance and workflow issues. The first tool inspects HMO claim readiness using the same ledger service and batch validations the product flow uses."
+      description="Focused system-admin diagnostics and maintenance jobs for finance and workflow issues: an HMO claim readiness check (read-only, same ledger service and batch validations as the product flow) and the lesson closure re-sync (preview first, then apply)."
       actions={checkedAt ? <span className="text-xs text-slate-500">Last checked: {checkedAt}</span> : null}
     >
       <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -240,6 +241,7 @@ export default function AdminToolsView() {
           </article>
         </section>
       ) : null}
+      <LessonClosureResyncTool />
     </ModuleShell>
   );
 }

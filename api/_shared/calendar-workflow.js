@@ -1,7 +1,7 @@
 /* eslint-env node */
 import { loadFinancePolicies } from './employee-finance.js';
 import { listDashboardTasks } from './dashboard-tasks.js';
-import { normalizeString } from './org-bff.js';
+import { normalizeString, withOrgScope } from './org-bff.js';
 import { isPlainObject, readParticipantWorkflowMetadata, shouldParticipantTriggerInstructorCompensation } from './calendar-workflow-decisions.js';
 import { coerceAgorot } from './currency.js';
 
@@ -356,7 +356,12 @@ function buildWorkflowStateComparisonKey(workflowState) {
   }, sortObjectKeysReplacer);
 }
 
-export async function syncLessonClosureState(tenantClient, lessonInstanceId, actorUserId = null) {
+/**
+ * Evaluate a lesson's closure state and build the lesson_instances update WITHOUT writing it.
+ * Returns null when the lesson does not exist. `hasChanged` is false when the stored state already
+ * matches, so callers never rewrite (and version-bump) an unchanged lesson.
+ */
+export async function planLessonClosureSync(tenantClient, lessonInstanceId, actorUserId = null) {
   const state = await loadLessonWorkflowState(tenantClient, lessonInstanceId);
   if (!state?.instance) {
     return null;
@@ -388,22 +393,46 @@ export async function syncLessonClosureState(tenantClient, lessonInstanceId, act
       || buildWorkflowStateComparisonKey(currentMetadata.workflow_state) !== buildWorkflowStateComparisonKey(nextWorkflowState),
   );
 
-  if (hasChanged) {
-    const { error: updateError } = await tenantClient
-      .from('lesson_instances')
-      .update(nextPayload)
-      .eq('id', lessonInstanceId);
+  return {
+    lessonInstanceId,
+    orgId: state.instance.org_id || null,
+    hasChanged,
+    payload: nextPayload,
+    previousReasonsOpen: isPlainObject(currentMetadata.workflow_state)
+      ? asArray(currentMetadata.workflow_state.reasons_open)
+      : null,
+    result: {
+      lesson_instance_id: lessonInstanceId,
+      is_closed: evaluation.should_close,
+      reasons_open: evaluation.reasons_open,
+      summary: evaluation.summary,
+      participants: evaluation.participants,
+    },
+  };
+}
 
-    if (updateError) {
-      throw updateError;
-    }
+/** Write a plan from planLessonClosureSync. Unchanged plans are skipped; returns whether it wrote. */
+export async function applyLessonClosurePlan(tenantClient, plan) {
+  if (!plan?.hasChanged) {
+    return false;
   }
 
-  return {
-    lesson_instance_id: lessonInstanceId,
-    is_closed: evaluation.should_close,
-    reasons_open: evaluation.reasons_open,
-    summary: evaluation.summary,
-    participants: evaluation.participants,
-  };
+  const { error: updateError } = await withOrgScope(tenantClient, 'lesson_instances', plan.orgId)
+    .update(plan.payload)
+    .eq('id', plan.lessonInstanceId);
+
+  if (updateError) {
+    throw updateError;
+  }
+  return true;
+}
+
+export async function syncLessonClosureState(tenantClient, lessonInstanceId, actorUserId = null) {
+  const plan = await planLessonClosureSync(tenantClient, lessonInstanceId, actorUserId);
+  if (!plan) {
+    return null;
+  }
+
+  await applyLessonClosurePlan(tenantClient, plan);
+  return plan.result;
 }

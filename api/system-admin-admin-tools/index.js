@@ -1,9 +1,16 @@
 /* eslint-env node */
 import { resolveBearerAuthorization } from '../_shared/http.js';
 import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../_shared/supabase-admin.js';
-import { ensureSystemAdmin, normalizeString, readEnv, respond } from '../_shared/org-bff.js';
+import { ensureSystemAdmin, normalizeString, parseRequestBody, readEnv, respond } from '../_shared/org-bff.js';
 import { respondTrackedError } from '../_shared/error-events.js';
+import { logAuditEvent, AUDIT_CATEGORIES } from '../_shared/audit-log.js';
 import BillingLedgerService from '../_shared/BillingLedgerService.js';
+import {
+  LESSON_CLOSURE_RESYNC_AUDIT_EVENT,
+  LESSON_CLOSURE_RESYNC_TOOL,
+  normalizeLessonClosureResyncRequest,
+  runLessonClosureResyncBatch,
+} from '../_shared/lesson-closure-maintenance.js';
 
 function isUuidLike(value) {
   const normalized = normalizeString(value);
@@ -19,9 +26,80 @@ function parseClaimIds(rawValue) {
     .filter(Boolean)));
 }
 
+// Write tools (POST). Each call processes one page so it stays well inside the Functions timeout;
+// the console keeps calling with `next_cursor` until it is null.
+async function runMaintenanceTool(context, req, supabase, admin) {
+  const body = parseRequestBody(req);
+  const tool = normalizeString(body?.tool).toLowerCase();
+  if (tool !== LESSON_CLOSURE_RESYNC_TOOL) {
+    return respond(context, 400, { message: 'unsupported_admin_tool' });
+  }
+
+  const { request, error: requestError } = normalizeLessonClosureResyncRequest(body);
+  if (requestError) {
+    return respond(context, 400, { message: requestError });
+  }
+
+  try {
+    const result = await runLessonClosureResyncBatch(supabase, request, {
+      actorUserId: admin?.userId || null,
+      onLessonError: (lessonInstanceId, lessonError) => {
+        context.log?.warn?.('system-admin-admin-tools: lesson closure re-sync failed for a lesson', {
+          lessonInstanceId,
+          message: lessonError?.message,
+        });
+      },
+    });
+
+    const changedLessonIds = result.items
+      .filter((item) => item.status === 'changed')
+      .map((item) => item.lesson_instance_id);
+    if (request.mode === 'apply' && changedLessonIds.length > 0) {
+      await logAuditEvent(supabase, {
+        orgId: request.orgId,
+        userId: admin.userId,
+        userEmail: admin.email || 'unknown',
+        userRole: 'system_admin',
+        actionType: LESSON_CLOSURE_RESYNC_AUDIT_EVENT,
+        actionCategory: AUDIT_CATEGORIES.SYSTEM_ADMIN,
+        resourceType: 'maintenance_job',
+        resourceId: LESSON_CLOSURE_RESYNC_TOOL,
+        details: {
+          scope: request.scope,
+          org_id: request.orgId,
+          cursor: request.cursor,
+          totals: result.totals,
+          changed_lesson_instance_ids: changedLessonIds,
+        },
+      });
+    }
+
+    return respond(context, 200, { ...result, ran_at: new Date().toISOString() });
+  } catch (error) {
+    context.log?.error?.('system-admin-admin-tools: lesson closure re-sync failed', {
+      message: error?.message,
+      mode: request.mode,
+      orgId: request.orgId,
+      cursor: request.cursor,
+    });
+    return respondTrackedError(context, req, supabase, {
+      status: 500,
+      message: 'failed_to_run_admin_tool',
+      userId: admin?.userId,
+      error,
+      metadata: {
+        tool: LESSON_CLOSURE_RESYNC_TOOL,
+        mode: request.mode,
+        org_id: request.orgId,
+        cursor: request.cursor,
+      },
+    });
+  }
+}
+
 export default async function systemAdminAdminTools(context, req) {
   const method = String(req.method || 'GET').toUpperCase();
-  if (method !== 'GET') {
+  if (method !== 'GET' && method !== 'POST') {
     return respond(context, 405, { message: 'method_not_allowed' });
   }
 
@@ -44,6 +122,10 @@ export default async function systemAdminAdminTools(context, req) {
     admin = await ensureSystemAdmin(req, supabase, authorization, { context });
   } catch (err) {
     return respond(context, err.statusCode || 403, { message: err.message || 'forbidden' });
+  }
+
+  if (method === 'POST') {
+    return runMaintenanceTool(context, req, supabase, admin);
   }
 
   const tool = normalizeString(req?.query?.tool).toLowerCase() || 'hmo_claim_readiness';
