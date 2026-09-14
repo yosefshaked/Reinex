@@ -430,3 +430,95 @@ export function buildConflictLines(baseInstance, latestInstance, participantId) 
 
   return lines;
 }
+
+// One display map for participant attendance statuses, shared by the roster, confirm strip and
+// correction panel. `tone` is mapped to classes by the component.
+export const PARTICIPANT_STATUS_DISPLAY = {
+  scheduled: { label: 'מתוכנן', tone: 'neutral' },
+  attended: { label: 'נכח/ה', tone: 'ok' },
+  no_show: { label: 'לא הגיע/ה', tone: 'bad' },
+  cancelled_student: { label: 'ביטול ע"י הלקוח', tone: 'neutral' },
+  cancelled_clinic: { label: 'ביטול ע"י המכון', tone: 'neutral' },
+};
+
+export function getParticipantStatusDisplay(status) {
+  return PARTICIPANT_STATUS_DISPLAY[String(status || '').trim().toLowerCase()] || { label: 'לא ידוע', tone: 'neutral' };
+}
+
+// The app runs on a hash router, so a link opened in a new tab must carry the "#/" prefix
+// (a plain "/students/..." lands on the site root instead of the profile).
+export function getParticipantCardHref(participant) {
+  if (participant?.student_id) return `#/students/${participant.student_id}`;
+  if (participant?.client_profile_id) return `#/one-time-customers/${participant.client_profile_id}`;
+  return null;
+}
+
+export function formatAgorotCompact(value) {
+  const amount = Number(value || 0);
+  return new Intl.NumberFormat('he-IL', {
+    style: 'currency',
+    currency: 'ILS',
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  }).format(Math.abs(amount) / 100);
+}
+
+const STRIP_DETAIL_EXCLUDED_TYPES = new Set(['participant_status', 'lesson_status']);
+
+/**
+ * Money-first summary of a participant status-change preview for the one-line confirm strip.
+ * Built from the server's typed impacts (see api/calendar-attendance preview builder). Amounts are
+ * phrased with Hebrew verbs instead of +/- signs, which reorder badly inside RTL text.
+ */
+export function summarizePreviewImpacts(preview) {
+  const impacts = Array.isArray(preview?.impacts) ? preview.impacts : [];
+  const segments = [];
+  const warnings = [];
+
+  for (const impact of impacts) {
+    switch (impact?.type) {
+      case 'billing_charge':
+        segments.push({ key: 'billing', label: 'חיוב', value: `${formatAgorotCompact(impact.amount)} יחויבו` });
+        break;
+      case 'billing_reversal':
+        segments.push({ key: 'billing', label: 'חיוב', value: `${formatAgorotCompact(impact.amount)} יזוכו` });
+        break;
+      case 'billing_update':
+        segments.push({ key: 'billing', label: 'חיוב', value: `${formatAgorotCompact(impact.amount_before)} ← ${formatAgorotCompact(impact.amount_after)}` });
+        break;
+      case 'post_coverage_charge':
+        segments.push({ key: 'billing', label: 'חיוב', value: `${formatAgorotCompact(impact.amount)} אחרי ניצול הזכאות` });
+        break;
+      case 'hmo_split_detail':
+        segments.push({
+          key: 'hmo',
+          label: impact.hmo_provider_name || 'גורם מממן',
+          value: `השתתפות ${formatAgorotCompact(impact.hmo_student_copay_amount)} · תביעה ${formatAgorotCompact(impact.hmo_insurer_claim_amount)}`,
+        });
+        break;
+      case 'hmo_task_resolve':
+        segments.push({ key: 'hmo', label: 'גורם מממן', value: 'משימת התביעה תבוטל' });
+        break;
+      case 'instructor_earning_add':
+        segments.push({ key: 'payroll', label: 'שכר', value: `${formatAgorotCompact(impact.amount)} יתווספו` });
+        break;
+      case 'instructor_earning_reversal':
+        segments.push({ key: 'payroll', label: 'שכר', value: `${formatAgorotCompact(impact.amount)} יוסרו` });
+        break;
+      case 'instructor_earning_update':
+        segments.push({ key: 'payroll', label: 'שכר', value: `${formatAgorotCompact(impact.amount_before)} ← ${formatAgorotCompact(impact.amount_after)}` });
+        break;
+      case 'billing_blocked':
+        warnings.push(impact.message || 'החיוב דורש בדיקה לפני שיתבצע.');
+        break;
+      default:
+        break;
+    }
+  }
+
+  const details = impacts
+    .filter((impact) => impact?.message && !STRIP_DETAIL_EXCLUDED_TYPES.has(impact.type))
+    .map((impact) => ({ type: impact.type, group: getImpactGroupMeta(impact.type).label, message: impact.message }));
+
+  return { segments, warnings, details, quiet: segments.length === 0 && warnings.length === 0 };
+}

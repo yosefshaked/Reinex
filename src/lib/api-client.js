@@ -6,6 +6,7 @@ const COMMON_API_ERROR_MESSAGES = {
   cannot_delete_committed_workspace: 'לא ניתן למחוק סביבת ייבוא שכבר יובאו ממנה רשומות למערכת.',
   cancel_instance_requires_dedicated_action: 'ביטול שיעור נעשה דרך "בטל שיעור" ולא דרך העריכה.',
   capacity_exceeded: 'השיעור מלא — אין מקום פנוי למשתתף/ת נוסף/ת.',
+  failed_to_load_lesson_history: 'טעינת היסטוריית השיעור נכשלה. נסו שוב.',
   admin_required: 'נדרשות הרשאות מנהל.',
   client_profile_not_found: 'הלקוח לא נמצא.',
   database_error: 'אירעה שגיאה בגישה לנתונים. נסו שוב.',

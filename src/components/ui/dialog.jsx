@@ -23,7 +23,9 @@ const DialogOverlay = React.forwardRef(({ className, ...props }, ref) => (
 ))
 DialogOverlay.displayName = DialogPrimitive.Overlay.displayName
 
-const DialogContent = React.forwardRef(({ className, children, footer, wide = false, hideDefaultClose = false, autoFocus = false, ...props }, ref) => {
+// `bare`: render children directly (no padded scroll wrapper) for dialogs that manage their own
+// header/body/footer layout and scrolling.
+const DialogContent = React.forwardRef(({ className, children, footer, wide = false, hideDefaultClose = false, autoFocus = false, bare = false, ...props }, ref) => {
   const defaultDescId = React.useId()
   const internalRef = React.useRef(null)
   const setRef = (node) => {
@@ -75,9 +77,11 @@ const DialogContent = React.forwardRef(({ className, children, footer, wide = fa
         {...props}>
         {/* Hidden empty description node as a safe default */}
         <span id={defaultDescId} className="sr-only" aria-hidden="true"></span>
-        <div className="flex-1 overflow-y-auto dialog-scroll-content p-4 sm:p-6">
-          {children}
-        </div>
+        {bare ? children : (
+          <div className="flex-1 overflow-y-auto dialog-scroll-content p-4 sm:p-6">
+            {children}
+          </div>
+        )}
         {footer && (
           <div className="border-t bg-background p-3 sm:p-4 sm:rounded-b-lg">
             {footer}

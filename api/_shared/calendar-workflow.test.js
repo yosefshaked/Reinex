@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { syncLessonClosureState } from './calendar-workflow.js';
+import { evaluateLessonClosureState, syncLessonClosureState } from './calendar-workflow.js';
 
 // ---------------------------------------------------------------------------
 // Minimal in-memory tenant client for loadLessonWorkflowState/syncLessonClosureState.
@@ -359,5 +359,57 @@ describe('syncLessonClosureState change detection', () => {
     const changedResult = await syncLessonClosureState(client, INSTANCE_ID, ACTOR_USER_ID);
     assert.equal(lessonInstanceUpdates(client).length, 1);
     assertResultShape(changedResult);
+  });
+});
+
+// One attended participant; calendar-attendance always stores hmo_claim.decision = 'pending' on attend.
+function attendedClosureState({ decision = 'pending', ledgerRows = [], openHmoTask = null } = {}) {
+  return {
+    instance: { id: INSTANCE_ID, status: 'scheduled' },
+    participants: [{
+      id: PARTICIPANT_A,
+      participant_status: 'attended',
+      metadata: { workflow: { hmo_claim: { decision, reason: 'attended' } } },
+    }],
+    policies: { billingConsumptionPolicy: {} },
+    instanceLocks: [],
+    participantLocks: [],
+    participantLocksByParticipant: new Map(),
+    lessonEarnings: [],
+    ledgerRowsByParticipant: new Map([[PARTICIPANT_A, ledgerRows]]),
+    openHmoTaskByParticipant: openHmoTask ? new Map([[PARTICIPANT_A, openHmoTask]]) : new Map(),
+    payrollRunById: new Map(),
+    claimBatchById: new Map(),
+  };
+}
+
+describe('evaluateLessonClosureState HMO claim requirement', () => {
+  it('does not require a claim for an attended participant without HMO coverage, despite the stored "pending"', () => {
+    const result = evaluateLessonClosureState(attendedClosureState());
+    assert.equal(result.participants[0].hmo_claim_required, false);
+    assert.equal(result.summary.hmo_claim_required, false);
+    assert.ok(!result.reasons_open.includes('hmo_claim_unresolved'));
+  });
+
+  it('requires a claim when the lesson produced an HMO ledger row', () => {
+    const result = evaluateLessonClosureState(attendedClosureState({
+      ledgerRows: [{ direction: 'DEBIT', amount: 15000, hmo_provider_id: 'provider-1' }],
+    }));
+    assert.equal(result.participants[0].hmo_claim_required, true);
+    assert.ok(result.reasons_open.includes('hmo_claim_unresolved'));
+  });
+
+  it('requires a claim while an HMO claim submission task is open', () => {
+    const result = evaluateLessonClosureState(attendedClosureState({
+      openHmoTask: { id: 'task-1', task_type: 'hmo_claim_submission' },
+    }));
+    assert.equal(result.participants[0].hmo_claim_required, true);
+    assert.ok(result.reasons_open.includes('hmo_claim_unresolved'));
+  });
+
+  it('honours an explicit "required" decision', () => {
+    const result = evaluateLessonClosureState(attendedClosureState({ decision: 'required' }));
+    assert.equal(result.participants[0].hmo_claim_required, true);
+    assert.ok(result.reasons_open.includes('hmo_claim_unresolved'));
   });
 });

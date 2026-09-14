@@ -310,5 +310,33 @@ The refactor is behavior-preserving.
 - `getParticipantStatusLabel` labels unknown statuses as "מתוכנן".
 
 **Still to do:**
-- Owner smoke test in the local env.
+- Owner smoke test in the local env. (Done; approved and committed as `8774087`.)
 - Then Phase 3 (v4 design).
+
+## Implementation Progress — Phase 3 (2026-09-14)
+
+This phase builds the approved v4 prototype into the real dialog.
+
+| Area | Result |
+|---|---|
+| Header | `LessonDialogHeader.jsx`: service · date + time range · instructor, the X on the top edge, and exception/corrected flags with tooltips. The tabs straddle the bottom edge: משתתפים / היסטוריה, admin/office only. Edit/correction modes show a mode chip instead. |
+| Roster | `LessonParticipantRoster.jsx` rewritten as a list. Each row: avatar, name, and an HMO badge whose tooltip shows provider · track, authorization number, lessons left and expiry. Then the status pill (or a dashed "טרם סומן"), a small contact line, the reminder bell popover (kept from the prototype), the report signal, ✓ / ✕, and a ⋯ menu (change absence, restore, call, open client card). The participant count and seats sit above the list. |
+| Attendance confirm | `LessonImpactStrip.jsx`: a one-line strip under the row showing from → to pills plus the money impact from the server preview. Amounts use verbs, not +/- signs (RTL-safe). A "פירוט" toggle shows details, warnings are listed, and Enter confirms. After a success, focus moves to the next ✓. **Every** absence now goes through the strip. The absence form prefills the instructor-pay decision from the org's earnings policy (tag "לפי הגדרות השכר"). There is one error channel per context (strip / form); toast and banner duplicates are removed. |
+| Closure tab (D-round 3) | Removed. The footer shows a one-line state, then "סמן כהושלם", "עריכה", and ⋯ → "ביטול השיעור...". |
+| History | `LessonHistoryTab.jsx`: typed, day-grouped events (היום / אתמול / date) with icons, actor, note, and before → after chips. Technical details (source, id, version) are collapsed. Backend: `GET lesson-instances/{id}?view=history` (admin/office) → `api/_shared/lesson-history.js` merges the duplicate audit rows per action and adds the corrections. |
+| Edit mode | Two-column form. The footer shows change chips, "בדיקת השפעה", and "אישור ושמירה". Closing or leaving with unsaved changes asks first (discard-confirm dialog). |
+| Dialog shell | `DialogContent` gained a `bare` prop (no default scroll wrapper) so the dialog can own its header/body/footer layout. The default is unchanged. |
+| Removed | `LessonResolutionStatus.jsx`, the fee-waiver confirm dialog (the waiver now lives in the absence form), `DetailField`, and the closure-count block. |
+
+**Bugs fixed along the way:**
+- The cancel-lesson dialog loaded its server preview only on the first confirm click, so the first click never cancelled. The preview now loads when the dialog opens.
+- Owner smoke test: "פתיחת כרטיס לקוח" opened `/students/:id` without the `#/` prefix, so the new tab showed the site root. `getParticipantCardHref` in the model now builds `#/students/:id` / `#/one-time-customers/:id`. It's covered by a node test and by the tester workflow `p3-client-card-link`.
+- Owner smoke test: the footer said "נותר לסגירה: ... תביעת גורם מממן" on lessons where no participant has HMO coverage. This bug predates the redesign (`bd7c90a`); the new footer just made it visible. `calendar-attendance` stores `hmo_claim.decision = 'pending'` for **every** attended participant, and `evaluateParticipantSettlement` counted `pending` as "claim required", so these lessons could never close. They also inflated the calendar's "needs attention" HMO count. Now a claim is required only with an HMO `lesson_charge` ledger row, an open `hmo_claim_submission` task, or an explicit `required` decision. `calendar-workflow.test.js` has 4 new cases. The local DB was re-synced: of 22 lessons flagged `hmo_claim_unresolved`, 6 non-HMO lessons were false positives and 14 were stale (their claims were already batched). The 2 with open claim tasks correctly stay flagged. **Production:** stored `workflow_state` recalculates only when a lesson is written to, so already-flagged production lessons need a one-off re-sync (owner decision).
+
+**Tests:**
+- `test/lesson-impact-strip.test.js` covers the status display map, compact agorot, and the strip summary.
+- `api/_shared/lesson-history.test.js` has 17 mapping tests.
+- `api/_shared/calendar-hmo-coverage.test.js` covers the new HMO display fields.
+- The automatic-tester scenario `lesson-dialog-regressions.json` moves to v1.1.0: new selectors for tabs, ✓, the strip and pills, plus a history-tab check (P3).
+
+**Still to do:** owner smoke test in the local env, then the Phase 3 commit.

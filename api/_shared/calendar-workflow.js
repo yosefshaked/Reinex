@@ -80,7 +80,10 @@ function evaluateParticipantSettlement(participant, context) {
     const claimBatch = context?.claimBatchById?.get(lock.lock_source_id) || null;
     return CLAIM_SETTLED_STATUSES.has(normalizeString(claimBatch?.status).toLowerCase());
   });
-  const hmoClaimRequired = ['pending', 'required'].includes(workflow.hmo_claim.decision) || Boolean(openHmoTask) || hmoCommitmentApplies;
+  // calendar-attendance writes hmo_claim.decision = 'pending' for EVERY attended participant, covered or
+  // not, so 'pending' alone is not evidence of a claim. A claim is required only when the lesson produced
+  // an HMO ledger row, an HMO claim task is open, or a decision explicitly says 'required'.
+  const hmoClaimRequired = workflow.hmo_claim.decision === 'required' || Boolean(openHmoTask) || hmoCommitmentApplies;
   const hmoClaimResolved = !hmoClaimRequired || submittedClaimLock;
 
   return {

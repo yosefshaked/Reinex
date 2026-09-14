@@ -2,9 +2,9 @@
   "meta": {
     "id": "lesson-dialog-regressions",
     "name": "Lesson Dialog — Regression Checks",
-    "description": "Regression checks for LessonInstanceDialog: (A3) edit mode has no status field, (A1) reopening the dialog or opening another lesson always starts in view mode on the first tab, (A2) marking two group participants attended back-to-back does not raise a false version-conflict panel. Fixtures (service price, two dedicated instructors, three students, one single + one group lesson on the first of the current month) are created through the API first, following the hmo-claiming conventions.",
-    "version": "1.0.0",
-    "last_validated_at": "2026-09-14T15:05:24Z",
+    "description": "Regression checks for LessonInstanceDialog: (A3) edit mode has no status field, (A1) reopening the dialog or opening another lesson always starts in view mode on the first tab, (A2) marking two group participants attended back-to-back (✓ + one-line confirm strip) does not raise a false version-conflict panel, (P3) the history tab loads typed events from GET lesson-instances/{id}?view=history. Fixtures (service price, two dedicated instructors, three students, one single + one group lesson on the first of the current month) are created through the API first, following the hmo-claiming conventions.",
+    "version": "1.1.0",
+    "last_validated_at": "2026-09-14T19:14:00Z",
     "author": "claude-ai",
     "dependencies": {
       "routes": [
@@ -15,6 +15,7 @@
         "POST /api/instructors",
         "POST /api/students-list",
         "POST /api/lesson-instances",
+        "GET /api/lesson-instances",
         "GET /api/calendar",
         "POST /api/calendar-attendance"
       ]
@@ -363,9 +364,9 @@
         },
         {
           "id": "wait-lesson-dialog",
-          "description": "Wait for the lesson dialog ('פרטי שיעור')",
+          "description": "Wait for the lesson dialog (its header tab list 'אזורי השיעור')",
           "action": "waitForSelector",
-          "selector": "[role='dialog']:has-text('פרטי שיעור')"
+          "selector": "[role='dialog'] [role='tablist'][aria-label='אזורי השיעור']"
         },
         {
           "id": "click-edit",
@@ -377,7 +378,7 @@
           "id": "wait-edit-form",
           "description": "Edit form is shown (date input)",
           "action": "waitForSelector",
-          "selector": "[role='dialog'] #date"
+          "selector": "[role='dialog'] #lesson-edit-date"
         },
         {
           "id": "assert-no-status-select",
@@ -425,7 +426,7 @@
     {
       "id": "a1-dialog-resets-to-view-mode",
       "name": "A1 – Reopen / other lesson starts in view mode",
-      "description": "Edit mode must not carry over: (1) open lesson → עריכה → close → open another lesson → view mode; (2) open lesson → switch to 'משתתפים' tab → עריכה → close → reopen same lesson → view mode on the first tab ('סקירה').",
+      "description": "Edit mode must not carry over: (1) open lesson → עריכה → close → open another lesson → view mode; (2) open lesson → switch to 'היסטוריה' tab → עריכה → close → reopen same lesson → view mode on the first tab ('משתתפים').",
       "steps": [
         {
           "id": "reset-dialogs",
@@ -449,7 +450,7 @@
         {
           "id": "wait-lesson-dialog",
           "action": "waitForSelector",
-          "selector": "[role='dialog']:has-text('פרטי שיעור')"
+          "selector": "[role='dialog'] [role='tablist'][aria-label='אזורי השיעור']"
         },
         {
           "id": "click-edit",
@@ -460,7 +461,7 @@
         {
           "id": "wait-edit-form",
           "action": "waitForSelector",
-          "selector": "[role='dialog'] #date"
+          "selector": "[role='dialog'] #lesson-edit-date"
         },
         {
           "id": "close-dialog-in-edit-mode",
@@ -483,16 +484,16 @@
         },
         {
           "id": "wait-view-mode-first-tab",
-          "description": "The other lesson opens in view mode with the first tab ('סקירה') active",
+          "description": "The other lesson opens in view mode with the first tab ('משתתפים') active",
           "action": "waitForSelector",
-          "selector": "[role='dialog'] [role='tab'][data-state='active']:has-text('סקירה')"
+          "selector": "[role='dialog'] [role='tab'][aria-selected='true']:has-text('משתתפים')"
         },
         {
           "id": "assert-no-edit-form",
           "description": "No edit form is rendered (edit mode did not carry over)",
           "action": "assert",
           "type": "exists",
-          "selector": "[role='dialog'] #date",
+          "selector": "[role='dialog'] #lesson-edit-date",
           "not": true
         },
         {
@@ -528,18 +529,18 @@
         {
           "id": "wait-single-dialog",
           "action": "waitForSelector",
-          "selector": "[role='dialog'] [role='tab']:has-text('משתתפים')"
+          "selector": "[role='dialog'] [role='tab']:has-text('היסטוריה')"
         },
         {
-          "id": "switch-to-participants-tab",
-          "description": "Move off the first tab",
+          "id": "switch-to-history-tab",
+          "description": "Move off the first tab (to 'היסטוריה')",
           "action": "click",
-          "selector": "[role='dialog'] [role='tab']:has-text('משתתפים')"
+          "selector": "[role='dialog'] [role='tab']:has-text('היסטוריה')"
         },
         {
-          "id": "wait-participants-tab-active",
+          "id": "wait-history-tab-active",
           "action": "waitForSelector",
-          "selector": "[role='dialog'] [role='tab'][data-state='active']:has-text('משתתפים')"
+          "selector": "[role='dialog'] [role='tab'][aria-selected='true']:has-text('היסטוריה')"
         },
         {
           "id": "click-edit-again",
@@ -550,7 +551,7 @@
         {
           "id": "wait-edit-form-again",
           "action": "waitForSelector",
-          "selector": "[role='dialog'] #date"
+          "selector": "[role='dialog'] #lesson-edit-date"
         },
         {
           "id": "close-dialog-in-edit-mode-again",
@@ -572,15 +573,15 @@
         },
         {
           "id": "wait-reopen-view-mode-first-tab",
-          "description": "Reopened lesson starts in view mode on the first tab ('סקירה'), not on 'משתתפים' or in edit mode",
+          "description": "Reopened lesson starts in view mode on the first tab ('משתתפים'), not on 'היסטוריה' or in edit mode",
           "action": "waitForSelector",
-          "selector": "[role='dialog'] [role='tab'][data-state='active']:has-text('סקירה')"
+          "selector": "[role='dialog'] [role='tab'][aria-selected='true']:has-text('משתתפים')"
         },
         {
           "id": "assert-no-edit-form-after-reopen",
           "action": "assert",
           "type": "exists",
-          "selector": "[role='dialog'] #date",
+          "selector": "[role='dialog'] #lesson-edit-date",
           "not": true
         },
         {
@@ -605,7 +606,7 @@
     {
       "id": "a2-back-to-back-attendance",
       "name": "A2 – Back-to-back attendance, no false conflict",
-      "description": "In the group lesson, marks participant A attended and then immediately participant B (the second click fires as soon as the roster re-enables, before the calendar refetch refreshes the instance prop). Expects no 'השיעור השתנה מאז שפתחתם אותו' panel and both participants shown as 'נכח'.",
+      "description": "In the group lesson, marks participant A attended and then immediately participant B (the second click fires as soon as the roster re-enables, before the calendar refetch refreshes the instance prop). Expects no 'השיעור השתנה מאז שפתחתם אותו' panel and both participants shown as 'נכח/ה'.",
       "steps": [
         {
           "id": "reset-dialogs",
@@ -628,74 +629,69 @@
         },
         {
           "id": "wait-participants-tab",
+          "description": "The roster ('משתתפים') is the default tab",
           "action": "waitForSelector",
-          "selector": "[role='dialog'] [role='tab']:has-text('משתתפים')"
-        },
-        {
-          "id": "open-participants-tab",
-          "description": "Switch to the participants roster",
-          "action": "click",
-          "selector": "[role='dialog'] [role='tab']:has-text('משתתפים')"
+          "selector": "[role='dialog'] [role='tab'][aria-selected='true']:has-text('משתתפים')"
         },
         {
           "id": "mark-a-attended",
-          "description": "Click the 'סמן כנכח – אלף קבוצה <run>' icon button",
+          "description": "Click the ✓ ('סימון כנוכח/ת') button in participant A's row",
           "action": "click",
-          "selector": "[role='dialog'] button[aria-label^='סמן כנכח'][aria-label*='אלף קבוצה {{RUN_NUMERIC_ID}}']"
+          "selector": "[role='dialog'] [data-participant-row]:has-text('אלף קבוצה {{RUN_NUMERIC_ID}}') button[data-mark-attended]"
         },
         {
           "id": "wait-a-preview",
           "description": "Wait for the impact preview confirm button",
           "action": "waitForSelector",
-          "selector": "[role='dialog'] button:has-text('אשר שינוי')"
+          "selector": "[role='dialog'] [role='group'][aria-label='אישור שינוי סטטוס'] button:has-text('אישור')"
         },
         {
           "id": "confirm-a",
           "description": "Confirm attendance for participant A",
           "action": "click",
-          "selector": "[role='dialog'] button:has-text('אשר שינוי')"
+          "selector": "[role='dialog'] [role='group'][aria-label='אישור שינוי סטטוס'] button:has-text('אישור')"
         },
         {
           "id": "wait-a-confirm-gone",
           "description": "Confirm button disappears once the mark is in flight / done",
           "action": "waitForSelector",
-          "selector": "[role='dialog'] button:has-text('אשר שינוי')",
+          "selector": "[role='dialog'] [role='group'][aria-label='אישור שינוי סטטוס'] button:has-text('אישור')",
           "state": "hidden"
         },
         {
           "id": "mark-b-attended",
-          "description": "Immediately click 'סמן כנכח – בית קבוצה <run>' (Playwright waits only until the button is re-enabled)",
+          "description": "Immediately click the ✓ in participant B's row (Playwright waits only until the button is re-enabled)",
           "action": "click",
-          "selector": "[role='dialog'] button[aria-label^='סמן כנכח'][aria-label*='בית קבוצה {{RUN_NUMERIC_ID}}']"
+          "selector": "[role='dialog'] [data-participant-row]:has-text('בית קבוצה {{RUN_NUMERIC_ID}}') button[data-mark-attended]"
         },
         {
           "id": "wait-b-preview",
           "action": "waitForSelector",
-          "selector": "[role='dialog'] button:has-text('אשר שינוי')"
+          "selector": "[role='dialog'] [role='group'][aria-label='אישור שינוי סטטוס'] button:has-text('אישור')"
         },
         {
           "id": "confirm-b",
           "description": "Confirm attendance for participant B",
           "action": "click",
-          "selector": "[role='dialog'] button:has-text('אשר שינוי')"
+          "selector": "[role='dialog'] [role='group'][aria-label='אישור שינוי סטטוס'] button:has-text('אישור')"
         },
         {
           "id": "wait-b-confirm-gone",
           "action": "waitForSelector",
-          "selector": "[role='dialog'] button:has-text('אשר שינוי')",
+          "selector": "[role='dialog'] [role='group'][aria-label='אישור שינוי סטטוס'] button:has-text('אישור')",
           "state": "hidden"
         },
         {
           "id": "wait-a-attended-badge",
-          "description": "Participant A shows the 'נכח' status badge",
+          "description": "Participant A shows the 'נכח/ה' status pill",
           "action": "waitForSelector",
-          "selector": "[role='dialog'] article:has-text('אלף קבוצה {{RUN_NUMERIC_ID}}') span:text-is('נכח')"
+          "selector": "[role='dialog'] [data-participant-row]:has-text('אלף קבוצה {{RUN_NUMERIC_ID}}') span:text-is('נכח/ה')"
         },
         {
           "id": "wait-b-attended-badge",
-          "description": "Participant B shows the 'נכח' status badge (would stay 'scheduled' if the second write had hit a 409)",
+          "description": "Participant B shows the 'נכח/ה' status pill (would stay 'scheduled' if the second write had hit a 409)",
           "action": "waitForSelector",
-          "selector": "[role='dialog'] article:has-text('בית קבוצה {{RUN_NUMERIC_ID}}') span:text-is('נכח')"
+          "selector": "[role='dialog'] [data-participant-row]:has-text('בית קבוצה {{RUN_NUMERIC_ID}}') span:text-is('נכח/ה')"
         },
         {
           "id": "assert-no-version-conflict",
@@ -709,6 +705,136 @@
           "id": "screenshot-both-attended",
           "action": "screenshot",
           "name": "05-a2-both-attended-no-conflict"
+        },
+        {
+          "id": "close-dialog",
+          "action": "pressKey",
+          "key": "Escape"
+        },
+        {
+          "id": "wait-dialog-closed",
+          "action": "waitForSelector",
+          "selector": "[role='dialog']",
+          "state": "hidden"
+        }
+      ]
+    },
+
+    {
+      "id": "p3-history-tab",
+      "name": "P3 – History tab loads typed events",
+      "description": "Opens the single lesson, switches to 'היסטוריה' and expects the creation entry ('השיעור נוצר') served by GET lesson-instances/{id}?view=history, with no load error.",
+      "steps": [
+        {
+          "id": "reset-dialogs",
+          "description": "Close any dialog left open by a previous failed workflow",
+          "action": "pressKey",
+          "key": "Escape"
+        },
+        {
+          "id": "wait-no-dialog",
+          "action": "waitForSelector",
+          "selector": "[role='dialog']",
+          "state": "hidden"
+        },
+        {
+          "id": "open-single-lesson",
+          "description": "Open the single-participant lesson",
+          "action": "click",
+          "selector": ".reinex-calendar-event:has-text('יחיד {{RUN_NUMERIC_ID}}')",
+          "first": true
+        },
+        {
+          "id": "open-history-tab",
+          "description": "Switch to the history tab",
+          "action": "click",
+          "selector": "[role='dialog'] [role='tab']:has-text('היסטוריה')"
+        },
+        {
+          "id": "wait-create-event",
+          "description": "The creation event is listed",
+          "action": "waitForSelector",
+          "selector": "[role='dialog'] li:has-text('השיעור נוצר')"
+        },
+        {
+          "id": "assert-no-history-error",
+          "description": "No history load error is shown",
+          "action": "assert",
+          "type": "exists",
+          "selector": "[role='dialog'] div:has-text('טעינת היסטוריית השיעור נכשלה')",
+          "not": true
+        },
+        {
+          "id": "screenshot-history",
+          "action": "screenshot",
+          "name": "06-p3-history-tab"
+        },
+        {
+          "id": "close-dialog",
+          "action": "pressKey",
+          "key": "Escape"
+        },
+        {
+          "id": "wait-dialog-closed",
+          "action": "waitForSelector",
+          "selector": "[role='dialog']",
+          "state": "hidden"
+        }
+      ]
+    },
+
+    {
+      "id": "p3-client-card-link",
+      "name": "P3 – Client card link uses the hash router",
+      "description": "The row menu's 'פתיחת כרטיס לקוח' link must point to '#/students/<id>' — a plain '/students/<id>' opens the site root in the new tab instead of the profile.",
+      "steps": [
+        {
+          "id": "reset-dialogs",
+          "description": "Close any dialog left open by a previous failed workflow",
+          "action": "pressKey",
+          "key": "Escape"
+        },
+        {
+          "id": "wait-no-dialog",
+          "action": "waitForSelector",
+          "selector": "[role='dialog']",
+          "state": "hidden"
+        },
+        {
+          "id": "open-single-lesson",
+          "description": "Open the single-participant lesson",
+          "action": "click",
+          "selector": ".reinex-calendar-event:has-text('יחיד {{RUN_NUMERIC_ID}}')",
+          "first": true
+        },
+        {
+          "id": "open-row-menu",
+          "description": "Open the participant row's ⋯ menu",
+          "action": "click",
+          "selector": "[role='dialog'] [data-participant-row]:has-text('יחיד {{RUN_NUMERIC_ID}}') button[aria-label='פעולות נוספות']"
+        },
+        {
+          "id": "assert-card-link-hash",
+          "description": "The client card link points to the hash route of this student",
+          "action": "waitForSelector",
+          "selector": "[role='menuitem'][href='#/students/{{SINGLE_STUDENT_UUID}}']"
+        },
+        {
+          "id": "screenshot-row-menu",
+          "action": "screenshot",
+          "name": "07-p3-row-menu-card-link"
+        },
+        {
+          "id": "close-menu",
+          "action": "pressKey",
+          "key": "Escape"
+        },
+        {
+          "id": "wait-menu-closed",
+          "description": "Let the menu finish closing; while its exit animation runs it still takes the next Escape",
+          "action": "waitForSelector",
+          "selector": "[role='menu']",
+          "state": "hidden"
         },
         {
           "id": "close-dialog",
