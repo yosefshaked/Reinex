@@ -280,3 +280,35 @@ Uncommitted, on the working branch.
 - `evaluateLessonClosureState` treats instructor pay as resolved only via `payroll_run` locks, but no production code creates them. Only claim-batch locks are written (`BillingLedgerService.js:~2527`), plus the debug UAT tool.
 - Lessons that owe instructor pay may therefore never close, and paid payroll never hard-locks lessons.
 - This also affects the footer closure line in the redesign ("נותר לסגירה: שכר מדריך/ה" would never clear).
+- Tracked as GitHub issue #49; the owner will return to it after the lesson-modal work.
+
+Phase 1 committed as `da0bbfb` on `improve-import-workspace`.
+
+## Implementation Progress — Phase 2 (2026-09-14)
+
+The refactor is behavior-preserving.
+
+| Step | Result |
+|---|---|
+| Pure helpers | 30 helpers/constants moved verbatim (by declaration name, via script) to `src/features/calendar/utils/lessonDialogModel.js`. The module has no React and no `@/` aliases, so it's importable by `node:test`. Kept in the component: `DetailField`, `EmptyTabState` (JSX), and `getDayTokenForDateString` / `resolveLessonSchedulingAvailability` (they depend on the `@/`-aliased `instructor-availability.js`). |
+| De-duplication (A12) | `LockedCorrectionPanel.jsx` imports `getDisplayInstance` / `getDisplayParticipants` from the model instead of keeping its own copies. |
+| Hooks | `src/features/calendar/hooks/useLessonDialogData.js` holds `useLessonSessionReports`, `useLessonFinancePolicies`, `useAbsenceRequirements` (keyed results replace four manual resets) and `useLessonVersions`. Wired in by an assert-every-match script. |
+| Size | `LessonInstanceDialog.jsx`: 2,760 → 2,274 lines. |
+| Docs | `agents-docs/60` lists the new building blocks. |
+
+| Tests | `test/lesson-dialog-model.test.js`: 89 characterization tests for the model, wired into `test:finance-calendar`. |
+
+**Bug found by the characterization tests, and fixed:**
+- `resolveMutationError` returned the generic 409 text ("השיעור עודכן על ידי משתמש אחר") before checking specific codes.
+- So "can't cancel, attendance already marked for X" (`instance_cancelled_has_attended_participants`, sent as 409 by `api/calendar/index.js`) never reached the user, and neither did the documented-report guard (`report_has_documentation`, 409).
+- The status fallbacks now run last. A 409 with a translated message shows that message; untranslated 409s still get the version-conflict text.
+
+**Backlog from the characterization notes** (documented in the tests, not fixed; low impact):
+- `toUtcIsoString` turns an unparseable time into midnight and lets out-of-range dates roll over.
+- `deriveDisplayWorkflowDecisions` ignores the instructor earnings policy (no_show compensation shows "unknown"), and shows billing as not_applicable when no policy is passed.
+- `buildConflictLines` doesn't report a cleared note, a participant removed on the server, or a no_show ↔ cancelled_* change.
+- `getParticipantStatusLabel` labels unknown statuses as "מתוכנן".
+
+**Still to do:**
+- Owner smoke test in the local env.
+- Then Phase 3 (v4 design).

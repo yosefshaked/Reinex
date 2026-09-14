@@ -11,7 +11,6 @@ import { useOrg } from '@/org/OrgContext';
 import { useServices } from '@/hooks/useOrgData';
 import { useCalendarInstructors } from '../hooks/useCalendar';
 import { authenticatedFetch } from '@/lib/api-client.js';
-import { extractSupportCode, resolveApiErrorMessage } from '@/lib/error-support.js';
 import { toast } from '@/lib/toast.jsx';
 import { Pencil, X, Check, XCircle, Loader2, AlertCircle, AlertTriangle, UserPlus, RotateCcw, Users } from 'lucide-react';
 import { Alert, AlertDescription } from '../../../components/ui/alert';
@@ -24,7 +23,6 @@ import { useVersionConflictResolver } from './useVersionConflictResolver';
 import { dayTokenForJsDay } from '@/lib/day-of-week.js';
 import { hasConfiguredAvailability, isWithinAvailabilityWindows } from '@/lib/instructor-availability.js';
 import {
-  buildSchedulingOverrideReasonDetails,
   hasValidSchedulingOverrideReason,
   resolveSchedulingOverrideFormState,
   SCHEDULING_OVERRIDE_REASON_OPTIONS,
@@ -34,52 +32,39 @@ import { getLessonOpenActions } from '../utils/calendarWorkspace.js';
 import { useSessionModal } from '@/features/sessions/context/SessionModalContext.jsx';
 import { useSessionReportsEnabled } from '@/features/sessions/config/session-reports-permission.js';
 import { buildLessonReminderWhatsAppMessage } from '@/lib/whatsapp-message-templates.js';
-
-const DEFAULT_BILLING_POLICY = {
-  attended: true,
-  no_show: false,
-  cancelled_student: false,
-  cancelled_clinic: false,
-};
-
-const DEFAULT_INSTRUCTOR_EARNINGS_POLICY = {
-  attended: true,
-  no_show: true,
-  cancelled_student: false,
-  cancelled_clinic: false,
-};
-
-function normalizeInstanceStatus(status) {
-  const normalized = String(status || '').trim().toLowerCase();
-  if (normalized === 'cancelled_student' || normalized === 'cancelled_clinic' || normalized === 'no_show') {
-    return 'cancelled';
-  }
-  return normalized;
-}
-
-function toLocalDateString(dateObj) {
-  if (!(dateObj instanceof Date) || Number.isNaN(dateObj.getTime())) return '';
-  const year = dateObj.getFullYear();
-  const month = String(dateObj.getMonth() + 1).padStart(2, '0');
-  const day = String(dateObj.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-}
-
-function toUtcIsoString(dateString, timeString) {
-  if (!dateString || !timeString) {
-    return null;
-  }
-
-  const [year, month, day] = String(dateString).split('-').map(Number);
-  const [hours, minutes] = String(timeString).split(':').map(Number);
-  const localDate = new Date(year, (month || 1) - 1, day || 1, hours || 0, minutes || 0, 0, 0);
-
-  if (Number.isNaN(localDate.getTime())) {
-    return null;
-  }
-
-  return localDate.toISOString();
-}
+import {
+  toLocalDateString,
+  toUtcIsoString,
+  buildSchedulingOverrideMetadata,
+  isCancellationStatus,
+  shouldShowGraceWaiver,
+  getCancellationStatusLabel,
+  getDisplayInstance,
+  getDisplayParticipants,
+  resolveMutationError,
+  getParticipantStatusLabel,
+  getCompensationDecisionLabel,
+  getWorkflowDecisionLabel,
+  deriveDisplayWorkflowDecisions,
+  getWorkflowReasonLabel,
+  parseIsoDateSafe,
+  resolveLatestWorkflowState,
+  resolveClosureStepState,
+  formatAgorotPreview,
+  getPreviewImpactClass,
+  shortId,
+  getOpenActionToneClass,
+  getOpenActionTab,
+  isResolvedParticipantStatus,
+  groupPreviewImpacts,
+  buildConflictLines,
+} from '../utils/lessonDialogModel.js';
+import {
+  useAbsenceRequirements,
+  useLessonFinancePolicies,
+  useLessonSessionReports,
+  useLessonVersions,
+} from '../hooks/useLessonDialogData.js';
 
 function getDayTokenForDateString(dateString) {
   if (!dateString) return null;
@@ -91,32 +76,6 @@ function getDayTokenForDateString(dateString) {
   }
 
   return dayTokenForJsDay(localDate.getDay());
-}
-
-function buildSchedulingOverrideMetadata(baseMetadata, { enabled, selectedReasonCode, customReason }) {
-  const nextMetadata = baseMetadata && typeof baseMetadata === 'object' && !Array.isArray(baseMetadata)
-    ? { ...baseMetadata }
-    : {};
-
-  if (!enabled) {
-    delete nextMetadata.scheduling_override;
-    return nextMetadata;
-  }
-
-  const { reasonCode, reason } = buildSchedulingOverrideReasonDetails(selectedReasonCode, customReason);
-  const existingOverride = nextMetadata.scheduling_override && typeof nextMetadata.scheduling_override === 'object'
-    ? nextMetadata.scheduling_override
-    : {};
-
-  nextMetadata.scheduling_override = {
-    type: 'one_time_exception',
-    reason,
-    reason_code: reasonCode,
-    created_by_ui: true,
-    created_at: existingOverride.created_at || new Date().toISOString(),
-  };
-
-  return nextMetadata;
 }
 
 function resolveLessonSchedulingAvailability({ capability, date, time, durationMinutes }) {
@@ -153,263 +112,6 @@ function resolveLessonSchedulingAvailability({ capability, date, time, durationM
   };
 }
 
-function isCancellationStatus(status) {
-  return normalizeInstanceStatus(status) === 'cancelled';
-}
-
-function isGraceEligibleStatus(status) {
-  return ['no_show', 'cancelled_student', 'cancelled_clinic'].includes(String(status || '').trim().toLowerCase());
-}
-
-function shouldShowGraceWaiver(policy, status) {
-  const normalizedStatus = String(status || '').trim().toLowerCase();
-  return isGraceEligibleStatus(normalizedStatus) && Boolean(policy?.[normalizedStatus]);
-}
-
-function getCancellationStatusLabel(status) {
-  if (normalizeInstanceStatus(status) === 'cancelled') return 'שיעור בוטל';
-  return 'ביטול';
-}
-
-function getDisplayInstance(instance) {
-  const resolved = instance?.latest_correction?.effective_state?.instance
-    ? { ...instance, ...instance.latest_correction.effective_state.instance }
-    : instance;
-  if (!resolved || typeof resolved !== 'object') {
-    return resolved;
-  }
-  return {
-    ...resolved,
-    status: normalizeInstanceStatus(resolved.status) || resolved.status,
-  };
-}
-
-function getDisplayParticipants(instance) {
-  const baseParticipants = Array.isArray(instance?.participants) ? instance.participants : [];
-  const effectiveParticipants = Array.isArray(instance?.latest_correction?.effective_state?.participants)
-    ? instance.latest_correction.effective_state.participants
-    : [];
-  const effectiveById = new Map(effectiveParticipants.map((participant) => [participant.id, participant]));
-  return baseParticipants.map((participant) => ({
-    ...participant,
-    ...(effectiveById.get(participant.id) || {}),
-  }));
-}
-
-function resolveMutationError(error) {
-  const supportMessage = resolveApiErrorMessage(error);
-  if (extractSupportCode(supportMessage)) {
-    return supportMessage;
-  }
-  if (supportMessage === 'capacity_exceeded') {
-    const maxCapacity = Number(error?.data?.max_capacity) || 0;
-    return maxCapacity > 0
-      ? `השיעור מלא — כל ${maxCapacity} המקומות תפוסים. אפשר לפנות מקום אם משתתף/ת ביטל/ה.`
-      : 'השיעור מלא — אין מקום פנוי למשתתף/ת נוסף/ת.';
-  }
-  if (supportMessage === 'cancel_instance_requires_dedicated_action') {
-    return 'ביטול שיעור נעשה דרך "בטל שיעור" ולא דרך העריכה.';
-  }
-  if (error?.message === 'missing_instructor_service_capability') {
-    return 'למדריך/ה שנבחר/ה אין יכולת שירות פעילה עבור השירות הזה.';
-  }
-  if (error?.message === 'missing_instructor_service_availability') {
-    return 'לשירות הזה עדיין לא הוגדרה זמינות אצל המדריך/ה שנבחר/ה.';
-  }
-  if (error?.message === 'outside_instructor_service_availability') {
-    return 'המועד שנבחר נמצא מחוץ לחלונות הזמינות של השירות אצל המדריך/ה.';
-  }
-  if (error?.message === 'failed_to_validate_instructor_availability') {
-    return 'לא הצלחנו לבדוק את זמינות המדריך/ה כרגע. נסו שוב.';
-  }
-  if (error?.message === 'invalid_service_duration') {
-    return 'לשירות שנבחר אין משך תקין. יש לעדכן את משך השירות לפני שמירת השיעור.';
-  }
-  if (error?.message === 'failed_to_load_service') {
-    return 'לא ניתן היה לטעון את פרטי השירות כרגע. נסו שוב.';
-  }
-  if (error?.status === 423) {
-    return 'השיעור נעול לשינוי ישיר. יש להשתמש בזרימת התיקון.';
-  }
-  if (error?.status === 409) {
-    return 'השיעור עודכן על ידי משתמש אחר. רעננו את התצוגה ונסו שוב.';
-  }
-  if (error?.data?.code === 'missing_instructor_compensation_decision') {
-    return 'יש לבחור אם המדריך אמור לקבל פיצוי לפני שמאשרים אי-הגעה מחויבת.';
-  }
-  if (error?.message === 'failed_to_build_status_change_preview') {
-    return 'לא ניתן היה לבנות תצוגה מקדימה לשינוי הסטטוס.';
-  }
-  const cancellationConflictMessage = resolveApiErrorMessage(error);
-  if (cancellationConflictMessage === 'instance_cancelled_has_attended_participants') {
-    const names = Array.isArray(error?.data?.attended_participants)
-      ? error.data.attended_participants.map((participant) => participant?.name).filter(Boolean)
-      : (Array.isArray(error?.attended_participants)
-        ? error.attended_participants.map((participant) => participant?.name).filter(Boolean)
-        : []);
-    if (names.length > 0) {
-      return `לא ניתן לבטל שיעור שבו כבר סומנה נוכחות. יש להסדיר קודם את: ${names.join(', ')}.`;
-    }
-    return 'לא ניתן לבטל שיעור שבו כבר סומנה נוכחות לאחד המשתתפים.';
-  }
-  return error?.message || 'הפעולה נכשלה.';
-}
-
-function getParticipantStatusLabel(status) {
-  if (status === 'attended') return 'נכח';
-  if (status === 'no_show') return 'לא הגיע';
-  if (status === 'cancelled') return 'בוטל';
-  if (status === 'cancelled_student') return 'בוטל ע"י תלמיד';
-  if (status === 'cancelled_clinic') return 'בוטל ע"י המכון';
-  if (status === 'completed') return 'הושלם';
-  return 'מתוכנן';
-}
-
-function getCompensationDecisionLabel(decision) {
-  if (decision === 'compensated') return 'כן, לפצות את המדריך';
-  if (decision === 'not_compensated') return 'לא, אין לפצות את המדריך';
-  return 'יש לבחור';
-}
-
-function getWorkflowDecisionLabel(decision, kind = 'generic') {
-  if (kind === 'student_billing') {
-    if (decision === 'pending') return 'ממתין לחיוב';
-    if (decision === 'unknown') return 'טרם נקבע';
-    if (decision === 'resolved') return 'החיוב טופל';
-    if (decision === 'not_applicable') return 'לא רלוונטי';
-  }
-  if (kind === 'hmo_claim') {
-    if (decision === 'expected') return 'צפויה תביעה';
-    if (decision === 'pending') return 'ממתין להגשת תביעה';
-    if (decision === 'required') return 'נדרשת תביעה';
-    if (decision === 'not_required') return 'לא נדרשת תביעה';
-    if (decision === 'blocked') return 'דורש בדיקת גורם מממן';
-    if (decision === 'unknown') return 'טרם נקבע';
-  }
-  if (kind === 'instructor_compensation') {
-    if (decision === 'compensated') return 'המדריך מתוגמל';
-    if (decision === 'not_compensated') return 'המדריך לא מתוגמל';
-    if (decision === 'pending') return 'ממתין להחלטת שכר';
-    if (decision === 'unknown') return 'טרם נקבע';
-    if (decision === 'not_applicable') return 'לא רלוונטי';
-  }
-  if (decision === 'resolved') return 'טופל';
-  if (decision === 'pending') return 'ממתין';
-  if (decision === 'unknown') return 'לא נקבע';
-  return decision || 'לא נקבע';
-}
-
-function deriveDisplayWorkflowDecisions(participant, billingPolicy) {
-  const workflow = participant?.metadata?.workflow && typeof participant.metadata.workflow === 'object'
-    ? participant.metadata.workflow
-    : {};
-  const status = String(participant?.participant_status || '').trim().toLowerCase();
-  const hmoCoverageStatus = String(participant?.hmo_coverage?.status || '').trim().toLowerCase();
-  const studentBillingDecision = workflow.student_billing?.decision || 'unknown';
-  const compensationDecision = workflow.instructor_compensation?.decision || 'unknown';
-  const hmoDecision = workflow.hmo_claim?.decision || 'unknown';
-  const hasResolvedStatus = ['attended', 'no_show', 'cancelled_student', 'cancelled_clinic'].includes(status);
-  const hasCoveredHmoAuthorization = hmoCoverageStatus === 'covered';
-  let resolvedStudentBillingDecision = studentBillingDecision;
-  if (studentBillingDecision === 'pending' && !billingPolicy?.[status]) {
-    resolvedStudentBillingDecision = 'not_applicable';
-  }
-  let resolvedHmoDecision = hmoDecision;
-  if (resolvedHmoDecision === 'unknown') {
-    if (hmoCoverageStatus === 'blocked') {
-      resolvedHmoDecision = 'blocked';
-    } else if (hasCoveredHmoAuthorization && status === 'scheduled') {
-      resolvedHmoDecision = 'expected';
-    } else if (hasCoveredHmoAuthorization && status === 'attended') {
-      resolvedHmoDecision = 'pending';
-    } else if (['no_show', 'cancelled_student', 'cancelled_clinic'].includes(status)) {
-      resolvedHmoDecision = 'not_required';
-    }
-  }
-
-  return {
-    studentBillingDecision: resolvedStudentBillingDecision !== 'unknown'
-      ? resolvedStudentBillingDecision
-      : (!hasResolvedStatus
-        ? 'unknown'
-        : (billingPolicy?.[status] ? 'pending' : 'not_applicable')),
-    compensationDecision: compensationDecision !== 'unknown'
-      ? compensationDecision
-      : (status === 'attended'
-        ? 'compensated'
-        : 'unknown'),
-    hmoDecision: resolvedHmoDecision,
-  };
-}
-
-function getWorkflowReasonLabel(reason) {
-  if (reason === 'attendance_unresolved') return 'יש משתתפים שטרם קיבלו סטטוס סופי.';
-  if (reason === 'student_billing_unresolved') return 'יש חיוב שעדיין לא הושלם.';
-  if (reason === 'instructor_compensation_unresolved') return 'שכר המדריך עדיין לא נסגר דרך הרצת שכר.';
-  if (reason === 'hmo_claim_unresolved') return 'יש תביעת גורם מממן שעדיין לא הושלמה.';
-  if (reason === 'missing_instance') return 'פרטי השיעור אינם זמינים.';
-  return reason || 'קיים שלב פתוח בתהליך הסגירה.';
-}
-
-function parseIsoDateSafe(value) {
-  if (typeof value !== 'string' || !value.trim()) return 0;
-  const parsed = Date.parse(value);
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function resolveLatestWorkflowState(preferredState, fallbackState) {
-  const hasPreferred = preferredState && typeof preferredState === 'object';
-  const hasFallback = fallbackState && typeof fallbackState === 'object';
-
-  if (!hasPreferred && !hasFallback) {
-    return {};
-  }
-  if (!hasPreferred) {
-    return fallbackState;
-  }
-  if (!hasFallback) {
-    return preferredState;
-  }
-
-  const preferredTs = parseIsoDateSafe(preferredState.evaluated_at);
-  const fallbackTs = parseIsoDateSafe(fallbackState.evaluated_at);
-  return fallbackTs > preferredTs ? fallbackState : preferredState;
-}
-
-function resolveClosureStepState(summary, key, isClosed) {
-  if (summary && typeof summary[key] === 'boolean') {
-    return summary[key];
-  }
-  if (isClosed === true) {
-    return true;
-  }
-  return null;
-}
-
-function formatAgorotPreview(value) {
-  const amount = Number(value || 0);
-  return new Intl.NumberFormat('he-IL', {
-    style: 'currency',
-    currency: 'ILS',
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(amount / 100);
-}
-
-function getPreviewImpactClass(severity) {
-  if (severity === 'blocking') {
-    return 'border-red-200 bg-red-50 text-red-950';
-  }
-  if (severity === 'warning') {
-    return 'border-amber-200 bg-amber-50 text-amber-950';
-  }
-  return 'border-slate-200 bg-slate-50 text-slate-800';
-}
-
-function shortId(value) {
-  return value ? String(value).slice(-8) : '';
-}
-
 function DetailField({ label, children, className = '' }) {
   return (
     <div className={className}>
@@ -428,100 +130,6 @@ function EmptyTabState({ title, description }) {
   );
 }
 
-function getOpenActionToneClass(tone) {
-  if (tone === 'warn') {
-    return 'border-amber-200 bg-amber-50 text-amber-950';
-  }
-  if (tone === 'danger') {
-    return 'border-red-200 bg-red-50 text-red-950';
-  }
-  return 'border-slate-200 bg-white text-slate-900';
-}
-
-function getOpenActionTab(actionId) {
-  if (actionId === 'attendance') return 'participants';
-  if (actionId === 'reminders') return 'participants';
-  if (['documentation', 'billing', 'payroll', 'hmo', 'closure'].includes(actionId)) return 'workflow';
-  if (actionId === 'exception') return 'overview';
-  return 'overview';
-}
-
-function isResolvedParticipantStatus(status) {
-  return ['attended', 'no_show', 'cancelled_student', 'cancelled_clinic'].includes(String(status || '').trim().toLowerCase());
-}
-
-function getImpactGroupMeta(type) {
-  if (['billing_reversal', 'billing_charge', 'billing_update', 'billing_blocked', 'post_coverage_charge'].includes(type)) {
-    return { key: 'billing', label: 'חיוב כספי', borderClass: 'border-amber-200', bgClass: 'bg-amber-50/70' };
-  }
-  if (['instructor_earning_reversal', 'instructor_earning_add', 'instructor_earning_update'].includes(type)) {
-    return { key: 'payroll', label: 'שכר מדריך', borderClass: 'border-emerald-200', bgClass: 'bg-emerald-50/70' };
-  }
-  if (['instructor_attendance_remove', 'instructor_attendance_update', 'instructor_attendance_add'].includes(type)) {
-    return { key: 'attendance', label: 'נוכחות מדריך', borderClass: 'border-sky-200', bgClass: 'bg-sky-50/70' };
-  }
-  if (['hmo_task_resolve', 'hmo_split_detail'].includes(type)) {
-    return { key: 'hmo', label: 'גורם מממן', borderClass: 'border-fuchsia-200', bgClass: 'bg-fuchsia-50/70' };
-  }
-  return { key: 'workflow', label: 'זרימת שיעור', borderClass: 'border-slate-200', bgClass: 'bg-slate-50/70' };
-}
-
-function groupPreviewImpacts(impacts) {
-  const groups = [];
-  for (const impact of Array.isArray(impacts) ? impacts : []) {
-    const meta = getImpactGroupMeta(impact?.type);
-    let group = groups.find((entry) => entry.key === meta.key);
-    if (!group) {
-      group = { ...meta, impacts: [] };
-      groups.push(group);
-    }
-    group.impacts.push(impact);
-  }
-  return groups;
-}
-
-function buildConflictLines(baseInstance, latestInstance, participantId) {
-  const lines = [];
-  if (!latestInstance) return lines;
-
-  const baseDisplayInstance = getDisplayInstance(baseInstance);
-  const latestDisplayInstance = getDisplayInstance(latestInstance);
-  const baseParticipants = getDisplayParticipants(baseInstance);
-  const latestParticipants = getDisplayParticipants(latestInstance);
-
-  if (baseDisplayInstance?.status !== latestDisplayInstance?.status) {
-    lines.push(`סטטוס השיעור כעת הוא "${getParticipantStatusLabel(latestDisplayInstance?.status)}" במקום "${getParticipantStatusLabel(baseDisplayInstance?.status)}".`);
-  }
-
-  if (baseDisplayInstance?.datetime_start !== latestDisplayInstance?.datetime_start) {
-    lines.push(`מועד השיעור השתנה ל-${formatDateDisplay(latestDisplayInstance?.datetime_start)} ${formatTimeDisplay(latestDisplayInstance?.datetime_start)}.`);
-  }
-
-  if (baseDisplayInstance?.duration_minutes !== latestDisplayInstance?.duration_minutes) {
-    lines.push(`משך השיעור עודכן ל-${latestDisplayInstance?.duration_minutes || 0} דקות.`);
-  }
-
-  if (participantId) {
-    const beforeParticipant = baseParticipants.find((participant) => participant.id === participantId);
-    const latestParticipant = latestParticipants.find((participant) => participant.id === participantId);
-    if (latestParticipant && beforeParticipant?.participant_status !== latestParticipant.participant_status) {
-      const participantName = getParticipantDisplayName(latestParticipant, getParticipantDisplayName(beforeParticipant, 'הלקוח/ה'));
-      lines.push(`${participantName} מסומן כרגע כ-"${getParticipantStatusLabel(latestParticipant.participant_status)}".`);
-    }
-    const latestNotes = latestParticipant?.metadata?.notes || '';
-    const previousNotes = beforeParticipant?.metadata?.notes || '';
-    if (latestNotes !== previousNotes && latestNotes) {
-      lines.push(`הערת המשתתף עודכנה ל-"${latestNotes}".`);
-    }
-  }
-
-  if (lines.length === 0) {
-    lines.push('קיימת גרסה חדשה יותר של השיעור בשרת, גם אם לא זוהה שינוי גלוי בשדות המוצגים כאן.');
-  }
-
-  return lines;
-}
-
 /**
  * LessonInstanceDialog component - displays and edits lesson instance details
  */
@@ -538,21 +146,31 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
 
   const sessionReportsEnabled = useSessionReportsEnabled();
   const { openSessionReportModal } = useSessionModal();
-  const [reportsByParticipant, setReportsByParticipant] = useState({});
-  const [sessionReportsLoadState, setSessionReportsLoadState] = useState({
-    scopeKey: '',
-    status: 'idle',
+  const {
+    reportsByParticipant,
+    loading: sessionReportsLoading,
+    loadFailed: sessionReportsLoadFailed,
+    reload: loadSessionReports,
+    recordReport,
+  } = useLessonSessionReports({
+    enabled: sessionReportsEnabled,
+    open,
+    orgId: org?.id,
+    instanceId: instance?.id,
   });
-  const sessionReportsRequestIdRef = useRef(0);
-  const sessionReportsScopeKey = sessionReportsEnabled && open && instance?.id && org?.id
-    ? `${org.id}:${instance.id}`
-    : '';
-  const sessionReportsLoading = Boolean(sessionReportsScopeKey) && (
-    sessionReportsLoadState.scopeKey !== sessionReportsScopeKey
-    || sessionReportsLoadState.status === 'loading'
-  );
-  const sessionReportsLoadFailed = sessionReportsLoadState.scopeKey === sessionReportsScopeKey
-    && sessionReportsLoadState.status === 'error';
+  const { billingPolicy, instructorEarningsPolicy } = useLessonFinancePolicies(org?.id);
+  const {
+    getCurrentInstanceVersion,
+    getCurrentParticipantVersion,
+    syncVersionsFromServer,
+    resetVersions,
+  } = useLessonVersions({
+    instance,
+    displayParticipants,
+    scopeKey: dialogScopeKey,
+    enabled: Boolean(org?.id && instance?.id),
+    fetchLatest: fetchLatestInstance,
+  });
   
   const [isEditMode, setIsEditMode] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -569,8 +187,13 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
   // absenceForm: { participantId, status, notes } | null
   const [absenceForm, setAbsenceForm] = useState(null);
   const [absenceFormError, setAbsenceFormError] = useState('');
-  const [absenceRequirements, setAbsenceRequirements] = useState(null);
-  const [absenceRequirementsLoading, setAbsenceRequirementsLoading] = useState(false);
+  const { requirements: absenceRequirements, loading: absenceRequirementsLoading } = useAbsenceRequirements({
+    orgId: org?.id,
+    instanceId: instance?.id,
+    participantId: absenceForm?.participantId,
+    status: absenceForm?.status,
+    onError: (loadError) => setAbsenceFormError(resolveMutationError(loadError) || 'לא ניתן היה לטעון את דרישות אי-ההגעה.'),
+  });
   const [feeWaiverConfirmOpen, setFeeWaiverConfirmOpen] = useState(false);
   const [restorePreview, setRestorePreview] = useState(null);
   const [restorePreviewError, setRestorePreviewError] = useState('');
@@ -582,12 +205,9 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
   const [editPreviewError, setEditPreviewError] = useState('');
   const [editPreviewLoading, setEditPreviewLoading] = useState(false);
   const [pendingEditBody, setPendingEditBody] = useState(null);
-  const [versionOverlay, setVersionOverlay] = useState(null);
   const [addingParticipantId, setAddingParticipantId] = useState(null);
   const studentSearchTimerRef = useRef(null);
   const [activeViewTab, setActiveViewTab] = useState('overview');
-  const [billingPolicy, setBillingPolicy] = useState(DEFAULT_BILLING_POLICY);
-  const [instructorEarningsPolicy, setInstructorEarningsPolicy] = useState(DEFAULT_INSTRUCTOR_EARNINGS_POLICY);
   const latestPreviewRequestIdRef = useRef(0);
   const latestCancelPreviewRequestIdRef = useRef(0);
   const latestStudentSearchRequestIdRef = useRef(0);
@@ -610,50 +230,6 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
     setPendingEditBody(null);
   }, [formData, useSchedulingOverride, selectedOverrideReasonCode, customOverrideReason]);
 
-  // Session Reports — load which participants already have a (non-legacy)
-  // report so the roster can show "documented" vs. an open "file report"
-  // action. Only fetched when the feature is enabled and the dialog is open.
-  const loadSessionReports = useCallback(async () => {
-    const scopeKey = sessionReportsScopeKey;
-    const requestId = ++sessionReportsRequestIdRef.current;
-
-    if (!scopeKey) {
-      setReportsByParticipant({});
-      setSessionReportsLoadState({ scopeKey: '', status: 'idle' });
-      return;
-    }
-
-    setSessionReportsLoadState({ scopeKey, status: 'loading' });
-    try {
-      const payload = await authenticatedFetch('session-reports', {
-        params: { org_id: org.id, lesson_instance_id: instance.id },
-      });
-      if (requestId !== sessionReportsRequestIdRef.current) return;
-
-      const map = {};
-      for (const report of Array.isArray(payload?.reports) ? payload.reports : []) {
-        if (report?.lesson_participant_id && !report?.is_legacy) {
-          map[report.lesson_participant_id] = report;
-        }
-      }
-      setReportsByParticipant(map);
-      setSessionReportsLoadState({ scopeKey, status: 'ready' });
-    } catch (err) {
-      if (requestId !== sessionReportsRequestIdRef.current) return;
-
-      console.error('Failed to load session reports for lesson', err);
-      setReportsByParticipant({});
-      setSessionReportsLoadState({ scopeKey, status: 'error' });
-    }
-  }, [instance?.id, org?.id, sessionReportsScopeKey]);
-
-  useEffect(() => {
-    void loadSessionReports();
-    return () => {
-      sessionReportsRequestIdRef.current += 1;
-    };
-  }, [loadSessionReports]);
-
   const handleOpenSessionReport = useCallback((participant) => {
     if (!participant?.id) return;
     openSessionReportModal({
@@ -662,16 +238,11 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
       serviceName: displayInstance?.service_name || '',
       lessonDateTime: displayInstance?.datetime_start || '',
       onCreated: (report) => {
-        if (report?.lesson_participant_id) {
-          setReportsByParticipant((current) => ({
-            ...current,
-            [report.lesson_participant_id]: report,
-          }));
-        }
+        recordReport(report);
         void loadSessionReports();
       },
     });
-  }, [openSessionReportModal, displayInstance?.service_name, displayInstance?.datetime_start, loadSessionReports]);
+  }, [openSessionReportModal, displayInstance?.service_name, displayInstance?.datetime_start, loadSessionReports, recordReport]);
 
   const resetEditState = useCallback((instanceValue = displayInstance) => {
     if (!instanceValue) {
@@ -709,7 +280,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
     setError(null);
     setFeeWaiverConfirmOpen(false);
     setAddingParticipantId(null);
-    setVersionOverlay(null);
+    resetVersions();
     window.clearTimeout(studentSearchTimerRef.current);
     setBillingWarnings([]);
     setIsAddingParticipant(false);
@@ -718,8 +289,6 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
     setIsSearchingStudents(false);
     setAbsenceForm(null);
     setAbsenceFormError('');
-    setAbsenceRequirements(null);
-    setAbsenceRequirementsLoading(false);
     setRestorePreview(null);
     setRestorePreviewError('');
     setRestorePreviewLoading(false);
@@ -735,7 +304,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
     latestPreviewRequestIdRef.current += 1;
     latestCancelPreviewRequestIdRef.current += 1;
     latestStudentSearchRequestIdRef.current += 1;
-  }, []);
+  }, [resetVersions]);
 
   useEffect(() => {
     resetTransientState();
@@ -748,97 +317,6 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
   }, [open, resetTransientState]);
 
   useEffect(() => () => window.clearTimeout(studentSearchTimerRef.current), []);
-
-  useEffect(() => {
-    if (!org?.id) {
-      setBillingPolicy(DEFAULT_BILLING_POLICY);
-      setInstructorEarningsPolicy(DEFAULT_INSTRUCTOR_EARNINGS_POLICY);
-      return undefined;
-    }
-
-    let cancelled = false;
-    const loadPolicies = async () => {
-      try {
-        const response = await authenticatedFetch('settings', {
-          params: {
-            org_id: org.id,
-            key: 'billing_consumption_policy,instructor_earnings_policy',
-          },
-        });
-        const settings = response?.settings && typeof response.settings === 'object'
-          ? response.settings
-          : {};
-        if (!cancelled) {
-          setBillingPolicy({
-            ...DEFAULT_BILLING_POLICY,
-            ...(settings.billing_consumption_policy && typeof settings.billing_consumption_policy === 'object'
-              ? settings.billing_consumption_policy
-              : {}),
-          });
-          setInstructorEarningsPolicy({
-            ...DEFAULT_INSTRUCTOR_EARNINGS_POLICY,
-            ...(settings.instructor_earnings_policy && typeof settings.instructor_earnings_policy === 'object'
-              ? settings.instructor_earnings_policy
-              : {}),
-          });
-        }
-      } catch (loadError) {
-        console.error('Failed to load finance policies for attendance dialog:', loadError);
-        if (!cancelled) {
-          setBillingPolicy(DEFAULT_BILLING_POLICY);
-          setInstructorEarningsPolicy(DEFAULT_INSTRUCTOR_EARNINGS_POLICY);
-        }
-      }
-    };
-
-    void loadPolicies();
-    return () => {
-      cancelled = true;
-    };
-  }, [org?.id]);
-
-  useEffect(() => {
-    if (!org?.id || !absenceForm?.status || !absenceForm?.participantId) {
-      setAbsenceRequirements(null);
-      setAbsenceRequirementsLoading(false);
-      return undefined;
-    }
-
-    let cancelled = false;
-    const loadAbsenceRequirements = async () => {
-      setAbsenceRequirementsLoading(true);
-      try {
-        const response = await authenticatedFetch('calendar/attendance', {
-          method: 'POST',
-          body: {
-            action: 'status-requirements',
-            org_id: org.id,
-            instance_id: instance.id,
-            participant_id: absenceForm.participantId,
-            participant_status: absenceForm.status,
-          },
-        });
-        if (!cancelled) {
-          setAbsenceRequirements(response && typeof response === 'object' ? response : null);
-        }
-      } catch (loadError) {
-        console.error('Failed to load absence requirements:', loadError);
-        if (!cancelled) {
-          setAbsenceRequirements(null);
-          setAbsenceFormError(resolveMutationError(loadError) || 'לא ניתן היה לטעון את דרישות אי-ההגעה.');
-        }
-      } finally {
-        if (!cancelled) {
-          setAbsenceRequirementsLoading(false);
-        }
-      }
-    };
-
-    void loadAbsenceRequirements();
-    return () => {
-      cancelled = true;
-    };
-  }, [org?.id, instance?.id, absenceForm?.participantId, absenceForm?.status]);
 
 
   function formatPhoneForWhatsApp(phone) {
@@ -923,42 +401,6 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
       clearConflict();
     }
   }, [open, clearConflict]);
-
-  function getCurrentInstanceVersion() {
-    const overlayVersion = versionOverlay?.scopeKey === dialogScopeKey ? versionOverlay.instanceVersion : null;
-    return typeof overlayVersion === 'number' && overlayVersion > (instance?.version ?? -Infinity)
-      ? overlayVersion
-      : instance?.version;
-  }
-
-  function getCurrentParticipantVersion(participantId) {
-    const baseVersion = displayParticipants.find((participant) => participant.id === participantId)?.version;
-    const overlayVersion = versionOverlay?.scopeKey === dialogScopeKey ? versionOverlay.participants?.[participantId] : null;
-    return typeof overlayVersion === 'number' && overlayVersion > (baseVersion ?? -Infinity)
-      ? overlayVersion
-      : baseVersion;
-  }
-
-  // Our own writes bump lesson/participant versions (attendance also re-syncs closure state), but the
-  // `instance` prop only refreshes after the whole calendar refetch. Pull the fresh versions right away
-  // so a quick follow-up action on the same lesson isn't rejected as a version conflict.
-  async function syncVersionsFromServer() {
-    if (!org?.id || !instance?.id) return;
-    const scopeKey = dialogScopeKey;
-    try {
-      const latest = await fetchLatestInstance();
-      setVersionOverlay({
-        scopeKey,
-        instanceVersion: typeof latest?.version === 'number' ? latest.version : null,
-        participants: Object.fromEntries(
-          (Array.isArray(latest?.participants) ? latest.participants : [])
-            .map((participant) => [participant.id, participant.version]),
-        ),
-      });
-    } catch (syncError) {
-      console.error('Failed to refresh lesson versions after update:', syncError);
-    }
-  }
 
   function createAttendanceConflictAdapter() {
     return {
@@ -1308,7 +750,6 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
           : '',
     });
     setAbsenceFormError('');
-    setAbsenceRequirements(null);
   }
 
   function handleAbsenceStatusChange(nextStatus) {
@@ -1325,14 +766,11 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
       };
     });
     setAbsenceFormError('');
-    setAbsenceRequirements(null);
   }
 
   function closeAbsenceForm() {
     setAbsenceForm(null);
     setAbsenceFormError('');
-    setAbsenceRequirements(null);
-    setAbsenceRequirementsLoading(false);
     setFeeWaiverConfirmOpen(false);
   }
 

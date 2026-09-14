@@ -32,6 +32,9 @@
 - [`../api/_shared/session-reports-guards.js`](../api/_shared/session-reports-guards.js)
 
 ## Shared helpers to reuse
+- Lesson dialog building blocks (reuse them instead of re-deriving inside components):
+  - [`../src/features/calendar/utils/lessonDialogModel.js`](../src/features/calendar/utils/lessonDialogModel.js): pure helpers. Display-state derivation with correction overlays (`getDisplayInstance`, `getDisplayParticipants`), Hebrew status/decision/reason labels, `resolveMutationError` (API code → Hebrew), `buildConflictLines`, `groupPreviewImpacts`, scheduling-override metadata, and the default finance policies. It has no React and no `@/` aliases, so `node:test` can import it (`test/lesson-dialog-model.test.js`).
+  - [`../src/features/calendar/hooks/useLessonDialogData.js`](../src/features/calendar/hooks/useLessonDialogData.js): `useLessonSessionReports`, `useLessonFinancePolicies`, `useAbsenceRequirements` (results keyed by participant+status; never reset them by hand) and `useLessonVersions` (fresh versions after the dialog's own writes).
 - `useCalendarInstances`, `useCalendarInstructors`
 - `useTemplates`, `useTemplateMutations`, `useTemplateOverrides`
 - Local date and adapter helpers in [`../src/features/calendar/utils/`](../src/features/calendar/utils/)

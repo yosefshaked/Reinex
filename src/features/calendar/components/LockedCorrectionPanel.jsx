@@ -19,6 +19,7 @@ import { authenticatedFetch } from '@/lib/api-client.js'
 import { extractSupportCode, resolveApiErrorMessage } from '@/lib/error-support.js'
 import { AlertTriangle, Loader2, Lock, ShieldAlert } from 'lucide-react'
 import { getParticipantDisplayName } from '../utils/participantDisplay.js'
+import { getDisplayInstance, getDisplayParticipants } from '../utils/lessonDialogModel.js'
 
 const PARTICIPANT_STATUS_LABELS = {
   scheduled: 'מתוכנן',
@@ -48,38 +49,6 @@ function getLockLabel(lock) {
   const sourceLabel = LOCK_SOURCE_LABELS[String(lock?.lock_source_type || '').trim().toLowerCase()] || 'נעילה פיננסית'
   const reasonLabel = LOCK_REASON_LABELS[String(lock?.lock_reason || '').trim().toLowerCase()]
   return reasonLabel ? `${sourceLabel}: ${reasonLabel}` : sourceLabel
-}
-
-function getDisplayInstance(instance) {
-  const resolved = instance?.latest_correction?.effective_state?.instance
-    ? { ...instance, ...instance.latest_correction.effective_state.instance }
-    : instance
-
-  if (!resolved || typeof resolved !== 'object') {
-    return resolved
-  }
-
-  const normalizedStatus = String(resolved.status || '').trim().toLowerCase()
-  const status = ['cancelled_student', 'cancelled_clinic', 'no_show'].includes(normalizedStatus)
-    ? 'cancelled'
-    : normalizedStatus
-
-  return {
-    ...resolved,
-    status: status || resolved.status,
-  }
-}
-
-function getDisplayParticipants(instance) {
-  const baseParticipants = Array.isArray(instance?.participants) ? instance.participants : []
-  const effectiveParticipants = Array.isArray(instance?.latest_correction?.effective_state?.participants)
-    ? instance.latest_correction.effective_state.participants
-    : []
-  const effectiveById = new Map(effectiveParticipants.map((participant) => [participant.id, participant]))
-  return baseParticipants.map((participant) => ({
-    ...participant,
-    ...(effectiveById.get(participant.id) || {}),
-  }))
 }
 
 function formatCurrencyDelta(amount) {
