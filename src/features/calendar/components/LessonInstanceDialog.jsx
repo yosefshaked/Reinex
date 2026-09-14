@@ -201,6 +201,15 @@ function resolveMutationError(error) {
   if (extractSupportCode(supportMessage)) {
     return supportMessage;
   }
+  if (supportMessage === 'capacity_exceeded') {
+    const maxCapacity = Number(error?.data?.max_capacity) || 0;
+    return maxCapacity > 0
+      ? `השיעור מלא — כל ${maxCapacity} המקומות תפוסים. אפשר לפנות מקום אם משתתף/ת ביטל/ה.`
+      : 'השיעור מלא — אין מקום פנוי למשתתף/ת נוסף/ת.';
+  }
+  if (supportMessage === 'cancel_instance_requires_dedicated_action') {
+    return 'ביטול שיעור נעשה דרך "בטל שיעור" ולא דרך העריכה.';
+  }
   if (error?.message === 'missing_instructor_service_capability') {
     return 'למדריך/ה שנבחר/ה אין יכולת שירות פעילה עבור השירות הזה.';
   }
@@ -573,6 +582,9 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
   const [editPreviewError, setEditPreviewError] = useState('');
   const [editPreviewLoading, setEditPreviewLoading] = useState(false);
   const [pendingEditBody, setPendingEditBody] = useState(null);
+  const [versionOverlay, setVersionOverlay] = useState(null);
+  const [addingParticipantId, setAddingParticipantId] = useState(null);
+  const studentSearchTimerRef = useRef(null);
   const [activeViewTab, setActiveViewTab] = useState('overview');
   const [billingPolicy, setBillingPolicy] = useState(DEFAULT_BILLING_POLICY);
   const [instructorEarningsPolicy, setInstructorEarningsPolicy] = useState(DEFAULT_INSTRUCTOR_EARNINGS_POLICY);
@@ -586,7 +598,6 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
     date: '',
     time: '',
     duration_minutes: 60,
-    status: 'scheduled',
   });
   const [useSchedulingOverride, setUseSchedulingOverride] = useState(false);
   const [selectedOverrideReasonCode, setSelectedOverrideReasonCode] = useState('');
@@ -674,7 +685,6 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
       date: toLocalDateString(dateTime),
       time: dateTime.toTimeString().slice(0, 5),
       duration_minutes: instanceValue.duration_minutes || 60,
-      status: normalizeInstanceStatus(instanceValue.status) || 'scheduled',
     });
     const overrideState = resolveSchedulingOverrideFormState(instanceValue?.metadata?.scheduling_override);
     setUseSchedulingOverride(overrideState.enabled);
@@ -691,9 +701,16 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
     resetEditState(displayInstance);
   }, [displayInstance, resetEditState]);
 
-  // Reset local reminder optimistic state when a different instance is opened
-  useEffect(() => {
+  // Reset transient dialog state when a different lesson (or correction) is shown, and on every reopen:
+  // the component stays mounted between opens, so edit mode / errors would otherwise leak across lessons.
+  const resetTransientState = useCallback(() => {
     setLocalReminderState({});
+    setIsEditMode(false);
+    setError(null);
+    setFeeWaiverConfirmOpen(false);
+    setAddingParticipantId(null);
+    setVersionOverlay(null);
+    window.clearTimeout(studentSearchTimerRef.current);
     setBillingWarnings([]);
     setIsAddingParticipant(false);
     setAddStudentQuery('');
@@ -718,7 +735,19 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
     latestPreviewRequestIdRef.current += 1;
     latestCancelPreviewRequestIdRef.current += 1;
     latestStudentSearchRequestIdRef.current += 1;
-  }, [instance?.id, instance?.latest_correction?.id]);
+  }, []);
+
+  useEffect(() => {
+    resetTransientState();
+  }, [instance?.id, instance?.latest_correction?.id, resetTransientState]);
+
+  useEffect(() => {
+    if (open) {
+      resetTransientState();
+    }
+  }, [open, resetTransientState]);
+
+  useEffect(() => () => window.clearTimeout(studentSearchTimerRef.current), []);
 
   useEffect(() => {
     if (!org?.id) {
@@ -889,6 +918,48 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
     scopeKey: dialogScopeKey,
   });
 
+  useEffect(() => {
+    if (open) {
+      clearConflict();
+    }
+  }, [open, clearConflict]);
+
+  function getCurrentInstanceVersion() {
+    const overlayVersion = versionOverlay?.scopeKey === dialogScopeKey ? versionOverlay.instanceVersion : null;
+    return typeof overlayVersion === 'number' && overlayVersion > (instance?.version ?? -Infinity)
+      ? overlayVersion
+      : instance?.version;
+  }
+
+  function getCurrentParticipantVersion(participantId) {
+    const baseVersion = displayParticipants.find((participant) => participant.id === participantId)?.version;
+    const overlayVersion = versionOverlay?.scopeKey === dialogScopeKey ? versionOverlay.participants?.[participantId] : null;
+    return typeof overlayVersion === 'number' && overlayVersion > (baseVersion ?? -Infinity)
+      ? overlayVersion
+      : baseVersion;
+  }
+
+  // Our own writes bump lesson/participant versions (attendance also re-syncs closure state), but the
+  // `instance` prop only refreshes after the whole calendar refetch. Pull the fresh versions right away
+  // so a quick follow-up action on the same lesson isn't rejected as a version conflict.
+  async function syncVersionsFromServer() {
+    if (!org?.id || !instance?.id) return;
+    const scopeKey = dialogScopeKey;
+    try {
+      const latest = await fetchLatestInstance();
+      setVersionOverlay({
+        scopeKey,
+        instanceVersion: typeof latest?.version === 'number' ? latest.version : null,
+        participants: Object.fromEntries(
+          (Array.isArray(latest?.participants) ? latest.participants : [])
+            .map((participant) => [participant.id, participant.version]),
+        ),
+      });
+    } catch (syncError) {
+      console.error('Failed to refresh lesson versions after update:', syncError);
+    }
+  }
+
   function createAttendanceConflictAdapter() {
     return {
       buildConflictState: ({ payload, latestValue }) => ({
@@ -928,6 +999,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
         if (absenceForm?.participantId === payload.participantId) {
           setAbsenceForm(null);
         }
+        await syncVersionsFromServer();
         onUpdate?.();
       },
     };
@@ -949,7 +1021,6 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
           duration_minutes: payload.formData.duration_minutes,
           instructor_employee_id: payload.formData.instructor_employee_id,
           service_id: payload.formData.service_id,
-          status: payload.formData.status,
           expected_version: latestValue.version,
           metadata: buildSchedulingOverrideMetadata(latestValue.metadata, {
             enabled: payload.useSchedulingOverride,
@@ -1019,12 +1090,6 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
       throw new Error('Organization not found');
     }
 
-    if (formData.status === 'completed' && hasUnsetParticipants) {
-      throw new Error(
-        `יש לסמן נוכחות לכל התלמידים לפני השלמת השיעור (${scheduledParticipantsCount} ${scheduledParticipantsCount === 1 ? 'תלמיד ממתין' : 'תלמידים ממתינים'})`
-      );
-    }
-
     if (selectedEditService && !selectedEditServiceHasValidDuration) {
       throw new Error('לשירות שנבחר אין משך תקין. יש לעדכן את משך השירות לפני שמירת השיעור.');
     }
@@ -1053,8 +1118,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
       duration_minutes: formData.duration_minutes,
       instructor_employee_id: formData.instructor_employee_id,
       service_id: formData.service_id,
-      status: formData.status,
-      expected_version: instance.version,
+      expected_version: getCurrentInstanceVersion(),
       metadata: buildSchedulingOverrideMetadata(displayInstance?.metadata, {
         enabled: useSchedulingOverride,
         selectedReasonCode: selectedOverrideReasonCode,
@@ -1157,8 +1221,8 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
         instance_id: instance.id,
         participant_id: participantId,
         participant_status: status,
-        instance_version: instance.version,
-        participant_version: displayParticipants.find((participant) => participant.id === participantId)?.version,
+        instance_version: getCurrentInstanceVersion(),
+        participant_version: getCurrentParticipantVersion(participantId),
       };
       if (typeof notes === 'string') {
         body.notes = notes.trim();
@@ -1178,6 +1242,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
       if (result?.billing_warnings?.length > 0) {
         setBillingWarnings(result.billing_warnings);
       }
+      await syncVersionsFromServer();
       setRestorePreview(null);
       setRestorePreviewError('');
       if (status === 'scheduled') {
@@ -1356,7 +1421,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
           id: instance.id,
           org_id: org.id,
           status,
-          expected_version: instance.version,
+          expected_version: getCurrentInstanceVersion(),
         },
       });
 
@@ -1390,7 +1455,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
           action: 'preview-cancel-instance',
           id: instance.id,
           org_id: org.id,
-          expected_version: instance.version,
+          expected_version: getCurrentInstanceVersion(),
         },
       });
       if (requestId !== latestCancelPreviewRequestIdRef.current) {
@@ -1445,7 +1510,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
           id: instance.id,
           org_id: org.id,
           status,
-          expected_version: instance.version,
+          expected_version: getCurrentInstanceVersion(),
         },
       });
 
@@ -1560,8 +1625,9 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
     await openAttendancePreview(participant, 'scheduled');
   }
 
-  async function handleAddParticipant(studentId) {
-    if (!org?.id || !instance?.id) return;
+  async function handleAddParticipant(studentId, studentName = '') {
+    if (!org?.id || !instance?.id || addingParticipantId) return;
+    setAddingParticipantId(studentId);
     setError(null);
     try {
       await authenticatedFetch('lesson-instances', {
@@ -1576,9 +1642,13 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
       setIsAddingParticipant(false);
       setAddStudentQuery('');
       setAddStudentResults([]);
+      await syncVersionsFromServer();
       onUpdate?.();
+      toast.success(studentName ? `${studentName} נוסף/ה לשיעור.` : 'המשתתף/ת נוסף/ה לשיעור.');
     } catch (err) {
       setError(resolveMutationError(err));
+    } finally {
+      setAddingParticipantId(null);
     }
   }
 
@@ -1600,9 +1670,11 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
         ...prev,
         [participantId]: { ...(prev[participantId] || {}), reminder_sent: true },
       }));
+      await syncVersionsFromServer();
       onUpdate?.();
     } catch (err) {
       console.error('Error marking reminder sent:', err);
+      toast.error('ההודעה נפתחה, אך לא הצלחנו לסמן שהתזכורת נשלחה. נסו לשלוח שוב.');
     } finally {
       setReminderUpdating(false);
     }
@@ -1618,12 +1690,12 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
     await markReminderSent(participant.id);
   }
 
-  function handleSendEmailReminder(participant) {
+  async function handleSendEmailReminder(participant) {
     const contact = resolveReminderContact(participant);
     const href = buildEmailReminderHref(displayInstance, contact);
     if (!href) return;
     window.open(href, '_blank', 'noopener,noreferrer');
-    markReminderSent(participant.id);
+    await markReminderSent(participant.id);
   }
 
   async function handleSetReminderConfirmation(participant, approved) {
@@ -1646,6 +1718,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
           ...prev,
           [participant.id]: { ...(prev[participant.id] || {}), reminder_seen: true },
         }));
+        await syncVersionsFromServer();
       } else {
         openAbsenceForm(participant.id, { status: 'cancelled_student' });
         return;
@@ -1653,7 +1726,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
       onUpdate?.();
     } catch (err) {
       console.error('Error setting reminder confirmation:', err);
-      setError(err.message);
+      setError(resolveMutationError(err));
     } finally {
       setReminderUpdating(false);
     }
@@ -2041,10 +2114,22 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
             return (
               <Alert variant="warning" className="border-amber-400 bg-amber-50 text-amber-900">
                 <AlertTriangle className="h-4 w-4 text-amber-600" />
-                <AlertDescription>
-                  <strong>שיעור הושלם — אך ישנה בעיית חיוב</strong>
-                  <br />
-                  {`לא נמצאה מסגרת חיוב תקינה עבור: ${names}. יש לסדר זאת במסך הניהול המתאים כדי שהחיוב יתבצע.`}
+                <AlertDescription className="flex items-start justify-between gap-3">
+                  <span>
+                    <strong>החיוב לא נוצר</strong>
+                    <br />
+                    {`לא נמצאה מסגרת חיוב תקינה עבור: ${names}. יש להסדיר זאת בכרטיס הלקוח כדי שהחיוב יתבצע.`}
+                  </span>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 shrink-0 px-2"
+                    onClick={() => setBillingWarnings([])}
+                    aria-label="סגירת ההתראה"
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
                 </AlertDescription>
               </Alert>
             );
@@ -2228,23 +2313,9 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
               )}
             </div>
 
-            {/* Status */}
-            <div>
-              <Label htmlFor="status">סטטוס</Label>
-              <Select
-                value={formData.status || 'scheduled'}
-                onValueChange={(value) => setFormData({ ...formData, status: value })}
-              >
-                <SelectTrigger id="status">
-                  <SelectValue placeholder="בחר סטטוס" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="scheduled">מתוכנן</SelectItem>
-                  <SelectItem value="cancelled">בוטל</SelectItem>
-                  <SelectItem value="completed">הושלם</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+            <p className="text-sm text-slate-500">
+              סטטוס השיעור לא נערך כאן: השלמה דרך "סמן כהושלם", וביטול דרך "בטל שיעור".
+            </p>
 
             {(editPreviewLoading || editPreviewError || editPreview) ? (
               <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4">
@@ -2464,8 +2535,10 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
                       placeholder="חפש תלמיד (2 תווים לפחות)..."
                       value={addStudentQuery}
                       onChange={(e) => {
-                        setAddStudentQuery(e.target.value);
-                        searchStudents(e.target.value);
+                        const nextQuery = e.target.value;
+                        setAddStudentQuery(nextQuery);
+                        window.clearTimeout(studentSearchTimerRef.current);
+                        studentSearchTimerRef.current = window.setTimeout(() => searchStudents(nextQuery), 250);
                       }}
                       className="flex-1 h-8 text-sm"
                       autoFocus
@@ -2501,10 +2574,12 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
                           <button
                             key={student.id}
                             type="button"
-                            className="w-full text-start text-sm px-2 py-1.5 rounded-lg hover:bg-blue-100 flex items-center justify-between"
-                            onClick={() => handleAddParticipant(student.id)}
+                            className="w-full text-start text-sm px-2 py-1.5 rounded-lg hover:bg-blue-100 flex items-center justify-between disabled:opacity-60"
+                            onClick={() => handleAddParticipant(student.id, [student.first_name, student.last_name].filter(Boolean).join(' '))}
+                            disabled={Boolean(addingParticipantId)}
                           >
-                            <span className="font-medium">
+                            <span className="inline-flex items-center gap-1.5 font-medium">
+                              {addingParticipantId === student.id && <Loader2 className="h-3 w-3 animate-spin" />}
                               {[student.first_name, student.last_name].filter(Boolean).join(' ')}
                             </span>
                             {student.phone && (
@@ -2639,7 +2714,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
           <DialogHeader>
             <DialogTitle>ביטול שיעור</DialogTitle>
             <DialogDescription>
-              הפעולה תסמן את השיעור כמבוטל ותעדכן את המשתתפים שעדיין מתוכננים לביטול ע"י המרפאה.
+              הפעולה תסמן את השיעור כמבוטל ותעדכן את המשתתפים שעדיין מתוכננים לביטול ע"י המכון.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
@@ -2678,7 +2753,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
                   <div className="text-slate-700">
                     {cancelPreviewScheduledCount > 0 ? (
                       <>
-                        <span className="font-medium text-slate-900">{cancelPreviewScheduledCount} משתתפים</span> יסומנו כ״בוטל ע״י המרפאה״
+                        <span className="font-medium text-slate-900">{cancelPreviewScheduledCount} משתתפים</span> יסומנו כ״בוטל ע״י המכון״
                         {cancelPreviewResolvedCount > 0 && (
                           <span className="text-slate-400"> · {cancelPreviewResolvedCount} שכבר הוכרעו לא ישתנו</span>
                         )}

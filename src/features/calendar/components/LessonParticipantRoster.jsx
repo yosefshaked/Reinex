@@ -264,6 +264,7 @@ export function LessonParticipantRoster({
                       onClick={() => openAttendancePreview(participant, 'attended')}
                       disabled={isMarkingAttendance}
                       title="סמן כנכח"
+                      aria-label={`סמן כנכח – ${name}`}
                       className="h-8 w-8 p-0 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50"
                     >
                       <Check className="h-4 w-4" />
@@ -275,6 +276,7 @@ export function LessonParticipantRoster({
                     onClick={() => openAbsenceForm(participant.id)}
                     disabled={isMarkingAttendance}
                     title="לא הגיע / ביטול"
+                    aria-label={`לא הגיע / ביטול – ${name}`}
                     className="h-8 w-8 p-0 text-red-500 hover:text-red-600 hover:bg-red-50"
                   >
                     <XCircle className="h-4 w-4" />
@@ -285,7 +287,8 @@ export function LessonParticipantRoster({
                       variant="ghost"
                       onClick={() => openRestorePreview(participant)}
                       disabled={isMarkingAttendance || restorePreviewLoading}
-                      title="שחזר לתוכנן"
+                      title="שחזר למתוכנן"
+                      aria-label={`שחזר למתוכנן – ${name}`}
                       className="h-8 w-8 p-0 text-blue-500 hover:text-blue-600 hover:bg-blue-50"
                     >
                       <RotateCcw className="h-4 w-4" />
@@ -546,7 +549,7 @@ export function LessonParticipantRoster({
                     type="button"
                     size="sm"
                     variant="destructive"
-                    onClick={confirmAbsenceForm}
+                    onClick={() => confirmAbsenceForm()}
                     disabled={
                       isMarkingAttendance ||
                       absenceRequirementsLoading ||

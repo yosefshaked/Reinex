@@ -329,6 +329,30 @@ export function evaluateLessonClosureState(state) {
   };
 }
 
+function sortObjectKeysReplacer(_key, value) {
+  if (!isPlainObject(value)) return value;
+  return Object.keys(value).sort().reduce((sorted, key) => {
+    sorted[key] = value[key];
+    return sorted;
+  }, {});
+}
+
+// Comparable form of metadata.workflow_state. Excludes evaluated_at (fresh on every
+// evaluation) so an unchanged state does not rewrite lesson_instances and bump `version`
+// (spurious 409 version_conflict). Key order and participant order are normalized because
+// jsonb does not preserve key order and the participants query is unordered.
+function buildWorkflowStateComparisonKey(workflowState) {
+  if (!isPlainObject(workflowState)) return null;
+  const participants = asArray(workflowState.participants)
+    .slice()
+    .sort((a, b) => normalizeString(a?.participant_id).localeCompare(normalizeString(b?.participant_id)));
+  return JSON.stringify({
+    reasons_open: workflowState.reasons_open ?? null,
+    summary: workflowState.summary ?? null,
+    participants,
+  }, sortObjectKeysReplacer);
+}
+
 export async function syncLessonClosureState(tenantClient, lessonInstanceId, actorUserId = null) {
   const state = await loadLessonWorkflowState(tenantClient, lessonInstanceId);
   if (!state?.instance) {
@@ -358,7 +382,7 @@ export async function syncLessonClosureState(tenantClient, lessonInstanceId, act
     state.instance.is_closed !== evaluation.should_close
       || normalizeString(state.instance.closed_at) !== normalizeString(nextPayload.closed_at)
       || normalizeString(state.instance.closed_by) !== normalizeString(nextPayload.closed_by)
-      || JSON.stringify(currentMetadata.workflow_state || null) !== JSON.stringify(nextWorkflowState),
+      || buildWorkflowStateComparisonKey(currentMetadata.workflow_state) !== buildWorkflowStateComparisonKey(nextWorkflowState),
   );
 
   if (hasChanged) {

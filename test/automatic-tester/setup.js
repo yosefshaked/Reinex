@@ -334,6 +334,8 @@ const SCHEMA_PROBE_COLUMNS = [
   { table: 'profiles', column: 'account_status' },
   { table: 'profiles', column: 'setup_completed_at' },
   { table: 'profiles', column: 'is_system_admin' },
+  // Session reports (#48) — without it GET /api/services fails with failed_to_load_services.
+  { table: 'Services', column: 'report_form_id' },
 ];
 
 // ── Direct DB probes via psql (bypasses PostgREST cache) ─────────────────

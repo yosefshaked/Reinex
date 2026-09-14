@@ -1,0 +1,745 @@
+{
+  "meta": {
+    "id": "lesson-dialog-regressions",
+    "name": "Lesson Dialog — Regression Checks",
+    "description": "Regression checks for LessonInstanceDialog: (A3) edit mode has no status field, (A1) reopening the dialog or opening another lesson always starts in view mode on the first tab, (A2) marking two group participants attended back-to-back does not raise a false version-conflict panel. Fixtures (service price, two dedicated instructors, three students, one single + one group lesson on the first of the current month) are created through the API first, following the hmo-claiming conventions.",
+    "version": "1.0.0",
+    "last_validated_at": "2026-09-14T15:05:24Z",
+    "author": "claude-ai",
+    "dependencies": {
+      "routes": [
+        "/calendar"
+      ],
+      "api_endpoints": [
+        "GET /api/services",
+        "POST /api/instructors",
+        "POST /api/students-list",
+        "POST /api/lesson-instances",
+        "GET /api/calendar",
+        "POST /api/calendar-attendance"
+      ]
+    }
+  },
+  "config": {
+    "timeout_ms": 25000,
+    "screenshot_on_failure": true,
+    "continue_on_step_failure": false,
+    "continue_on_workflow_failure": true
+  },
+  "variables": {
+    "LESSON_DURATION": "45"
+  },
+
+  "workflows": [
+
+    {
+      "id": "login",
+      "name": "Login as Admin",
+      "steps": [
+        {
+          "id": "do-login",
+          "description": "Sign in with admin credentials",
+          "action": "login",
+          "role": "admin"
+        },
+        {
+          "id": "assert-dashboard",
+          "description": "Confirm landing on dashboard",
+          "action": "assert",
+          "type": "url",
+          "pattern": "#/dashboard"
+        }
+      ]
+    },
+
+    {
+      "id": "api-setup-service",
+      "name": "API – Resolve service ID",
+      "description": "Fetches the first available service and ensures it has a default customer charge so attendance marking can create billing (same fixture as hmo-claiming).",
+      "steps": [
+        {
+          "id": "get-service",
+          "action": "apiCall",
+          "description": "Fetch the first available service",
+          "method": "GET",
+          "endpoint": "/api/services?org_id={{TEST_ORG_ID}}",
+          "store": "SERVICE_ID",
+          "storeField": "0.id"
+        },
+        {
+          "id": "ensure-service-price-direct",
+          "action": "apiCall",
+          "description": "Direct Supabase PATCH to ensure the selected service has a default customer charge (billing blocks ledger creation without it).",
+          "method": "PATCH",
+          "endpoint": "{{SUPABASE_URL}}/rest/v1/Services?id=eq.{{SERVICE_ID}}&org_id=eq.{{TEST_ORG_ID}}",
+          "headers": {
+            "apikey": "{{SERVICE_ROLE_KEY}}",
+            "Prefer": "return=minimal"
+          },
+          "body": {
+            "default_customer_charge_amount": 10000,
+            "payment_model": "fixed_rate"
+          }
+        }
+      ]
+    },
+
+    {
+      "id": "api-setup-instructors",
+      "name": "API – Create two dedicated instructors",
+      "description": "Creates one instructor for the single lesson and one for the group lesson (separate calendar columns, no double-booking), each with a base_rate=0 service capability so attendance rate validation passes.",
+      "steps": [
+        {
+          "id": "create-instructor-single",
+          "action": "apiCall",
+          "description": "Create the instructor for the single-participant lesson",
+          "method": "POST",
+          "endpoint": "/api/instructors",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "first_name": "מדריך",
+            "last_name": "דיאלוג יחיד",
+            "employee_id": "TEST-DLG-S-{{RUN_NUMERIC_ID}}",
+            "employee_type": "instructor",
+            "payroll_model": "lesson_based",
+            "current_rate": 20000
+          },
+          "store": "SINGLE_INSTRUCTOR_ID",
+          "storeField": "id"
+        },
+        {
+          "id": "set-single-instructor-rate-direct",
+          "action": "apiCall",
+          "description": "Direct Supabase INSERT of a base_rate=0 capability for the service (ignore 409 if it exists)",
+          "method": "POST",
+          "endpoint": "{{SUPABASE_URL}}/rest/v1/instructor_service_capabilities",
+          "headers": {
+            "apikey": "{{SERVICE_ROLE_KEY}}",
+            "Prefer": "return=minimal"
+          },
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "employee_id": "{{SINGLE_INSTRUCTOR_ID}}",
+            "service_id": "{{SERVICE_ID}}",
+            "base_rate": 0,
+            "max_students": 1,
+            "availability_windows": [],
+            "metadata": {}
+          },
+          "ignoreStatus": [409]
+        },
+        {
+          "id": "create-instructor-group",
+          "action": "apiCall",
+          "description": "Create the instructor for the group lesson",
+          "method": "POST",
+          "endpoint": "/api/instructors",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "first_name": "מדריך",
+            "last_name": "דיאלוג קבוצה",
+            "employee_id": "TEST-DLG-G-{{RUN_NUMERIC_ID}}",
+            "employee_type": "instructor",
+            "payroll_model": "lesson_based",
+            "current_rate": 20000
+          },
+          "store": "GROUP_INSTRUCTOR_ID",
+          "storeField": "id"
+        },
+        {
+          "id": "set-group-instructor-rate-direct",
+          "action": "apiCall",
+          "description": "Direct Supabase INSERT of a base_rate=0 capability with room for two participants (ignore 409 if it exists)",
+          "method": "POST",
+          "endpoint": "{{SUPABASE_URL}}/rest/v1/instructor_service_capabilities",
+          "headers": {
+            "apikey": "{{SERVICE_ROLE_KEY}}",
+            "Prefer": "return=minimal"
+          },
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "employee_id": "{{GROUP_INSTRUCTOR_ID}}",
+            "service_id": "{{SERVICE_ID}}",
+            "base_rate": 0,
+            "max_students": 2,
+            "availability_windows": [],
+            "metadata": {}
+          },
+          "ignoreStatus": [409]
+        }
+      ]
+    },
+
+    {
+      "id": "api-setup-students",
+      "name": "API – Create three run-specific students",
+      "description": "Creates one student for the single lesson and two for the group lesson. Names embed RUN_NUMERIC_ID so calendar/roster selectors never match lessons left over from earlier runs on the same day.",
+      "steps": [
+        {
+          "id": "create-single-student",
+          "action": "apiCall",
+          "description": "Create the single-lesson student ('דיאלוג יחיד <run>')",
+          "method": "POST",
+          "endpoint": "/api/students-list",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "first_name": "דיאלוג",
+            "last_name": "יחיד {{RUN_NUMERIC_ID}}",
+            "identity_number": "991{{RUN_NUMERIC_ID}}",
+            "phone": "0501234511"
+          },
+          "store": "SINGLE_STUDENT_UUID",
+          "storeField": "id"
+        },
+        {
+          "id": "create-group-student-a",
+          "action": "apiCall",
+          "description": "Create group student A ('אלף קבוצה <run>')",
+          "method": "POST",
+          "endpoint": "/api/students-list",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "first_name": "אלף",
+            "last_name": "קבוצה {{RUN_NUMERIC_ID}}",
+            "identity_number": "992{{RUN_NUMERIC_ID}}",
+            "phone": "0501234512"
+          },
+          "store": "GROUP_STUDENT_A_UUID",
+          "storeField": "id"
+        },
+        {
+          "id": "create-group-student-b",
+          "action": "apiCall",
+          "description": "Create group student B ('בית קבוצה <run>')",
+          "method": "POST",
+          "endpoint": "/api/students-list",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "first_name": "בית",
+            "last_name": "קבוצה {{RUN_NUMERIC_ID}}",
+            "identity_number": "993{{RUN_NUMERIC_ID}}",
+            "phone": "0501234513"
+          },
+          "store": "GROUP_STUDENT_B_UUID",
+          "storeField": "id"
+        }
+      ]
+    },
+
+    {
+      "id": "api-setup-lessons",
+      "name": "API – Create single and group lessons",
+      "description": "Creates both lessons on the first of the current month ({{CURRENT_MONTH_START}}), each on its own dedicated instructor.",
+      "steps": [
+        {
+          "id": "create-single-lesson",
+          "action": "apiCall",
+          "description": "Create the single-participant lesson",
+          "method": "POST",
+          "endpoint": "/api/lesson-instances",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "datetime_start": "{{CURRENT_MONTH_START}}",
+            "duration_minutes": 45,
+            "instructor_employee_id": "{{SINGLE_INSTRUCTOR_ID}}",
+            "service_id": "{{SERVICE_ID}}",
+            "student_ids": ["{{SINGLE_STUDENT_UUID}}"]
+          },
+          "store": "SINGLE_INSTANCE_ID",
+          "storeField": "id"
+        },
+        {
+          "id": "create-group-lesson",
+          "action": "apiCall",
+          "description": "Create the two-participant group lesson",
+          "method": "POST",
+          "endpoint": "/api/lesson-instances",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "datetime_start": "{{CURRENT_MONTH_START}}",
+            "duration_minutes": 45,
+            "instructor_employee_id": "{{GROUP_INSTRUCTOR_ID}}",
+            "service_id": "{{SERVICE_ID}}",
+            "student_ids": ["{{GROUP_STUDENT_A_UUID}}", "{{GROUP_STUDENT_B_UUID}}"]
+          },
+          "store": "GROUP_INSTANCE_ID",
+          "storeField": "id"
+        }
+      ]
+    },
+
+    {
+      "id": "ui-open-calendar-day",
+      "name": "UI – Open the calendar on the first of the month",
+      "description": "Opens the calendar (fresh context → day view, today) and uses the date picker to jump to day 1 of the current month, where both fixture lessons live.",
+      "steps": [
+        {
+          "id": "navigate-calendar",
+          "description": "Navigate to the calendar page",
+          "action": "navigate",
+          "url": "{{BASE_URL}}/#/calendar"
+        },
+        {
+          "id": "wait-for-calendar",
+          "description": "Wait for the calendar main content to appear",
+          "action": "waitForSelector",
+          "selector": "main, [role='main']"
+        },
+        {
+          "id": "wait-for-new-lesson-button",
+          "description": "Wait for the 'שיעור חדש' split button to appear",
+          "action": "waitForSelector",
+          "selector": "button:has-text('שיעור חדש')"
+        },
+        {
+          "id": "open-date-picker",
+          "description": "Open the DateNavigator date picker (day-view trigger)",
+          "action": "click",
+          "selector": "button:has-text('בחירת יום מדויקת מהלוח')"
+        },
+        {
+          "id": "pick-first-of-month",
+          "description": "Click day 1 of the displayed (current) month — react-day-picker gridcell with ISO data-day ending in -01 that is not an outside day",
+          "action": "click",
+          "selector": "[role='gridcell'][data-day$='-01']:not([data-outside]) button",
+          "first": true
+        },
+        {
+          "id": "close-date-picker",
+          "description": "Press Escape in case the picker stayed open (when today is the 1st, clicking the selected day deselects it instead of navigating)",
+          "action": "pressKey",
+          "key": "Escape"
+        },
+        {
+          "id": "wait-picker-closed",
+          "description": "Wait for the picker popover to close",
+          "action": "waitForSelector",
+          "selector": "[role='dialog']",
+          "state": "hidden"
+        },
+        {
+          "id": "wait-single-lesson-event",
+          "description": "Wait for the single-participant lesson event to render",
+          "action": "waitForSelector",
+          "selector": ".reinex-calendar-event:has-text('יחיד {{RUN_NUMERIC_ID}}')"
+        },
+        {
+          "id": "wait-group-lesson-event",
+          "description": "Wait for the group lesson event to render",
+          "action": "waitForSelector",
+          "selector": ".reinex-calendar-event:has-text('קבוצה {{RUN_NUMERIC_ID}}')"
+        },
+        {
+          "id": "screenshot-calendar-day",
+          "action": "screenshot",
+          "name": "01-calendar-first-of-month"
+        }
+      ]
+    },
+
+    {
+      "id": "a3-edit-mode-no-status-field",
+      "name": "A3 – Edit mode has no status field",
+      "description": "Opens the single lesson, enters edit mode, and verifies the removed status Select (#status / label 'סטטוס') is gone and the explanatory note is shown instead.",
+      "steps": [
+        {
+          "id": "reset-dialogs",
+          "description": "Close any dialog left open by a previous failed workflow",
+          "action": "pressKey",
+          "key": "Escape"
+        },
+        {
+          "id": "wait-no-dialog",
+          "action": "waitForSelector",
+          "selector": "[role='dialog']",
+          "state": "hidden"
+        },
+        {
+          "id": "open-single-lesson",
+          "description": "Click the single-participant lesson in the calendar",
+          "action": "click",
+          "selector": ".reinex-calendar-event:has-text('יחיד {{RUN_NUMERIC_ID}}')",
+          "first": true
+        },
+        {
+          "id": "wait-lesson-dialog",
+          "description": "Wait for the lesson dialog ('פרטי שיעור')",
+          "action": "waitForSelector",
+          "selector": "[role='dialog']:has-text('פרטי שיעור')"
+        },
+        {
+          "id": "click-edit",
+          "description": "Enter edit mode",
+          "action": "click",
+          "selector": "[role='dialog'] button:has-text('עריכה')"
+        },
+        {
+          "id": "wait-edit-form",
+          "description": "Edit form is shown (date input)",
+          "action": "waitForSelector",
+          "selector": "[role='dialog'] #date"
+        },
+        {
+          "id": "assert-no-status-select",
+          "description": "The status Select trigger (#status) no longer exists",
+          "action": "assert",
+          "type": "exists",
+          "selector": "[role='dialog'] #status",
+          "not": true
+        },
+        {
+          "id": "assert-no-status-label",
+          "description": "The 'סטטוס' label (for=status) no longer exists",
+          "action": "assert",
+          "type": "exists",
+          "selector": "[role='dialog'] label[for='status']",
+          "not": true
+        },
+        {
+          "id": "assert-status-note",
+          "description": "The replacement note explaining where status is changed is visible",
+          "action": "assert",
+          "type": "visible",
+          "selector": "[role='dialog'] p:has-text('סטטוס השיעור לא נערך כאן')"
+        },
+        {
+          "id": "screenshot-edit-mode",
+          "action": "screenshot",
+          "name": "02-a3-edit-mode-no-status"
+        },
+        {
+          "id": "close-dialog",
+          "description": "Close the dialog without saving",
+          "action": "pressKey",
+          "key": "Escape"
+        },
+        {
+          "id": "wait-dialog-closed",
+          "action": "waitForSelector",
+          "selector": "[role='dialog']",
+          "state": "hidden"
+        }
+      ]
+    },
+
+    {
+      "id": "a1-dialog-resets-to-view-mode",
+      "name": "A1 – Reopen / other lesson starts in view mode",
+      "description": "Edit mode must not carry over: (1) open lesson → עריכה → close → open another lesson → view mode; (2) open lesson → switch to 'משתתפים' tab → עריכה → close → reopen same lesson → view mode on the first tab ('סקירה').",
+      "steps": [
+        {
+          "id": "reset-dialogs",
+          "description": "Close any dialog left open by a previous failed workflow",
+          "action": "pressKey",
+          "key": "Escape"
+        },
+        {
+          "id": "wait-no-dialog",
+          "action": "waitForSelector",
+          "selector": "[role='dialog']",
+          "state": "hidden"
+        },
+        {
+          "id": "open-single-lesson",
+          "description": "Open the single-participant lesson",
+          "action": "click",
+          "selector": ".reinex-calendar-event:has-text('יחיד {{RUN_NUMERIC_ID}}')",
+          "first": true
+        },
+        {
+          "id": "wait-lesson-dialog",
+          "action": "waitForSelector",
+          "selector": "[role='dialog']:has-text('פרטי שיעור')"
+        },
+        {
+          "id": "click-edit",
+          "description": "Enter edit mode",
+          "action": "click",
+          "selector": "[role='dialog'] button:has-text('עריכה')"
+        },
+        {
+          "id": "wait-edit-form",
+          "action": "waitForSelector",
+          "selector": "[role='dialog'] #date"
+        },
+        {
+          "id": "close-dialog-in-edit-mode",
+          "description": "Close the dialog while still in edit mode",
+          "action": "pressKey",
+          "key": "Escape"
+        },
+        {
+          "id": "wait-dialog-closed",
+          "action": "waitForSelector",
+          "selector": "[role='dialog']",
+          "state": "hidden"
+        },
+        {
+          "id": "open-group-lesson",
+          "description": "Open a different lesson (the group lesson)",
+          "action": "click",
+          "selector": ".reinex-calendar-event:has-text('קבוצה {{RUN_NUMERIC_ID}}')",
+          "first": true
+        },
+        {
+          "id": "wait-view-mode-first-tab",
+          "description": "The other lesson opens in view mode with the first tab ('סקירה') active",
+          "action": "waitForSelector",
+          "selector": "[role='dialog'] [role='tab'][data-state='active']:has-text('סקירה')"
+        },
+        {
+          "id": "assert-no-edit-form",
+          "description": "No edit form is rendered (edit mode did not carry over)",
+          "action": "assert",
+          "type": "exists",
+          "selector": "[role='dialog'] #date",
+          "not": true
+        },
+        {
+          "id": "assert-edit-button-visible",
+          "description": "The 'עריכה' button is offered again (only rendered in view mode)",
+          "action": "assert",
+          "type": "visible",
+          "selector": "[role='dialog'] button:has-text('עריכה')"
+        },
+        {
+          "id": "screenshot-other-lesson-view-mode",
+          "action": "screenshot",
+          "name": "03-a1-other-lesson-view-mode"
+        },
+        {
+          "id": "close-group-dialog",
+          "action": "pressKey",
+          "key": "Escape"
+        },
+        {
+          "id": "wait-group-dialog-closed",
+          "action": "waitForSelector",
+          "selector": "[role='dialog']",
+          "state": "hidden"
+        },
+        {
+          "id": "reopen-single-lesson",
+          "description": "Open the single lesson again for the same-lesson reopen check",
+          "action": "click",
+          "selector": ".reinex-calendar-event:has-text('יחיד {{RUN_NUMERIC_ID}}')",
+          "first": true
+        },
+        {
+          "id": "wait-single-dialog",
+          "action": "waitForSelector",
+          "selector": "[role='dialog'] [role='tab']:has-text('משתתפים')"
+        },
+        {
+          "id": "switch-to-participants-tab",
+          "description": "Move off the first tab",
+          "action": "click",
+          "selector": "[role='dialog'] [role='tab']:has-text('משתתפים')"
+        },
+        {
+          "id": "wait-participants-tab-active",
+          "action": "waitForSelector",
+          "selector": "[role='dialog'] [role='tab'][data-state='active']:has-text('משתתפים')"
+        },
+        {
+          "id": "click-edit-again",
+          "description": "Enter edit mode",
+          "action": "click",
+          "selector": "[role='dialog'] button:has-text('עריכה')"
+        },
+        {
+          "id": "wait-edit-form-again",
+          "action": "waitForSelector",
+          "selector": "[role='dialog'] #date"
+        },
+        {
+          "id": "close-dialog-in-edit-mode-again",
+          "action": "pressKey",
+          "key": "Escape"
+        },
+        {
+          "id": "wait-dialog-closed-again",
+          "action": "waitForSelector",
+          "selector": "[role='dialog']",
+          "state": "hidden"
+        },
+        {
+          "id": "reopen-same-lesson",
+          "description": "Reopen the same lesson",
+          "action": "click",
+          "selector": ".reinex-calendar-event:has-text('יחיד {{RUN_NUMERIC_ID}}')",
+          "first": true
+        },
+        {
+          "id": "wait-reopen-view-mode-first-tab",
+          "description": "Reopened lesson starts in view mode on the first tab ('סקירה'), not on 'משתתפים' or in edit mode",
+          "action": "waitForSelector",
+          "selector": "[role='dialog'] [role='tab'][data-state='active']:has-text('סקירה')"
+        },
+        {
+          "id": "assert-no-edit-form-after-reopen",
+          "action": "assert",
+          "type": "exists",
+          "selector": "[role='dialog'] #date",
+          "not": true
+        },
+        {
+          "id": "screenshot-reopen-view-mode",
+          "action": "screenshot",
+          "name": "04-a1-reopen-view-mode"
+        },
+        {
+          "id": "close-dialog-final",
+          "action": "pressKey",
+          "key": "Escape"
+        },
+        {
+          "id": "wait-dialog-closed-final",
+          "action": "waitForSelector",
+          "selector": "[role='dialog']",
+          "state": "hidden"
+        }
+      ]
+    },
+
+    {
+      "id": "a2-back-to-back-attendance",
+      "name": "A2 – Back-to-back attendance, no false conflict",
+      "description": "In the group lesson, marks participant A attended and then immediately participant B (the second click fires as soon as the roster re-enables, before the calendar refetch refreshes the instance prop). Expects no 'השיעור השתנה מאז שפתחתם אותו' panel and both participants shown as 'נכח'.",
+      "steps": [
+        {
+          "id": "reset-dialogs",
+          "description": "Close any dialog left open by a previous failed workflow",
+          "action": "pressKey",
+          "key": "Escape"
+        },
+        {
+          "id": "wait-no-dialog",
+          "action": "waitForSelector",
+          "selector": "[role='dialog']",
+          "state": "hidden"
+        },
+        {
+          "id": "open-group-lesson",
+          "description": "Open the group lesson",
+          "action": "click",
+          "selector": ".reinex-calendar-event:has-text('קבוצה {{RUN_NUMERIC_ID}}')",
+          "first": true
+        },
+        {
+          "id": "wait-participants-tab",
+          "action": "waitForSelector",
+          "selector": "[role='dialog'] [role='tab']:has-text('משתתפים')"
+        },
+        {
+          "id": "open-participants-tab",
+          "description": "Switch to the participants roster",
+          "action": "click",
+          "selector": "[role='dialog'] [role='tab']:has-text('משתתפים')"
+        },
+        {
+          "id": "mark-a-attended",
+          "description": "Click the 'סמן כנכח – אלף קבוצה <run>' icon button",
+          "action": "click",
+          "selector": "[role='dialog'] button[aria-label^='סמן כנכח'][aria-label*='אלף קבוצה {{RUN_NUMERIC_ID}}']"
+        },
+        {
+          "id": "wait-a-preview",
+          "description": "Wait for the impact preview confirm button",
+          "action": "waitForSelector",
+          "selector": "[role='dialog'] button:has-text('אשר שינוי')"
+        },
+        {
+          "id": "confirm-a",
+          "description": "Confirm attendance for participant A",
+          "action": "click",
+          "selector": "[role='dialog'] button:has-text('אשר שינוי')"
+        },
+        {
+          "id": "wait-a-confirm-gone",
+          "description": "Confirm button disappears once the mark is in flight / done",
+          "action": "waitForSelector",
+          "selector": "[role='dialog'] button:has-text('אשר שינוי')",
+          "state": "hidden"
+        },
+        {
+          "id": "mark-b-attended",
+          "description": "Immediately click 'סמן כנכח – בית קבוצה <run>' (Playwright waits only until the button is re-enabled)",
+          "action": "click",
+          "selector": "[role='dialog'] button[aria-label^='סמן כנכח'][aria-label*='בית קבוצה {{RUN_NUMERIC_ID}}']"
+        },
+        {
+          "id": "wait-b-preview",
+          "action": "waitForSelector",
+          "selector": "[role='dialog'] button:has-text('אשר שינוי')"
+        },
+        {
+          "id": "confirm-b",
+          "description": "Confirm attendance for participant B",
+          "action": "click",
+          "selector": "[role='dialog'] button:has-text('אשר שינוי')"
+        },
+        {
+          "id": "wait-b-confirm-gone",
+          "action": "waitForSelector",
+          "selector": "[role='dialog'] button:has-text('אשר שינוי')",
+          "state": "hidden"
+        },
+        {
+          "id": "wait-a-attended-badge",
+          "description": "Participant A shows the 'נכח' status badge",
+          "action": "waitForSelector",
+          "selector": "[role='dialog'] article:has-text('אלף קבוצה {{RUN_NUMERIC_ID}}') span:text-is('נכח')"
+        },
+        {
+          "id": "wait-b-attended-badge",
+          "description": "Participant B shows the 'נכח' status badge (would stay 'scheduled' if the second write had hit a 409)",
+          "action": "waitForSelector",
+          "selector": "[role='dialog'] article:has-text('בית קבוצה {{RUN_NUMERIC_ID}}') span:text-is('נכח')"
+        },
+        {
+          "id": "assert-no-version-conflict",
+          "description": "No version-conflict panel ('השיעור השתנה מאז שפתחתם אותו') is shown",
+          "action": "assert",
+          "type": "exists",
+          "selector": "[role='dialog'] div:has-text('השיעור השתנה מאז שפתחתם אותו')",
+          "not": true
+        },
+        {
+          "id": "screenshot-both-attended",
+          "action": "screenshot",
+          "name": "05-a2-both-attended-no-conflict"
+        },
+        {
+          "id": "close-dialog",
+          "action": "pressKey",
+          "key": "Escape"
+        },
+        {
+          "id": "wait-dialog-closed",
+          "action": "waitForSelector",
+          "selector": "[role='dialog']",
+          "state": "hidden"
+        }
+      ]
+    },
+
+    {
+      "id": "logout",
+      "name": "Logout",
+      "steps": [
+        {
+          "id": "do-logout",
+          "action": "logout"
+        },
+        {
+          "id": "assert-login-page",
+          "action": "assert",
+          "type": "url",
+          "pattern": "#/login"
+        }
+      ]
+    }
+
+  ]
+}
