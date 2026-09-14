@@ -81,6 +81,7 @@ export default function LessonClosureResyncTool() {
     const collected = [];
     let scannedTotal = 0;
     let cursor = null;
+    let auditMissed = false;
     try {
       do {
         const page = await authenticatedFetch('system-admin-admin-tools', {
@@ -98,6 +99,7 @@ export default function LessonClosureResyncTool() {
         scannedTotal += Number(page?.scanned) || 0;
         setItems([...collected]);
         setScanned(scannedTotal);
+        if (page?.audit_logged === false) auditMissed = true;
         cursor = page?.next_cursor || null;
       } while (cursor && !stopRef.current);
 
@@ -107,6 +109,7 @@ export default function LessonClosureResyncTool() {
         orgId,
         stopped: stopRef.current,
         wouldChange: countItems(collected).would_change,
+        auditMissed,
       });
     } catch (requestError) {
       setError(requestError?.message || 'The re-sync request failed.');
@@ -184,6 +187,11 @@ export default function LessonClosureResyncTool() {
 
       {error ? (
         <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</div>
+      ) : null}
+      {lastRun?.auditMissed ? (
+        <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+          The changes were applied, but at least one page could not be written to the audit log. Check Error Events.
+        </div>
       ) : null}
 
       {running || items.length || lastRun ? (

@@ -9,10 +9,42 @@
  * (each write bumps the lesson version, like any other lesson write).
  */
 import { applyLessonClosurePlan, planLessonClosureSync } from './calendar-workflow.js';
+import { AUDIT_ROLES } from './audit-log.js';
 import { normalizeString } from './org-bff.js';
 
 export const LESSON_CLOSURE_RESYNC_TOOL = 'lesson_closure_resync';
 export const LESSON_CLOSURE_RESYNC_AUDIT_EVENT = 'system_admin.lesson_closure_resync';
+// Same category as the other system-admin actions (impersonation, pseudonymize, org purge); retained as critical.
+export const LESSON_CLOSURE_RESYNC_AUDIT_CATEGORY = 'admin_control';
+
+/**
+ * logAuditEvent params for one apply page, or null when nothing was written (preview, or no changes).
+ * Every field logAuditEvent requires is always set.
+ */
+export function buildLessonClosureResyncAuditEvent({ admin, request, result }) {
+  const changedLessonIds = (Array.isArray(result?.items) ? result.items : [])
+    .filter((item) => item?.status === 'changed')
+    .map((item) => item.lesson_instance_id);
+  if (request?.mode !== 'apply' || changedLessonIds.length === 0) return null;
+
+  return {
+    orgId: request.orgId || null,
+    userId: admin?.userId || null,
+    userEmail: normalizeString(admin?.email) || 'unknown',
+    userRole: AUDIT_ROLES.SYSTEM_ADMIN,
+    actionType: LESSON_CLOSURE_RESYNC_AUDIT_EVENT,
+    actionCategory: LESSON_CLOSURE_RESYNC_AUDIT_CATEGORY,
+    resourceType: 'maintenance_job',
+    resourceId: LESSON_CLOSURE_RESYNC_TOOL,
+    details: {
+      scope: request.scope,
+      org_id: request.orgId || null,
+      cursor: request.cursor || null,
+      totals: result.totals || null,
+      changed_lesson_instance_ids: changedLessonIds,
+    },
+  };
+}
 export const LESSON_CLOSURE_RESYNC_SCOPES = Object.freeze(['hmo_claim_unresolved', 'open_reasons']);
 export const LESSON_CLOSURE_RESYNC_DEFAULT_LIMIT = 25;
 export const LESSON_CLOSURE_RESYNC_MAX_LIMIT = 50;
