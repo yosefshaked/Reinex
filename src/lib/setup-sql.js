@@ -6838,4 +6838,284 @@ GRANT EXECUTE ON FUNCTION public.patch_import_workspace_config(uuid, uuid, jsonb
 -- api/import-commit-chunk/. Drop the dead function so it is not left dangling.
 -- =================================================================
 DROP FUNCTION IF EXISTS public.commit_import_chunk(uuid, uuid, uuid[]);
+
+-- =================================================================
+-- Patch 2026-09-17: RateHistory is the single source of truth for pay rates
+-- (implementations/business-process/payroll-prerequisites.md, P2).
+-- A row means "from effective_date until the next row of the same kind, the rate is X".
+-- pay_basis: lesson_hourly / lesson_flat (service required), attendance_hourly /
+-- monthly_salary / leave_day (no service). Pay code reads only RateHistory.
+-- =================================================================
+ALTER TABLE public."RateHistory" ADD COLUMN IF NOT EXISTS "pay_basis" text NULL;
+ALTER TABLE public."RateHistory" ADD COLUMN IF NOT EXISTS "created_at" timestamptz NOT NULL DEFAULT now();
+ALTER TABLE public."RateHistory" ADD COLUMN IF NOT EXISTS "created_by" uuid NULL;
+
+-- Legacy rows had no kind: a row with a service is a lesson rate, a row without one an hourly rate.
+UPDATE public."RateHistory"
+SET "pay_basis" = CASE WHEN "service_id" IS NOT NULL THEN 'lesson_hourly' ELSE 'attendance_hourly' END
+WHERE "pay_basis" IS NULL;
+
+ALTER TABLE public."RateHistory" ALTER COLUMN "pay_basis" SET NOT NULL;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'RateHistory_pay_basis_check'
+      AND conrelid = 'public."RateHistory"'::regclass
+  ) THEN
+    ALTER TABLE public."RateHistory"
+      ADD CONSTRAINT "RateHistory_pay_basis_check"
+      CHECK ("pay_basis" IN ('lesson_hourly', 'lesson_flat', 'attendance_hourly', 'monthly_salary', 'leave_day'));
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'RateHistory_service_matches_pay_basis_check'
+      AND conrelid = 'public."RateHistory"'::regclass
+  ) THEN
+    ALTER TABLE public."RateHistory"
+      ADD CONSTRAINT "RateHistory_service_matches_pay_basis_check"
+      CHECK (("pay_basis" IN ('lesson_hourly', 'lesson_flat')) = ("service_id" IS NOT NULL));
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'RateHistory_rate_non_negative_check'
+      AND conrelid = 'public."RateHistory"'::regclass
+  ) THEN
+    ALTER TABLE public."RateHistory"
+      ADD CONSTRAINT "RateHistory_rate_non_negative_check"
+      CHECK ("rate" >= 0);
+  END IF;
+END $$;
+
+-- One rate per employee, kind, service and effective date ("no service" compares equal).
+-- Created only when no duplicates exist, so an unexpected legacy duplicate can't abort the script.
+DROP INDEX IF EXISTS public."RateHistory_employee_service_effective_date_key";
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM public."RateHistory" rh
+    GROUP BY rh."org_id", rh."employee_id", rh."pay_basis",
+      COALESCE(rh."service_id", '00000000-0000-0000-0000-000000000000'::uuid), rh."effective_date"
+    HAVING count(*) > 1
+  ) THEN
+    CREATE UNIQUE INDEX IF NOT EXISTS "RateHistory_employee_basis_service_effective_date_key"
+      ON public."RateHistory" (
+        "org_id", "employee_id", "pay_basis",
+        COALESCE("service_id", '00000000-0000-0000-0000-000000000000'::uuid),
+        "effective_date"
+      );
+  ELSE
+    RAISE NOTICE 'RateHistory has duplicate rates for the same employee, kind, service and date; unique index not created.';
+  END IF;
+END $$;
+
+CREATE INDEX IF NOT EXISTS "RateHistory_employee_basis_effective_date_idx"
+  ON public."RateHistory" ("org_id", "employee_id", "pay_basis", "effective_date");
+
+-- Backfill: every current rate becomes a first row that applies from the beginning (2000-01-01),
+-- so every existing lesson and month keeps exactly the pay it has today.
+INSERT INTO public."RateHistory" ("org_id", "employee_id", "service_id", "pay_basis", "rate", "effective_date", "metadata")
+SELECT
+  cap."org_id",
+  cap."employee_id",
+  cap."service_id",
+  'lesson_hourly',
+  cap."base_rate",
+  DATE '2000-01-01',
+  jsonb_strip_nulls(jsonb_build_object(
+    'source', 'backfill_2026_09',
+    'compensation_input', cap."metadata" -> 'compensation_input'
+  ))
+FROM public.instructor_service_capabilities cap
+WHERE cap."base_rate" IS NOT NULL
+  AND NOT EXISTS (
+    SELECT 1 FROM public."RateHistory" existing_rate
+    WHERE existing_rate."org_id" = cap."org_id"
+      AND existing_rate."employee_id" = cap."employee_id"
+      AND existing_rate."service_id" = cap."service_id"
+      AND existing_rate."pay_basis" IN ('lesson_hourly', 'lesson_flat')
+  );
+
+INSERT INTO public."RateHistory" ("org_id", "employee_id", "service_id", "pay_basis", "rate", "effective_date", "metadata")
+SELECT
+  emp."org_id",
+  emp."id",
+  NULL::uuid,
+  legacy_rate.pay_basis,
+  legacy_rate.rate,
+  DATE '2000-01-01',
+  jsonb_build_object('source', 'backfill_2026_09')
+FROM public."Employees" emp
+CROSS JOIN LATERAL (
+  VALUES
+    ('attendance_hourly', emp."current_rate"),
+    ('monthly_salary', emp."monthly_salary_amount"),
+    ('leave_day', emp."leave_fixed_day_rate")
+) AS legacy_rate(pay_basis, rate)
+WHERE legacy_rate.rate IS NOT NULL
+  AND NOT EXISTS (
+    SELECT 1 FROM public."RateHistory" existing_rate
+    WHERE existing_rate."org_id" = emp."org_id"
+      AND existing_rate."employee_id" = emp."id"
+      AND existing_rate."pay_basis" = legacy_rate.pay_basis
+  );
+
+-- Transition: until every rate screen writes RateHistory with an effective date, changes to the legacy
+-- rate columns are mirrored here. A pairing's first rate applies from the beginning; a later change
+-- applies from today (Israel date). Writing the same rate again is a no-op.
+CREATE OR REPLACE FUNCTION public.record_rate_history_from_legacy_value(
+  p_org_id uuid,
+  p_employee_id uuid,
+  p_service_id uuid,
+  p_pay_basis text,
+  p_rate integer,
+  p_source text,
+  p_metadata jsonb DEFAULT NULL
+)
+RETURNS void
+LANGUAGE plpgsql
+SET search_path = public
+AS $$
+DECLARE
+  v_today date := (now() AT TIME ZONE 'Asia/Jerusalem')::date;
+  v_kinds text[] := CASE
+    WHEN p_service_id IS NULL THEN ARRAY[p_pay_basis]
+    ELSE ARRAY['lesson_hourly', 'lesson_flat']
+  END;
+  v_current_rate integer;
+  v_has_rows boolean;
+  v_effective_date date;
+BEGIN
+  IF p_rate IS NULL OR p_org_id IS NULL OR p_employee_id IS NULL THEN
+    RETURN;
+  END IF;
+
+  SELECT rh."rate" INTO v_current_rate
+  FROM public."RateHistory" rh
+  WHERE rh."org_id" = p_org_id
+    AND rh."employee_id" = p_employee_id
+    AND rh."pay_basis" = ANY (v_kinds)
+    AND rh."service_id" IS NOT DISTINCT FROM p_service_id
+    AND rh."effective_date" <= v_today
+  ORDER BY rh."effective_date" DESC, rh."created_at" DESC
+  LIMIT 1;
+
+  IF FOUND AND v_current_rate = p_rate THEN
+    RETURN;
+  END IF;
+
+  SELECT EXISTS (
+    SELECT 1 FROM public."RateHistory" rh
+    WHERE rh."org_id" = p_org_id
+      AND rh."employee_id" = p_employee_id
+      AND rh."pay_basis" = ANY (v_kinds)
+      AND rh."service_id" IS NOT DISTINCT FROM p_service_id
+  ) INTO v_has_rows;
+
+  v_effective_date := CASE WHEN v_has_rows THEN v_today ELSE DATE '2000-01-01' END;
+
+  UPDATE public."RateHistory" rh
+  SET "rate" = p_rate,
+      "metadata" = COALESCE(rh."metadata", '{}'::jsonb) || COALESCE(p_metadata, '{}'::jsonb) || jsonb_build_object('source', p_source)
+  WHERE rh."org_id" = p_org_id
+    AND rh."employee_id" = p_employee_id
+    AND rh."pay_basis" = p_pay_basis
+    AND rh."service_id" IS NOT DISTINCT FROM p_service_id
+    AND rh."effective_date" = v_effective_date;
+
+  IF NOT FOUND THEN
+    INSERT INTO public."RateHistory" ("org_id", "employee_id", "service_id", "pay_basis", "rate", "effective_date", "metadata")
+    VALUES (
+      p_org_id,
+      p_employee_id,
+      p_service_id,
+      p_pay_basis,
+      p_rate,
+      v_effective_date,
+      COALESCE(p_metadata, '{}'::jsonb) || jsonb_build_object('source', p_source)
+    );
+  END IF;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.mirror_capability_rate_to_rate_history()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = public
+AS $$
+BEGIN
+  IF TG_OP = 'UPDATE' AND OLD."base_rate" IS NOT DISTINCT FROM NEW."base_rate" THEN
+    RETURN NEW;
+  END IF;
+
+  PERFORM public.record_rate_history_from_legacy_value(
+    NEW."org_id",
+    NEW."employee_id",
+    NEW."service_id",
+    'lesson_hourly',
+    NEW."base_rate",
+    'instructor_service_capabilities.base_rate',
+    jsonb_strip_nulls(jsonb_build_object('compensation_input', NEW."metadata" -> 'compensation_input'))
+  );
+  RETURN NEW;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.mirror_employee_rates_to_rate_history()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = public
+AS $$
+BEGIN
+  IF TG_OP = 'INSERT' OR OLD."current_rate" IS DISTINCT FROM NEW."current_rate" THEN
+    PERFORM public.record_rate_history_from_legacy_value(
+      NEW."org_id", NEW."id", NULL, 'attendance_hourly', NEW."current_rate", 'Employees.current_rate', NULL
+    );
+  END IF;
+
+  IF TG_OP = 'INSERT' OR OLD."monthly_salary_amount" IS DISTINCT FROM NEW."monthly_salary_amount" THEN
+    PERFORM public.record_rate_history_from_legacy_value(
+      NEW."org_id", NEW."id", NULL, 'monthly_salary', NEW."monthly_salary_amount", 'Employees.monthly_salary_amount', NULL
+    );
+  END IF;
+
+  IF TG_OP = 'INSERT' OR OLD."leave_fixed_day_rate" IS DISTINCT FROM NEW."leave_fixed_day_rate" THEN
+    PERFORM public.record_rate_history_from_legacy_value(
+      NEW."org_id", NEW."id", NULL, 'leave_day', NEW."leave_fixed_day_rate", 'Employees.leave_fixed_day_rate', NULL
+    );
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_trigger
+    WHERE tgname = 'trg_instructor_service_capabilities_mirror_rate_history'
+      AND tgrelid = 'public.instructor_service_capabilities'::regclass
+  ) THEN
+    CREATE TRIGGER trg_instructor_service_capabilities_mirror_rate_history
+      AFTER INSERT OR UPDATE ON public.instructor_service_capabilities
+      FOR EACH ROW
+      EXECUTE FUNCTION public.mirror_capability_rate_to_rate_history();
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_trigger
+    WHERE tgname = 'trg_employees_mirror_rate_history'
+      AND tgrelid = 'public."Employees"'::regclass
+  ) THEN
+    CREATE TRIGGER trg_employees_mirror_rate_history
+      AFTER INSERT OR UPDATE ON public."Employees"
+      FOR EACH ROW
+      EXECUTE FUNCTION public.mirror_employee_rates_to_rate_history();
+  END IF;
+END $$;
 `;

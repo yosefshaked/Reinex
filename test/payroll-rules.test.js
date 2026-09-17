@@ -14,6 +14,32 @@ import {
   resolveLessonInstructorPayout,
 } from '../api/_shared/employee-finance.js';
 import { shouldParticipantTriggerInstructorCompensation } from '../api/_shared/calendar-workflow-decisions.js';
+import { PAY_BASIS, resolveLessonRateOnDate, resolveRateOnDate } from '../api/_shared/rate-history.js';
+
+function rateRow(id, employeeId, serviceId, payBasis, rate, effectiveDate) {
+  return { id, employee_id: employeeId, service_id: serviceId, pay_basis: payBasis, rate, effective_date: effectiveDate };
+}
+
+// Dana teaches riding at 100 ₪/hour until 30.9, 120 ₪/hour from 1.10. Omer substitutes at 110 ₪/hour.
+// Dana also works office hours at 50 ₪/hour.
+const RATES = [
+  rateRow('dana-100', 'dana', 'riding', PAY_BASIS.LESSON_HOURLY, 10000, '2026-01-01'),
+  rateRow('dana-120', 'dana', 'riding', PAY_BASIS.LESSON_HOURLY, 12000, '2026-10-01'),
+  rateRow('omer-110', 'omer', 'riding', PAY_BASIS.LESSON_HOURLY, 11000, '2026-01-01'),
+  rateRow('dana-office', 'dana', null, PAY_BASIS.ATTENDANCE_HOURLY, 5000, '2026-01-01'),
+];
+
+function lessonPay({ employeeId, date, durationMinutes = 60, serviceId = 'riding', rows = RATES }) {
+  const lessonRate = resolveLessonRateOnDate(rows, { employeeId, serviceId, date });
+  if (!lessonRate) return null;
+  return resolveLessonInstructorPayout({
+    instance: { duration_minutes: durationMinutes },
+    rateUsed: lessonRate.rate,
+    servicePaymentModel: 'fixed_rate',
+    compensationParticipants: [{ id: 'p1', participant_status: 'attended' }],
+    payBasis: lessonRate.pay_basis,
+  }).payoutAmount;
+}
 
 const POLICIES = { instructorEarningsPolicy: { ...DEFAULT_INSTRUCTOR_EARNINGS_POLICY } };
 
@@ -38,12 +64,35 @@ describe('PAY-A rates', () => {
     assert.equal(payoutAmount, 7500);
   });
 
-  it.todo('PAY-A1 a rate from 1.10 pays lessons from 1.10 until the next change; earlier lessons keep the previous rate');
-  it.todo('PAY-A2 a future-dated rate is scheduled and takes effect on its own');
+  it('PAY-A1 a rate from 1.10 pays lessons from 1.10 until the next change; earlier lessons keep the previous rate', () => {
+    assert.equal(lessonPay({ employeeId: 'dana', date: '2026-09-30' }), 10000);
+    assert.equal(lessonPay({ employeeId: 'dana', date: '2026-10-01' }), 12000);
+  });
+
+  it('PAY-A2 a future-dated rate is scheduled and takes effect on its own date', () => {
+    const scheduled = [...RATES, rateRow('dana-150', 'dana', 'riding', PAY_BASIS.LESSON_HOURLY, 15000, '2027-01-01')];
+    assert.equal(lessonPay({ employeeId: 'dana', date: '2026-12-31', rows: scheduled }), 12000);
+    assert.equal(lessonPay({ employeeId: 'dana', date: '2027-01-01', rows: scheduled }), 15000);
+  });
+
+  it('PAY-A4 a lesson without a rate for its service and date gets no rate (nothing is guessed)', () => {
+    assert.equal(resolveLessonRateOnDate(RATES, { employeeId: 'dana', serviceId: 'hippotherapy', date: '2026-06-01' }), null);
+    assert.equal(resolveLessonRateOnDate(RATES, { employeeId: 'dana', serviceId: 'riding', date: '2025-12-31' }), null);
+  });
+
+  it('PAY-A5 lesson_flat: the same pay per lesson whatever its length', () => {
+    const flat = [rateRow('dana-flat', 'dana', 'group', PAY_BASIS.LESSON_FLAT, 9000, '2026-01-01')];
+    assert.equal(lessonPay({ employeeId: 'dana', serviceId: 'group', date: '2026-06-01', durationMinutes: 45, rows: flat }), 9000);
+    assert.equal(lessonPay({ employeeId: 'dana', serviceId: 'group', date: '2026-06-01', durationMinutes: 90, rows: flat }), 9000);
+  });
+
+  it('PAY-A6 an employee with lesson rates and an hourly rate is paid each part from its own rate', () => {
+    assert.equal(resolveRateOnDate(RATES, { employeeId: 'dana', payBasis: PAY_BASIS.ATTENDANCE_HOURLY, date: '2026-10-05' }).rate, 5000);
+    assert.equal(resolveLessonRateOnDate(RATES, { employeeId: 'dana', serviceId: 'riding', date: '2026-10-05' }).rate, 12000);
+  });
+
   it.todo('PAY-A3 a back-dated rate recalculates open months and adds pay differences for closed months');
-  it.todo('PAY-A4 a lesson without a rate for its service and date is flagged "missing rate", pays nothing and blocks closing');
-  it.todo('PAY-A5 lesson_flat: the same pay per lesson whatever its length');
-  it.todo('PAY-A6 an employee with lesson rates and an hourly rate is paid each part from its own rate');
+  it.todo('PAY-A4 a lesson without a rate is flagged "missing rate" in the monthly review and blocks closing');
 });
 
 describe('PAY-B instructor pay per participant outcome', () => {
@@ -144,14 +193,29 @@ describe('PAY-C group lessons', () => {
 });
 
 describe('PAY-D changes to a lesson', () => {
-  it.todo('PAY-D1 a substitute instructor is paid at their own rate for that date');
+  it('PAY-D1 a substitute instructor is paid at their own rate for that date', () => {
+    assert.equal(lessonPay({ employeeId: 'omer', date: '2026-10-05' }), 11000);
+  });
+
+  it('PAY-D4 a lesson moved to another date is paid at the rate valid on the new date', () => {
+    assert.equal(lessonPay({ employeeId: 'dana', date: '2026-09-28' }), 10000, 'before the move');
+    assert.equal(lessonPay({ employeeId: 'dana', date: '2026-10-02' }), 12000, 'after moving past 1.10');
+  });
+
   it.todo('PAY-D2 a length change recalculates an open month and becomes a pay difference for a closed month');
   it.todo('PAY-D3 an attendance fix recalculates an open month and becomes a pay difference for a closed month');
-  it.todo('PAY-D4 a lesson moved to another date is paid in the new date\'s month at that date\'s rate');
 });
 
 describe('PAY-E hours', () => {
-  it.todo('PAY-E1 hourly pay uses the hourly rate valid on each day');
+  it('PAY-E1 hourly pay uses the hourly rate valid on each day', () => {
+    const rows = [
+      rateRow('office-50', 'noa', null, PAY_BASIS.ATTENDANCE_HOURLY, 5000, '2026-01-01'),
+      rateRow('office-55', 'noa', null, PAY_BASIS.ATTENDANCE_HOURLY, 5500, '2026-09-15'),
+    ];
+    const hourlyOn = (date) => resolveRateOnDate(rows, { employeeId: 'noa', payBasis: PAY_BASIS.ATTENDANCE_HOURLY, date }).rate;
+    assert.equal(hourlyOn('2026-09-14'), 5000);
+    assert.equal(hourlyOn('2026-09-15'), 5500);
+  });
   it.todo('PAY-E2 an instructor\'s lesson hours are derived from the lessons they gave');
   it.todo('PAY-E3 non-instructor hours are self-entered, approved by the office, and unapproved hours block closing');
 });
@@ -174,12 +238,14 @@ describe('PAY-G annual leave', () => {
     assert.equal(rows[0].pay_fraction, 0.5);
   });
 
-  it('PAY-G1 farm override: a fixed leave-day rate per employee is used as is', () => {
-    const value = resolveLeaveDayValue({
-      employee: { payroll_model: 'lesson_based', leave_pay_method: 'fixed_rate', leave_fixed_day_rate: 25000 },
-      targetDate: '2026-09-10',
-    });
-    assert.equal(value, 25000);
+  it('PAY-G1 farm override: the fixed leave-day rate in effect on the leave date is used as is', () => {
+    const employee = { id: 'dana', payroll_model: 'lesson_based', leave_pay_method: 'fixed_rate' };
+    const rateRows = [
+      rateRow('leave-250', 'dana', null, PAY_BASIS.LEAVE_DAY, 25000, '2026-01-01'),
+      rateRow('leave-280', 'dana', null, PAY_BASIS.LEAVE_DAY, 28000, '2026-10-01'),
+    ];
+    assert.equal(resolveLeaveDayValue({ employee, targetDate: '2026-09-10', rateRows }), 25000);
+    assert.equal(resolveLeaveDayValue({ employee, targetDate: '2026-10-10', rateRows }), 28000);
   });
 
   // Today's "legal" method averages over *worked* days; the law is 3 months' gross ÷ 90 (see the spec).

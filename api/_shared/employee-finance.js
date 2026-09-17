@@ -5,6 +5,14 @@ import { coerceAgorot } from './currency.js';
 import { shouldParticipantTriggerInstructorCompensation } from './calendar-workflow-decisions.js';
 import { buildUtcBoundsForTimezoneDateRange } from './instructor-availability.js';
 import { fetchLessonMutationState, isLockedState } from './calendar-editing.js';
+import {
+  LESSON_PAY_BASES,
+  PAY_BASIS,
+  loadRateHistoryRows,
+  resolveLessonRateOnDate,
+  resolveRateOnDate,
+  toRateDateKey,
+} from './rate-history.js';
 
 export const DEFAULT_LEAVE_POLICY = Object.freeze({
   carryover_enabled: false,
@@ -343,20 +351,27 @@ export function resolveLessonInstructorPayout({
   rateUsed,
   servicePaymentModel = 'fixed_rate',
   compensationParticipants = [],
+  payBasis = PAY_BASIS.LESSON_HOURLY,
 } = {}) {
   const normalizedRate = coerceAgorot(rateUsed);
   const normalizedPaymentModel = normalizeServicePaymentModel(servicePaymentModel);
+  const normalizedPayBasis = payBasis === PAY_BASIS.LESSON_FLAT ? PAY_BASIS.LESSON_FLAT : PAY_BASIS.LESSON_HOURLY;
   const participantCount = Array.isArray(compensationParticipants) ? compensationParticipants.length : 0;
   const participantMultiplier = normalizedPaymentModel === 'per_student'
     ? participantCount
     : (participantCount > 0 ? 1 : 0);
-  const payoutAmount = Math.round(normalizedRate * (Number(instance?.duration_minutes || 0) / 60) * participantMultiplier);
+  // lesson_flat pays the same per lesson whatever its length; lesson_hourly pays rate × lesson hours.
+  const lessonUnits = normalizedPayBasis === PAY_BASIS.LESSON_FLAT
+    ? 1
+    : Number(instance?.duration_minutes || 0) / 60;
+  const payoutAmount = Math.round(normalizedRate * lessonUnits * participantMultiplier);
 
   return {
     rateUsed: normalizedRate,
     participantMultiplier,
     payoutAmount,
     servicePaymentModel: normalizedPaymentModel,
+    payBasis: normalizedPayBasis,
   };
 }
 
@@ -372,6 +387,7 @@ export function computeLessonInstructorPayoutAmount(instance, rateUsed, options 
     rateUsed,
     servicePaymentModel: options?.servicePaymentModel,
     compensationParticipants: options?.compensationParticipants,
+    payBasis: options?.payBasis,
   }).payoutAmount;
 }
 
@@ -424,14 +440,18 @@ export function resolveLeaveDayValue({
   lessonEarnings = [],
   attendanceRecords = [],
   leavePayPolicy = DEFAULT_LEAVE_PAY_POLICY,
+  rateRows = [],
 }) {
   const payrollModel = normalizeString(employee?.payroll_model).toLowerCase();
   const method = resolveLeavePayMethod(employee, leavePayPolicy);
+  const targetKey = toDateKey(targetDate);
+  const employeeId = employee?.id || null;
 
   if (method === 'fixed_rate') {
-    const employeeRate = Number(employee?.leave_fixed_day_rate);
-    if (Number.isFinite(employeeRate) && employeeRate >= 0) {
-      return employeeRate;
+    // The fixed leave-day value is a dated rate (pay_basis leave_day); without one, the farm default applies.
+    const leaveDayRate = resolveRateOnDate(rateRows, { employeeId, payBasis: PAY_BASIS.LEAVE_DAY, date: targetKey });
+    if (leaveDayRate) {
+      return leaveDayRate.rate;
     }
     return coerceAgorot(leavePayPolicy.fixed_rate_default);
   }
@@ -440,8 +460,8 @@ export function resolveLeaveDayValue({
     const monthStart = startOfMonthKey(targetDate);
     const monthEnd = endOfMonthKey(targetDate);
     const workingDays = countWorkingDaysInRange(resolveEmployeeWorkingDays(employee), monthStart, monthEnd);
-    const monthlySalary = Number(employee?.monthly_salary_amount);
-    if (Number.isFinite(monthlySalary) && monthlySalary > 0 && workingDays > 0) {
+    const monthlySalary = resolveRateOnDate(rateRows, { employeeId, payBasis: PAY_BASIS.MONTHLY_SALARY, date: targetKey })?.rate ?? 0;
+    if (monthlySalary > 0 && workingDays > 0) {
       // Both values are in agorot — round to nearest agora for per-day rate
       return Math.round(monthlySalary / workingDays);
     }
@@ -454,13 +474,20 @@ export function resolveLeaveDayValue({
       amount: row.payout_amount,
       hours: row.duration_minutes ? Number(row.duration_minutes) / 60 : 0,
     })),
-    ...(attendanceRecords || []).map((row) => ({
-      date: row.attendance_date,
-      amount: row.worked_minutes && Number.isFinite(Number(employee?.current_rate))
-        ? Math.round((Number(row.worked_minutes) / 60) * coerceAgorot(employee.current_rate))
-        : 0,
-      hours: row.worked_minutes ? Number(row.worked_minutes) / 60 : 0,
-    })),
+    ...(attendanceRecords || []).map((row) => {
+      const hourlyRate = resolveRateOnDate(rateRows, {
+        employeeId,
+        payBasis: PAY_BASIS.ATTENDANCE_HOURLY,
+        date: toDateKey(row.attendance_date),
+      });
+      return {
+        date: row.attendance_date,
+        amount: row.worked_minutes && hourlyRate
+          ? Math.round((Number(row.worked_minutes) / 60) * hourlyRate.rate)
+          : 0,
+        hours: row.worked_minutes ? Number(row.worked_minutes) / 60 : 0,
+      };
+    }),
   ];
 
   const baseValue = computeAverageDayValue(historicalRecords, targetDate, leavePayPolicy.lookback_months || 3);
@@ -921,18 +948,47 @@ export async function syncLessonInstructorEarnings(
     };
   }
 
-  const capabilityQuery = resolvedInstance?.org_id
-    ? withOrgScope(tenantClient, 'instructor_service_capabilities', resolvedInstance.org_id)
-      .select('base_rate')
-      .eq('employee_id', resolvedInstance.instructor_employee_id)
-      .eq('service_id', resolvedInstance.service_id)
-      .maybeSingle()
-    : tenantClient
-      .from('instructor_service_capabilities')
-      .select('base_rate')
-      .eq('employee_id', resolvedInstance.instructor_employee_id)
-      .eq('service_id', resolvedInstance.service_id)
+  let lessonOrgId = resolvedInstance?.org_id || null;
+  if (!lessonOrgId) {
+    const { data: orgRow, error: orgRowError } = await tenantClient
+      .from('lesson_instances')
+      .select('org_id, datetime_start')
+      .eq('id', lessonInstanceId)
       .maybeSingle();
+    if (orgRowError) {
+      throw orgRowError;
+    }
+    lessonOrgId = orgRow?.org_id || null;
+    resolvedInstance = { ...resolvedInstance, org_id: lessonOrgId, datetime_start: resolvedInstance?.datetime_start || orgRow?.datetime_start };
+  }
+
+  // The instructor's lesson rate (hourly or flat) in effect on the lesson's date (RateHistory).
+  const lessonRateDate = toRateDateKey(resolvedInstance.datetime_start);
+  const rateRows = await loadRateHistoryRows(tenantClient, lessonOrgId, {
+    employeeIds: [resolvedInstance.instructor_employee_id],
+    payBases: [...LESSON_PAY_BASES],
+  });
+  const lessonRate = resolveLessonRateOnDate(rateRows, {
+    employeeId: resolvedInstance.instructor_employee_id,
+    serviceId: resolvedInstance.service_id,
+    date: lessonRateDate,
+  });
+
+  if (!lessonRate) {
+    // Missing rate: nothing is guessed and nothing is paid (PAY-A4). The monthly review flags it.
+    const { error: deleteError } = await withOrgScope(tenantClient, 'lesson_earnings', lessonOrgId)
+      .delete()
+      .eq('lesson_instance_id', lessonInstanceId);
+    if (deleteError && deleteError.code !== '42P01') {
+      throw deleteError;
+    }
+    return {
+      lesson_instance_id: lessonInstanceId,
+      instructor_earned: false,
+      missing_rate: true,
+      rate_date: lessonRateDate || null,
+    };
+  }
 
   const serviceQuery = resolvedInstance?.org_id
     ? withOrgScope(tenantClient, 'Services', resolvedInstance.org_id)
@@ -945,23 +1001,17 @@ export async function syncLessonInstructorEarnings(
       .eq('id', resolvedInstance.service_id)
       .maybeSingle();
 
-  const [{ data: capability, error: capabilityError }, { data: serviceRow, error: serviceError }] = await Promise.all([
-    capabilityQuery,
-    serviceQuery,
-  ]);
-
-  if (capabilityError && capabilityError.code !== '42P01') {
-    throw capabilityError;
-  }
+  const { data: serviceRow, error: serviceError } = await serviceQuery;
   if (serviceError && serviceError.code !== '42P01' && serviceError.code !== 'PGRST116') {
     throw serviceError;
   }
 
   const payout = resolveLessonInstructorPayout({
     instance: resolvedInstance,
-    rateUsed: Number.isFinite(Number(capability?.base_rate)) ? Number(capability.base_rate) : 0,
+    rateUsed: lessonRate.rate,
     servicePaymentModel: serviceRow?.payment_model,
     compensationParticipants,
+    payBasis: lessonRate.pay_basis,
   });
   const lessonEarningsUpsertQuery = resolvedInstance?.org_id
     ? withOrgScope(tenantClient, 'lesson_earnings', resolvedInstance.org_id)
@@ -977,6 +1027,9 @@ export async function syncLessonInstructorEarnings(
         service_id: resolvedInstance.service_id,
         lesson_date: toDateKey(resolvedInstance.datetime_start),
         service_payment_model: payout.servicePaymentModel,
+        pay_basis: payout.payBasis,
+        rate_history_id: lessonRate.id,
+        rate_effective_date: lessonRate.effective_date,
         lesson_status_at_sync: resolvedInstance.status || null,
         participant_statuses: resolvedParticipants.map((participant) => ({
           participant_id: participant?.id || null,
@@ -1206,30 +1259,35 @@ export async function syncInstructorAttendanceFromLessons(
 }
 
 /**
- * Validates that the instructor has a base_rate configured for the lesson's service.
+ * Validates that the instructor has a lesson rate (RateHistory, hourly or flat) for the lesson's
+ * service in effect on the lesson's date.
  * Returns null when valid.
- * Returns { code, instructor_employee_id, service_id } when validation fails.
+ * Returns { code, instructor_employee_id, service_id, rate_date } when validation fails.
  *
  * Call this BEFORE marking a lesson completed or recording attendance, so the user
  * can be told exactly what to fix before proceeding.
  */
 export async function validateInstructorRateForLesson(
   tenantClient,
-  { lessonInstanceId, instructorEmployeeId, serviceId } = {},
+  { orgId = null, lessonInstanceId, instructorEmployeeId, serviceId, lessonDate = null } = {},
 ) {
   let resolvedInstructorId = instructorEmployeeId || null;
   let resolvedServiceId = serviceId || null;
+  let resolvedOrgId = normalizeString(orgId) || null;
+  let resolvedLessonDate = lessonDate || null;
 
-  if ((!resolvedInstructorId || !resolvedServiceId) && lessonInstanceId) {
+  if ((!resolvedInstructorId || !resolvedServiceId || !resolvedOrgId || !resolvedLessonDate) && lessonInstanceId) {
     const { data: instance, error: instanceError } = await tenantClient
       .from('lesson_instances')
-      .select('instructor_employee_id, service_id')
+      .select('org_id, instructor_employee_id, service_id, datetime_start')
       .eq('id', lessonInstanceId)
       .maybeSingle();
 
     if (instanceError) throw instanceError;
     resolvedInstructorId = resolvedInstructorId || instance?.instructor_employee_id || null;
     resolvedServiceId = resolvedServiceId || instance?.service_id || null;
+    resolvedOrgId = resolvedOrgId || instance?.org_id || null;
+    resolvedLessonDate = resolvedLessonDate || instance?.datetime_start || null;
   }
 
   // If either is missing there is nothing to validate — downstream will handle it
@@ -1237,24 +1295,31 @@ export async function validateInstructorRateForLesson(
     return null;
   }
 
-  const { data: capability, error: capabilityError } = await tenantClient
-    .from('instructor_service_capabilities')
-    .select('base_rate')
-    .eq('employee_id', resolvedInstructorId)
-    .eq('service_id', resolvedServiceId)
-    .maybeSingle();
-
-  if (capabilityError && capabilityError.code !== '42P01') {
-    throw capabilityError;
+  if (!resolvedOrgId) {
+    const { data: employee, error: employeeError } = await tenantClient
+      .from('Employees')
+      .select('org_id')
+      .eq('id', resolvedInstructorId)
+      .maybeSingle();
+    if (employeeError) throw employeeError;
+    resolvedOrgId = employee?.org_id || null;
   }
 
-  // A base_rate of 0 is explicitly valid (volunteer / zero-rate service).
-  // Only a missing row or an explicit null base_rate is a configuration error.
-  if (!capability || capability.base_rate == null) {
+  const rateDate = toRateDateKey(resolvedLessonDate || new Date().toISOString());
+  const rateRows = resolvedOrgId
+    ? await loadRateHistoryRows(tenantClient, resolvedOrgId, {
+      employeeIds: [resolvedInstructorId],
+      payBases: [...LESSON_PAY_BASES],
+    })
+    : [];
+
+  // A rate of 0 is explicitly valid (volunteer / zero-rate service). Only a missing rate on that date is an error.
+  if (!resolveLessonRateOnDate(rateRows, { employeeId: resolvedInstructorId, serviceId: resolvedServiceId, date: rateDate })) {
     return {
       code: 'instructor_rate_not_configured',
       instructor_employee_id: resolvedInstructorId,
       service_id: resolvedServiceId,
+      rate_date: rateDate || null,
     };
   }
 

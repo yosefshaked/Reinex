@@ -1395,8 +1395,10 @@ async function handleUpdateInstance(context, req, body, dbContext, supabase, aut
   const newStatus = typeof body.status === 'string' ? body.status.trim().toLowerCase() : '';
   if (EARNING_STATUSES.has(newStatus)) {
     const rateError = await validateInstructorRateForLesson(client, {
+      orgId,
       instructorEmployeeId: body.instructor_employee_id || existingInstance.instructor_employee_id,
       serviceId: body.service_id || existingInstance.service_id,
+      lessonDate: body.datetime_start || existingInstance.datetime_start,
     });
     if (rateError) {
       return respond(context, 422, {

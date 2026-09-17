@@ -26,6 +26,7 @@ import {
   toDateKey,
 } from '../_shared/employee-finance.js';
 import { coerceAgorot } from '../_shared/currency.js';
+import { PAY_BASIS, loadRateHistoryRows, resolveRateOnDate } from '../_shared/rate-history.js';
 
 function shiftMonths(dateKey, deltaMonths) {
   const date = new Date(`${dateKey}T00:00:00Z`);
@@ -108,7 +109,7 @@ function collectWorkingDates(startDate, endDate, workingDays) {
   return dates;
 }
 
-async function buildEmployeePayrollPreview(client, orgId, employee, profile, startDate, endDate, policies) {
+async function buildEmployeePayrollPreview(client, orgId, employee, profile, startDate, endDate, policies, rateRows = []) {
   const historyStart = shiftMonths(startDate, -12);
   const payrollModel = getPayrollModel(employee);
   const [attendanceHistory, leaveDays, corrections, lessonEarnings] = await Promise.all([
@@ -130,6 +131,7 @@ async function buildEmployeePayrollPreview(client, orgId, employee, profile, sta
       lessonEarnings,
       attendanceRecords: attendanceHistory,
       leavePayPolicy: policies.leavePayPolicy,
+      rateRows,
     });
     leaveAmounts.push({
       ...leaveDay,
@@ -150,8 +152,13 @@ async function buildEmployeePayrollPreview(client, orgId, employee, profile, sta
     baseAmount = lessonAmount;
   } else if (payrollModel === 'hourly') {
     attendanceAmount = roundCurrency((attendanceInPeriod || []).reduce((sum, row) => {
-      const rate = coerceAgorot(employee?.current_rate);
-      if (!Number.isFinite(rate) || rate <= 0) {
+      // The hourly rate in effect on each attendance day (RateHistory attendance_hourly).
+      const rate = resolveRateOnDate(rateRows, {
+        employeeId: employee.id,
+        payBasis: PAY_BASIS.ATTENDANCE_HOURLY,
+        date: toDateKey(row?.attendance_date),
+      })?.rate ?? 0;
+      if (rate <= 0) {
         return sum;
       }
       const workedMinutes = Number(row?.worked_minutes || 0);
@@ -165,7 +172,13 @@ async function buildEmployeePayrollPreview(client, orgId, employee, profile, sta
       const monthStart = startOfMonthKey(dateKey);
       const monthEnd = endOfMonthKey(dateKey);
       const monthWorkingDays = Math.max(1, countWorkingDaysInRange(resolveEmployeeWorkingDays(employee, profile), monthStart, monthEnd));
-      const dailyRate = coerceAgorot(employee?.monthly_salary_amount) / monthWorkingDays;
+      // The monthly salary in effect on each working day (RateHistory monthly_salary).
+      const monthlySalary = resolveRateOnDate(rateRows, {
+        employeeId: employee.id,
+        payBasis: PAY_BASIS.MONTHLY_SALARY,
+        date: dateKey,
+      })?.rate ?? 0;
+      const dailyRate = monthlySalary / monthWorkingDays;
       const leaveDay = leaveMap.get(dateKey);
       if (leaveDay) {
         return sum + (dailyRate * Number(leaveDay.pay_fraction || 0));
@@ -292,6 +305,9 @@ export default async function (context, req) {
   }
 
   const profilesMap = await loadInstructorProfilesMap(supabase, employees.map((row) => row.id));
+  const rateRows = await loadRateHistoryRows(supabase, orgId, {
+    employeeIds: employees.map((row) => row.id),
+  });
   const previews = [];
   for (const employee of employees) {
     const preview = await buildEmployeePayrollPreview(
@@ -302,6 +318,7 @@ export default async function (context, req) {
       resolvedStart,
       resolvedEnd,
       policies,
+      rateRows,
     );
     previews.push(preview);
   }
