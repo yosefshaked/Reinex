@@ -110,6 +110,11 @@
 - `BillingLedgerService.inspectHmoClaimReadiness(...)` is the read-only diagnostic entrypoint for system-admin HMO claim investigations. Use it when an admin needs to understand why a participant or requested claim batch is not claimable; do not build parallel ad-hoc SQL diagnostics in page code.
 - Submitted HMO invoice batches create `participant_locks` with `lock_source_type = 'claim_batch'`; workflow readers must resolve those locks against both legacy `claim_batches` and current `hmo_invoice_batches`.
 - Payroll, leave, attendance, and instructor earnings rules are still driven from `Settings` through [`../api/_shared/employee-finance.js`](../api/_shared/employee-finance.js).
+- **Pay rules spec (owner-approved, 2026-09-17):** [`../implementations/business-process/payroll-scenarios.md`](../implementations/business-process/payroll-scenarios.md), with the technical plan in [`payroll-prerequisites.md`](../implementations/business-process/payroll-prerequisites.md). Every scenario ID (`PAY-A1` … `PAY-K7`) is in [`../test/payroll-rules.test.js`](../test/payroll-rules.test.js): rules that exist are real tests, rules not yet built are `it.todo`. When you build a rule, turn its todo into a real test first. The key decisions:
+  - Rates are dated in `RateHistory`, with a `pay_basis` column.
+  - A closed pay month is never reopened; later fixes become pay differences.
+  - The participant's decision in the lesson is the source of truth for instructor pay.
+  - Legal amounts are dated settings, and closing and exports show a disclaimer.
 - Instructor earnings are calculated from the canonical hourly `base_rate` on `instructor_service_capabilities`.
 - The UI may preserve the admin's original pay entry in `instructor_service_capabilities.metadata.compensation_input`, but finance math must not read from that display helper field.
 - Instructor payout now also depends on `Services.payment_model`:
