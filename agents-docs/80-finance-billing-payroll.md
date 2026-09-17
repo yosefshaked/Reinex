@@ -111,7 +111,9 @@
 - Submitted HMO invoice batches create `participant_locks` with `lock_source_type = 'claim_batch'`; workflow readers must resolve those locks against both legacy `claim_batches` and current `hmo_invoice_batches`.
 - Payroll, leave, attendance, and instructor earnings rules are still driven from `Settings` through [`../api/_shared/employee-finance.js`](../api/_shared/employee-finance.js).
 - **Pay rules spec (owner-approved, 2026-09-17):** [`../implementations/business-process/payroll-scenarios.md`](../implementations/business-process/payroll-scenarios.md), with the technical plan in [`payroll-prerequisites.md`](../implementations/business-process/payroll-prerequisites.md). Every scenario ID (`PAY-A1` … `PAY-K7`) is in [`../test/payroll-rules.test.js`](../test/payroll-rules.test.js): rules that exist are real tests, rules not yet built are `it.todo`. When you build a rule, turn its todo into a real test first. The key decisions:
-  - Rates are dated in `RateHistory`, with a `pay_basis` column.
+  - Rates are dated in `RateHistory`, with a `pay_basis` column: `lesson_hourly` / `lesson_flat` (per service), `attendance_hourly`, `monthly_salary`, `leave_day`.
+    - **Pay code reads rates only through [`../api/_shared/rate-history.js`](../api/_shared/rate-history.js)** (`loadRateHistoryRows`, `resolveRateOnDate`, `resolveLessonRateOnDate`, `toRateDateKey` for the lesson's Israel date). There's no fallback between kinds, and a missing rate pays nothing.
+    - Never read `instructor_service_capabilities.base_rate`, `Employees.current_rate`, `monthly_salary_amount` or `leave_fixed_day_rate` for pay. They're legacy input and display fields, mirrored into `RateHistory` by DB triggers (`record_rate_history_from_legacy_value`): a first rate applies from the beginning, a change from today. This lasts until the rate screens write `RateHistory` directly.
   - A closed pay month is never reopened; later fixes become pay differences.
   - The participant's decision in the lesson is the source of truth for instructor pay.
   - Legal amounts are dated settings, and closing and exports show a disclaimer.

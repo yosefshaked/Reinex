@@ -4,7 +4,7 @@
     "name": "Lesson Dialog — Regression Checks",
     "description": "Regression checks for LessonInstanceDialog: (A3) edit mode has no status field, (A1) reopening the dialog or opening another lesson always starts in view mode on the first tab, (A2) marking two group participants attended back-to-back (✓ + one-line confirm strip) does not raise a false version-conflict panel, (P3) the history tab loads typed events from GET lesson-instances/{id}?view=history. Fixtures (service price, two dedicated instructors, three students, one single + one group lesson on the first of the current month) are created through the API first, following the hmo-claiming conventions.",
     "version": "1.1.0",
-    "last_validated_at": "2026-09-14T19:14:00Z",
+    "last_validated_at": "2026-09-17T08:26:00Z",
     "author": "claude-ai",
     "dependencies": {
       "routes": [

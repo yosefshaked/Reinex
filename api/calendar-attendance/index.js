@@ -32,6 +32,7 @@ import {
 } from '../_shared/employee-finance.js';
 import BillingLedgerService from '../_shared/BillingLedgerService.js';
 import { coerceAgorot, toShekel } from '../_shared/currency.js';
+import { LESSON_PAY_BASES, loadRateHistoryRows, resolveLessonRateOnDate } from '../_shared/rate-history.js';
 import { buildBillingDecision, buildDirectClientBillingDecision } from '../_shared/student-billing.js';
 import { resolveLessonCoverageDecision } from '../_shared/hmo.js';
 import { logTenantAuditEvent, TENANT_AUDIT_RETENTION } from '../_shared/tenant-audit.js';
@@ -320,8 +321,10 @@ async function validateProjectedInstructorRate(client, orgId, instance, particip
     return null;
   }
   return validateInstructorRateForLesson(client, {
+    orgId,
     instructorEmployeeId: instance?.instructor_employee_id,
     serviceId: instance?.service_id,
+    lessonDate: instance?.datetime_start || null,
   });
 }
 
@@ -638,7 +641,7 @@ async function buildParticipantStatusPreview(client, orgId, body, {
     ? buildUtcBoundsForTimezoneDateRange(lessonDateKey, lessonDateKey)
     : null;
   const policiesPromise = loadFinancePolicies(client, orgId);
-  const [{ data: dayLessons, error: dayLessonsError }, { data: systemAttendanceRecord, error: attendanceError }, { data: employeeRow, error: employeeError }, { data: studentRow, error: studentError }, { data: clientProfileRow, error: clientProfileError }, { data: serviceRow, error: serviceError }, { data: capabilityRow, error: capabilityError }, policies] = await Promise.all([
+  const [{ data: dayLessons, error: dayLessonsError }, { data: systemAttendanceRecord, error: attendanceError }, { data: employeeRow, error: employeeError }, { data: studentRow, error: studentError }, { data: clientProfileRow, error: clientProfileError }, { data: serviceRow, error: serviceError }, { data: rateRows, error: rateRowsError }, policies] = await Promise.all([
     withOrgScope(client, 'lesson_instances', orgId)
       .select('id, status, duration_minutes')
       .eq('instructor_employee_id', instanceDetail.instructor_employee_id)
@@ -670,11 +673,10 @@ async function buildParticipantStatusPreview(client, orgId, body, {
       .select('id, name, payment_model, default_customer_charge_amount')
       .eq('id', instanceDetail.service_id)
       .maybeSingle(),
-    withOrgScope(client, 'instructor_service_capabilities', orgId)
-      .select('base_rate')
-      .eq('employee_id', instanceDetail.instructor_employee_id)
-      .eq('service_id', instanceDetail.service_id)
-      .maybeSingle(),
+    loadRateHistoryRows(client, orgId, {
+      employeeIds: [instanceDetail.instructor_employee_id],
+      payBases: [...LESSON_PAY_BASES],
+    }).then((rows) => ({ data: rows, error: null }), (error) => ({ data: [], error })),
     policiesPromise,
   ]);
 
@@ -684,7 +686,7 @@ async function buildParticipantStatusPreview(client, orgId, body, {
   if (studentError && studentError.code !== 'PGRST116') throw studentError;
   if (clientProfileError && clientProfileError.code !== 'PGRST116') throw clientProfileError;
   if (serviceError && serviceError.code !== 'PGRST116') throw serviceError;
-  if (capabilityError && capabilityError.code !== 'PGRST116' && capabilityError.code !== '42P01') throw capabilityError;
+  if (rateRowsError) throw rateRowsError;
   const currentShouldInstructorEarn = Array.isArray(lessonEarningRows) && lessonEarningRows.length > 0;
   const projectedCompensationParticipants = resolveCompensationEligibleParticipants(
     projectedParticipants,
@@ -727,11 +729,17 @@ async function buildParticipantStatusPreview(client, orgId, body, {
 
   const openHmoTask = (dashboardTasks || []).find((task) => task.task_type === 'hmo_claim_submission' && task.status === 'open') || null;
   const storedLessonEarningAmount = coerceAgorot((lessonEarningRows || []).reduce((sum, row) => sum + coerceAgorot(row?.payout_amount), 0));
+  const projectedLessonRate = resolveLessonRateOnDate(rateRows, {
+    employeeId: instanceDetail.instructor_employee_id,
+    serviceId: instanceDetail.service_id,
+    date: lessonDateKey,
+  });
   const inferredLessonEarningAmount = resolveLessonInstructorPayout({
     instance: instanceDetail,
-    rateUsed: capabilityRow?.base_rate || 0,
+    rateUsed: projectedLessonRate?.rate || 0,
     servicePaymentModel: serviceRow?.payment_model,
     compensationParticipants: projectedCompensationParticipants,
+    payBasis: projectedLessonRate?.pay_basis,
   }).payoutAmount;
   const lessonEarningAmount = storedLessonEarningAmount;
   const ledgerAmount = coerceAgorot((billingArtifactRows || []).reduce((sum, row) => {

@@ -12,6 +12,7 @@ import { normalizeString } from './org-bff.js';
 import { buildBillingDecision, buildDirectClientBillingDecision } from './student-billing.js';
 import { normalizeLessonInstanceStatus } from './lesson-instance-status.js';
 import { coerceAgorot } from './currency.js';
+import { LESSON_PAY_BASES, loadRateHistoryRows, resolveLessonRateOnDate, toRateDateKey } from './rate-history.js';
 
 const LESSON_BILLING_USAGE_TYPES = ['lesson_charge', 'reversal', 'manual_adjustment', 'manual_payment'];
 const PARTICIPANT_STATUSES = new Set(['scheduled', 'attended', 'no_show', 'cancelled_student', 'cancelled_clinic']);
@@ -93,10 +94,6 @@ function applyParticipantPatches(participants, participantPatches) {
       metadata: nextMetadata,
     };
   });
-}
-
-function buildRateKey(employeeId, serviceId) {
-  return `${employeeId || ''}:${serviceId || ''}`;
 }
 
 async function loadServicesMap(tenantClient, serviceIds = []) {
@@ -308,34 +305,17 @@ async function loadCorrectionContext(tenantClient, originalInstanceId) {
   };
 }
 
-async function loadRateMap(tenantClient, pairs) {
-  const uniquePairs = Array.from(new Set(asArray(pairs)
-    .map((pair) => buildRateKey(pair.employeeId, pair.serviceId))
-    .filter((key) => key !== ':')));
-
-  const rateMap = new Map();
-  if (uniquePairs.length === 0) {
-    return rateMap;
-  }
-
-  const employeeIds = Array.from(new Set(uniquePairs.map((key) => key.split(':')[0]).filter(Boolean)));
-  const serviceIds = Array.from(new Set(uniquePairs.map((key) => key.split(':')[1]).filter(Boolean)));
-
-  const { data, error } = await tenantClient
-    .from('instructor_service_capabilities')
-    .select('employee_id, service_id, base_rate')
-    .in('employee_id', employeeIds)
-    .in('service_id', serviceIds);
-
-  if (error) {
-    throw error;
-  }
-
-  for (const row of asArray(data)) {
-    rateMap.set(buildRateKey(row.employee_id, row.service_id), Number.isFinite(Number(row.base_rate)) ? Number(row.base_rate) : 0);
-  }
-
-  return rateMap;
+// Resolves the lesson rate (RateHistory, hourly or flat) in effect on each instance's own date.
+async function loadLessonRateResolver(tenantClient, orgId, employeeIds) {
+  const rows = await loadRateHistoryRows(tenantClient, orgId, {
+    employeeIds: asArray(employeeIds).filter(Boolean),
+    payBases: [...LESSON_PAY_BASES],
+  });
+  return (instance) => resolveLessonRateOnDate(rows, {
+    employeeId: instance?.instructor_employee_id,
+    serviceId: instance?.service_id,
+    date: toRateDateKey(instance?.datetime_start),
+  });
 }
 
 function buildChargeMap(ledgerRows) {
@@ -376,11 +356,15 @@ export async function buildInstanceCorrectionPreview(tenantClient, options) {
   effectiveInstance.status = normalizeLessonInstanceStatus(effectiveInstance.status);
   validateCorrectionEffectiveState(effectiveInstance, effectiveParticipants);
 
-  const rateMap = await loadRateMap(tenantClient, [
-    { employeeId: context.instance.instructor_employee_id, serviceId: context.instance.service_id },
-    { employeeId: currentInstance.instructor_employee_id, serviceId: currentInstance.service_id },
-    { employeeId: effectiveInstance.instructor_employee_id, serviceId: effectiveInstance.service_id },
-  ]);
+  const resolveLessonRate = await loadLessonRateResolver(
+    tenantClient,
+    context.instance?.org_id || context.originalInstance?.org_id,
+    [
+      context.instance.instructor_employee_id,
+      currentInstance.instructor_employee_id,
+      effectiveInstance.instructor_employee_id,
+    ],
+  );
   const serviceMap = await loadServicesMap(tenantClient, [
     context.instance.service_id,
     currentInstance.service_id,
@@ -401,12 +385,15 @@ export async function buildInstanceCorrectionPreview(tenantClient, options) {
     graceParticipantIds,
   );
 
-  const originalRate = rateMap.get(buildRateKey(context.instance.instructor_employee_id, context.instance.service_id)) || 0;
-  const proposedRate = rateMap.get(buildRateKey(effectiveInstance.instructor_employee_id, effectiveInstance.service_id)) || 0;
+  const originalLessonRate = resolveLessonRate(context.instance);
+  const proposedLessonRate = resolveLessonRate(effectiveInstance);
+  const originalRate = originalLessonRate?.rate || 0;
+  const proposedRate = proposedLessonRate?.rate || 0;
   const baseCurrentPayout = shouldInstructorEarn(context.instance, context.participants, policies)
     ? resolveLessonInstructorPayout({
       instance: context.instance,
       rateUsed: originalRate,
+      payBasis: originalLessonRate?.pay_basis,
       servicePaymentModel: serviceMap.get(context.instance.service_id)?.payment_model,
       compensationParticipants: currentCompensationParticipants,
     }).payoutAmount
@@ -419,6 +406,7 @@ export async function buildInstanceCorrectionPreview(tenantClient, options) {
     ? resolveLessonInstructorPayout({
       instance: effectiveInstance,
       rateUsed: proposedRate,
+      payBasis: proposedLessonRate?.pay_basis,
       servicePaymentModel: serviceMap.get(effectiveInstance.service_id)?.payment_model,
       compensationParticipants: proposedCompensationParticipants,
     }).payoutAmount
