@@ -2,9 +2,9 @@
   "meta": {
     "id": "employee-rates",
     "name": "Employee Pay Rates — dated rates screen",
-    "description": "Payroll phase 1b: the rates panel in an employee's finance tab. Creates an instructor with a service capability through the API (the DB trigger seeds its first rate), then in the UI schedules a future rate, checks it shows as scheduled with its history, checks the warnings shown for a back-dated rate and for a date that already has a rate, and adds a rate for another service through the service picker. Rates are never edited in place (PAY-A1, PAY-A2).",
-    "version": "1.2.0",
-    "last_validated_at": "2026-09-22T13:00:00Z",
+    "description": "Payroll phase 1b: the rates panel in an employee's finance tab. Creates an instructor with a service capability through the API (the DB trigger seeds its first rate), then in the UI schedules a future rate, checks the warnings for a back-dated rate and for a date that already has a rate, adds a rate for another service through the add-rate dialog, and adds an hourly rate — which switches the employee's pay model so the rate is actually read. Rates are never edited in place (PAY-A1, PAY-A2).",
+    "version": "1.3.0",
+    "last_validated_at": "2026-09-22T14:00:00Z",
     "author": "claude-ai",
     "dependencies": {
       "routes": [
@@ -274,13 +274,20 @@
           "id": "open-add-dialog",
           "description": "Open the add-rate dialog from the panel header",
           "action": "click",
-          "selector": "button:has-text('הוספת תעריף לשירות')",
+          "selector": "button:has-text('הוספת תעריף')",
           "first": true
         },
         {
           "id": "wait-dialog",
           "action": "waitForSelector",
-          "selector": "[role='dialog']:has-text('הוספת תעריף לשירות')"
+          "selector": "[role='dialog']:has-text('הוספת תעריף')"
+        },
+        {
+          "id": "assert-lesson-kind-selected",
+          "description": "The kind the employee is actually paid by is preselected and marked as in use",
+          "action": "assert",
+          "type": "visible",
+          "selector": "[role='dialog'] button[aria-pressed='true']:has-text('לפי מפגש')"
         },
         {
           "id": "open-service-list",
@@ -325,9 +332,9 @@
         },
         {
           "id": "assert-new-card",
-          "description": "The service now has a card of its own, marked as not assigned to the employee",
+          "description": "The service now has a card of its own, tagged as a service the employee is not assigned to",
           "action": "waitForSelector",
-          "selector": "article:has-text('{{OTHER_SERVICE_NAME}}'):has-text('השירות אינו משויך לעובד/ת')"
+          "selector": "article:has-text('{{OTHER_SERVICE_NAME}}'):has-text('שירות לא משויך')"
         },
         {
           "id": "assert-current-rate",
@@ -346,6 +353,64 @@
           "id": "screenshot-service-rate",
           "action": "screenshot",
           "name": "04-service-rate-added"
+        }
+      ]
+    },
+    {
+      "id": "ui-add-hourly-rate",
+      "name": "UI – An hourly rate switches the pay model so it is read",
+      "description": "Payroll pays an employee by one model, so adding a kind the model does not read carries the model with it (PAY-A6).",
+      "steps": [
+        {
+          "id": "open-add-dialog",
+          "action": "click",
+          "selector": "button:has-text('הוספת תעריף')",
+          "first": true
+        },
+        {
+          "id": "wait-dialog",
+          "action": "waitForSelector",
+          "selector": "[role='dialog']:has-text('הוספת תעריף')"
+        },
+        {
+          "id": "choose-hourly",
+          "description": "Choose the hourly kind, which this instructor is not paid by",
+          "action": "click",
+          "selector": "[role='dialog'] button:has-text('לפי שעות עבודה')"
+        },
+        {
+          "id": "fill-amount",
+          "action": "fill",
+          "selector": "[role='dialog'] input[type='number']",
+          "value": "55"
+        },
+        {
+          "id": "assert-model-switch",
+          "description": "The dialog says the pay model will change",
+          "action": "waitForSelector",
+          "selector": "[role='dialog']:has-text('מודל השכר של העובד/ת יעבור')"
+        },
+        {
+          "id": "save-rate",
+          "action": "click",
+          "selector": "[role='dialog'] button:has-text('שמירת תעריף')"
+        },
+        {
+          "id": "assert-hourly-card",
+          "description": "The hourly rate is listed under the work-pay group",
+          "action": "waitForSelector",
+          "selector": "article:has-text('שעתי'):has-text('₪55.00')"
+        },
+        {
+          "id": "assert-lesson-not-used",
+          "description": "The lesson rates are now marked as not read by payroll",
+          "action": "waitForSelector",
+          "selector": "article:has-text('{{SERVICE_NAME}}'):has-text('לא בשימוש')"
+        },
+        {
+          "id": "screenshot-hourly",
+          "action": "screenshot",
+          "name": "05-hourly-rate-switches-model"
         }
       ]
     },

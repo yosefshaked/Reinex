@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { CalendarClock, ChevronDown, Loader2, Plus, TriangleAlert } from 'lucide-react';
+import { CalendarClock, CalendarDays, ChevronDown, Clock, GraduationCap, Loader2, Palmtree, Plus, TriangleAlert } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -23,6 +23,26 @@ import { authenticatedFetch } from '@/lib/api-client.js';
 import { formatCurrency, toAgorot } from '@/lib/currency.js';
 
 const LESSON_BASES = ['lesson_hourly', 'lesson_flat'];
+
+/** The kinds of rate the office can set, in the order they are offered. */
+const RATE_KINDS = [
+  { key: 'lesson', payBasis: 'lesson_hourly', title: 'לפי מפגש', hint: 'תעריף לכל שירות', icon: GraduationCap, payrollModel: 'lesson_based' },
+  { key: 'attendance_hourly', payBasis: 'attendance_hourly', title: 'שעתי', hint: 'לפי שעות עבודה', icon: Clock, payrollModel: 'hourly' },
+  { key: 'monthly_salary', payBasis: 'monthly_salary', title: 'חודשי', hint: 'משכורת קבועה', icon: CalendarDays, payrollModel: 'monthly_salary' },
+  { key: 'leave_day', payBasis: 'leave_day', title: 'יום חופשה', hint: 'ערך יום קבוע', icon: Palmtree, leavePayMethod: 'fixed_rate' },
+];
+
+const PAYROLL_MODEL_LABEL = {
+  lesson_based: 'לפי מפגש',
+  hourly: 'שעתי',
+  monthly_salary: 'חודשי',
+};
+
+/** Whether a rate of this kind is read by payroll for this employee as they are set up now. */
+function isKindPaid(kind, employee) {
+  if (kind.leavePayMethod) return employee?.leave_pay_method === kind.leavePayMethod;
+  return (employee?.payroll_model || 'lesson_based') === kind.payrollModel;
+}
 
 const BASIS_SUFFIX = {
   lesson_hourly: 'לשעה',
@@ -75,7 +95,7 @@ function describeRate(row) {
 }
 
 /** The warnings shown before saving: what the chosen date does to rates that already exist. */
-function buildWarnings({ history, current, existingOnDate, effectiveDate, today }) {
+function buildWarnings({ history, current, existingOnDate, effectiveDate, today, isLesson }) {
   const warnings = [];
   if (effectiveDate && effectiveDate < today) {
     warnings.push('התעריף יחול על ימים שכבר עברו. שכר של חודשים פתוחים יחושב מחדש.');
@@ -87,7 +107,9 @@ function buildWarnings({ history, current, existingOnDate, effectiveDate, today 
     warnings.push(`כבר קיים תעריף בתאריך הזה (${describeRate(existingOnDate)}). השמירה תחליף אותו.`);
   }
   if (!existingOnDate && history.length === 0) {
-    warnings.push('זהו התעריף הראשון בשירות הזה. מפגשים לפני התאריך שנבחר יישארו ללא תעריף.');
+    warnings.push(isLesson
+      ? 'זהו התעריף הראשון בשירות הזה. מפגשים לפני התאריך שנבחר יישארו ללא תעריף.'
+      : 'זהו התעריף הראשון מסוג זה. ימים לפני התאריך שנבחר לא יחושבו.');
   }
   return warnings;
 }
@@ -97,12 +119,15 @@ function createEmptyForm(payBasis, today) {
 }
 
 /** The fields of a rate: amount, date, how a lesson is counted, and a note. Shared by the card and the dialog. */
-function RateFields({ idPrefix, form, setForm, allowBasisChoice, warnings, saving }) {
+function RateFields({ idPrefix, form, setForm, allowBasisChoice, warnings, saving, unitBasis }) {
   return (
     <>
       <div className="grid gap-3 sm:grid-cols-2">
         <div className="space-y-1.5">
-          <Label htmlFor={`rate-amount-${idPrefix}`} className="text-xs text-slate-600">סכום בשקלים</Label>
+          <Label htmlFor={`rate-amount-${idPrefix}`} className="text-xs text-slate-600">
+            סכום בשקלים
+            {BASIS_SUFFIX[unitBasis] ? <span className="text-slate-400"> · {BASIS_SUFFIX[unitBasis]}</span> : null}
+          </Label>
           <Input
             id={`rate-amount-${idPrefix}`}
             type="number"
@@ -171,7 +196,14 @@ function RateCard({ card, rates, today, onSave, saving }) {
   const current = history.find((row) => row.effective_date <= today) || null;
   const scheduled = history.filter((row) => row.effective_date > today).slice(-1)[0] || null;
   const existingOnDate = history.find((row) => row.effective_date === form.effectiveDate) || null;
-  const warnings = buildWarnings({ history, current, existingOnDate, effectiveDate: form.effectiveDate, today });
+  const warnings = buildWarnings({
+    history,
+    current,
+    existingOnDate,
+    effectiveDate: form.effectiveDate,
+    today,
+    isLesson: isLessonBasis(card.payBasis),
+  });
 
   function resetForm() {
     setForm(createEmptyForm(card.payBasis, today));
@@ -196,8 +228,16 @@ function RateCard({ card, rates, today, onSave, saving }) {
     <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <h4 className="text-sm font-bold text-slate-900">{card.title}</h4>
-          {card.note ? <p className="mt-0.5 text-xs text-slate-500">{card.note}</p> : null}
+          <div className="flex flex-wrap items-center gap-1.5">
+            <h4 className="text-sm font-bold text-slate-900">{card.title}</h4>
+            {card.unassigned ? (
+              <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-800">שירות לא משויך</span>
+            ) : null}
+            {card.unpaid ? (
+              <span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-500">לא בשימוש</span>
+            ) : null}
+          </div>
+          {card.hint ? <p className="mt-0.5 text-xs text-slate-500">{card.hint}</p> : null}
           {current ? (
             <>
               <div className="mt-1 flex flex-wrap items-baseline gap-1.5">
@@ -254,6 +294,7 @@ function RateCard({ card, rates, today, onSave, saving }) {
             form={form}
             setForm={setForm}
             allowBasisChoice={isLessonBasis(card.payBasis)}
+            unitBasis={isLessonBasis(card.payBasis) ? form.basis : card.payBasis}
             warnings={warnings}
             saving={saving}
           />
@@ -275,38 +316,57 @@ function RateCard({ card, rates, today, onSave, saving }) {
 }
 
 /**
- * Add a rate for a service through a dialog: pick the service, then the same fields the card shows.
- * The service list is every service of the org, so a rate is never left without a service.
+ * One way in for every kind of rate: pick what the rate is (per service, hourly, monthly, leave day),
+ * then set it. A kind the employee's pay model doesn't read is offered too, and saving it switches
+ * the employee to that model, so the rate actually pays.
  */
-function AddServiceRateDialog({ open, onOpenChange, services, rates, today, onSave, saving }) {
+function AddRateDialog({ open, onOpenChange, employee, services, rates, today, onSave, saving }) {
+  const [kindKey, setKindKey] = useState(RATE_KINDS[0].key);
   const [serviceId, setServiceId] = useState('');
   const [form, setForm] = useState(() => createEmptyForm('lesson_hourly', today));
 
-  useEffect(() => {
-    if (!open) {
-      setServiceId('');
-      setForm(createEmptyForm('lesson_hourly', today));
-    }
-  }, [open, today]);
+  const kind = RATE_KINDS.find((item) => item.key === kindKey) || RATE_KINDS[0];
+  const isLessonKind = kind.key === 'lesson';
 
+  useEffect(() => {
+    if (!open) return;
+    const initial = RATE_KINDS.find((item) => isKindPaid(item, employee)) || RATE_KINDS[0];
+    setKindKey(initial.key);
+    setServiceId('');
+    setForm(createEmptyForm(initial.payBasis, today));
+  }, [employee, open, today]);
+
+  function chooseKind(nextKind) {
+    setKindKey(nextKind.key);
+    setServiceId('');
+    setForm((current) => ({ ...current, basis: nextKind.payBasis }));
+  }
+
+  const card = isLessonKind
+    ? { serviceId, payBasis: 'lesson_hourly' }
+    : { serviceId: null, payBasis: kind.payBasis };
   const history = useMemo(
-    () => (serviceId ? rowsForCard(rates, { serviceId, payBasis: 'lesson_hourly' }) : []),
-    [rates, serviceId],
+    () => ((isLessonKind && !serviceId) ? [] : rowsForCard(rates, card)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [rates, isLessonKind, serviceId, kind.payBasis],
   );
   const current = history.find((row) => row.effective_date <= today) || null;
   const existingOnDate = history.find((row) => row.effective_date === form.effectiveDate) || null;
-  const warnings = serviceId
-    ? buildWarnings({ history, current, existingOnDate, effectiveDate: form.effectiveDate, today })
+  const ready = isLessonKind ? Boolean(serviceId) : true;
+  const warnings = ready
+    ? buildWarnings({ history, current, existingOnDate, effectiveDate: form.effectiveDate, today, isLesson: isLessonKind })
     : [];
+  const switchesPayModel = !isKindPaid(kind, employee);
 
   async function handleSave() {
     const saved = await onSave({
-      payBasis: form.basis,
-      serviceId,
+      payBasis: isLessonKind ? form.basis : kind.payBasis,
+      serviceId: isLessonKind ? serviceId : null,
       rate: toAgorot(form.amount),
       effectiveDate: form.effectiveDate,
       notes: form.notes || null,
       replaceExisting: Boolean(existingOnDate),
+      applyPayFields: switchesPayModel,
     });
     if (saved) onOpenChange(false);
   }
@@ -315,46 +375,88 @@ function AddServiceRateDialog({ open, onOpenChange, services, rates, today, onSa
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-lg">
         <DialogHeader>
-          <DialogTitle>הוספת תעריף לשירות</DialogTitle>
-          <DialogDescription>
-            כל מפגש מחושב לפי תעריף השירות שלו שהיה בתוקף באותו יום.
-          </DialogDescription>
+          <DialogTitle>הוספת תעריף</DialogTitle>
+          <DialogDescription>כל תעריף חל מהתאריך שנבחר ועד לשינוי הבא.</DialogDescription>
         </DialogHeader>
 
         <div className="grid gap-3">
-          <div className="space-y-1.5">
-            <Label className="text-xs text-slate-600">שירות</Label>
-            <Select value={serviceId} onValueChange={setServiceId} disabled={saving}>
-              <SelectTrigger><SelectValue placeholder="בחירת שירות" /></SelectTrigger>
-              <SelectContent>
-                {services.map((service) => (
-                  <SelectItem key={service.id} value={service.id}>{service.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+          <div className="grid grid-cols-2 gap-2">
+            {RATE_KINDS.map((item) => {
+              const Icon = item.icon;
+              const selected = item.key === kind.key;
+              return (
+                <button
+                  key={item.key}
+                  type="button"
+                  onClick={() => chooseKind(item)}
+                  disabled={saving}
+                  aria-pressed={selected}
+                  className={`flex items-start gap-2 rounded-2xl border p-3 text-start transition ${
+                    selected
+                      ? 'border-primary bg-primary/5 ring-1 ring-primary'
+                      : 'border-slate-200 bg-white hover:border-slate-300'
+                  }`}
+                >
+                  <Icon className={`mt-0.5 h-4 w-4 shrink-0 ${selected ? 'text-primary' : 'text-slate-400'}`} />
+                  <span className="min-w-0">
+                    <span className="flex flex-wrap items-center gap-1.5">
+                      <span className="text-sm font-bold text-slate-900">{item.title}</span>
+                      {isKindPaid(item, employee) ? (
+                        <span className="rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-bold text-emerald-700">בשימוש</span>
+                      ) : null}
+                    </span>
+                    <span className="mt-0.5 block text-xs text-slate-500">{item.hint}</span>
+                  </span>
+                </button>
+              );
+            })}
           </div>
 
+          {isLessonKind ? (
+            <div className="space-y-1.5">
+              <Label className="text-xs text-slate-600">שירות</Label>
+              <Select value={serviceId} onValueChange={setServiceId} disabled={saving}>
+                <SelectTrigger><SelectValue placeholder="בחירת שירות" /></SelectTrigger>
+                <SelectContent>
+                  {services.map((service) => (
+                    <SelectItem key={service.id} value={service.id}>{service.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          ) : null}
+
           {current ? (
-            <p className="text-xs text-slate-500">
-              התעריף הנוכחי בשירות הזה: {describeRate(current)} ({effectiveFromLabel(current)}).
-            </p>
+            <p className="text-xs text-slate-500">כרגע: {describeRate(current)} ({effectiveFromLabel(current)}).</p>
           ) : null}
 
           <RateFields
-            idPrefix="add-service"
+            idPrefix="add-rate"
             form={form}
             setForm={setForm}
-            allowBasisChoice
+            allowBasisChoice={isLessonKind}
+            unitBasis={isLessonKind ? form.basis : kind.payBasis}
             warnings={warnings}
             saving={saving}
           />
+
+          {switchesPayModel ? (
+            <p className="flex items-start gap-1.5 rounded-xl bg-sky-50 px-3 py-2 text-xs text-sky-900">
+              <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              <span>
+                {kind.leavePayMethod
+                  ? 'חופשות ישולמו לפי ערך יום קבוע.'
+                  : `מודל השכר של העובד/ת יעבור ל"${PAYROLL_MODEL_LABEL[kind.payrollModel]}".`}
+              </span>
+            </p>
+          ) : null}
         </div>
 
         <DialogFooter className="gap-2 sm:justify-start">
           <Button
             type="button"
             onClick={handleSave}
-            disabled={saving || !serviceId || form.amount === '' || !form.effectiveDate}
+            disabled={saving || !ready || form.amount === '' || !form.effectiveDate}
           >
             {saving ? <Loader2 className="me-2 h-4 w-4 animate-spin" /> : null}
             שמירת תעריף
@@ -370,11 +472,11 @@ function AddServiceRateDialog({ open, onOpenChange, services, rates, today, onSa
  * Pay rates of one employee: what they earn per service, and from when (RateHistory).
  * Rates are never edited in place; saving adds a rate that applies from the date you choose.
  */
-export default function EmployeeRatesPanel({ employee, orgId, session, services = [] }) {
+export default function EmployeeRatesPanel({ employee, orgId, session, services = [], onEmployeeChanged }) {
   const [rates, setRates] = useState([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [addServiceOpen, setAddServiceOpen] = useState(false);
+  const [addRateOpen, setAddRateOpen] = useState(false);
   const today = todayKey();
 
   const loadRates = useCallback(async () => {
@@ -398,7 +500,7 @@ export default function EmployeeRatesPanel({ employee, orgId, session, services 
     void loadRates();
   }, [loadRates]);
 
-  const cards = useMemo(() => {
+  const groups = useMemo(() => {
     const capabilities = employee?.service_capabilities || [];
     const capabilityServiceIds = capabilities.map((capability) => capability.service_id).filter(Boolean);
     const ratedServiceIds = rates.map((row) => row.service_id).filter(Boolean);
@@ -407,44 +509,39 @@ export default function EmployeeRatesPanel({ employee, orgId, session, services 
       if (serviceId && !serviceIds.includes(serviceId)) serviceIds.push(serviceId);
     });
 
-    const serviceCards = serviceIds.map((serviceId) => {
-      const capability = capabilities.find((item) => item.service_id === serviceId) || null;
-      return {
-        key: `service-${serviceId}`,
-        title: services.find((service) => service.id === serviceId)?.name || 'שירות',
-        note: capability
-          ? 'תעריף המפגשים בשירות הזה'
-          : 'השירות אינו משויך לעובד/ת. כדי לשבץ מפגשים בשירות הזה יש להוסיף אותו ב"שירותים ויכולות".',
-        payBasis: 'lesson_hourly',
-        serviceId,
-      };
-    });
-
-    const lessonBased = employee?.payroll_model === 'lesson_based';
-    const employeeLevel = [
-      { key: 'attendance_hourly', title: 'שכר שעתי (שעות עבודה)', payBasis: 'attendance_hourly', serviceId: null },
-      { key: 'monthly_salary', title: 'שכר חודשי', payBasis: 'monthly_salary', serviceId: null },
-      { key: 'leave_day', title: 'ערך יום חופשה קבוע', payBasis: 'leave_day', serviceId: null },
-    ].filter((card) => {
-      if (rates.some((row) => row.pay_basis === card.payBasis && !row.service_id)) return true;
-      if (card.payBasis === 'attendance_hourly') return employee?.payroll_model === 'hourly';
-      if (card.payBasis === 'monthly_salary') return employee?.payroll_model === 'monthly_salary';
-      return employee?.leave_pay_method === 'fixed_rate';
-    }).map((card) => ({
-      ...card,
-      // A lesson-paid employee can still carry an old overall rate; it never pays a lesson.
-      note: lessonBased && card.payBasis !== 'leave_day'
-        ? 'תעריף כללי שאינו מחשב מפגשים. מפגשים מחושבים לפי תעריפי השירותים שלמעלה.'
-        : null,
+    const lessonKind = RATE_KINDS[0];
+    const lessonCards = serviceIds.map((serviceId) => ({
+      key: `service-${serviceId}`,
+      title: services.find((service) => service.id === serviceId)?.name || 'שירות',
+      payBasis: 'lesson_hourly',
+      serviceId,
+      unassigned: !capabilities.some((capability) => capability.service_id === serviceId),
+      unpaid: !isKindPaid(lessonKind, employee),
     }));
 
-    return [...serviceCards, ...employeeLevel];
+    const otherCards = RATE_KINDS.slice(1)
+      .filter((kind) => (
+        rates.some((row) => row.pay_basis === kind.payBasis && !row.service_id) || isKindPaid(kind, employee)
+      ))
+      .map((kind) => ({
+        key: kind.key,
+        title: kind.title,
+        hint: kind.hint,
+        payBasis: kind.payBasis,
+        serviceId: null,
+        unpaid: !isKindPaid(kind, employee),
+      }));
+
+    return [
+      { key: 'lesson', title: 'לפי מפגש', hint: 'תעריף לכל שירות', cards: lessonCards },
+      { key: 'employee', title: 'שכר עבודה', hint: 'שעות, משכורת וחופשה', cards: otherCards },
+    ].filter((group) => group.cards.length > 0);
   }, [employee, rates, services]);
 
-  async function handleSave({ payBasis, serviceId, rate, effectiveDate, notes, replaceExisting }) {
+  async function handleSave({ payBasis, serviceId, rate, effectiveDate, notes, replaceExisting, applyPayFields }) {
     setSaving(true);
     try {
-      await authenticatedFetch('employee-rates', {
+      const payload = await authenticatedFetch('employee-rates', {
         session,
         method: 'POST',
         body: {
@@ -456,9 +553,11 @@ export default function EmployeeRatesPanel({ employee, orgId, session, services 
           effective_date: effectiveDate,
           notes,
           replace_existing: replaceExisting,
+          apply_pay_fields: applyPayFields === true,
         },
       });
       await loadRates();
+      if (payload?.pay_fields_applied) await onEmployeeChanged?.();
       toast.success(effectiveDate > today ? 'התעריף נשמר ויחול מהתאריך שנבחר.' : 'התעריף נשמר.');
       return true;
     } catch (error) {
@@ -481,35 +580,46 @@ export default function EmployeeRatesPanel({ employee, orgId, session, services 
         </div>
         <div className="flex items-center gap-2">
           {loading ? <Loader2 className="h-4 w-4 animate-spin text-slate-400" /> : null}
-          <Button type="button" size="sm" variant="outline" className="gap-1" onClick={() => setAddServiceOpen(true)} disabled={saving}>
+          <Button type="button" size="sm" variant="outline" className="gap-1" onClick={() => setAddRateOpen(true)} disabled={saving}>
             <Plus className="h-3.5 w-3.5" />
-            הוספת תעריף לשירות
+            הוספת תעריף
           </Button>
         </div>
       </div>
 
-      {cards.length === 0 ? (
+      {groups.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-3 py-6 text-center text-sm text-slate-500">
-          עדיין לא הוגדרו תעריפים. אפשר להוסיף תעריף לשירות בכפתור שלמעלה.
+          עדיין לא הוגדרו תעריפים.
         </div>
       ) : (
-        <div className="grid gap-3">
-          {cards.map((card) => (
-            <RateCard
-              key={card.key}
-              card={card}
-              rates={rates}
-              today={today}
-              saving={saving}
-              onSave={handleSave}
-            />
+        <div className="space-y-4">
+          {groups.map((group) => (
+            <div key={group.key} className="space-y-2">
+              <div className="flex items-baseline gap-2 px-1">
+                <h4 className="text-xs font-bold text-slate-700">{group.title}</h4>
+                <span className="text-[11px] text-slate-400">{group.hint}</span>
+              </div>
+              <div className="grid gap-3">
+                {group.cards.map((card) => (
+                  <RateCard
+                    key={card.key}
+                    card={card}
+                    rates={rates}
+                    today={today}
+                    saving={saving}
+                    onSave={handleSave}
+                  />
+                ))}
+              </div>
+            </div>
           ))}
         </div>
       )}
 
-      <AddServiceRateDialog
-        open={addServiceOpen}
-        onOpenChange={setAddServiceOpen}
+      <AddRateDialog
+        open={addRateOpen}
+        onOpenChange={setAddRateOpen}
+        employee={employee}
         services={services}
         rates={rates}
         today={today}

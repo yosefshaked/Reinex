@@ -1298,6 +1298,7 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
                     orgId={orgId}
                     session={session}
                     services={services}
+                    onEmployeeChanged={refetchInstructors}
                   />
                   <EmployeeFinancePanel
                     employee={currentEmployee}
