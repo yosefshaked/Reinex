@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { CalendarClock, CalendarDays, ChevronDown, Clock, GraduationCap, Loader2, Palmtree, Plus, TriangleAlert } from 'lucide-react';
+import { CalendarClock, CalendarDays, ChevronDown, Clock, GraduationCap, Loader2, Plus, TriangleAlert } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -24,12 +24,16 @@ import { formatCurrency, toAgorot } from '@/lib/currency.js';
 
 const LESSON_BASES = ['lesson_hourly', 'lesson_flat'];
 
-/** The kinds of rate the office can set, in the order they are offered. */
+/**
+ * The kinds of pay for work the office can set, in the order they are offered.
+ *
+ * Leave pay is not one of them: it is a method on the employee (legal average, historical average
+ * or a fixed value), set with the other leave settings in the employee card.
+ */
 const RATE_KINDS = [
   { key: 'lesson', payBasis: 'lesson_hourly', title: 'לפי מפגש', hint: 'תעריף לכל שירות', icon: GraduationCap, payrollModel: 'lesson_based' },
   { key: 'attendance_hourly', payBasis: 'attendance_hourly', title: 'שעתי', hint: 'לפי שעות עבודה', icon: Clock, payrollModel: 'hourly' },
   { key: 'monthly_salary', payBasis: 'monthly_salary', title: 'חודשי', hint: 'משכורת קבועה', icon: CalendarDays, payrollModel: 'monthly_salary' },
-  { key: 'leave_day', payBasis: 'leave_day', title: 'יום חופשה', hint: 'ערך יום קבוע', icon: Palmtree, leavePayMethod: 'fixed_rate' },
 ];
 
 const PAYROLL_MODEL_LABEL = {
@@ -40,7 +44,6 @@ const PAYROLL_MODEL_LABEL = {
 
 /** Whether a rate of this kind is read by payroll for this employee as they are set up now. */
 function isKindPaid(kind, employee) {
-  if (kind.leavePayMethod) return employee?.leave_pay_method === kind.leavePayMethod;
   return (employee?.payroll_model || 'lesson_based') === kind.payrollModel;
 }
 
@@ -443,11 +446,7 @@ function AddRateDialog({ open, onOpenChange, employee, services, rates, today, o
           {switchesPayModel ? (
             <p className="flex items-start gap-1.5 rounded-xl bg-sky-50 px-3 py-2 text-xs text-sky-900">
               <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-              <span>
-                {kind.leavePayMethod
-                  ? 'חופשות ישולמו לפי ערך יום קבוע.'
-                  : `מודל השכר של העובד/ת יעבור ל"${PAYROLL_MODEL_LABEL[kind.payrollModel]}".`}
-              </span>
+              <span>מודל השכר של העובד/ת יעבור ל&quot;{PAYROLL_MODEL_LABEL[kind.payrollModel]}&quot;.</span>
             </p>
           ) : null}
         </div>
@@ -523,6 +522,7 @@ export default function EmployeeRatesPanel({ employee, orgId, session, services 
       .filter((kind) => (
         rates.some((row) => row.pay_basis === kind.payBasis && !row.service_id) || isKindPaid(kind, employee)
       ))
+      // leave_day rows are never listed here: leave pay lives with the leave settings
       .map((kind) => ({
         key: kind.key,
         title: kind.title,
@@ -534,7 +534,7 @@ export default function EmployeeRatesPanel({ employee, orgId, session, services 
 
     return [
       { key: 'lesson', title: 'לפי מפגש', hint: 'תעריף לכל שירות', cards: lessonCards },
-      { key: 'employee', title: 'שכר עבודה', hint: 'שעות, משכורת וחופשה', cards: otherCards },
+      { key: 'employee', title: 'שכר עבודה', hint: 'שעות או משכורת', cards: otherCards },
     ].filter((group) => group.cards.length > 0);
   }, [employee, rates, services]);
 

@@ -66,8 +66,8 @@ Customer billing for the same cases is S4.4–S4.5 in the map. A cancellation be
 | ID | Scenario | Today |
 |---|---|---|
 | PAY-E1 | The pay is the hours worked × the hourly rate valid on each day. | ✅ Hours × the hourly rate in effect on each day |
-| PAY-E2 | **An instructor's lesson hours** come from the lessons they gave. | ✅ Derived from lessons |
-| PAY-E3 | **An hourly employee who isn't an instructor** enters their own hours (the office can enter them too). The office approves them. Unapproved hours block closing the month (H4). The record of actual hours is the employer's legal record (K6). | 🟡 The office enters hours by hand; there's no self-entry or approval |
+| PAY-E2 | **An instructor's lesson hours** come from the lessons they gave, and are kept apart from other work on the same day. | ✅ Derived from lessons. The attendance day holds `lesson_minutes` (written from the lessons) and `other_minutes` (work that isn't a lesson) separately; hourly pay reads only `other_minutes`, so lesson time is never paid twice |
+| PAY-E3 | **An hourly employee who isn't an instructor** enters their own hours (the office can enter them too). The office approves them. Unapproved hours block closing the month (H4). The record of actual hours is the employer's legal record (K6). | 🟡 The office enters non-lesson hours by hand in the attendance tab; there's no self-entry or approval |
 
 ## F — Monthly salary
 

@@ -22,6 +22,7 @@ import {
   resolveEmployeeRecord,
   resolveEmployeeWorkingDays,
   resolveLeaveDayValue,
+  resolveOtherMinutes,
   startOfMonthKey,
   toDateKey,
 } from '../_shared/employee-finance.js';
@@ -161,7 +162,8 @@ async function buildEmployeePayrollPreview(client, orgId, employee, profile, sta
       if (rate <= 0) {
         return sum;
       }
-      const workedMinutes = Number(row?.worked_minutes || 0);
+      // Office work only: lesson time on the same day is paid through lesson_earnings.
+      const workedMinutes = resolveOtherMinutes(row);
       return sum + ((workedMinutes / 60) * rate);
     }, 0));
     baseAmount = attendanceAmount;

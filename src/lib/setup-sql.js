@@ -7118,4 +7118,104 @@ BEGIN
       EXECUTE FUNCTION public.mirror_employee_rates_to_rate_history();
   END IF;
 END $$;
+
+-- -----------------------------------------------------------------
+-- Patch 2026-09-22: attendance separates lesson minutes from other work
+-- -----------------------------------------------------------------
+-- A day's worked_minutes held teaching time and office time in one number, and only one row per
+-- day was allowed across manual/import/system, so a manual office day hid the lesson minutes (and
+-- vice versa). Anything paying by attendance hours therefore paid for lesson time that lesson pay
+-- already covers. The day row now carries the two buckets separately:
+--   lesson_minutes — written from the lessons the instructor is compensated for that day
+--   other_minutes  — work that is not a lesson: office hours, stable work, meetings
+-- worked_minutes stays as the total of both, maintained by a trigger, so existing readers and
+-- reports keep working.
+
+ALTER TABLE public.employee_attendance_records
+  ADD COLUMN IF NOT EXISTS lesson_minutes integer NOT NULL DEFAULT 0;
+
+ALTER TABLE public.employee_attendance_records
+  ADD COLUMN IF NOT EXISTS other_minutes integer NOT NULL DEFAULT 0;
+
+-- Backfill: a system row's minutes were lesson minutes, every other row's were other work.
+UPDATE public.employee_attendance_records
+SET "lesson_minutes" = GREATEST(COALESCE("worked_minutes", 0), 0)
+WHERE "source_type" = 'system'
+  AND "lesson_minutes" = 0
+  AND COALESCE("worked_minutes", 0) <> 0;
+
+UPDATE public.employee_attendance_records
+SET "other_minutes" = GREATEST(COALESCE("worked_minutes", 0), 0)
+WHERE "source_type" <> 'system'
+  AND "other_minutes" = 0
+  AND COALESCE("worked_minutes", 0) > 0;
+
+-- Correction rows can subtract minutes, and they always correct lesson time (they come from a
+-- calendar correction), so they keep their sign in the lesson bucket.
+UPDATE public.employee_attendance_records
+SET "lesson_minutes" = COALESCE("worked_minutes", 0),
+    "other_minutes" = 0
+WHERE "source_type" = 'correction'
+  AND "lesson_minutes" = 0
+  AND COALESCE("worked_minutes", 0) <> 0;
+
+-- worked_minutes is the total of the two buckets. Writers that still set worked_minutes alone
+-- (older code, imports) keep working: their value lands in the bucket the row's source implies.
+CREATE OR REPLACE FUNCTION public.sync_attendance_minute_buckets()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = public
+AS $$
+DECLARE
+  v_buckets_touched boolean;
+BEGIN
+  v_buckets_touched := TG_OP = 'INSERT'
+    OR NEW."lesson_minutes" IS DISTINCT FROM OLD."lesson_minutes"
+    OR NEW."other_minutes" IS DISTINCT FROM OLD."other_minutes";
+
+  NEW."lesson_minutes" := COALESCE(NEW."lesson_minutes", 0);
+  NEW."other_minutes" := COALESCE(NEW."other_minutes", 0);
+
+  IF NOT v_buckets_touched
+    AND NEW."worked_minutes" IS DISTINCT FROM OLD."worked_minutes"
+    AND NEW."worked_minutes" IS NOT NULL
+  THEN
+    -- Only the total was written: put it in the bucket this row is about.
+    IF NEW."source_type" IN ('system', 'correction') THEN
+      NEW."lesson_minutes" := NEW."worked_minutes";
+      NEW."other_minutes" := 0;
+    ELSE
+      NEW."other_minutes" := NEW."worked_minutes";
+      NEW."lesson_minutes" := 0;
+    END IF;
+  ELSIF TG_OP = 'INSERT'
+    AND NEW."worked_minutes" IS NOT NULL
+    AND NEW."lesson_minutes" = 0
+    AND NEW."other_minutes" = 0
+  THEN
+    IF NEW."source_type" IN ('system', 'correction') THEN
+      NEW."lesson_minutes" := NEW."worked_minutes";
+    ELSE
+      NEW."other_minutes" := NEW."worked_minutes";
+    END IF;
+  END IF;
+
+  NEW."worked_minutes" := NEW."lesson_minutes" + NEW."other_minutes";
+  RETURN NEW;
+END;
+$$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_trigger
+    WHERE tgname = 'trg_employee_attendance_records_sync_minutes'
+      AND tgrelid = 'public.employee_attendance_records'::regclass
+  ) THEN
+    CREATE TRIGGER trg_employee_attendance_records_sync_minutes
+      BEFORE INSERT OR UPDATE ON public.employee_attendance_records
+      FOR EACH ROW
+      EXECUTE FUNCTION public.sync_attendance_minute_buckets();
+  END IF;
+END $$;
 `;

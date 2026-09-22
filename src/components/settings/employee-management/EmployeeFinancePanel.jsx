@@ -37,6 +37,17 @@ function formatMonth(date) {
 
 
 
+/**
+ * How a paid leave day is valued. This is a method on the employee, not a rate for work: the legal
+ * average is the default, and a farm can override it per employee with a fixed day value.
+ */
+function getLeavePayMethodLabel(method) {
+  if (method === 'fixed_rate') return 'ערך קבוע ליום';
+  if (method === 'legal') return 'ממוצע חוקי';
+  if (method === 'avg_hourly_x_avg_day_hours') return 'ממוצע היסטורי';
+  return 'ברירת מחדל ארגונית';
+}
+
 function getPayrollModelLabel(value) {
   if (value === 'lesson_based') return 'מבוסס שיעורים';
   if (value === 'monthly_salary') return 'שכר חודשי';
@@ -187,8 +198,11 @@ export default function EmployeeFinancePanel({ employee, orgId, session, onEditE
             </div>
           </div>
           <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3">
-            <div className="text-[11px] text-slate-500">שיטת חופשה</div>
-            <div className="mt-1 text-lg font-bold text-slate-900">{employee?.leave_pay_method || 'ברירת מחדל'}</div>
+            <div className="text-[11px] text-slate-500">תשלום חופשה</div>
+            <div className="mt-1 text-lg font-bold text-slate-900">{getLeavePayMethodLabel(employee?.leave_pay_method)}</div>
+            {employee?.leave_pay_method === 'fixed_rate' ? (
+              <div className="text-xs text-slate-500">{formatCurrency(employee?.leave_fixed_day_rate)} ליום</div>
+            ) : null}
           </div>
         </div>
 

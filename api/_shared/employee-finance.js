@@ -474,18 +474,21 @@ export function resolveLeaveDayValue({
       amount: row.payout_amount,
       hours: row.duration_minutes ? Number(row.duration_minutes) / 60 : 0,
     })),
+    // Only work that is not a lesson: the lesson hours of the same day are already in lessonEarnings
+    // above, and counting them here too would inflate every average day value.
     ...(attendanceRecords || []).map((row) => {
       const hourlyRate = resolveRateOnDate(rateRows, {
         employeeId,
         payBasis: PAY_BASIS.ATTENDANCE_HOURLY,
         date: toDateKey(row.attendance_date),
       });
+      const otherMinutes = resolveOtherMinutes(row);
       return {
         date: row.attendance_date,
-        amount: row.worked_minutes && hourlyRate
-          ? Math.round((Number(row.worked_minutes) / 60) * hourlyRate.rate)
+        amount: otherMinutes && hourlyRate
+          ? Math.round((otherMinutes / 60) * hourlyRate.rate)
           : 0,
-        hours: row.worked_minutes ? Number(row.worked_minutes) / 60 : 0,
+        hours: otherMinutes ? otherMinutes / 60 : 0,
       };
     }),
   ];
@@ -497,6 +500,22 @@ export function resolveLeaveDayValue({
 
   const twelveMonth = computeAverageDayValue(historicalRecords, targetDate, 12);
   return Math.round(Math.max(baseValue, twelveMonth));
+}
+
+/**
+ * The minutes of a day that are not lesson time — office hours, stable work, meetings.
+ *
+ * Lesson time is paid by the lesson (`lesson_earnings`), so paying it again by the hour would pay
+ * twice. Rows written before the buckets existed carry only `worked_minutes`, and for those the
+ * row's source says which bucket it was: a system or correction row is lesson time.
+ */
+export function resolveOtherMinutes(row) {
+  if (row?.other_minutes != null || row?.lesson_minutes != null) {
+    return Math.max(0, Number(row.other_minutes) || 0);
+  }
+  const worked = Number(row?.worked_minutes) || 0;
+  if (worked <= 0) return 0;
+  return ['system', 'correction'].includes(normalizeString(row?.source_type).toLowerCase()) ? 0 : worked;
 }
 
 export function buildLeaveDayRows({
@@ -595,7 +614,7 @@ export async function fetchAttendanceRecords(tenantClient, { employeeId, startDa
 
   const { data, error } = await tenantClient
     .from('employee_attendance_records')
-    .select('id, employee_id, attendance_date, status, worked_minutes, notes, source_type, created_by, updated_by, created_at, updated_at, metadata')
+    .select('id, employee_id, attendance_date, status, worked_minutes, lesson_minutes, other_minutes, notes, source_type, created_by, updated_by, created_at, updated_at, metadata')
     .eq('employee_id', employeeId)
     .gte('attendance_date', startKey)
     .lte('attendance_date', endKey)
@@ -1056,11 +1075,34 @@ export async function syncLessonInstructorEarnings(
 }
 
 /**
+ * Lessons no longer count for that day: empty the lesson bucket. The day row is deleted only when
+ * nothing else is on it, so work the office entered by hand survives.
+ */
+async function clearLessonMinutes(attendanceScope, existingRecord, otherMinutes, actorUserId) {
+  if (!existingRecord) return;
+  if (otherMinutes > 0) {
+    await attendanceScope
+      .update({ lesson_minutes: 0, updated_by: actorUserId || null, updated_at: new Date().toISOString() })
+      .eq('id', existingRecord.id);
+    return;
+  }
+  if (existingRecord.source_type === 'system') {
+    await attendanceScope.delete().eq('id', existingRecord.id);
+    return;
+  }
+  await attendanceScope
+    .update({ lesson_minutes: 0, updated_by: actorUserId || null, updated_at: new Date().toISOString() })
+    .eq('id', existingRecord.id);
+}
+
+/**
  * Auto-sync instructor attendance when lesson workflow decisions imply
  * that the instructor should be compensated for the lesson.
- * Upserts an employee_attendance_records row with source_type='system',
- * summing worked_minutes from all compensation-eligible lessons for that instructor on that date.
- * Respects existing manual attendance: does not overwrite manual/import entries.
+ *
+ * Writes only the lesson bucket of the day (`lesson_minutes`), summed from the lessons the
+ * instructor is compensated for that date. Office work the employee entered by hand for the same
+ * day (`other_minutes`) is left untouched: a day can hold both, and only the office bucket is paid
+ * by the hour, so lesson time is never paid twice.
  */
 export async function syncInstructorAttendanceFromLessons(
   tenantClient,
@@ -1096,7 +1138,7 @@ export async function syncInstructorAttendanceFromLessons(
     : tenantClient.from('employee_attendance_records');
 
   const { data: existingRecord, error: existingError } = await employeeAttendanceScope
-    .select('id, source_type')
+    .select('id, source_type, other_minutes, worked_minutes, notes, metadata')
     .eq('employee_id', instance.instructor_employee_id)
     .eq('attendance_date', lessonDate)
     .in('source_type', ['manual', 'import', 'system'])
@@ -1106,10 +1148,8 @@ export async function syncInstructorAttendanceFromLessons(
     throw existingError;
   }
 
-  if (existingRecord && existingRecord.source_type !== 'system') {
-    // Manual or import entry exists — do not overwrite
-    return { employee_id: instance.instructor_employee_id, attendance_date: lessonDate, skipped: true };
-  }
+  const existingOtherMinutes = Math.max(0, Number(existingRecord?.other_minutes) || 0);
+  const entryIsOwnedByOffice = Boolean(existingRecord) && existingRecord.source_type !== 'system';
 
   // Sum worked minutes from all compensation-eligible lessons for this instructor on this date
   const dayBounds = buildUtcBoundsForTimezoneDateRange(lessonDate, lessonDate);
@@ -1131,12 +1171,7 @@ export async function syncInstructorAttendanceFromLessons(
 
   const dayLessonRows = dayLessons || [];
   if (dayLessonRows.length === 0) {
-    // No lessons on that date — remove system attendance record if it exists
-    if (existingRecord && existingRecord.source_type === 'system') {
-      await employeeAttendanceScope
-        .delete()
-        .eq('id', existingRecord.id);
-    }
+    await clearLessonMinutes(employeeAttendanceScope, existingRecord, existingOtherMinutes, actorUserId);
     return { employee_id: instance.instructor_employee_id, attendance_date: lessonDate, removed: true };
   }
 
@@ -1166,11 +1201,7 @@ export async function syncInstructorAttendanceFromLessons(
   });
 
   if (eligibleLessons.length === 0) {
-    if (existingRecord && existingRecord.source_type === 'system') {
-      await employeeAttendanceScope
-        .delete()
-        .eq('id', existingRecord.id);
-    }
+    await clearLessonMinutes(employeeAttendanceScope, existingRecord, existingOtherMinutes, actorUserId);
     return { employee_id: instance.instructor_employee_id, attendance_date: lessonDate, removed: true };
   }
 
@@ -1215,12 +1246,17 @@ export async function syncInstructorAttendanceFromLessons(
     employee_id: instance.instructor_employee_id,
     attendance_date: lessonDate,
     status: 'present',
-    worked_minutes: totalWorkedMinutes,
-    source_type: 'system',
-    notes: systemNote,
+    lesson_minutes: totalWorkedMinutes,
+    other_minutes: existingOtherMinutes,
+    // The DB keeps worked_minutes as the sum of both buckets.
+    source_type: entryIsOwnedByOffice ? existingRecord.source_type : 'system',
+    notes: entryIsOwnedByOffice ? (existingRecord.notes || null) : systemNote,
     updated_by: actorUserId || null,
     updated_at: new Date().toISOString(),
     metadata: {
+      ...(entryIsOwnedByOffice && existingRecord.metadata && typeof existingRecord.metadata === 'object'
+        ? existingRecord.metadata
+        : {}),
       lesson_count: eligibleLessons.length,
       lesson_ids: eligibleLessons.map((l) => l.id),
       resolved_lesson_count: resolvedLessons.length,
@@ -1230,7 +1266,7 @@ export async function syncInstructorAttendanceFromLessons(
     },
   };
 
-  if (existingRecord?.source_type === 'system') {
+  if (existingRecord) {
     const { error: updateError } = await employeeAttendanceScope
       .update(systemPayload)
       .eq('id', existingRecord.id);
@@ -1253,7 +1289,9 @@ export async function syncInstructorAttendanceFromLessons(
   return {
     employee_id: instance.instructor_employee_id,
     attendance_date: lessonDate,
-    worked_minutes: totalWorkedMinutes,
+    lesson_minutes: totalWorkedMinutes,
+    other_minutes: existingOtherMinutes,
+    worked_minutes: totalWorkedMinutes + existingOtherMinutes,
     lesson_count: eligibleLessons.length,
   };
 }

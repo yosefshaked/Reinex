@@ -12,6 +12,7 @@ import {
   resolveCompensationEligibleParticipants,
   resolveLeaveDayValue,
   resolveLessonInstructorPayout,
+  resolveOtherMinutes,
 } from '../api/_shared/employee-finance.js';
 import { shouldParticipantTriggerInstructorCompensation } from '../api/_shared/calendar-workflow-decisions.js';
 import { PAY_BASIS, resolveLessonRateOnDate, resolveRateOnDate } from '../api/_shared/rate-history.js';
@@ -216,7 +217,50 @@ describe('PAY-E hours', () => {
     assert.equal(hourlyOn('2026-09-14'), 5000);
     assert.equal(hourlyOn('2026-09-15'), 5500);
   });
-  it.todo('PAY-E2 an instructor\'s lesson hours are derived from the lessons they gave');
+  it('PAY-E2 lesson minutes and other work are kept apart, so lesson time is never paid twice', () => {
+    // A day an instructor taught 120 minutes and also did 90 minutes of office work.
+    const mixedDay = {
+      attendance_date: '2026-09-10',
+      source_type: 'manual',
+      lesson_minutes: 120,
+      other_minutes: 90,
+      worked_minutes: 210,
+    };
+    assert.equal(resolveOtherMinutes(mixedDay), 90, 'hourly pay covers the office work only');
+
+    // A day written by the lesson sync alone: nothing on it is payable by the hour.
+    assert.equal(
+      resolveOtherMinutes({ source_type: 'system', lesson_minutes: 120, other_minutes: 0, worked_minutes: 120 }),
+      0,
+    );
+
+    // Rows written before the split: the row's source says which bucket it was.
+    assert.equal(resolveOtherMinutes({ source_type: 'system', worked_minutes: 120 }), 0);
+    assert.equal(resolveOtherMinutes({ source_type: 'correction', worked_minutes: -60 }), 0);
+    assert.equal(resolveOtherMinutes({ source_type: 'manual', worked_minutes: 90 }), 90);
+  });
+
+  it('PAY-E2 the leave-day average counts a teaching day once, not as lesson pay plus hourly pay', () => {
+    const employee = { id: 'dana', payroll_model: 'lesson_based', leave_pay_method: 'legal' };
+    const rateRows = [rateRow('dana-office', 'dana', null, PAY_BASIS.ATTENDANCE_HOURLY, 5000, '2026-01-01')];
+    const lessonEarnings = [{ lesson_date: '2026-09-10', payout_amount: 30000, duration_minutes: 120 }];
+    const attendanceRecords = [{
+      attendance_date: '2026-09-10',
+      source_type: 'system',
+      lesson_minutes: 120,
+      other_minutes: 0,
+      worked_minutes: 120,
+    }];
+
+    const withAttendance = resolveLeaveDayValue({
+      employee, targetDate: '2026-09-20', lessonEarnings, attendanceRecords, rateRows,
+    });
+    const lessonsOnly = resolveLeaveDayValue({
+      employee, targetDate: '2026-09-20', lessonEarnings, attendanceRecords: [], rateRows,
+    });
+
+    assert.equal(withAttendance, lessonsOnly, 'the lesson-derived attendance row adds nothing on top of the lesson');
+  });
   it.todo('PAY-E3 non-instructor hours are self-entered, approved by the office, and unapproved hours block closing');
 });
 
