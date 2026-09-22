@@ -2,12 +2,14 @@
   "meta": {
     "id": "employee-rates",
     "name": "Employee Pay Rates — dated rates screen",
-    "description": "Payroll phase 1b: the rates panel in an employee's finance tab. Creates an instructor with a service capability through the API (the DB trigger seeds its first rate), then in the UI schedules a future rate, checks it shows as scheduled with its history, and checks the warnings shown for a back-dated rate and for a date that already has a rate. Rates are never edited in place (PAY-A1, PAY-A2).",
-    "version": "1.0.0",
-    "last_validated_at": "2026-09-22T09:00:00Z",
+    "description": "Payroll phase 1b: the rates panel in an employee's finance tab. Creates an instructor with a service capability through the API (the DB trigger seeds its first rate), then in the UI schedules a future rate, checks it shows as scheduled with its history, checks the warnings shown for a back-dated rate and for a date that already has a rate, and adds a rate for another service through the service picker. Rates are never edited in place (PAY-A1, PAY-A2).",
+    "version": "1.1.0",
+    "last_validated_at": "2026-09-22T12:00:00Z",
     "author": "claude-ai",
     "dependencies": {
-      "routes": ["/employees"],
+      "routes": [
+        "/employees"
+      ],
       "api_endpoints": [
         "GET /api/services",
         "POST /api/instructors",
@@ -22,17 +24,25 @@
     "continue_on_step_failure": false,
     "continue_on_workflow_failure": true
   },
-
   "workflows": [
     {
       "id": "login",
       "name": "Login as Admin",
       "steps": [
-        { "id": "do-login", "description": "Sign in with admin credentials", "action": "login", "role": "admin" },
-        { "id": "assert-dashboard", "action": "assert", "type": "url", "pattern": "#/dashboard" }
+        {
+          "id": "do-login",
+          "description": "Sign in with admin credentials",
+          "action": "login",
+          "role": "admin"
+        },
+        {
+          "id": "assert-dashboard",
+          "action": "assert",
+          "type": "url",
+          "pattern": "#/dashboard"
+        }
       ]
     },
-
     {
       "id": "api-setup",
       "name": "API – Service and instructor with a rate",
@@ -55,6 +65,15 @@
           "endpoint": "/api/services?org_id={{TEST_ORG_ID}}",
           "store": "SERVICE_NAME",
           "storeField": "0.name"
+        },
+        {
+          "id": "get-second-service-name",
+          "description": "Store a second service name, the one added through the rate picker",
+          "action": "apiCall",
+          "method": "GET",
+          "endpoint": "/api/services?org_id={{TEST_ORG_ID}}",
+          "store": "OTHER_SERVICE_NAME",
+          "storeField": "1.name"
         },
         {
           "id": "create-instructor",
@@ -80,7 +99,10 @@
           "action": "apiCall",
           "method": "POST",
           "endpoint": "{{SUPABASE_URL}}/rest/v1/instructor_service_capabilities",
-          "headers": { "apikey": "{{SERVICE_ROLE_KEY}}", "Prefer": "return=minimal" },
+          "headers": {
+            "apikey": "{{SERVICE_ROLE_KEY}}",
+            "Prefer": "return=minimal"
+          },
           "body": {
             "org_id": "{{TEST_ORG_ID}}",
             "employee_id": "{{RATE_INSTRUCTOR_ID}}",
@@ -90,7 +112,9 @@
             "availability_windows": [],
             "metadata": {}
           },
-          "ignoreStatus": [409]
+          "ignoreStatus": [
+            409
+          ]
         },
         {
           "id": "verify-seeded-rate",
@@ -101,14 +125,21 @@
         }
       ]
     },
-
     {
       "id": "ui-schedule-future-rate",
       "name": "UI – Schedule a future rate",
       "description": "Opens the instructor's finance tab and saves a rate that starts in the future; it must show as scheduled while the current rate stays.",
       "steps": [
-        { "id": "navigate-employees", "action": "navigate", "url": "{{BASE_URL}}/#/employees" },
-        { "id": "wait-main", "action": "waitForSelector", "selector": "main, [role='main']" },
+        {
+          "id": "navigate-employees",
+          "action": "navigate",
+          "url": "{{BASE_URL}}/#/employees"
+        },
+        {
+          "id": "wait-main",
+          "action": "waitForSelector",
+          "selector": "main, [role='main']"
+        },
         {
           "id": "open-employee",
           "description": "Select the fixture instructor in the roster",
@@ -116,14 +147,24 @@
           "selector": "button:has-text('בדיקה {{RUN_NUMERIC_ID}}')",
           "first": true
         },
-        { "id": "open-finance-tab", "description": "Switch to the finance tab", "action": "click", "selector": "[role='tab']:has-text('פיננסים')" },
-        { "id": "wait-rates-panel", "description": "The rates panel is shown", "action": "waitForSelector", "selector": "h3:has-text('תעריפי שכר')" },
+        {
+          "id": "open-finance-tab",
+          "description": "Switch to the finance tab",
+          "action": "click",
+          "selector": "[role='tab']:has-text('פיננסים')"
+        },
+        {
+          "id": "wait-rates-panel",
+          "description": "The rates panel is shown",
+          "action": "waitForSelector",
+          "selector": "h3:has-text('תעריפי שכר')"
+        },
         {
           "id": "assert-current-rate",
-          "description": "The seeded rate of the service is shown as the current rate",
+          "description": "The seeded rate of the service is shown, labelled as the current rate",
           "action": "assert",
           "type": "visible",
-          "selector": "article:has-text('{{SERVICE_NAME}}'):has-text('בתוקף מאז תחילת ההעסקה')"
+          "selector": "article:has-text('{{SERVICE_NAME}}'):has-text('נוכחי:'):has-text('בתוקף מאז תחילת ההעסקה')"
         },
         {
           "id": "open-rate-form",
@@ -162,10 +203,13 @@
           "type": "visible",
           "selector": "article:has-text('{{SERVICE_NAME}}') button:has-text('היסטוריה')"
         },
-        { "id": "screenshot-scheduled", "action": "screenshot", "name": "01-rate-scheduled" }
+        {
+          "id": "screenshot-scheduled",
+          "action": "screenshot",
+          "name": "01-rate-scheduled"
+        }
       ]
     },
-
     {
       "id": "ui-back-dated-warning",
       "name": "UI – Back-dated rate warns before saving",
@@ -208,7 +252,11 @@
           "action": "waitForSelector",
           "selector": "article:has-text('{{SERVICE_NAME}}'):has-text('כבר קיים תעריף בתאריך הזה')"
         },
-        { "id": "screenshot-warning", "action": "screenshot", "name": "02-back-dated-warning" },
+        {
+          "id": "screenshot-warning",
+          "action": "screenshot",
+          "name": "02-back-dated-warning"
+        },
         {
           "id": "cancel",
           "description": "Leave without saving",
@@ -217,13 +265,76 @@
         }
       ]
     },
-
+    {
+      "id": "ui-add-service-rate",
+      "name": "UI – Add a rate for a service the employee is not assigned to",
+      "description": "A rate is always tied to a service, so the panel can add one for any service of the org. The card says the service is not assigned to the employee yet.",
+      "steps": [
+        {
+          "id": "open-service-picker",
+          "description": "Open the service list at the bottom of the rates panel",
+          "action": "click",
+          "selector": "button:has-text('בחירת שירות')",
+          "first": true
+        },
+        {
+          "id": "pick-service",
+          "description": "Pick the second service",
+          "action": "click",
+          "selector": "[role='option']:has-text('{{OTHER_SERVICE_NAME}}')",
+          "first": true
+        },
+        {
+          "id": "assert-unassigned-note",
+          "description": "The new card explains the service is not assigned to the employee",
+          "action": "waitForSelector",
+          "selector": "article:has-text('{{OTHER_SERVICE_NAME}}'):has-text('השירות אינו משויך לעובד/ת')"
+        },
+        {
+          "id": "fill-amount",
+          "action": "fill",
+          "selector": "article:has-text('{{OTHER_SERVICE_NAME}}') input[type='number']",
+          "value": "145"
+        },
+        {
+          "id": "save-rate",
+          "action": "click",
+          "selector": "article:has-text('{{OTHER_SERVICE_NAME}}') button:has-text('שמירת תעריף')"
+        },
+        {
+          "id": "assert-current-rate",
+          "description": "The service now has a current rate of its own",
+          "action": "waitForSelector",
+          "selector": "article:has-text('{{OTHER_SERVICE_NAME}}'):has-text('נוכחי:')"
+        },
+        {
+          "id": "verify-rate-saved",
+          "description": "The API returns a rate for that service",
+          "action": "apiCall",
+          "method": "GET",
+          "endpoint": "/api/employee-rates?org_id={{TEST_ORG_ID}}&employee_id={{RATE_INSTRUCTOR_ID}}"
+        },
+        {
+          "id": "screenshot-service-rate",
+          "action": "screenshot",
+          "name": "03-service-rate-added"
+        }
+      ]
+    },
     {
       "id": "logout",
       "name": "Logout",
       "steps": [
-        { "id": "do-logout", "action": "logout" },
-        { "id": "assert-login-page", "action": "assert", "type": "url", "pattern": "#/login" }
+        {
+          "id": "do-logout",
+          "action": "logout"
+        },
+        {
+          "id": "assert-login-page",
+          "action": "assert",
+          "type": "url",
+          "pattern": "#/login"
+        }
       ]
     }
   ]

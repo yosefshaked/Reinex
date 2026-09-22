@@ -67,7 +67,7 @@ function describeRate(row) {
 }
 
 function RateCard({ card, rates, today, onSave, saving }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(Boolean(card.startOpen));
   const [showHistory, setShowHistory] = useState(false);
   const [form, setForm] = useState({ amount: '', basis: card.payBasis, effectiveDate: today, notes: '' });
 
@@ -111,9 +111,13 @@ function RateCard({ card, rates, today, onSave, saving }) {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <h4 className="text-sm font-bold text-slate-900">{card.title}</h4>
+          {card.note ? <p className="mt-0.5 text-xs text-slate-500">{card.note}</p> : null}
           {current ? (
             <>
-              <div className="mt-1 text-xl font-bold text-slate-900">{describeRate(current)}</div>
+              <div className="mt-1 flex flex-wrap items-baseline gap-1.5">
+                <span className="text-xs font-bold text-slate-500">נוכחי:</span>
+                <span className="text-xl font-bold text-slate-900">{describeRate(current)}</span>
+              </div>
               <div className="text-xs text-slate-500">{effectiveFromLabel(current)}</div>
             </>
           ) : (
@@ -242,6 +246,7 @@ export default function EmployeeRatesPanel({ employee, orgId, session, services 
   const [rates, setRates] = useState([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [extraServiceIds, setExtraServiceIds] = useState([]);
   const today = todayKey();
 
   const loadRates = useCallback(async () => {
@@ -266,13 +271,29 @@ export default function EmployeeRatesPanel({ employee, orgId, session, services 
   }, [loadRates]);
 
   const cards = useMemo(() => {
-    const serviceCards = (employee?.service_capabilities || []).map((capability) => ({
-      key: `service-${capability.service_id}`,
-      title: services.find((service) => service.id === capability.service_id)?.name || 'שירות',
-      payBasis: 'lesson_hourly',
-      serviceId: capability.service_id,
-    }));
+    const capabilities = employee?.service_capabilities || [];
+    const capabilityServiceIds = capabilities.map((capability) => capability.service_id).filter(Boolean);
+    const ratedServiceIds = rates.map((row) => row.service_id).filter(Boolean);
+    const serviceIds = [];
+    [...capabilityServiceIds, ...ratedServiceIds, ...extraServiceIds].forEach((serviceId) => {
+      if (serviceId && !serviceIds.includes(serviceId)) serviceIds.push(serviceId);
+    });
 
+    const serviceCards = serviceIds.map((serviceId) => {
+      const capability = capabilities.find((item) => item.service_id === serviceId) || null;
+      return {
+        key: `service-${serviceId}`,
+        title: services.find((service) => service.id === serviceId)?.name || 'שירות',
+        note: capability
+          ? 'תעריף המפגשים בשירות הזה'
+          : 'השירות אינו משויך לעובד/ת. כדי לשבץ מפגשים בשירות הזה יש להוסיף אותו ב"שירותים ויכולות".',
+        payBasis: 'lesson_hourly',
+        serviceId,
+        startOpen: extraServiceIds.includes(serviceId) && !rates.some((row) => row.service_id === serviceId),
+      };
+    });
+
+    const lessonBased = employee?.payroll_model === 'lesson_based';
     const employeeLevel = [
       { key: 'attendance_hourly', title: 'שכר שעתי (שעות עבודה)', payBasis: 'attendance_hourly', serviceId: null },
       { key: 'monthly_salary', title: 'שכר חודשי', payBasis: 'monthly_salary', serviceId: null },
@@ -282,10 +303,21 @@ export default function EmployeeRatesPanel({ employee, orgId, session, services 
       if (card.payBasis === 'attendance_hourly') return employee?.payroll_model === 'hourly';
       if (card.payBasis === 'monthly_salary') return employee?.payroll_model === 'monthly_salary';
       return employee?.leave_pay_method === 'fixed_rate';
-    });
+    }).map((card) => ({
+      ...card,
+      // A lesson-paid employee can still carry an old overall rate; it never pays a lesson.
+      note: lessonBased && card.payBasis !== 'leave_day'
+        ? 'תעריף כללי שאינו מחשב מפגשים. מפגשים מחושבים לפי תעריפי השירותים שלמעלה.'
+        : null,
+    }));
 
     return [...serviceCards, ...employeeLevel];
-  }, [employee, rates, services]);
+  }, [employee, extraServiceIds, rates, services]);
+
+  const addableServices = useMemo(() => {
+    const shown = new Set(cards.filter((card) => card.serviceId).map((card) => card.serviceId));
+    return services.filter((service) => !shown.has(service.id));
+  }, [cards, services]);
 
   async function handleSave({ payBasis, serviceId, rate, effectiveDate, notes, replaceExisting }) {
     setSaving(true);
@@ -330,7 +362,7 @@ export default function EmployeeRatesPanel({ employee, orgId, session, services 
 
       {cards.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-3 py-6 text-center text-sm text-slate-500">
-          אין שירותים משויכים לעובד/ת. הוספת שירות בכרטיס העובד/ת תאפשר להגדיר תעריף.
+          עדיין לא הוגדרו תעריפים. אפשר להוסיף תעריף לשירות למטה.
         </div>
       ) : (
         <div className="grid gap-3">
@@ -346,6 +378,27 @@ export default function EmployeeRatesPanel({ employee, orgId, session, services 
           ))}
         </div>
       )}
+
+      {addableServices.length > 0 ? (
+        <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-3 py-3">
+          <Label className="text-xs font-bold text-slate-600">הוספת תעריף לשירות</Label>
+          <Select
+            value=""
+            onValueChange={(serviceId) => setExtraServiceIds((current) => (
+              current.includes(serviceId) ? current : [...current, serviceId]
+            ))}
+            disabled={saving}
+          >
+            <SelectTrigger className="h-9 w-full sm:w-64"><SelectValue placeholder="בחירת שירות" /></SelectTrigger>
+            <SelectContent>
+              {addableServices.map((service) => (
+                <SelectItem key={service.id} value={service.id}>{service.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <span className="text-xs text-slate-500">כל מפגש מחושב לפי תעריף השירות שלו באותו יום.</span>
+        </div>
+      ) : null}
     </section>
   );
 }

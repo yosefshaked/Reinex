@@ -1199,7 +1199,7 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
 
                     <SectionCard
                       title="שירותים ויכולות"
-                      description="שירותים זמינים, קיבולת ואופן תשלום"
+                      description="שירותים זמינים, קיבולת ואופן תשלום. התעריפים עצמם וההיסטוריה שלהם נמצאים בלשונית פיננסים"
                       action={getEmployeeType(currentEmployee) === 'instructor' ? (
                         <Button size="sm" variant="outline" onClick={() => setShowCapabilitiesDialog(true)}>
                           <Briefcase className="me-2 h-4 w-4" />
@@ -1213,13 +1213,13 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
                             <div key={capability.service_id} className="rounded-2xl border border-slate-200 bg-slate-50/60 px-3 py-3">
                               <div className="text-sm font-bold text-slate-900">{capability.name}</div>
                               <div className="mt-1 text-xs text-slate-500">
-                                קיבולת {capability.max_students || 1} • {capability.compensationSummary.valueLabel} • {capability.compensationSummary.basisLabel} • {capability.setup_incomplete ? 'זמינות חסרה' : `ימי זמינות ${capability.availabilitySummary || '—'}`}
+                                קיבולת {capability.max_students || 1} • תשלום {capability.compensationSummary.basisLabel} • {capability.setup_incomplete ? 'זמינות חסרה' : `ימי זמינות ${capability.availabilitySummary || '—'}`}
                               </div>
                             </div>
                           ))}
                         </div>
                       ) : (
-                        <EmptyState title="אין שירותים מוגדרים" body="הוסף שירותים לעובד כדי לנהל קיבולת ותעריפי בסיס." />
+                        <EmptyState title="אין שירותים מוגדרים" body="הוסף שירותים לעובד כדי לנהל קיבולת וזמינות." />
                       )}
                     </SectionCard>
                   </div>

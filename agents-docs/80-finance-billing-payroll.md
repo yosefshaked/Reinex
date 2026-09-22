@@ -114,11 +114,13 @@
   - Rates are dated in `RateHistory`, with a `pay_basis` column: `lesson_hourly` / `lesson_flat` (per service), `attendance_hourly`, `monthly_salary`, `leave_day`.
     - **Pay code reads rates only through [`../api/_shared/rate-history.js`](../api/_shared/rate-history.js)** (`loadRateHistoryRows`, `resolveRateOnDate`, `resolveLessonRateOnDate`, `toRateDateKey` for the lesson's Israel date). There's no fallback between kinds, and a missing rate pays nothing.
     - Rates are read and written by the office through [`../api/employee-rates/`](../api/employee-rates/) and `src/components/settings/employee-management/EmployeeRatesPanel.jsx` (employee → finance tab). Saving always adds a dated row; a date that already has a rate of that kind needs `replace_existing`. The endpoint mirrors a rate that is in effect today back to the legacy column so the older screens agree.
+    - A lesson rate always belongs to a service. The panel shows a card per service the employee is assigned to, per service that already has a rate, and per service picked from "הוספת תעריף לשירות" — a rate for a service the employee has no capability for is allowed, and the card says so. Employee-level kinds on a `lesson_based` employee are labelled as not paying lessons.
+    - The employee overview tab shows capacity, payment basis and availability, never a rate figure: rates and their history live in the finance tab only. The capability dialog still edits `base_rate`, and says there that the change is recorded as a rate effective from today.
     - Never read `instructor_service_capabilities.base_rate`, `Employees.current_rate`, `monthly_salary_amount` or `leave_fixed_day_rate` for pay. They're legacy input and display fields, mirrored into `RateHistory` by DB triggers (`record_rate_history_from_legacy_value`): a first rate applies from the beginning, a change from today. This lasts until the rate screens write `RateHistory` directly.
   - A closed pay month is never reopened; later fixes become pay differences.
   - The participant's decision in the lesson is the source of truth for instructor pay.
   - Legal amounts are dated settings, and closing and exports show a disclaimer.
-- Instructor earnings are calculated from the canonical hourly `base_rate` on `instructor_service_capabilities`.
+- Instructor earnings are calculated from the `lesson_hourly` / `lesson_flat` rate in effect on the lesson's date (`RateHistory`), never from `instructor_service_capabilities.base_rate`.
 - The UI may preserve the admin's original pay entry in `instructor_service_capabilities.metadata.compensation_input`, but finance math must not read from that display helper field.
 - Instructor payout now also depends on `Services.payment_model`:
   - `fixed_rate` pays once per lesson

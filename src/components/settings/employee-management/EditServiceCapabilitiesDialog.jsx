@@ -346,7 +346,7 @@ export default function EditServiceCapabilitiesDialog({
                               capability,
                               services.find((service) => service.id === capability.service_id) || null,
                             );
-                            return `תצוגה בכרטיס העובד: ${summary.valueLabel} • ${summary.basisLabel}`;
+                            return `תעריף נוכחי: ${summary.valueLabel} • ${summary.basisLabel}. שינוי כאן נרשם כתעריף שתקף מהיום; לתעריף מתאריך אחר או לצפייה בהיסטוריה — לשונית פיננסים.`;
                           })()}
                         </div>
                       ) : null}
