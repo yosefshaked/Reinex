@@ -3,8 +3,8 @@
     "id": "employee-rates",
     "name": "Employee Pay Rates — dated rates screen",
     "description": "Payroll phase 1b: the rates panel in an employee's finance tab. Creates an instructor with a service capability through the API (the DB trigger seeds its first rate), then in the UI schedules a future rate, checks it shows as scheduled with its history, checks the warnings shown for a back-dated rate and for a date that already has a rate, and adds a rate for another service through the service picker. Rates are never edited in place (PAY-A1, PAY-A2).",
-    "version": "1.1.0",
-    "last_validated_at": "2026-09-22T12:00:00Z",
+    "version": "1.2.0",
+    "last_validated_at": "2026-09-22T13:00:00Z",
     "author": "claude-ai",
     "dependencies": {
       "routes": [
@@ -267,15 +267,26 @@
     },
     {
       "id": "ui-add-service-rate",
-      "name": "UI – Add a rate for a service the employee is not assigned to",
-      "description": "A rate is always tied to a service, so the panel can add one for any service of the org. The card says the service is not assigned to the employee yet.",
+      "name": "UI – Add a rate for another service through the dialog",
+      "description": "A rate always belongs to a service, so the panel opens a dialog that picks the service and sets the rate. The new card says the service is not assigned to the employee yet.",
       "steps": [
         {
-          "id": "open-service-picker",
-          "description": "Open the service list at the bottom of the rates panel",
+          "id": "open-add-dialog",
+          "description": "Open the add-rate dialog from the panel header",
           "action": "click",
-          "selector": "button:has-text('בחירת שירות')",
+          "selector": "button:has-text('הוספת תעריף לשירות')",
           "first": true
+        },
+        {
+          "id": "wait-dialog",
+          "action": "waitForSelector",
+          "selector": "[role='dialog']:has-text('הוספת תעריף לשירות')"
+        },
+        {
+          "id": "open-service-list",
+          "description": "Open the service list inside the dialog",
+          "action": "click",
+          "selector": "[role='dialog'] button:has-text('בחירת שירות')"
         },
         {
           "id": "pick-service",
@@ -285,26 +296,43 @@
           "first": true
         },
         {
-          "id": "assert-unassigned-note",
-          "description": "The new card explains the service is not assigned to the employee",
-          "action": "waitForSelector",
-          "selector": "article:has-text('{{OTHER_SERVICE_NAME}}'):has-text('השירות אינו משויך לעובד/ת')"
-        },
-        {
           "id": "fill-amount",
           "action": "fill",
-          "selector": "article:has-text('{{OTHER_SERVICE_NAME}}') input[type='number']",
+          "selector": "[role='dialog'] input[type='number']",
           "value": "145"
+        },
+        {
+          "id": "fill-past-date",
+          "description": "Back-date it, so the dialog shows the same warnings the card does",
+          "action": "fill",
+          "selector": "[role='dialog'] input[type='date']",
+          "value": "2025-05-01"
+        },
+        {
+          "id": "assert-past-warning",
+          "action": "waitForSelector",
+          "selector": "[role='dialog']:has-text('התעריף יחול על ימים שכבר עברו')"
+        },
+        {
+          "id": "screenshot-dialog",
+          "action": "screenshot",
+          "name": "03-add-service-rate-dialog"
         },
         {
           "id": "save-rate",
           "action": "click",
-          "selector": "article:has-text('{{OTHER_SERVICE_NAME}}') button:has-text('שמירת תעריף')"
+          "selector": "[role='dialog'] button:has-text('שמירת תעריף')"
+        },
+        {
+          "id": "assert-new-card",
+          "description": "The service now has a card of its own, marked as not assigned to the employee",
+          "action": "waitForSelector",
+          "selector": "article:has-text('{{OTHER_SERVICE_NAME}}'):has-text('השירות אינו משויך לעובד/ת')"
         },
         {
           "id": "assert-current-rate",
-          "description": "The service now has a current rate of its own",
-          "action": "waitForSelector",
+          "action": "assert",
+          "type": "visible",
           "selector": "article:has-text('{{OTHER_SERVICE_NAME}}'):has-text('נוכחי:')"
         },
         {
@@ -317,7 +345,7 @@
         {
           "id": "screenshot-service-rate",
           "action": "screenshot",
-          "name": "03-service-rate-added"
+          "name": "04-service-rate-added"
         }
       ]
     },

@@ -4,6 +4,14 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -66,29 +74,107 @@ function describeRate(row) {
   return `${formatCurrency(row.rate)} ${BASIS_SUFFIX[row.pay_basis] || ''}`.trim();
 }
 
-function RateCard({ card, rates, today, onSave, saving }) {
-  const [open, setOpen] = useState(Boolean(card.startOpen));
-  const [showHistory, setShowHistory] = useState(false);
-  const [form, setForm] = useState({ amount: '', basis: card.payBasis, effectiveDate: today, notes: '' });
-
-  const history = useMemo(() => rowsForCard(rates, card), [rates, card]);
-  const current = history.find((row) => row.effective_date <= today) || null;
-  const scheduled = history.filter((row) => row.effective_date > today).slice(-1)[0] || null;
-  const existingOnDate = history.find((row) => row.effective_date === form.effectiveDate) || null;
-
+/** The warnings shown before saving: what the chosen date does to rates that already exist. */
+function buildWarnings({ history, current, existingOnDate, effectiveDate, today }) {
   const warnings = [];
-  if (form.effectiveDate && form.effectiveDate < today) {
+  if (effectiveDate && effectiveDate < today) {
     warnings.push('התעריף יחול על ימים שכבר עברו. שכר של חודשים פתוחים יחושב מחדש.');
   }
-  if (current && form.effectiveDate && form.effectiveDate < current.effective_date) {
+  if (current && effectiveDate && effectiveDate < current.effective_date) {
     warnings.push(`התעריף ייכנס לפני התעריף הנוכחי (מ-${formatDate(current.effective_date)}) ויהיה בתוקף רק עד אליו.`);
   }
   if (existingOnDate) {
     warnings.push(`כבר קיים תעריף בתאריך הזה (${describeRate(existingOnDate)}). השמירה תחליף אותו.`);
   }
+  if (!existingOnDate && history.length === 0) {
+    warnings.push('זהו התעריף הראשון בשירות הזה. מפגשים לפני התאריך שנבחר יישארו ללא תעריף.');
+  }
+  return warnings;
+}
+
+function createEmptyForm(payBasis, today) {
+  return { amount: '', basis: payBasis, effectiveDate: today, notes: '' };
+}
+
+/** The fields of a rate: amount, date, how a lesson is counted, and a note. Shared by the card and the dialog. */
+function RateFields({ idPrefix, form, setForm, allowBasisChoice, warnings, saving }) {
+  return (
+    <>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div className="space-y-1.5">
+          <Label htmlFor={`rate-amount-${idPrefix}`} className="text-xs text-slate-600">סכום בשקלים</Label>
+          <Input
+            id={`rate-amount-${idPrefix}`}
+            type="number"
+            min="0"
+            step="0.01"
+            value={form.amount}
+            onChange={(event) => setForm((value) => ({ ...value, amount: event.target.value }))}
+            disabled={saving}
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor={`rate-date-${idPrefix}`} className="text-xs text-slate-600">בתוקף מתאריך</Label>
+          <Input
+            id={`rate-date-${idPrefix}`}
+            type="date"
+            value={form.effectiveDate}
+            onChange={(event) => setForm((value) => ({ ...value, effectiveDate: event.target.value }))}
+            disabled={saving}
+          />
+        </div>
+      </div>
+
+      {allowBasisChoice ? (
+        <div className="space-y-1.5">
+          <Label className="text-xs text-slate-600">אופן החישוב</Label>
+          <Select value={form.basis} onValueChange={(value) => setForm((current) => ({ ...current, basis: value }))} disabled={saving}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="lesson_hourly">לפי שעה (הסכום מוכפל במשך המפגש)</SelectItem>
+              <SelectItem value="lesson_flat">למפגש (אותו סכום בכל אורך מפגש)</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      ) : null}
+
+      <div className="space-y-1.5">
+        <Label htmlFor={`rate-notes-${idPrefix}`} className="text-xs text-slate-600">הערה (לא חובה)</Label>
+        <Input
+          id={`rate-notes-${idPrefix}`}
+          value={form.notes}
+          onChange={(event) => setForm((value) => ({ ...value, notes: event.target.value }))}
+          disabled={saving}
+        />
+      </div>
+
+      {warnings.length > 0 ? (
+        <ul className="space-y-1 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          {warnings.map((warning) => (
+            <li key={warning} className="flex items-start gap-1.5">
+              <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              <span>{warning}</span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </>
+  );
+}
+
+function RateCard({ card, rates, today, onSave, saving }) {
+  const [open, setOpen] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
+  const [form, setForm] = useState(() => createEmptyForm(card.payBasis, today));
+
+  const history = useMemo(() => rowsForCard(rates, card), [rates, card]);
+  const current = history.find((row) => row.effective_date <= today) || null;
+  const scheduled = history.filter((row) => row.effective_date > today).slice(-1)[0] || null;
+  const existingOnDate = history.find((row) => row.effective_date === form.effectiveDate) || null;
+  const warnings = buildWarnings({ history, current, existingOnDate, effectiveDate: form.effectiveDate, today });
 
   function resetForm() {
-    setForm({ amount: '', basis: card.payBasis, effectiveDate: today, notes: '' });
+    setForm(createEmptyForm(card.payBasis, today));
   }
 
   async function handleSave() {
@@ -163,64 +249,14 @@ function RateCard({ card, rates, today, onSave, saving }) {
 
       {open ? (
         <div className="mt-4 grid gap-3 rounded-xl border border-dashed border-slate-300 bg-slate-50 p-3">
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div className="space-y-1.5">
-              <Label htmlFor={`rate-amount-${card.key}`} className="text-xs text-slate-600">סכום בשקלים</Label>
-              <Input
-                id={`rate-amount-${card.key}`}
-                type="number"
-                min="0"
-                step="0.01"
-                value={form.amount}
-                onChange={(event) => setForm((value) => ({ ...value, amount: event.target.value }))}
-                disabled={saving}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor={`rate-date-${card.key}`} className="text-xs text-slate-600">בתוקף מתאריך</Label>
-              <Input
-                id={`rate-date-${card.key}`}
-                type="date"
-                value={form.effectiveDate}
-                onChange={(event) => setForm((value) => ({ ...value, effectiveDate: event.target.value }))}
-                disabled={saving}
-              />
-            </div>
-          </div>
-
-          {isLessonBasis(card.payBasis) ? (
-            <div className="space-y-1.5">
-              <Label className="text-xs text-slate-600">אופן החישוב</Label>
-              <Select value={form.basis} onValueChange={(value) => setForm((current2) => ({ ...current2, basis: value }))} disabled={saving}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="lesson_hourly">לפי שעה (הסכום מוכפל במשך המפגש)</SelectItem>
-                  <SelectItem value="lesson_flat">למפגש (אותו סכום בכל אורך מפגש)</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          ) : null}
-
-          <div className="space-y-1.5">
-            <Label htmlFor={`rate-notes-${card.key}`} className="text-xs text-slate-600">הערה (לא חובה)</Label>
-            <Input
-              id={`rate-notes-${card.key}`}
-              value={form.notes}
-              onChange={(event) => setForm((value) => ({ ...value, notes: event.target.value }))}
-              disabled={saving}
-            />
-          </div>
-
-          {warnings.length > 0 ? (
-            <ul className="space-y-1 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800">
-              {warnings.map((warning) => (
-                <li key={warning} className="flex items-start gap-1.5">
-                  <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                  <span>{warning}</span>
-                </li>
-              ))}
-            </ul>
-          ) : null}
+          <RateFields
+            idPrefix={card.key}
+            form={form}
+            setForm={setForm}
+            allowBasisChoice={isLessonBasis(card.payBasis)}
+            warnings={warnings}
+            saving={saving}
+          />
 
           <div className="flex flex-wrap items-center gap-2">
             <Button type="button" size="sm" onClick={handleSave} disabled={saving || form.amount === '' || !form.effectiveDate}>
@@ -239,6 +275,98 @@ function RateCard({ card, rates, today, onSave, saving }) {
 }
 
 /**
+ * Add a rate for a service through a dialog: pick the service, then the same fields the card shows.
+ * The service list is every service of the org, so a rate is never left without a service.
+ */
+function AddServiceRateDialog({ open, onOpenChange, services, rates, today, onSave, saving }) {
+  const [serviceId, setServiceId] = useState('');
+  const [form, setForm] = useState(() => createEmptyForm('lesson_hourly', today));
+
+  useEffect(() => {
+    if (!open) {
+      setServiceId('');
+      setForm(createEmptyForm('lesson_hourly', today));
+    }
+  }, [open, today]);
+
+  const history = useMemo(
+    () => (serviceId ? rowsForCard(rates, { serviceId, payBasis: 'lesson_hourly' }) : []),
+    [rates, serviceId],
+  );
+  const current = history.find((row) => row.effective_date <= today) || null;
+  const existingOnDate = history.find((row) => row.effective_date === form.effectiveDate) || null;
+  const warnings = serviceId
+    ? buildWarnings({ history, current, existingOnDate, effectiveDate: form.effectiveDate, today })
+    : [];
+
+  async function handleSave() {
+    const saved = await onSave({
+      payBasis: form.basis,
+      serviceId,
+      rate: toAgorot(form.amount),
+      effectiveDate: form.effectiveDate,
+      notes: form.notes || null,
+      replaceExisting: Boolean(existingOnDate),
+    });
+    if (saved) onOpenChange(false);
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle>הוספת תעריף לשירות</DialogTitle>
+          <DialogDescription>
+            כל מפגש מחושב לפי תעריף השירות שלו שהיה בתוקף באותו יום.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="grid gap-3">
+          <div className="space-y-1.5">
+            <Label className="text-xs text-slate-600">שירות</Label>
+            <Select value={serviceId} onValueChange={setServiceId} disabled={saving}>
+              <SelectTrigger><SelectValue placeholder="בחירת שירות" /></SelectTrigger>
+              <SelectContent>
+                {services.map((service) => (
+                  <SelectItem key={service.id} value={service.id}>{service.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {current ? (
+            <p className="text-xs text-slate-500">
+              התעריף הנוכחי בשירות הזה: {describeRate(current)} ({effectiveFromLabel(current)}).
+            </p>
+          ) : null}
+
+          <RateFields
+            idPrefix="add-service"
+            form={form}
+            setForm={setForm}
+            allowBasisChoice
+            warnings={warnings}
+            saving={saving}
+          />
+        </div>
+
+        <DialogFooter className="gap-2 sm:justify-start">
+          <Button
+            type="button"
+            onClick={handleSave}
+            disabled={saving || !serviceId || form.amount === '' || !form.effectiveDate}
+          >
+            {saving ? <Loader2 className="me-2 h-4 w-4 animate-spin" /> : null}
+            שמירת תעריף
+          </Button>
+          <Button type="button" variant="ghost" onClick={() => onOpenChange(false)} disabled={saving}>ביטול</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/**
  * Pay rates of one employee: what they earn per service, and from when (RateHistory).
  * Rates are never edited in place; saving adds a rate that applies from the date you choose.
  */
@@ -246,7 +374,7 @@ export default function EmployeeRatesPanel({ employee, orgId, session, services 
   const [rates, setRates] = useState([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [extraServiceIds, setExtraServiceIds] = useState([]);
+  const [addServiceOpen, setAddServiceOpen] = useState(false);
   const today = todayKey();
 
   const loadRates = useCallback(async () => {
@@ -275,7 +403,7 @@ export default function EmployeeRatesPanel({ employee, orgId, session, services 
     const capabilityServiceIds = capabilities.map((capability) => capability.service_id).filter(Boolean);
     const ratedServiceIds = rates.map((row) => row.service_id).filter(Boolean);
     const serviceIds = [];
-    [...capabilityServiceIds, ...ratedServiceIds, ...extraServiceIds].forEach((serviceId) => {
+    [...capabilityServiceIds, ...ratedServiceIds].forEach((serviceId) => {
       if (serviceId && !serviceIds.includes(serviceId)) serviceIds.push(serviceId);
     });
 
@@ -289,7 +417,6 @@ export default function EmployeeRatesPanel({ employee, orgId, session, services 
           : 'השירות אינו משויך לעובד/ת. כדי לשבץ מפגשים בשירות הזה יש להוסיף אותו ב"שירותים ויכולות".',
         payBasis: 'lesson_hourly',
         serviceId,
-        startOpen: extraServiceIds.includes(serviceId) && !rates.some((row) => row.service_id === serviceId),
       };
     });
 
@@ -312,12 +439,7 @@ export default function EmployeeRatesPanel({ employee, orgId, session, services 
     }));
 
     return [...serviceCards, ...employeeLevel];
-  }, [employee, extraServiceIds, rates, services]);
-
-  const addableServices = useMemo(() => {
-    const shown = new Set(cards.filter((card) => card.serviceId).map((card) => card.serviceId));
-    return services.filter((service) => !shown.has(service.id));
-  }, [cards, services]);
+  }, [employee, rates, services]);
 
   async function handleSave({ payBasis, serviceId, rate, effectiveDate, notes, replaceExisting }) {
     setSaving(true);
@@ -357,12 +479,18 @@ export default function EmployeeRatesPanel({ employee, orgId, session, services 
             כל תעריף חל מהתאריך שנבחר ועד לשינוי הבא. מפגשים וימי עבודה מחושבים לפי התעריף שהיה בתוקף באותו יום.
           </p>
         </div>
-        {loading ? <Loader2 className="h-4 w-4 animate-spin text-slate-400" /> : null}
+        <div className="flex items-center gap-2">
+          {loading ? <Loader2 className="h-4 w-4 animate-spin text-slate-400" /> : null}
+          <Button type="button" size="sm" variant="outline" className="gap-1" onClick={() => setAddServiceOpen(true)} disabled={saving}>
+            <Plus className="h-3.5 w-3.5" />
+            הוספת תעריף לשירות
+          </Button>
+        </div>
       </div>
 
       {cards.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-3 py-6 text-center text-sm text-slate-500">
-          עדיין לא הוגדרו תעריפים. אפשר להוסיף תעריף לשירות למטה.
+          עדיין לא הוגדרו תעריפים. אפשר להוסיף תעריף לשירות בכפתור שלמעלה.
         </div>
       ) : (
         <div className="grid gap-3">
@@ -379,26 +507,15 @@ export default function EmployeeRatesPanel({ employee, orgId, session, services 
         </div>
       )}
 
-      {addableServices.length > 0 ? (
-        <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-3 py-3">
-          <Label className="text-xs font-bold text-slate-600">הוספת תעריף לשירות</Label>
-          <Select
-            value=""
-            onValueChange={(serviceId) => setExtraServiceIds((current) => (
-              current.includes(serviceId) ? current : [...current, serviceId]
-            ))}
-            disabled={saving}
-          >
-            <SelectTrigger className="h-9 w-full sm:w-64"><SelectValue placeholder="בחירת שירות" /></SelectTrigger>
-            <SelectContent>
-              {addableServices.map((service) => (
-                <SelectItem key={service.id} value={service.id}>{service.name}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <span className="text-xs text-slate-500">כל מפגש מחושב לפי תעריף השירות שלו באותו יום.</span>
-        </div>
-      ) : null}
+      <AddServiceRateDialog
+        open={addServiceOpen}
+        onOpenChange={setAddServiceOpen}
+        services={services}
+        rates={rates}
+        today={today}
+        saving={saving}
+        onSave={handleSave}
+      />
     </section>
   );
 }
