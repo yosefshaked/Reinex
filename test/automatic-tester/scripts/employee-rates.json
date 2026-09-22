@@ -1,0 +1,230 @@
+{
+  "meta": {
+    "id": "employee-rates",
+    "name": "Employee Pay Rates — dated rates screen",
+    "description": "Payroll phase 1b: the rates panel in an employee's finance tab. Creates an instructor with a service capability through the API (the DB trigger seeds its first rate), then in the UI schedules a future rate, checks it shows as scheduled with its history, and checks the warnings shown for a back-dated rate and for a date that already has a rate. Rates are never edited in place (PAY-A1, PAY-A2).",
+    "version": "1.0.0",
+    "last_validated_at": "2026-09-22T09:00:00Z",
+    "author": "claude-ai",
+    "dependencies": {
+      "routes": ["/employees"],
+      "api_endpoints": [
+        "GET /api/services",
+        "POST /api/instructors",
+        "GET /api/employee-rates",
+        "POST /api/employee-rates"
+      ]
+    }
+  },
+  "config": {
+    "timeout_ms": 25000,
+    "screenshot_on_failure": true,
+    "continue_on_step_failure": false,
+    "continue_on_workflow_failure": true
+  },
+
+  "workflows": [
+    {
+      "id": "login",
+      "name": "Login as Admin",
+      "steps": [
+        { "id": "do-login", "description": "Sign in with admin credentials", "action": "login", "role": "admin" },
+        { "id": "assert-dashboard", "action": "assert", "type": "url", "pattern": "#/dashboard" }
+      ]
+    },
+
+    {
+      "id": "api-setup",
+      "name": "API – Service and instructor with a rate",
+      "description": "Creates the fixture instructor and a service capability. Saving the capability seeds its first rate in RateHistory (effective from the beginning).",
+      "steps": [
+        {
+          "id": "get-service",
+          "description": "Fetch the first available service",
+          "action": "apiCall",
+          "method": "GET",
+          "endpoint": "/api/services?org_id={{TEST_ORG_ID}}",
+          "store": "SERVICE_ID",
+          "storeField": "0.id"
+        },
+        {
+          "id": "get-service-name",
+          "description": "Store the service name for UI selectors",
+          "action": "apiCall",
+          "method": "GET",
+          "endpoint": "/api/services?org_id={{TEST_ORG_ID}}",
+          "store": "SERVICE_NAME",
+          "storeField": "0.name"
+        },
+        {
+          "id": "create-instructor",
+          "description": "Create the fixture instructor",
+          "action": "apiCall",
+          "method": "POST",
+          "endpoint": "/api/instructors",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "first_name": "תעריף",
+            "last_name": "בדיקה {{RUN_NUMERIC_ID}}",
+            "employee_id": "TEST-RATE-{{RUN_NUMERIC_ID}}",
+            "employee_type": "instructor",
+            "payroll_model": "lesson_based",
+            "current_rate": 20000
+          },
+          "store": "RATE_INSTRUCTOR_ID",
+          "storeField": "id"
+        },
+        {
+          "id": "create-capability",
+          "description": "Direct Supabase INSERT of a capability with an hourly rate of 100 (the trigger seeds RateHistory)",
+          "action": "apiCall",
+          "method": "POST",
+          "endpoint": "{{SUPABASE_URL}}/rest/v1/instructor_service_capabilities",
+          "headers": { "apikey": "{{SERVICE_ROLE_KEY}}", "Prefer": "return=minimal" },
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "employee_id": "{{RATE_INSTRUCTOR_ID}}",
+            "service_id": "{{SERVICE_ID}}",
+            "base_rate": 10000,
+            "max_students": 1,
+            "availability_windows": [],
+            "metadata": {}
+          },
+          "ignoreStatus": [409]
+        },
+        {
+          "id": "verify-seeded-rate",
+          "description": "The API returns the seeded rate for the instructor",
+          "action": "apiCall",
+          "method": "GET",
+          "endpoint": "/api/employee-rates?org_id={{TEST_ORG_ID}}&employee_id={{RATE_INSTRUCTOR_ID}}"
+        }
+      ]
+    },
+
+    {
+      "id": "ui-schedule-future-rate",
+      "name": "UI – Schedule a future rate",
+      "description": "Opens the instructor's finance tab and saves a rate that starts in the future; it must show as scheduled while the current rate stays.",
+      "steps": [
+        { "id": "navigate-employees", "action": "navigate", "url": "{{BASE_URL}}/#/employees" },
+        { "id": "wait-main", "action": "waitForSelector", "selector": "main, [role='main']" },
+        {
+          "id": "open-employee",
+          "description": "Select the fixture instructor in the roster",
+          "action": "click",
+          "selector": "button:has-text('בדיקה {{RUN_NUMERIC_ID}}')",
+          "first": true
+        },
+        { "id": "open-finance-tab", "description": "Switch to the finance tab", "action": "click", "selector": "[role='tab']:has-text('פיננסים')" },
+        { "id": "wait-rates-panel", "description": "The rates panel is shown", "action": "waitForSelector", "selector": "h3:has-text('תעריפי שכר')" },
+        {
+          "id": "assert-current-rate",
+          "description": "The seeded rate of the service is shown as the current rate",
+          "action": "assert",
+          "type": "visible",
+          "selector": "article:has-text('{{SERVICE_NAME}}'):has-text('בתוקף מאז תחילת ההעסקה')"
+        },
+        {
+          "id": "open-rate-form",
+          "description": "Open the update form of the service card",
+          "action": "click",
+          "selector": "article:has-text('{{SERVICE_NAME}}') button:has-text('עדכון תעריף')",
+          "first": true
+        },
+        {
+          "id": "fill-amount",
+          "action": "fill",
+          "selector": "article:has-text('{{SERVICE_NAME}}') input[type='number']",
+          "value": "130"
+        },
+        {
+          "id": "fill-future-date",
+          "action": "fill",
+          "selector": "article:has-text('{{SERVICE_NAME}}') input[type='date']",
+          "value": "2027-01-01"
+        },
+        {
+          "id": "save-rate",
+          "action": "click",
+          "selector": "article:has-text('{{SERVICE_NAME}}') button:has-text('שמירת תעריף')"
+        },
+        {
+          "id": "assert-scheduled",
+          "description": "The new rate is listed as scheduled from 01.01.2027",
+          "action": "waitForSelector",
+          "selector": "article:has-text('{{SERVICE_NAME}}'):has-text('מ-01.01.2027')"
+        },
+        {
+          "id": "assert-history-button",
+          "description": "The card now offers the rate history",
+          "action": "assert",
+          "type": "visible",
+          "selector": "article:has-text('{{SERVICE_NAME}}') button:has-text('היסטוריה')"
+        },
+        { "id": "screenshot-scheduled", "action": "screenshot", "name": "01-rate-scheduled" }
+      ]
+    },
+
+    {
+      "id": "ui-back-dated-warning",
+      "name": "UI – Back-dated rate warns before saving",
+      "description": "A rate dated in the past warns that it affects days that already happened, before anything is saved.",
+      "steps": [
+        {
+          "id": "open-rate-form",
+          "action": "click",
+          "selector": "article:has-text('{{SERVICE_NAME}}') button:has-text('עדכון תעריף')",
+          "first": true
+        },
+        {
+          "id": "fill-amount",
+          "action": "fill",
+          "selector": "article:has-text('{{SERVICE_NAME}}') input[type='number']",
+          "value": "90"
+        },
+        {
+          "id": "fill-past-date",
+          "action": "fill",
+          "selector": "article:has-text('{{SERVICE_NAME}}') input[type='date']",
+          "value": "2025-01-01"
+        },
+        {
+          "id": "assert-past-warning",
+          "description": "The warning about days that already happened is shown",
+          "action": "waitForSelector",
+          "selector": "article:has-text('{{SERVICE_NAME}}'):has-text('התעריף יחול על ימים שכבר עברו')"
+        },
+        {
+          "id": "fill-existing-date",
+          "description": "Pick the date of the rate scheduled in the previous workflow",
+          "action": "fill",
+          "selector": "article:has-text('{{SERVICE_NAME}}') input[type='date']",
+          "value": "2027-01-01"
+        },
+        {
+          "id": "assert-replace-warning",
+          "description": "Choosing a date that already has a rate warns that saving replaces it",
+          "action": "waitForSelector",
+          "selector": "article:has-text('{{SERVICE_NAME}}'):has-text('כבר קיים תעריף בתאריך הזה')"
+        },
+        { "id": "screenshot-warning", "action": "screenshot", "name": "02-back-dated-warning" },
+        {
+          "id": "cancel",
+          "description": "Leave without saving",
+          "action": "click",
+          "selector": "article:has-text('{{SERVICE_NAME}}') button:has-text('ביטול')"
+        }
+      ]
+    },
+
+    {
+      "id": "logout",
+      "name": "Logout",
+      "steps": [
+        { "id": "do-logout", "action": "logout" },
+        { "id": "assert-login-page", "action": "assert", "type": "url", "pattern": "#/login" }
+      ]
+    }
+  ]
+}

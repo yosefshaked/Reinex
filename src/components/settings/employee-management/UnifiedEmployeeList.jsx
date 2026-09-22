@@ -36,6 +36,7 @@ import EmployeeAttendancePanel from './EmployeeAttendancePanel.jsx';
 import EditEmployeeDialog from './EditEmployeeDialog.jsx';
 import EditServiceCapabilitiesDialog from './EditServiceCapabilitiesDialog.jsx';
 import EmployeeFinancePanel from './EmployeeFinancePanel.jsx';
+import EmployeeRatesPanel from './EmployeeRatesPanel.jsx';
 import EmployeeLeavePanel from './EmployeeLeavePanel.jsx';
 import LinkEmployeeMemberDialog from './LinkEmployeeMemberDialog.jsx';
 import InstructorDocumentsSection from '../InstructorDocumentsSection.jsx';
@@ -1292,6 +1293,12 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
                 </TabsContent>
 
                 <TabsContent value={TAB_KEYS.finance} className="space-y-3">
+                  <EmployeeRatesPanel
+                    employee={currentEmployee}
+                    orgId={orgId}
+                    session={session}
+                    services={services}
+                  />
                   <EmployeeFinancePanel
                     employee={currentEmployee}
                     orgId={orgId}

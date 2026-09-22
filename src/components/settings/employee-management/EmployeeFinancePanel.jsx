@@ -181,7 +181,9 @@ export default function EmployeeFinancePanel({ employee, orgId, session, onEditE
             <div className="mt-1 text-lg font-bold text-slate-900">
               {employee?.payroll_model === 'monthly_salary'
                 ? formatCurrency(employee?.monthly_salary_amount)
-                : formatCurrency(employee?.current_rate)}
+                : employee?.payroll_model === 'lesson_based'
+                  ? <span className="text-sm text-slate-600">לפי תעריפי השירותים למעלה</span>
+                  : formatCurrency(employee?.current_rate)}
             </div>
           </div>
           <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3">

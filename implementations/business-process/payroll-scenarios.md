@@ -19,11 +19,11 @@ These are the pay rules the monthly cycle will enforce, written as acceptance sc
 | ID | Scenario | Today |
 |---|---|---|
 | PAY-A1 | A rate set "from 1.10" pays every lesson from 1.10 on, until the next rate change. Lessons before 1.10 keep the previous rate. | ✅ Pay reads the `RateHistory` rate in effect on the lesson's date (phase 1) |
-| PAY-A2 | A rate with a future effective date is scheduled. It shows as "current X, from 1.10: Y" and takes effect on its own. | 🟡 Pay applies a future-dated rate from its date; the screen to schedule one is phase 1b |
+| PAY-A2 | A rate with a future effective date is scheduled. It shows as "current X, from 1.10: Y" and takes effect on its own. | ✅ The rates screen schedules a future rate and shows it as "from 1.10: X" while the current rate stays (phase 1b) |
 | PAY-A3 | A back-dated rate change warns first. If confirmed, it recalculates lessons in open months. For closed months it adds a linked pay difference to the next open month (see H5 / I1). | ❌ |
 | PAY-A4 | A lesson whose instructor has no rate for that service on that date is flagged as "missing rate". Nothing is guessed, nothing is paid until a rate exists, and the flag blocks closing the month (H4). | 🟡 No rate on the lesson date means no pay (the earning is skipped and marked `missing_rate`), and attendance and completion are blocked. The review flag and close blocker come with the monthly cycle |
-| PAY-A5 | An instructor paid per hour (`lesson_hourly`) earns rate × lesson length. An instructor paid per lesson (`lesson_flat`) earns the same amount whatever the length. | 🟡 Pay supports `lesson_flat`; the screen to set it is phase 1b |
-| PAY-A6 | An employee who also works office hours has an hourly rate for those hours as well as their lesson rates. Each part of the month is paid from its own rate. | 🟡 Separate rate kinds exist in `RateHistory`; screens still offer one pay model per employee (phase 1b) |
+| PAY-A5 | An instructor paid per hour (`lesson_hourly`) earns rate × lesson length. An instructor paid per lesson (`lesson_flat`) earns the same amount whatever the length. | ✅ Each service rate is saved as hourly or flat from the rates screen |
+| PAY-A6 | An employee who also works office hours has an hourly rate for those hours as well as their lesson rates. Each part of the month is paid from its own rate. | 🟡 Separate kinds exist and each has its own dated rate; the screen shows an employee-level kind only when their pay model or an existing rate calls for it, so an instructor who also works office hours still needs their pay model changed first |
 
 ## B — One lesson, one participant: what does the instructor earn?
 

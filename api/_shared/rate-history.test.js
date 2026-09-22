@@ -3,10 +3,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   PAY_BASIS,
+  buildRateChangeWarnings,
   normalizeRateRow,
   resolveLessonRateOnDate,
   resolveRateOnDate,
   toRateDateKey,
+  validateRateInput,
 } from './rate-history.js';
 
 const DANA = 'employee-dana';
@@ -74,6 +76,45 @@ test('lesson timestamps map to their Israel calendar date', () => {
   assert.equal(toRateDateKey('2026-09-30T21:30:00.000Z'), '2026-10-01', '00:30 in Israel on 1.10');
   assert.equal(toRateDateKey('2026-10-01T09:00:00.000Z'), '2026-10-01');
   assert.equal(toRateDateKey(null), '');
+});
+
+test('a new rate is validated before it is saved', () => {
+  const valid = validateRateInput({ employeeId: DANA, payBasis: PAY_BASIS.LESSON_HOURLY, serviceId: RIDING, rate: 12000, effectiveDate: '2026-10-01' });
+  assert.deepEqual(valid.value, { employeeId: DANA, payBasis: PAY_BASIS.LESSON_HOURLY, serviceId: RIDING, rate: 12000, effectiveDate: '2026-10-01' });
+
+  const cases = [
+    [{ payBasis: PAY_BASIS.MONTHLY_SALARY, rate: 1, effectiveDate: '2026-10-01' }, 'missing_employee_id'],
+    [{ employeeId: DANA, payBasis: 'bonus', rate: 1, effectiveDate: '2026-10-01' }, 'invalid_pay_basis'],
+    [{ employeeId: DANA, payBasis: PAY_BASIS.LESSON_FLAT, rate: 1, effectiveDate: '2026-10-01' }, 'missing_service_id'],
+    [{ employeeId: DANA, payBasis: PAY_BASIS.MONTHLY_SALARY, serviceId: RIDING, rate: 1, effectiveDate: '2026-10-01' }, 'service_not_allowed_for_pay_basis'],
+    [{ employeeId: DANA, payBasis: PAY_BASIS.MONTHLY_SALARY, rate: -1, effectiveDate: '2026-10-01' }, 'invalid_rate'],
+    [{ employeeId: DANA, payBasis: PAY_BASIS.MONTHLY_SALARY, rate: 10.5, effectiveDate: '2026-10-01' }, 'invalid_rate'],
+    [{ employeeId: DANA, payBasis: PAY_BASIS.MONTHLY_SALARY, rate: 1, effectiveDate: '1.10.2026' }, 'invalid_effective_date'],
+  ];
+  for (const [input, expected] of cases) {
+    assert.equal(validateRateInput(input).error, expected, expected);
+  }
+  assert.equal(validateRateInput({ employeeId: DANA, payBasis: PAY_BASIS.MONTHLY_SALARY, rate: 0, effectiveDate: '2026-10-01' }).value.rate, 0, 'zero is a valid rate');
+});
+
+test('saving a rate warns about past dates, earlier dates and an existing rate on that date', () => {
+  const today = '2026-09-22';
+  const warnFor = (effectiveDate) => buildRateChangeWarnings(
+    ROWS,
+    { employeeId: DANA, payBasis: PAY_BASIS.LESSON_HOURLY, serviceId: RIDING, effectiveDate },
+    today,
+  );
+
+  assert.deepEqual(warnFor('2026-11-01').warnings, [], 'a future date is the normal case');
+  assert.deepEqual(warnFor('2026-09-01').warnings, ['effective_date_in_past']);
+  assert.deepEqual(warnFor('2025-06-01').warnings, ['effective_date_in_past', 'effective_date_before_current_rate']);
+  assert.deepEqual(warnFor('2026-01-01').warnings, ['effective_date_in_past', 'rate_exists_on_date']);
+
+  const context = warnFor('2026-11-01');
+  assert.equal(context.currentRate.id, 'riding-100', 'the rate in effect today');
+  assert.equal(context.nextRate.id, 'riding-120', 'the next scheduled rate');
+  assert.equal(context.existingOnDate, null);
+  assert.deepEqual(context.history.map((row) => row.id), ['riding-100', 'riding-120']);
 });
 
 test('invalid rows and dates are ignored', () => {
