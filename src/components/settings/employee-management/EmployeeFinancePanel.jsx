@@ -10,6 +10,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
+import ConfirmDialog from '@/components/ui/ConfirmDialog.jsx';
 import { Loader2 } from 'lucide-react';
 import { toast } from '@/lib/toast.jsx';
 import { authenticatedFetch } from '@/lib/api-client.js';
@@ -37,6 +38,17 @@ function formatMonth(date) {
 
 
 
+/**
+ * How a paid leave day is valued. This is a method on the employee, not a rate for work: the legal
+ * average is the default, and a farm can override it per employee with a fixed day value.
+ */
+function getLeavePayMethodLabel(method) {
+  if (method === 'fixed_rate') return 'ערך קבוע ליום';
+  if (method === 'legal') return 'ממוצע חוקי';
+  if (method === 'avg_hourly_x_avg_day_hours') return 'ממוצע היסטורי';
+  return 'ברירת מחדל ארגונית';
+}
+
 function getPayrollModelLabel(value) {
   if (value === 'lesson_based') return 'מבוסס שיעורים';
   if (value === 'monthly_salary') return 'שכר חודשי';
@@ -52,12 +64,19 @@ export default function EmployeeFinancePanel({ employee, orgId, session, onEditE
   const [form, setForm] = useState({
     correctionType: 'bonus',
     amount: '',
-    effectiveDate: toLocalDateString(new Date()),
+    effectiveDate: toLocalDateString(startOfMonth(new Date())),
     notes: '',
   });
+  const [pendingRemoval, setPendingRemoval] = useState(null);
 
   const monthStart = useMemo(() => toLocalDateString(startOfMonth(monthDate)), [monthDate]);
   const monthEnd = useMemo(() => toLocalDateString(endOfMonth(monthDate)), [monthDate]);
+
+  // A correction belongs to the month on screen. Defaulting to today put a fix for last month into
+  // this one whenever the office was looking back.
+  useEffect(() => {
+    setForm((current) => ({ ...current, effectiveDate: monthStart }));
+  }, [monthStart]);
 
   const loadData = useCallback(async () => {
     if (!employee?.id || !orgId) return;
@@ -181,12 +200,17 @@ export default function EmployeeFinancePanel({ employee, orgId, session, onEditE
             <div className="mt-1 text-lg font-bold text-slate-900">
               {employee?.payroll_model === 'monthly_salary'
                 ? formatCurrency(employee?.monthly_salary_amount)
-                : formatCurrency(employee?.current_rate)}
+                : employee?.payroll_model === 'lesson_based'
+                  ? <span className="text-sm text-slate-600">לפי תעריפי השירותים למעלה</span>
+                  : formatCurrency(employee?.current_rate)}
             </div>
           </div>
           <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3">
-            <div className="text-[11px] text-slate-500">שיטת חופשה</div>
-            <div className="mt-1 text-lg font-bold text-slate-900">{employee?.leave_pay_method || 'ברירת מחדל'}</div>
+            <div className="text-[11px] text-slate-500">תשלום חופשה</div>
+            <div className="mt-1 text-lg font-bold text-slate-900">{getLeavePayMethodLabel(employee?.leave_pay_method)}</div>
+            {employee?.leave_pay_method === 'fixed_rate' ? (
+              <div className="text-xs text-slate-500">{formatCurrency(employee?.leave_fixed_day_rate)} ליום</div>
+            ) : null}
           </div>
         </div>
 
@@ -288,7 +312,7 @@ export default function EmployeeFinancePanel({ employee, orgId, session, onEditE
                   <div className="text-sm font-semibold text-slate-900">{entry.correction_type} • {formatCurrency(entry.amount)}</div>
                   <div className="mt-1 text-xs text-slate-500">{entry.effective_date} • {entry.notes || 'ללא הערות'}</div>
                 </div>
-                <Button size="sm" variant="outline" className="[font-family:inherit]" onClick={() => handleDeleteAdjustment(entry.id)} disabled={saving}>
+                <Button size="sm" variant="outline" className="[font-family:inherit]" onClick={() => setPendingRemoval(entry)} disabled={saving}>
                   הסר
                 </Button>
               </div>
@@ -301,6 +325,20 @@ export default function EmployeeFinancePanel({ employee, orgId, session, onEditE
           ) : null}
         </div>
       </section>
+      <ConfirmDialog
+        open={Boolean(pendingRemoval)}
+        onOpenChange={(open) => { if (!open) setPendingRemoval(null); }}
+        onConfirm={() => {
+          const target = pendingRemoval;
+          setPendingRemoval(null);
+          if (target?.id) void handleDeleteAdjustment(target.id);
+        }}
+        confirmLabel="הסרה"
+        title="להסיר את התיקון?"
+        description={pendingRemoval
+          ? `${formatCurrency(pendingRemoval.amount)} בתאריך ${pendingRemoval.effective_date} יימחק, והשכר של החודש יחושב מחדש בלעדיו.`
+          : ''}
+      />
     </div>
   );
 }

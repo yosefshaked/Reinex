@@ -9,28 +9,20 @@ import { Badge } from '@/components/ui/badge';
 import { Briefcase, CalendarClock, Plus, Trash2, Users, AlertCircle } from 'lucide-react';
 import { toast } from '@/lib/toast.jsx';
 import { authenticatedFetch } from '@/lib/api-client';
-import { DAY_OPTIONS } from '@/lib/day-of-week.js';
 import { getAvailabilitySummary, normalizeAvailabilityWindows } from '@/lib/instructor-availability.js';
-import CapabilityCompensationFields from './CapabilityCompensationFields.jsx';
-import {
-  buildCapabilityCompensationSummary,
-  hydrateCapabilityCompensationForm,
-  serializeCapabilityCompensation,
-} from '@/lib/instructor-compensation.js';
+import AvailabilityWindowsEditor from './AvailabilityWindowsEditor.jsx';
 
 function createEmptyWindow() {
   return { day: '', start: '', end: '' };
 }
 
 function createEmptyCapability(serviceId = '') {
-  const payConfig = hydrateCapabilityCompensationForm({ base_rate: 0, metadata: {} });
   return {
     service_id: serviceId,
     max_students: 1,
     base_rate: 0,
     availability_windows: serviceId ? [createEmptyWindow()] : [],
     metadata: {},
-    pay_config: { ...payConfig, amountInput: '' },
   };
 }
 
@@ -74,7 +66,6 @@ export default function EditServiceCapabilitiesDialog({
             ...capability,
             availability_windows: Array.isArray(capability.availability_windows) ? capability.availability_windows : [],
             metadata: capability.metadata || {},
-            pay_config: hydrateCapabilityCompensationForm(capability),
           }))
         : [];
 
@@ -138,38 +129,6 @@ export default function EditServiceCapabilitiesDialog({
     setCapabilities((prev) => prev.filter((_, capabilityIndex) => capabilityIndex !== index));
   };
 
-  const addWindow = (capabilityIndex) => {
-    setCapabilities((prev) => prev.map((capability, index) => (
-      index === capabilityIndex
-        ? { ...capability, availability_windows: [...(capability.availability_windows || []), createEmptyWindow()] }
-        : capability
-    )));
-  };
-
-  const updateWindow = (capabilityIndex, windowIndex, field, value) => {
-    setCapabilities((prev) => prev.map((capability, index) => (
-      index === capabilityIndex
-        ? {
-            ...capability,
-            availability_windows: (capability.availability_windows || []).map((window, currentIndex) => (
-              currentIndex === windowIndex ? { ...window, [field]: value } : window
-            )),
-          }
-        : capability
-    )));
-  };
-
-  const removeWindow = (capabilityIndex, windowIndex) => {
-    setCapabilities((prev) => prev.map((capability, index) => (
-      index === capabilityIndex
-        ? {
-            ...capability,
-            availability_windows: (capability.availability_windows || []).filter((_, currentIndex) => currentIndex !== windowIndex),
-          }
-        : capability
-    )));
-  };
-
   const validationByCapability = useMemo(
     () => capabilities.map((capability) => normalizeAvailabilityWindows(capability.availability_windows || [])),
     [capabilities],
@@ -213,7 +172,6 @@ export default function EditServiceCapabilitiesDialog({
           service_capabilities: capabilities.map((capability, index) => ({
             service_id: capability.service_id,
             max_students: capability.max_students || 1,
-            ...serializeCapabilityCompensation(capability),
             availability_windows: validationByCapability[index].value,
           })),
         },
@@ -332,99 +290,23 @@ export default function EditServiceCapabilitiesDialog({
                         </div>
                       </div>
 
-                      <CapabilityCompensationFields
-                        capability={capability}
-                        service={services.find((service) => service.id === capability.service_id) || null}
-                        disabled={isSaving}
-                        onChange={(payConfig) => updateCapability(capabilityIndex, 'pay_config', payConfig)}
-                      />
-
                       {capability.service_id ? (
                         <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600">
-                          {(() => {
-                            const summary = buildCapabilityCompensationSummary(
-                              capability,
-                              services.find((service) => service.id === capability.service_id) || null,
-                            );
-                            return `תצוגה בכרטיס העובד: ${summary.valueLabel} • ${summary.basisLabel}`;
-                          })()}
+                          התעריף לשירות הזה נקבע בלשונית פיננסים, עם התאריך שממנו הוא חל.
                         </div>
                       ) : null}
 
                       <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-3">
-                        <div className="flex items-center justify-between gap-2">
-                          <div className="flex items-center gap-2 text-sm font-medium text-slate-900">
-                            <CalendarClock className="h-4 w-4 text-slate-600" />
-                            חלונות זמינות
-                          </div>
-                          <Button type="button" variant="outline" size="sm" onClick={() => addWindow(capabilityIndex)} disabled={isSaving}>
-                            <Plus className="me-2 h-4 w-4" />
-                            הוסף חלון
-                          </Button>
+                        <div className="flex items-center gap-2 text-sm font-medium text-slate-900">
+                          <CalendarClock className="h-4 w-4 text-slate-600" />
+                          שעות עבודה
                         </div>
-
-                        {windows.length === 0 ? (
-                          <div className="rounded-xl border border-dashed border-slate-200 px-3 py-3 text-xs text-slate-500">
-                            לא הוגדרו חלונות זמינות לשירות הזה. עד שלא יוגדרו חלונות, המדריך/ה לא יוצע/תוצע לשיבוץ עבור השירות.
-                          </div>
-                        ) : (
-                          <div className="space-y-3">
-                            {windows.map((window, windowIndex) => (
-                              <div key={`${capability.service_id || 'new'}-window-${windowIndex}`} className="grid gap-3 md:grid-cols-[1.1fr_1fr_1fr_auto] items-end">
-                                <div className="space-y-1">
-                                  <Label className="text-xs text-slate-600">יום</Label>
-                                  <Select
-                                    value={window.day || undefined}
-                                    onValueChange={(value) => updateWindow(capabilityIndex, windowIndex, 'day', value)}
-                                    disabled={isSaving}
-                                  >
-                                    <SelectTrigger>
-                                      <SelectValue placeholder="בחר יום" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                      {DAY_OPTIONS.map((day) => (
-                                        <SelectItem key={day.value} value={day.value}>
-                                          {day.fullLabel}
-                                        </SelectItem>
-                                      ))}
-                                    </SelectContent>
-                                  </Select>
-                                </div>
-
-                                <div className="space-y-1">
-                                  <Label className="text-xs text-slate-600">משעה</Label>
-                                  <Input
-                                    type="time"
-                                    value={window.start || ''}
-                                    onChange={(e) => updateWindow(capabilityIndex, windowIndex, 'start', e.target.value)}
-                                    disabled={isSaving}
-                                  />
-                                </div>
-
-                                <div className="space-y-1">
-                                  <Label className="text-xs text-slate-600">עד שעה</Label>
-                                  <Input
-                                    type="time"
-                                    value={window.end || ''}
-                                    onChange={(e) => updateWindow(capabilityIndex, windowIndex, 'end', e.target.value)}
-                                    disabled={isSaving}
-                                  />
-                                </div>
-
-                                <Button
-                                  type="button"
-                                  variant="ghost"
-                                  size="icon"
-                                  className="text-destructive hover:text-destructive"
-                                  onClick={() => removeWindow(capabilityIndex, windowIndex)}
-                                  disabled={isSaving}
-                                >
-                                  <Trash2 className="h-4 w-4" />
-                                </Button>
-                              </div>
-                            ))}
-                          </div>
-                        )}
+                        <AvailabilityWindowsEditor
+                          windows={windows}
+                          onChange={(next) => updateCapability(capabilityIndex, 'availability_windows', next)}
+                          disabled={isSaving}
+                          idPrefix={`capability-${capabilityIndex}`}
+                        />
                       </div>
                     </div>
                   );

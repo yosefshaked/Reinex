@@ -9,12 +9,14 @@ import { describe, it } from 'node:test';
 import {
   DEFAULT_INSTRUCTOR_EARNINGS_POLICY,
   buildLeaveDayRows,
+  combinePayComponents,
   resolveCompensationEligibleParticipants,
   resolveLeaveDayValue,
   resolveLessonInstructorPayout,
+  resolveOtherMinutes,
 } from '../api/_shared/employee-finance.js';
 import { shouldParticipantTriggerInstructorCompensation } from '../api/_shared/calendar-workflow-decisions.js';
-import { PAY_BASIS, resolveLessonRateOnDate, resolveRateOnDate } from '../api/_shared/rate-history.js';
+import { PAY_BASIS, hasRateKind, resolveLessonRateOnDate, resolveRateOnDate } from '../api/_shared/rate-history.js';
 
 function rateRow(id, employeeId, serviceId, payBasis, rate, effectiveDate) {
   return { id, employee_id: employeeId, service_id: serviceId, pay_basis: payBasis, rate, effective_date: effectiveDate };
@@ -89,6 +91,31 @@ describe('PAY-A rates', () => {
   it('PAY-A6 an employee with lesson rates and an hourly rate is paid each part from its own rate', () => {
     assert.equal(resolveRateOnDate(RATES, { employeeId: 'dana', payBasis: PAY_BASIS.ATTENDANCE_HOURLY, date: '2026-10-05' }).rate, 5000);
     assert.equal(resolveLessonRateOnDate(RATES, { employeeId: 'dana', serviceId: 'riding', date: '2026-10-05' }).rate, 12000);
+
+    // Dana taught for 3,000 and did office hours worth 500 in the same month: she is paid both,
+    // where the old rule paid whichever single model was on her employee record.
+    const both = combinePayComponents({ lessonAmount: 300000, attendanceAmount: 50000 });
+    assert.equal(both.baseAmount, 350000);
+    assert.equal(both.totalAmount, 350000);
+
+    // Rates she does not have contribute nothing.
+    assert.equal(hasRateKind(RATES, { employeeId: 'dana', payBasis: PAY_BASIS.MONTHLY_SALARY }), false);
+    assert.equal(hasRateKind(RATES, { employeeId: 'omer', payBasis: PAY_BASIS.ATTENDANCE_HOURLY }), false);
+    assert.equal(hasRateKind(RATES, { employeeId: 'dana', payBasis: PAY_BASIS.ATTENDANCE_HOURLY }), true);
+  });
+
+  it('PAY-A6 paid leave is added on top, except for a salary that already covers the month', () => {
+    const hourly = combinePayComponents({ attendanceAmount: 50000, paidLeaveTotal: 20000, correctionTotal: 5000 });
+    assert.equal(hourly.paidLeaveAmount, 20000, 'an hourly employee is paid for the leave day itself');
+    assert.equal(hourly.totalAmount, 75000);
+
+    const salaried = combinePayComponents({
+      monthlySalaryAmount: 800000,
+      paidLeaveTotal: 20000,
+      paysMonthlySalary: true,
+    });
+    assert.equal(salaried.paidLeaveAmount, 0, 'the salary is pro-rated over the month, leave included');
+    assert.equal(salaried.totalAmount, 800000, 'so the leave day is not paid twice');
   });
 
   it.todo('PAY-A3 a back-dated rate recalculates open months and adds pay differences for closed months');
@@ -216,7 +243,50 @@ describe('PAY-E hours', () => {
     assert.equal(hourlyOn('2026-09-14'), 5000);
     assert.equal(hourlyOn('2026-09-15'), 5500);
   });
-  it.todo('PAY-E2 an instructor\'s lesson hours are derived from the lessons they gave');
+  it('PAY-E2 lesson minutes and other work are kept apart, so lesson time is never paid twice', () => {
+    // A day an instructor taught 120 minutes and also did 90 minutes of office work.
+    const mixedDay = {
+      attendance_date: '2026-09-10',
+      source_type: 'manual',
+      lesson_minutes: 120,
+      other_minutes: 90,
+      worked_minutes: 210,
+    };
+    assert.equal(resolveOtherMinutes(mixedDay), 90, 'hourly pay covers the office work only');
+
+    // A day written by the lesson sync alone: nothing on it is payable by the hour.
+    assert.equal(
+      resolveOtherMinutes({ source_type: 'system', lesson_minutes: 120, other_minutes: 0, worked_minutes: 120 }),
+      0,
+    );
+
+    // Rows written before the split: the row's source says which bucket it was.
+    assert.equal(resolveOtherMinutes({ source_type: 'system', worked_minutes: 120 }), 0);
+    assert.equal(resolveOtherMinutes({ source_type: 'correction', worked_minutes: -60 }), 0);
+    assert.equal(resolveOtherMinutes({ source_type: 'manual', worked_minutes: 90 }), 90);
+  });
+
+  it('PAY-E2 the leave-day average counts a teaching day once, not as lesson pay plus hourly pay', () => {
+    const employee = { id: 'dana', payroll_model: 'lesson_based', leave_pay_method: 'legal' };
+    const rateRows = [rateRow('dana-office', 'dana', null, PAY_BASIS.ATTENDANCE_HOURLY, 5000, '2026-01-01')];
+    const lessonEarnings = [{ lesson_date: '2026-09-10', payout_amount: 30000, duration_minutes: 120 }];
+    const attendanceRecords = [{
+      attendance_date: '2026-09-10',
+      source_type: 'system',
+      lesson_minutes: 120,
+      other_minutes: 0,
+      worked_minutes: 120,
+    }];
+
+    const withAttendance = resolveLeaveDayValue({
+      employee, targetDate: '2026-09-20', lessonEarnings, attendanceRecords, rateRows,
+    });
+    const lessonsOnly = resolveLeaveDayValue({
+      employee, targetDate: '2026-09-20', lessonEarnings, attendanceRecords: [], rateRows,
+    });
+
+    assert.equal(withAttendance, lessonsOnly, 'the lesson-derived attendance row adds nothing on top of the lesson');
+  });
   it.todo('PAY-E3 non-instructor hours are self-entered, approved by the office, and unapproved hours block closing');
 });
 

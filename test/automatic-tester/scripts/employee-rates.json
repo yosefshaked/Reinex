@@ -1,0 +1,757 @@
+{
+  "meta": {
+    "id": "employee-rates",
+    "name": "Employee Pay Rates — dated rates screen",
+    "description": "Payroll phase 1b: the rates panel in an employee's finance tab. Creates an instructor with a service capability through the API (the DB trigger seeds its first rate), then in the UI schedules a future rate, checks the warnings for a back-dated rate and for a date that already has a rate, adds a rate for another service through the add-rate dialog, and adds an hourly rate — which switches the employee's pay model so the rate is actually read. Rates are never edited in place (PAY-A1, PAY-A2).",
+    "version": "1.8.0",
+    "last_validated_at": "2026-09-23T20:00:00Z",
+    "author": "claude-ai",
+    "dependencies": {
+      "routes": [
+        "/employees"
+      ],
+      "api_endpoints": [
+        "GET /api/services",
+        "POST /api/instructors",
+        "GET /api/employee-rates",
+        "POST /api/employee-rates",
+        "PUT /api/instructors"
+      ]
+    }
+  },
+  "config": {
+    "timeout_ms": 25000,
+    "screenshot_on_failure": true,
+    "continue_on_step_failure": false,
+    "continue_on_workflow_failure": true
+  },
+  "workflows": [
+    {
+      "id": "login",
+      "name": "Login as Admin",
+      "steps": [
+        {
+          "id": "do-login",
+          "description": "Sign in with admin credentials",
+          "action": "login",
+          "role": "admin"
+        },
+        {
+          "id": "assert-dashboard",
+          "action": "assert",
+          "type": "url",
+          "pattern": "#/dashboard"
+        }
+      ]
+    },
+    {
+      "id": "api-setup",
+      "name": "API – Service and instructor with a rate",
+      "description": "Creates the fixture instructor and a service capability, then sets that service's rate through the rates endpoint. A capability no longer carries money, so the rate has to be created on its own.",
+      "steps": [
+        {
+          "id": "get-service",
+          "description": "Fetch the first available service",
+          "action": "apiCall",
+          "method": "GET",
+          "endpoint": "/api/services?org_id={{TEST_ORG_ID}}",
+          "store": "SERVICE_ID",
+          "storeField": "0.id"
+        },
+        {
+          "id": "get-service-name",
+          "description": "Store the service name for UI selectors",
+          "action": "apiCall",
+          "method": "GET",
+          "endpoint": "/api/services?org_id={{TEST_ORG_ID}}",
+          "store": "SERVICE_NAME",
+          "storeField": "0.name"
+        },
+        {
+          "id": "get-second-service-name",
+          "description": "Store a second service name, the one added through the rate picker",
+          "action": "apiCall",
+          "method": "GET",
+          "endpoint": "/api/services?org_id={{TEST_ORG_ID}}",
+          "store": "OTHER_SERVICE_NAME",
+          "storeField": "1.name"
+        },
+        {
+          "id": "create-instructor",
+          "description": "Create the fixture instructor",
+          "action": "apiCall",
+          "method": "POST",
+          "endpoint": "/api/instructors",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "first_name": "תעריף",
+            "last_name": "בדיקה {{RUN_NUMERIC_ID}}",
+            "employee_id": "TEST-RATE-{{RUN_NUMERIC_ID}}",
+            "employee_type": "instructor",
+            "payroll_model": "lesson_based",
+            "current_rate": 20000
+          },
+          "store": "RATE_INSTRUCTOR_ID",
+          "storeField": "id"
+        },
+        {
+          "id": "create-capability",
+          "description": "Assign the service to the instructor (capacity and availability only — no rate)",
+          "action": "apiCall",
+          "method": "POST",
+          "endpoint": "{{SUPABASE_URL}}/rest/v1/instructor_service_capabilities",
+          "headers": {
+            "apikey": "{{SERVICE_ROLE_KEY}}",
+            "Prefer": "return=minimal"
+          },
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "employee_id": "{{RATE_INSTRUCTOR_ID}}",
+            "service_id": "{{SERVICE_ID}}",
+            "max_students": 1,
+            "availability_windows": [],
+            "metadata": {}
+          },
+          "ignoreStatus": [
+            409
+          ]
+        },
+        {
+          "id": "seed-rate",
+          "description": "The instructor's rate for that service, in effect from the start of employment",
+          "action": "apiCall",
+          "method": "POST",
+          "endpoint": "/api/employee-rates",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "employee_id": "{{RATE_INSTRUCTOR_ID}}",
+            "service_id": "{{SERVICE_ID}}",
+            "pay_basis": "lesson_hourly",
+            "rate": 10000,
+            "effective_date": "2000-01-01",
+            "replace_existing": true
+          }
+        },
+        {
+          "id": "verify-seeded-rate",
+          "description": "The API returns the seeded rate for the instructor",
+          "action": "apiCall",
+          "method": "GET",
+          "endpoint": "/api/employee-rates?org_id={{TEST_ORG_ID}}&employee_id={{RATE_INSTRUCTOR_ID}}"
+        }
+      ]
+    },
+    {
+      "id": "ui-schedule-future-rate",
+      "name": "UI – Schedule a future rate",
+      "description": "Opens the instructor's finance tab and saves a rate that starts in the future; it must show as scheduled while the current rate stays.",
+      "steps": [
+        {
+          "id": "navigate-employees",
+          "action": "navigate",
+          "url": "{{BASE_URL}}/#/employees"
+        },
+        {
+          "id": "wait-main",
+          "action": "waitForSelector",
+          "selector": "main, [role='main']"
+        },
+        {
+          "id": "open-employee",
+          "description": "Select the fixture instructor in the roster",
+          "action": "click",
+          "selector": "button:has-text('בדיקה {{RUN_NUMERIC_ID}}')",
+          "first": true
+        },
+        {
+          "id": "open-finance-tab",
+          "description": "Switch to the finance tab",
+          "action": "click",
+          "selector": "[role='tab']:has-text('פיננסים')"
+        },
+        {
+          "id": "wait-rates-panel",
+          "description": "The rates panel is shown",
+          "action": "waitForSelector",
+          "selector": "h3:has-text('תעריפי שכר')"
+        },
+        {
+          "id": "assert-current-rate",
+          "description": "The seeded rate of the service is shown, labelled as the current rate",
+          "action": "assert",
+          "type": "visible",
+          "selector": "article:has-text('{{SERVICE_NAME}}'):has-text('נוכחי:'):has-text('בתוקף מאז תחילת ההעסקה')"
+        },
+        {
+          "id": "open-rate-form",
+          "description": "Open the update form of the service card",
+          "action": "click",
+          "selector": "article:has-text('{{SERVICE_NAME}}') button:has-text('עדכון תעריף')",
+          "first": true
+        },
+        {
+          "id": "fill-amount",
+          "action": "fill",
+          "selector": "article:has-text('{{SERVICE_NAME}}') input[type='number']",
+          "value": "130"
+        },
+        {
+          "id": "fill-future-date",
+          "action": "fill",
+          "selector": "article:has-text('{{SERVICE_NAME}}') input[type='date']",
+          "value": "2027-01-01"
+        },
+        {
+          "id": "save-rate",
+          "action": "click",
+          "selector": "article:has-text('{{SERVICE_NAME}}') button:has-text('שמירת תעריף')"
+        },
+        {
+          "id": "assert-scheduled",
+          "description": "The new rate is listed as scheduled from 01.01.2027",
+          "action": "waitForSelector",
+          "selector": "article:has-text('{{SERVICE_NAME}}'):has-text('מ-01.01.2027')"
+        },
+        {
+          "id": "assert-history-button",
+          "description": "The card now offers the rate history",
+          "action": "assert",
+          "type": "visible",
+          "selector": "article:has-text('{{SERVICE_NAME}}') button:has-text('היסטוריה')"
+        },
+        {
+          "id": "screenshot-scheduled",
+          "action": "screenshot",
+          "name": "01-rate-scheduled"
+        }
+      ]
+    },
+    {
+      "id": "ui-back-dated-warning",
+      "name": "UI – Back-dated rate warns before saving",
+      "description": "A rate dated in the past warns that it affects days that already happened, before anything is saved.",
+      "steps": [
+        {
+          "id": "open-rate-form",
+          "action": "click",
+          "selector": "article:has-text('{{SERVICE_NAME}}') button:has-text('עדכון תעריף')",
+          "first": true
+        },
+        {
+          "id": "fill-amount",
+          "action": "fill",
+          "selector": "article:has-text('{{SERVICE_NAME}}') input[type='number']",
+          "value": "90"
+        },
+        {
+          "id": "fill-past-date",
+          "action": "fill",
+          "selector": "article:has-text('{{SERVICE_NAME}}') input[type='date']",
+          "value": "2025-01-01"
+        },
+        {
+          "id": "assert-past-warning",
+          "description": "The warning about days that already happened is shown",
+          "action": "waitForSelector",
+          "selector": "article:has-text('{{SERVICE_NAME}}'):has-text('התעריף יחול על ימים שכבר עברו')"
+        },
+        {
+          "id": "fill-existing-date",
+          "description": "Pick the date of the rate scheduled in the previous workflow",
+          "action": "fill",
+          "selector": "article:has-text('{{SERVICE_NAME}}') input[type='date']",
+          "value": "2027-01-01"
+        },
+        {
+          "id": "assert-replace-warning",
+          "description": "Choosing a date that already has a rate warns that saving replaces it",
+          "action": "waitForSelector",
+          "selector": "article:has-text('{{SERVICE_NAME}}'):has-text('כבר קיים תעריף בתאריך הזה')"
+        },
+        {
+          "id": "screenshot-warning",
+          "action": "screenshot",
+          "name": "02-back-dated-warning"
+        },
+        {
+          "id": "cancel",
+          "description": "Leave without saving",
+          "action": "click",
+          "selector": "article:has-text('{{SERVICE_NAME}}') button:has-text('ביטול')"
+        }
+      ]
+    },
+    {
+      "id": "ui-add-service-rate",
+      "name": "UI – Add a rate for another service through the dialog",
+      "description": "A rate always belongs to a service, so the panel opens a dialog that picks the service and sets the rate. The new card says the service is not assigned to the employee yet.",
+      "steps": [
+        {
+          "id": "open-add-dialog",
+          "description": "Open the add-rate dialog from the panel header",
+          "action": "click",
+          "selector": "button:has-text('הוספת תעריף')",
+          "first": true
+        },
+        {
+          "id": "wait-dialog",
+          "action": "waitForSelector",
+          "selector": "[role='dialog']:has-text('הוספת תעריף')"
+        },
+        {
+          "id": "assert-lesson-kind-selected",
+          "description": "The kind the employee is actually paid by is preselected and marked as in use",
+          "action": "assert",
+          "type": "visible",
+          "selector": "[role='dialog'] button[aria-pressed='true']:has-text('לפי מפגש')"
+        },
+        {
+          "id": "open-service-list",
+          "description": "Open the service list inside the dialog",
+          "action": "click",
+          "selector": "[role='dialog'] button:has-text('בחירת שירות')"
+        },
+        {
+          "id": "pick-service",
+          "description": "Pick the second service",
+          "action": "click",
+          "selector": "[role='option']:has-text('{{OTHER_SERVICE_NAME}}')",
+          "first": true
+        },
+        {
+          "id": "fill-amount",
+          "action": "fill",
+          "selector": "[role='dialog'] input[type='number']",
+          "value": "145"
+        },
+        {
+          "id": "fill-past-date",
+          "description": "Back-date it, so the dialog shows the same warnings the card does",
+          "action": "fill",
+          "selector": "[role='dialog'] input[type='date']",
+          "value": "2025-05-01"
+        },
+        {
+          "id": "assert-past-warning",
+          "action": "waitForSelector",
+          "selector": "[role='dialog']:has-text('התעריף יחול על ימים שכבר עברו')"
+        },
+        {
+          "id": "screenshot-dialog",
+          "action": "screenshot",
+          "name": "03-add-service-rate-dialog"
+        },
+        {
+          "id": "save-rate",
+          "action": "click",
+          "selector": "[role='dialog'] button:has-text('שמירת תעריף')"
+        },
+        {
+          "id": "assert-new-card",
+          "description": "The service now has a card of its own, tagged as a service the employee is not assigned to",
+          "action": "waitForSelector",
+          "selector": "article:has-text('{{OTHER_SERVICE_NAME}}'):has-text('שירות לא משויך')"
+        },
+        {
+          "id": "assert-current-rate",
+          "action": "assert",
+          "type": "visible",
+          "selector": "article:has-text('{{OTHER_SERVICE_NAME}}'):has-text('נוכחי:')"
+        },
+        {
+          "id": "verify-rate-saved",
+          "description": "The API returns a rate for that service",
+          "action": "apiCall",
+          "method": "GET",
+          "endpoint": "/api/employee-rates?org_id={{TEST_ORG_ID}}&employee_id={{RATE_INSTRUCTOR_ID}}"
+        },
+        {
+          "id": "screenshot-service-rate",
+          "action": "screenshot",
+          "name": "04-service-rate-added"
+        }
+      ]
+    },
+    {
+      "id": "capability-edit-keeps-rate",
+      "name": "A capability edit no longer rewrites the rate",
+      "description": "A per-session rate set in the rates screen used to be replaced by an hourly one whenever anything else on the capability was saved: the capability carried base_rate, and a trigger copied it into RateHistory as lesson_hourly. The capability endpoint no longer carries money at all.",
+      "steps": [
+        {
+          "id": "set-flat-rate",
+          "description": "The office agrees ₪200 per session in the rates screen",
+          "action": "apiCall",
+          "method": "POST",
+          "endpoint": "/api/employee-rates",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "employee_id": "{{RATE_INSTRUCTOR_ID}}",
+            "service_id": "{{SERVICE_ID}}",
+            "pay_basis": "lesson_flat",
+            "rate": 20000,
+            "effective_date": "2026-01-15",
+            "replace_existing": true
+          }
+        },
+        {
+          "id": "edit-capability",
+          "description": "Later someone edits only the capacity and availability of that service",
+          "action": "apiCall",
+          "method": "PUT",
+          "endpoint": "/api/instructors",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "instructor_id": "{{RATE_INSTRUCTOR_ID}}",
+            "service_capabilities": [
+              {
+                "service_id": "{{SERVICE_ID}}",
+                "max_students": 2,
+                "availability_windows": []
+              }
+            ]
+          }
+        },
+        {
+          "id": "reload-employees",
+          "action": "navigate",
+          "url": "{{BASE_URL}}/#/employees"
+        },
+        {
+          "id": "wait-main",
+          "action": "waitForSelector",
+          "selector": "main, [role='main']"
+        },
+        {
+          "id": "open-employee",
+          "action": "click",
+          "selector": "button:has-text('בדיקה {{RUN_NUMERIC_ID}}')",
+          "first": true
+        },
+        {
+          "id": "open-finance-tab",
+          "action": "click",
+          "selector": "[role='tab']:has-text('פיננסים')"
+        },
+        {
+          "id": "wait-rates-panel",
+          "action": "waitForSelector",
+          "selector": "h3:has-text('תעריפי שכר')"
+        },
+        {
+          "id": "leave-finance-tab",
+          "description": "Leave the tab so the panel unmounts",
+          "action": "click",
+          "selector": "[role='tab']:has-text('סקירה')"
+        },
+        {
+          "id": "return-finance-tab",
+          "description": "Re-enter it, which refetches the rates",
+          "action": "click",
+          "selector": "[role='tab']:has-text('פיננסים')"
+        },
+        {
+          "id": "wait-rates-panel-again",
+          "action": "waitForSelector",
+          "selector": "h3:has-text('תעריפי שכר')"
+        },
+        {
+          "id": "assert-flat-survived",
+          "description": "The per-session rate is still the current one — nothing converted it",
+          "action": "waitForSelector",
+          "selector": "article:has-text('{{SERVICE_NAME}}'):has-text('₪200.00 למפגש')"
+        },
+        {
+          "id": "screenshot-survived",
+          "action": "screenshot",
+          "name": "06-capability-edit-keeps-rate"
+        }
+      ]
+    },
+    {
+      "id": "replace-changes-the-kind",
+      "name": "Replacing a rate on the same date changes its kind too",
+      "description": "Only one lesson rate applies on a date, so saving a per-session rate over an hourly one must change the kind as well as the amount. Updating the amount alone would leave the row hourly and multiply it by the lesson length.",
+      "steps": [
+        {
+          "id": "hourly-first",
+          "description": "An hourly rate on a chosen date",
+          "action": "apiCall",
+          "method": "POST",
+          "endpoint": "/api/employee-rates",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "employee_id": "{{RATE_INSTRUCTOR_ID}}",
+            "service_id": "{{SERVICE_ID}}",
+            "pay_basis": "lesson_hourly",
+            "rate": 11000,
+            "effective_date": "2026-03-01",
+            "replace_existing": true
+          }
+        },
+        {
+          "id": "refuse-without-replace",
+          "description": "The same date is refused unless the office confirms the replacement",
+          "action": "apiCall",
+          "method": "POST",
+          "endpoint": "/api/employee-rates",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "employee_id": "{{RATE_INSTRUCTOR_ID}}",
+            "service_id": "{{SERVICE_ID}}",
+            "pay_basis": "lesson_flat",
+            "rate": 25000,
+            "effective_date": "2026-03-01"
+          },
+          "ignoreStatus": [
+            409
+          ]
+        },
+        {
+          "id": "replace-with-flat",
+          "description": "Confirmed: the same date becomes a per-session rate",
+          "action": "apiCall",
+          "method": "POST",
+          "endpoint": "/api/employee-rates",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "employee_id": "{{RATE_INSTRUCTOR_ID}}",
+            "service_id": "{{SERVICE_ID}}",
+            "pay_basis": "lesson_flat",
+            "rate": 25000,
+            "effective_date": "2026-03-01",
+            "replace_existing": true
+          }
+        },
+        {
+          "id": "leave-finance-tab",
+          "action": "click",
+          "selector": "[role='tab']:has-text('סקירה')"
+        },
+        {
+          "id": "return-finance-tab",
+          "action": "click",
+          "selector": "[role='tab']:has-text('פיננסים')"
+        },
+        {
+          "id": "wait-rates-panel",
+          "action": "waitForSelector",
+          "selector": "h3:has-text('תעריפי שכר')"
+        },
+        {
+          "id": "assert-history-shows-flat",
+          "description": "The replaced row is a per-session rate, not an hourly one",
+          "action": "click",
+          "selector": "article:has-text('{{SERVICE_NAME}}') button:has-text('היסטוריה')",
+          "first": true
+        },
+        {
+          "id": "assert-flat-in-history",
+          "action": "waitForSelector",
+          "selector": "article:has-text('{{SERVICE_NAME}}'):has-text('₪250.00 למפגש')"
+        },
+        {
+          "id": "assert-no-hourly-leftover",
+          "description": "The hourly amount it replaced is gone",
+          "action": "assert",
+          "type": "count",
+          "selector": "article:has-text('{{SERVICE_NAME}}') li:has-text('₪110.00 לשעה')",
+          "value": "0"
+        },
+        {
+          "id": "assert-form-keeps-unit",
+          "description": "Opening the update form on a per-session rate keeps למפגש selected, so a raise does not change the agreement",
+          "action": "click",
+          "selector": "article:has-text('{{SERVICE_NAME}}') button:has-text('עדכון תעריף')",
+          "first": true
+        },
+        {
+          "id": "assert-flat-preselected",
+          "action": "assert",
+          "type": "text",
+          "selector": "article:has-text('{{SERVICE_NAME}}') [role='combobox']",
+          "value": "למפגש"
+        },
+        {
+          "id": "close-form",
+          "action": "click",
+          "selector": "article:has-text('{{SERVICE_NAME}}') button:has-text('ביטול')",
+          "first": true
+        },
+        {
+          "id": "screenshot-replace",
+          "action": "screenshot",
+          "name": "07-replace-changes-kind"
+        }
+      ]
+    },
+    {
+      "id": "service-sheet-scheduling",
+      "name": "Capacity and working hours are edited on the service card",
+      "description": "Everything about one service in one place: the rate, how many riders, and when the instructor works. Saving the scheduling part must not touch the rate.",
+      "steps": [
+        {
+          "id": "open-scheduling",
+          "description": "Open the scheduling part of the service card",
+          "action": "click",
+          "selector": "article:has-text('{{SERVICE_NAME}}') button:has-text('שינוי')",
+          "first": true
+        },
+        {
+          "id": "wait-capacity",
+          "action": "waitForSelector",
+          "selector": "article:has-text('{{SERVICE_NAME}}'):has-text('עד כמה רוכבים במפגש')"
+        },
+        {
+          "id": "set-capacity",
+          "action": "fill",
+          "selector": "article:has-text('{{SERVICE_NAME}}') input[type='number']",
+          "value": "3"
+        },
+        {
+          "id": "add-window",
+          "action": "click",
+          "selector": "article:has-text('{{SERVICE_NAME}}') button:has-text('הוסף שעות עבודה')",
+          "first": true
+        },
+        {
+          "id": "open-day-list",
+          "action": "click",
+          "selector": "article:has-text('{{SERVICE_NAME}}') [role='combobox']",
+          "first": true
+        },
+        {
+          "id": "pick-day",
+          "action": "click",
+          "selector": "[role='option']:has-text('יום רביעי')",
+          "first": true
+        },
+        {
+          "id": "set-start",
+          "action": "fill",
+          "selector": "article:has-text('{{SERVICE_NAME}}') input[type='time']",
+          "value": "09:00",
+          "first": true
+        },
+        {
+          "id": "set-end",
+          "action": "fill",
+          "selector": "article:has-text('{{SERVICE_NAME}}') input[type='time'] >> nth=1",
+          "value": "15:00"
+        },
+        {
+          "id": "save-scheduling",
+          "action": "click",
+          "selector": "article:has-text('{{SERVICE_NAME}}') button:has-text('שמירת שיבוץ')"
+        },
+        {
+          "id": "assert-scheduling-saved",
+          "description": "The card shows the new capacity and the day",
+          "action": "waitForSelector",
+          "selector": "article:has-text('{{SERVICE_NAME}}'):has-text('עד 3 רוכבים')"
+        },
+        {
+          "id": "assert-rate-untouched",
+          "description": "The per-session rate is exactly as it was",
+          "action": "assert",
+          "type": "visible",
+          "selector": "article:has-text('{{SERVICE_NAME}}'):has-text('₪250.00 למפגש')"
+        },
+        {
+          "id": "assert-ready-verdict",
+          "description": "With a rate and working hours the card says the instructor can be scheduled",
+          "action": "waitForSelector",
+          "selector": "article:has-text('{{SERVICE_NAME}}'):has-text('מוכן/ה לשיבוץ')"
+        },
+        {
+          "id": "assert-payment-basis",
+          "description": "How the service pays is stated next to the amount",
+          "action": "assert",
+          "type": "visible",
+          "selector": "article:has-text('{{SERVICE_NAME}}'):has-text('פעם אחת למפגש')"
+        },
+        {
+          "id": "screenshot-sheet",
+          "action": "screenshot",
+          "name": "08-service-sheet-scheduling"
+        }
+      ]
+    },
+    {
+      "id": "ui-add-hourly-rate",
+      "name": "UI – An hourly rate is added on top of the lesson rates",
+      "description": "An instructor who also does stable or office work is paid for both: adding an hourly rate adds a part of the pay, it does not replace the lesson pay (PAY-A6).",
+      "steps": [
+        {
+          "id": "open-add-dialog",
+          "action": "click",
+          "selector": "button:has-text('הוספת תעריף')",
+          "first": true
+        },
+        {
+          "id": "wait-dialog",
+          "action": "waitForSelector",
+          "selector": "[role='dialog']:has-text('הוספת תעריף')"
+        },
+        {
+          "id": "choose-hourly",
+          "description": "Choose the hourly kind",
+          "action": "click",
+          "selector": "[role='dialog'] button:has-text('לפי שעות עבודה')"
+        },
+        {
+          "id": "fill-amount",
+          "action": "fill",
+          "selector": "[role='dialog'] input[type='number']",
+          "value": "55"
+        },
+        {
+          "id": "save-rate",
+          "action": "click",
+          "selector": "[role='dialog'] button:has-text('שמירת תעריף')"
+        },
+        {
+          "id": "assert-hourly-card",
+          "description": "The hourly rate is listed under the work-pay group",
+          "action": "waitForSelector",
+          "selector": "article:has-text('שעתי'):has-text('₪55.00')"
+        },
+        {
+          "id": "assert-lesson-rate-kept",
+          "description": "The lesson rate is still there and still paid — nothing was replaced",
+          "action": "assert",
+          "type": "visible",
+          "selector": "article:has-text('{{SERVICE_NAME}}'):has-text('נוכחי:')"
+        },
+        {
+          "id": "assert-nothing-marked-unused",
+          "description": "No rate is marked as unused: every kind the employee has is paid",
+          "action": "assert",
+          "type": "count",
+          "selector": "article:has-text('לא בשימוש')",
+          "value": "0"
+        },
+        {
+          "id": "screenshot-hourly",
+          "action": "screenshot",
+          "name": "05-hourly-rate-added-on-top"
+        }
+      ]
+    },
+    {
+      "id": "logout",
+      "name": "Logout",
+      "steps": [
+        {
+          "id": "do-logout",
+          "action": "logout"
+        },
+        {
+          "id": "assert-login-page",
+          "action": "assert",
+          "type": "url",
+          "pattern": "#/login"
+        }
+      ]
+    }
+  ]
+}

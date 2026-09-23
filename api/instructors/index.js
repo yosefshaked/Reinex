@@ -74,49 +74,6 @@ function normalizeWorkingDaysInput(value) {
   return { provided: true, valid: true, value: unique };
 }
 
-const CAPABILITY_COMPENSATION_MODES = new Set(['hourly', 'duration_based']);
-
-function normalizeCapabilityCompensationInput(raw) {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
-    return { valid: false, value: null };
-  }
-
-  const mode = normalizeString(raw?.mode).toLowerCase();
-  if (!CAPABILITY_COMPENSATION_MODES.has(mode)) {
-    return { valid: false, value: null };
-  }
-
-  const amountAgorot = Number(raw?.amount_agorot);
-  if (!Number.isFinite(amountAgorot) || amountAgorot < 0) {
-    return { valid: false, value: null };
-  }
-
-  if (mode === 'duration_based') {
-    const durationMinutes = Number(raw?.duration_minutes);
-    if (!Number.isFinite(durationMinutes) || durationMinutes <= 0) {
-      return { valid: false, value: null };
-    }
-
-    return {
-      valid: true,
-      value: {
-        mode,
-        amount_agorot: Math.round(amountAgorot),
-        duration_minutes: Math.round(durationMinutes),
-      },
-    };
-  }
-
-  return {
-    valid: true,
-    value: {
-      mode,
-      amount_agorot: Math.round(amountAgorot),
-      duration_minutes: null,
-    },
-  };
-}
-
 function normalizeServiceCapabilitiesInput(value) {
   if (value === undefined) {
     return { provided: false, valid: true, value: [] };
@@ -140,35 +97,14 @@ function normalizeServiceCapabilitiesInput(value) {
       return { provided: true, valid: false, value: [] };
     }
 
-    const hasCompensationInput = Object.prototype.hasOwnProperty.call(metadata, 'compensation_input');
-    const normalizedCompensationInput = hasCompensationInput
-      ? normalizeCapabilityCompensationInput(metadata.compensation_input)
-      : { valid: true, value: null };
-
-    if (!normalizedCompensationInput.valid) {
-      return { provided: true, valid: false, value: [] };
-    }
-
-    const rawBaseRate = item?.base_rate;
-    const parsedBaseRate = rawBaseRate === '' || rawBaseRate == null ? 0 : Number(rawBaseRate);
-    if (!hasCompensationInput && (!Number.isFinite(parsedBaseRate) || parsedBaseRate < 0)) {
-      return { provided: true, valid: false, value: [] };
-    }
-
-    if (normalizedCompensationInput.value) {
-      metadata.compensation_input = normalizedCompensationInput.value;
-    }
-
-    const normalizedBaseRate = normalizedCompensationInput.value
-      ? (normalizedCompensationInput.value.mode === 'duration_based'
-          ? Math.round((normalizedCompensationInput.value.amount_agorot * 60) / normalizedCompensationInput.value.duration_minutes)
-          : normalizedCompensationInput.value.amount_agorot)
-      : Math.round(parsedBaseRate);
+    // Pay is not set here. A rate belongs to RateHistory and is written only by api/employee-rates,
+    // so what this endpoint receives about money is dropped rather than stored: keeping it would
+    // give the farm a second, silent way to change what an instructor is paid.
+    delete metadata.compensation_input;
 
     normalized.push({
       service_id: serviceId,
       max_students: Number.isFinite(Number(item?.max_students)) ? Math.max(1, Number(item.max_students)) : 1,
-      base_rate: normalizedBaseRate,
       availability_windows: [],
       metadata,
     });
@@ -308,7 +244,6 @@ async function writeServiceCapabilities(client, orgId, instructorId, serviceCapa
     employee_id: instructorId,
     service_id: capability.service_id,
     max_students: capability.max_students || 1,
-    base_rate: capability.base_rate || 0,
     availability_windows: capability.availability_windows || [],
     metadata: capability.metadata || {},
   }));

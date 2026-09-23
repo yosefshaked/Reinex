@@ -648,7 +648,7 @@ async function buildParticipantStatusPreview(client, orgId, body, {
       .gte('datetime_start', lessonDayBounds?.startIso || '')
       .lt('datetime_start', lessonDayBounds?.endExclusiveIso || ''),
     withOrgScope(client, 'employee_attendance_records', orgId)
-      .select('id, status, worked_minutes, source_type, metadata')
+      .select('id, status, worked_minutes, lesson_minutes, other_minutes, source_type, metadata')
       .eq('employee_id', instanceDetail.instructor_employee_id)
       .eq('attendance_date', lessonDateKey)
       .in('source_type', ['manual', 'import', 'system'])
@@ -724,7 +724,10 @@ async function buildParticipantStatusPreview(client, orgId, body, {
   });
 
   const projectedWorkedMinutes = projectedAttendanceLessons.reduce((sum, row) => sum + Number(row.duration_minutes || 0), 0);
-  const currentAttendanceWorkedMinutes = Number(systemAttendanceRecord?.worked_minutes || 0);
+  // The lesson bucket of that day: office hours on the same day are not part of this projection.
+  const currentAttendanceWorkedMinutes = Number(
+    systemAttendanceRecord?.lesson_minutes ?? systemAttendanceRecord?.worked_minutes ?? 0,
+  );
   const effectiveProjectedWorkedMinutes = projectedWorkedMinutes;
 
   const openHmoTask = (dashboardTasks || []).find((task) => task.task_type === 'hmo_claim_submission' && task.status === 'open') || null;
