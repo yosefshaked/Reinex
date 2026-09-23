@@ -10,7 +10,11 @@ import {
   AlertDialogAction
 } from '@/components/ui/alert-dialog';
 
-export default function ConfirmDialog({ open, onOpenChange, onConfirm, title, description }) {
+/**
+ * `confirmLabel` defaults to the delete wording. Pass a verb for actions that are not deletions —
+ * a reversible one should not ask the office to confirm deleting something.
+ */
+export default function ConfirmDialog({ open, onOpenChange, onConfirm, title, description, confirmLabel, destructive = true }) {
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
       <AlertDialogContent>
@@ -20,7 +24,9 @@ export default function ConfirmDialog({ open, onOpenChange, onConfirm, title, de
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel>בטל</AlertDialogCancel>
-          <AlertDialogAction onClick={onConfirm} className="bg-red-600 hover:bg-red-700">אני מבין/ה, מחק</AlertDialogAction>
+          <AlertDialogAction onClick={onConfirm} className={destructive ? 'bg-red-600 hover:bg-red-700' : undefined}>
+            {confirmLabel || 'אני מבין/ה, מחק'}
+          </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>

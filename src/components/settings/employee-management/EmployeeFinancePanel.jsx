@@ -10,6 +10,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
+import ConfirmDialog from '@/components/ui/ConfirmDialog.jsx';
 import { Loader2 } from 'lucide-react';
 import { toast } from '@/lib/toast.jsx';
 import { authenticatedFetch } from '@/lib/api-client.js';
@@ -63,12 +64,19 @@ export default function EmployeeFinancePanel({ employee, orgId, session, onEditE
   const [form, setForm] = useState({
     correctionType: 'bonus',
     amount: '',
-    effectiveDate: toLocalDateString(new Date()),
+    effectiveDate: toLocalDateString(startOfMonth(new Date())),
     notes: '',
   });
+  const [pendingRemoval, setPendingRemoval] = useState(null);
 
   const monthStart = useMemo(() => toLocalDateString(startOfMonth(monthDate)), [monthDate]);
   const monthEnd = useMemo(() => toLocalDateString(endOfMonth(monthDate)), [monthDate]);
+
+  // A correction belongs to the month on screen. Defaulting to today put a fix for last month into
+  // this one whenever the office was looking back.
+  useEffect(() => {
+    setForm((current) => ({ ...current, effectiveDate: monthStart }));
+  }, [monthStart]);
 
   const loadData = useCallback(async () => {
     if (!employee?.id || !orgId) return;
@@ -304,7 +312,7 @@ export default function EmployeeFinancePanel({ employee, orgId, session, onEditE
                   <div className="text-sm font-semibold text-slate-900">{entry.correction_type} • {formatCurrency(entry.amount)}</div>
                   <div className="mt-1 text-xs text-slate-500">{entry.effective_date} • {entry.notes || 'ללא הערות'}</div>
                 </div>
-                <Button size="sm" variant="outline" className="[font-family:inherit]" onClick={() => handleDeleteAdjustment(entry.id)} disabled={saving}>
+                <Button size="sm" variant="outline" className="[font-family:inherit]" onClick={() => setPendingRemoval(entry)} disabled={saving}>
                   הסר
                 </Button>
               </div>
@@ -317,6 +325,20 @@ export default function EmployeeFinancePanel({ employee, orgId, session, onEditE
           ) : null}
         </div>
       </section>
+      <ConfirmDialog
+        open={Boolean(pendingRemoval)}
+        onOpenChange={(open) => { if (!open) setPendingRemoval(null); }}
+        onConfirm={() => {
+          const target = pendingRemoval;
+          setPendingRemoval(null);
+          if (target?.id) void handleDeleteAdjustment(target.id);
+        }}
+        confirmLabel="הסרה"
+        title="להסיר את התיקון?"
+        description={pendingRemoval
+          ? `${formatCurrency(pendingRemoval.amount)} בתאריך ${pendingRemoval.effective_date} יימחק, והשכר של החודש יחושב מחדש בלעדיו.`
+          : ''}
+      />
     </div>
   );
 }

@@ -35,6 +35,7 @@ import EmployeeActivityTimeline from './EmployeeActivityTimeline.jsx';
 import EmployeeAttendancePanel from './EmployeeAttendancePanel.jsx';
 import EditEmployeeDialog from './EditEmployeeDialog.jsx';
 import EditServiceCapabilitiesDialog from './EditServiceCapabilitiesDialog.jsx';
+import ConfirmDialog from '@/components/ui/ConfirmDialog.jsx';
 import EmployeeFinancePanel from './EmployeeFinancePanel.jsx';
 import EmployeeRatesPanel from './EmployeeRatesPanel.jsx';
 import EmployeeLeavePanel from './EmployeeLeavePanel.jsx';
@@ -346,6 +347,7 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
   const [filterKey, setFilterKey] = useState(FILTER_ALL);
   const [activeTab, setActiveTab] = useState(TAB_KEYS.overview);
   const [actionState, setActionState] = useState(REQUEST.idle);
+  const [pendingDeactivate, setPendingDeactivate] = useState(null);
   const [overviewInstances, setOverviewInstances] = useState([]);
   const [employeeInstances, setEmployeeInstances] = useState([]);
   const [instancesLoading, setInstancesLoading] = useState(false);
@@ -926,7 +928,7 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
                       </Button>
                     ) : null}
                     {currentEmployee.is_active ? (
-                      <Button size="sm" variant="outline" onClick={() => handleToggleActive(currentEmployee, false)} disabled={actionState === REQUEST.loading}>
+                      <Button size="sm" variant="outline" onClick={() => setPendingDeactivate(currentEmployee)} disabled={actionState === REQUEST.loading}>
                         <UserX className="me-2 h-4 w-4 text-red-600" />
                         השבת
                       </Button>
@@ -1355,6 +1357,22 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
           await fetchOverviewInstances();
         }}
       />
+      <ConfirmDialog
+        open={Boolean(pendingDeactivate)}
+        onOpenChange={(open) => { if (!open) setPendingDeactivate(null); }}
+        onConfirm={() => {
+          const target = pendingDeactivate;
+          setPendingDeactivate(null);
+          if (target) void handleToggleActive(target, false);
+        }}
+        confirmLabel="השבתה"
+        destructive={false}
+        title="להשבית את העובד/ת?"
+        description={pendingDeactivate
+          ? `${getEmployeeName(pendingDeactivate)} לא יופיע/תופיע בשיבוץ ובחיפוש. המפגשים, הנוכחות והשכר שכבר נרשמו נשארים, ואפשר להפעיל מחדש בכל רגע.`
+          : ''}
+      />
+
       <EditEmployeeDialog
         open={showEditDialog}
         onOpenChange={setShowEditDialog}

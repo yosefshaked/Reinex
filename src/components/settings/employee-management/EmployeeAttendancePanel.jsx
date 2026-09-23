@@ -11,6 +11,7 @@ import {
 } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Loader2 } from 'lucide-react';
+import ConfirmDialog from '@/components/ui/ConfirmDialog.jsx';
 import { toast } from '@/lib/toast.jsx';
 import { authenticatedFetch } from '@/lib/api-client.js';
 
@@ -134,6 +135,7 @@ export default function EmployeeAttendancePanel({ employee, orgId, session }) {
 
   const selectedRecord = recordsByDate.get(selectedDate) || null;
   const selectedLessonMinutes = Math.max(0, Number(selectedRecord?.lesson_minutes) || 0);
+  const [confirmRemoveOpen, setConfirmRemoveOpen] = useState(false);
   const selectedLeave = leaveByDate.get(selectedDate) || null;
 
   async function handleSave() {
@@ -180,6 +182,7 @@ export default function EmployeeAttendancePanel({ employee, orgId, session }) {
   }
 
   async function handleDelete() {
+    setConfirmRemoveOpen(false);
     if (!selectedRecord?.id || !employee?.id || !orgId) return;
     setSaving(true);
     try {
@@ -312,13 +315,23 @@ export default function EmployeeAttendancePanel({ employee, orgId, session }) {
               {selectedRecord ? 'עדכן נוכחות' : 'שמור נוכחות'}
             </Button>
             {selectedRecord ? (
-              <Button variant="outline" onClick={handleDelete} disabled={saving}>
+              <Button variant="outline" onClick={() => setConfirmRemoveOpen(true)} disabled={saving}>
                 הסר רישום
               </Button>
             ) : null}
           </div>
         </div>
       </section>
+      <ConfirmDialog
+        open={confirmRemoveOpen}
+        onOpenChange={setConfirmRemoveOpen}
+        onConfirm={handleDelete}
+        confirmLabel="הסרה"
+        title="להסיר את רישום הנוכחות?"
+        description={selectedLessonMinutes > 0
+          ? `שעות העבודה שאינן מפגש יימחקו. ${selectedLessonMinutes} דקות המפגשים של אותו יום יישארו, הן מגיעות מהיומן.`
+          : 'הרישום של אותו יום יימחק. אפשר להזין אותו מחדש, אבל מה שנרשם עד עכשיו יאבד.'}
+      />
     </div>
   );
 }
