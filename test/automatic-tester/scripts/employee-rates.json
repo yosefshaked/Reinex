@@ -3,8 +3,8 @@
     "id": "employee-rates",
     "name": "Employee Pay Rates — dated rates screen",
     "description": "Payroll phase 1b: the rates panel in an employee's finance tab. Creates an instructor with a service capability through the API (the DB trigger seeds its first rate), then in the UI schedules a future rate, checks the warnings for a back-dated rate and for a date that already has a rate, adds a rate for another service through the add-rate dialog, and adds an hourly rate — which switches the employee's pay model so the rate is actually read. Rates are never edited in place (PAY-A1, PAY-A2).",
-    "version": "1.6.0",
-    "last_validated_at": "2026-09-23T19:00:00Z",
+    "version": "1.8.0",
+    "last_validated_at": "2026-09-23T20:00:00Z",
     "author": "claude-ai",
     "dependencies": {
       "routes": [
@@ -581,6 +581,98 @@
           "id": "screenshot-replace",
           "action": "screenshot",
           "name": "07-replace-changes-kind"
+        }
+      ]
+    },
+    {
+      "id": "service-sheet-scheduling",
+      "name": "Capacity and working hours are edited on the service card",
+      "description": "Everything about one service in one place: the rate, how many riders, and when the instructor works. Saving the scheduling part must not touch the rate.",
+      "steps": [
+        {
+          "id": "open-scheduling",
+          "description": "Open the scheduling part of the service card",
+          "action": "click",
+          "selector": "article:has-text('{{SERVICE_NAME}}') button:has-text('שינוי')",
+          "first": true
+        },
+        {
+          "id": "wait-capacity",
+          "action": "waitForSelector",
+          "selector": "article:has-text('{{SERVICE_NAME}}'):has-text('עד כמה רוכבים במפגש')"
+        },
+        {
+          "id": "set-capacity",
+          "action": "fill",
+          "selector": "article:has-text('{{SERVICE_NAME}}') input[type='number']",
+          "value": "3"
+        },
+        {
+          "id": "add-window",
+          "action": "click",
+          "selector": "article:has-text('{{SERVICE_NAME}}') button:has-text('הוסף שעות עבודה')",
+          "first": true
+        },
+        {
+          "id": "open-day-list",
+          "action": "click",
+          "selector": "article:has-text('{{SERVICE_NAME}}') [role='combobox']",
+          "first": true
+        },
+        {
+          "id": "pick-day",
+          "action": "click",
+          "selector": "[role='option']:has-text('יום רביעי')",
+          "first": true
+        },
+        {
+          "id": "set-start",
+          "action": "fill",
+          "selector": "article:has-text('{{SERVICE_NAME}}') input[type='time']",
+          "value": "09:00",
+          "first": true
+        },
+        {
+          "id": "set-end",
+          "action": "fill",
+          "selector": "article:has-text('{{SERVICE_NAME}}') input[type='time'] >> nth=1",
+          "value": "15:00"
+        },
+        {
+          "id": "save-scheduling",
+          "action": "click",
+          "selector": "article:has-text('{{SERVICE_NAME}}') button:has-text('שמירת שיבוץ')"
+        },
+        {
+          "id": "assert-scheduling-saved",
+          "description": "The card shows the new capacity and the day",
+          "action": "waitForSelector",
+          "selector": "article:has-text('{{SERVICE_NAME}}'):has-text('עד 3 רוכבים')"
+        },
+        {
+          "id": "assert-rate-untouched",
+          "description": "The per-session rate is exactly as it was",
+          "action": "assert",
+          "type": "visible",
+          "selector": "article:has-text('{{SERVICE_NAME}}'):has-text('₪250.00 למפגש')"
+        },
+        {
+          "id": "assert-ready-verdict",
+          "description": "With a rate and working hours the card says the instructor can be scheduled",
+          "action": "waitForSelector",
+          "selector": "article:has-text('{{SERVICE_NAME}}'):has-text('מוכן/ה לשיבוץ')"
+        },
+        {
+          "id": "assert-payment-basis",
+          "description": "How the service pays is stated next to the amount",
+          "action": "assert",
+          "type": "visible",
+          "selector": "article:has-text('{{SERVICE_NAME}}'):has-text('פעם אחת למפגש')"
+        },
+        {
+          "id": "screenshot-sheet",
+          "action": "screenshot",
+          "name": "08-service-sheet-scheduling"
         }
       ]
     },

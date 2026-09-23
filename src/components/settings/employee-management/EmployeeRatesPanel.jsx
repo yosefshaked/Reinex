@@ -20,6 +20,8 @@ import {
 } from '@/components/ui/select';
 import { toast } from '@/lib/toast.jsx';
 import { authenticatedFetch } from '@/lib/api-client.js';
+import { getAvailabilitySummary, normalizeAvailabilityWindows } from '@/lib/instructor-availability.js';
+import AvailabilityWindowsEditor from './AvailabilityWindowsEditor.jsx';
 import { formatCurrency, toAgorot } from '@/lib/currency.js';
 
 const LESSON_BASES = ['lesson_hourly', 'lesson_flat'];
@@ -186,7 +188,7 @@ function RateFields({ idPrefix, form, setForm, allowBasisChoice, warnings, savin
   );
 }
 
-function RateCard({ card, rates, today, onSave, saving }) {
+function RateCard({ card, rates, today, onSave, onSaveScheduling, saving }) {
   const [open, setOpen] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const history = useMemo(() => rowsForCard(rates, card), [rates, card]);
@@ -209,6 +211,36 @@ function RateCard({ card, rates, today, onSave, saving }) {
     today,
     isLesson: isLessonBasis(card.payBasis),
   });
+
+  const [schedulingOpen, setSchedulingOpen] = useState(false);
+  const [savingScheduling, setSavingScheduling] = useState(false);
+  const [capacityInput, setCapacityInput] = useState(String(card.capability?.max_students || 1));
+  const [windowsDraft, setWindowsDraft] = useState(() => (
+    Array.isArray(card.capability?.availability_windows) ? card.capability.availability_windows : []
+  ));
+
+  function closeScheduling() {
+    setCapacityInput(String(card.capability?.max_students || 1));
+    setWindowsDraft(Array.isArray(card.capability?.availability_windows) ? card.capability.availability_windows : []);
+    setSchedulingOpen(false);
+  }
+
+  async function handleSaveScheduling() {
+    setSavingScheduling(true);
+    const ok = await onSaveScheduling({
+      serviceId: card.serviceId,
+      maxStudents: Math.max(1, Number(capacityInput) || 1),
+      availabilityWindows: windowsDraft,
+    });
+    setSavingScheduling(false);
+    if (ok) setSchedulingOpen(false);
+  }
+
+  // What the office actually wants to know: can this instructor be scheduled and paid for it.
+  const hasHours = (card.capability?.availability_windows || []).length > 0;
+  const readiness = !current
+    ? { ready: false, label: 'חסר תעריף' }
+    : (!hasHours ? { ready: false, label: 'חסרות שעות עבודה' } : { ready: true, label: 'מוכן/ה לשיבוץ' });
 
   function resetForm() {
     setForm(createEmptyForm(currentBasis, today));
@@ -238,6 +270,14 @@ function RateCard({ card, rates, today, onSave, saving }) {
             {card.unassigned ? (
               <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-800">שירות לא משויך</span>
             ) : null}
+            {card.serviceId && !card.unassigned ? (
+              <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold ${readiness.ready
+                ? 'bg-emerald-100 text-emerald-800'
+                : 'bg-amber-100 text-amber-800'}`}
+              >
+                {readiness.label}
+              </span>
+            ) : null}
           </div>
           {card.hint ? <p className="mt-0.5 text-xs text-slate-500">{card.hint}</p> : null}
           {current ? (
@@ -245,6 +285,14 @@ function RateCard({ card, rates, today, onSave, saving }) {
               <div className="mt-1 flex flex-wrap items-baseline gap-1.5">
                 <span className="text-xs font-bold text-slate-500">נוכחי:</span>
                 <span className="text-xl font-bold text-slate-900">{describeRate(current)}</span>
+                {card.serviceId ? (
+                  <span
+                    title="נקבע בהגדרות השירות, לא לכל מדריך בנפרד"
+                    className="cursor-help rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-600"
+                  >
+                    {card.paymentModel === 'per_student' ? 'לכל רוכב' : 'פעם אחת למפגש'}
+                  </span>
+                ) : null}
               </div>
               <div className="text-xs text-slate-500">{effectiveFromLabel(current)}</div>
             </>
@@ -311,6 +359,63 @@ function RateCard({ card, rates, today, onSave, saving }) {
             </Button>
             <span className="text-xs text-slate-500">התעריף הקודם נשמר בהיסטוריה ומפגשים שקדמו לתאריך לא ישתנו.</span>
           </div>
+        </div>
+      ) : null}
+
+      {card.serviceId ? (
+        <div className="mt-3 border-t border-slate-100 pt-3">
+          {schedulingOpen ? (
+            <div className="grid gap-3 rounded-xl border border-dashed border-slate-300 bg-slate-50 p-3">
+              <div className="space-y-1.5">
+                <Label htmlFor={`capacity-${card.key}`} className="text-xs text-slate-600">עד כמה רוכבים במפגש</Label>
+                <Input
+                  id={`capacity-${card.key}`}
+                  type="number"
+                  min="1"
+                  max="50"
+                  className="max-w-[120px]"
+                  value={capacityInput}
+                  onChange={(event) => setCapacityInput(event.target.value)}
+                  disabled={savingScheduling}
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label className="text-xs text-slate-600">שעות עבודה בשירות הזה</Label>
+                <AvailabilityWindowsEditor
+                  windows={windowsDraft}
+                  onChange={setWindowsDraft}
+                  disabled={savingScheduling}
+                  idPrefix={card.key}
+                />
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <Button type="button" size="sm" onClick={handleSaveScheduling} disabled={savingScheduling}>
+                  {savingScheduling ? <Loader2 className="me-2 h-4 w-4 animate-spin" /> : null}
+                  שמירת שיבוץ
+                </Button>
+                <Button type="button" size="sm" variant="ghost" onClick={closeScheduling} disabled={savingScheduling}>
+                  ביטול
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              <span className="font-bold text-slate-700">שיבוץ</span>
+              <span className="text-slate-500">
+                {card.capability
+                  ? `עד ${card.capability.max_students || 1} רוכבים · ${card.availabilitySummary || 'לא הוגדרו שעות עבודה'}`
+                  : 'השירות אינו משויך לעובד/ת'}
+              </span>
+              <span className="flex-grow" />
+              {card.capability ? (
+                <Button type="button" size="sm" variant="ghost" className="text-xs" onClick={() => setSchedulingOpen(true)} disabled={saving}>
+                  שינוי
+                </Button>
+              ) : null}
+            </div>
+          )}
         </div>
       ) : null}
     </article>
@@ -499,13 +604,19 @@ export default function EmployeeRatesPanel({ employee, orgId, session, services 
       if (serviceId && !serviceIds.includes(serviceId)) serviceIds.push(serviceId);
     });
 
-    const lessonCards = serviceIds.map((serviceId) => ({
-      key: `service-${serviceId}`,
-      title: services.find((service) => service.id === serviceId)?.name || 'שירות',
-      payBasis: 'lesson_hourly',
-      serviceId,
-      unassigned: !capabilities.some((capability) => capability.service_id === serviceId),
-    }));
+    const lessonCards = serviceIds.map((serviceId) => {
+      const capability = capabilities.find((item) => item.service_id === serviceId) || null;
+      return {
+        key: `service-${serviceId}`,
+        title: services.find((service) => service.id === serviceId)?.name || 'שירות',
+        payBasis: 'lesson_hourly',
+        serviceId,
+        capability,
+        availabilitySummary: capability ? getAvailabilitySummary(capability.availability_windows) : '',
+        paymentModel: services.find((service) => service.id === serviceId)?.payment_model,
+        unassigned: !capability,
+      };
+    });
 
     const otherCards = RATE_KINDS.slice(1)
       .filter((kind) => (
@@ -525,6 +636,47 @@ export default function EmployeeRatesPanel({ employee, orgId, session, services 
       { key: 'employee', title: 'שכר עבודה', hint: 'שעות או משכורת', cards: otherCards },
     ].filter((group) => group.cards.length > 0);
   }, [employee, rates, services]);
+
+  /**
+   * Capacity and working hours for one service. The instructors endpoint replaces the whole set, so
+   * the untouched services are sent back exactly as they are — editing Thursday's hours must not
+   * drop another service.
+   */
+  async function handleSaveScheduling({ serviceId, maxStudents, availabilityWindows }) {
+    const normalized = normalizeAvailabilityWindows(availabilityWindows);
+    if (!normalized.valid) {
+      toast.error('שעות העבודה אינן תקינות: צריך יום, שעת התחלה ושעת סיום, והסיום אחרי ההתחלה.');
+      return false;
+    }
+
+    setSaving(true);
+    try {
+      await authenticatedFetch('instructors', {
+        session,
+        method: 'PUT',
+        body: {
+          org_id: orgId,
+          instructor_id: employee.id,
+          service_capabilities: (employee?.service_capabilities || []).map((capability) => ({
+            service_id: capability.service_id,
+            max_students: capability.service_id === serviceId ? maxStudents : (capability.max_students || 1),
+            availability_windows: capability.service_id === serviceId
+              ? normalized.value
+              : (capability.availability_windows || []),
+          })),
+        },
+      });
+      await onEmployeeChanged?.();
+      toast.success('השיבוץ עודכן.');
+      return true;
+    } catch (error) {
+      console.error('Failed to save scheduling', error);
+      toast.error(error?.message || 'שמירת השיבוץ נכשלה.');
+      return false;
+    } finally {
+      setSaving(false);
+    }
+  }
 
   async function handleSave({ payBasis, serviceId, rate, effectiveDate, notes, replaceExisting }) {
     setSaving(true);
@@ -595,6 +747,7 @@ export default function EmployeeRatesPanel({ employee, orgId, session, services 
                     today={today}
                     saving={saving}
                     onSave={handleSave}
+                    onSaveScheduling={handleSaveScheduling}
                   />
                 ))}
               </div>
