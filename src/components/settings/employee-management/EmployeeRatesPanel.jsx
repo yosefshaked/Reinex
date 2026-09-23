@@ -193,10 +193,16 @@ function RateFields({ idPrefix, form, setForm, allowBasisChoice, warnings, savin
 function RateCard({ card, rates, today, onSave, saving }) {
   const [open, setOpen] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
-  const [form, setForm] = useState(() => createEmptyForm(card.payBasis, today));
-
   const history = useMemo(() => rowsForCard(rates, card), [rates, card]);
   const current = history.find((row) => row.effective_date <= today) || null;
+  // A raise should not silently change the agreement: the form opens on the unit that is in effect,
+  // so updating a per-session rate stays per-session unless the office deliberately switches it.
+  const currentBasis = current?.pay_basis || card.payBasis;
+  const [form, setForm] = useState(() => createEmptyForm(currentBasis, today));
+
+  useEffect(() => {
+    if (!open) setForm(createEmptyForm(currentBasis, today));
+  }, [currentBasis, open, today]);
   const scheduled = history.filter((row) => row.effective_date > today).slice(-1)[0] || null;
   const existingOnDate = history.find((row) => row.effective_date === form.effectiveDate) || null;
   const warnings = buildWarnings({
@@ -209,7 +215,7 @@ function RateCard({ card, rates, today, onSave, saving }) {
   });
 
   function resetForm() {
-    setForm(createEmptyForm(card.payBasis, today));
+    setForm(createEmptyForm(currentBasis, today));
   }
 
   async function handleSave() {

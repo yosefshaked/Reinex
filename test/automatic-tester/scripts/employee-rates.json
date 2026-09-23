@@ -3,8 +3,8 @@
     "id": "employee-rates",
     "name": "Employee Pay Rates — dated rates screen",
     "description": "Payroll phase 1b: the rates panel in an employee's finance tab. Creates an instructor with a service capability through the API (the DB trigger seeds its first rate), then in the UI schedules a future rate, checks the warnings for a back-dated rate and for a date that already has a rate, adds a rate for another service through the add-rate dialog, and adds an hourly rate — which switches the employee's pay model so the rate is actually read. Rates are never edited in place (PAY-A1, PAY-A2).",
-    "version": "1.4.0",
-    "last_validated_at": "2026-09-23T15:00:00Z",
+    "version": "1.5.0",
+    "last_validated_at": "2026-09-23T18:00:00Z",
     "author": "claude-ai",
     "dependencies": {
       "routes": [
@@ -464,6 +464,123 @@
           "id": "screenshot-survived",
           "action": "screenshot",
           "name": "06-capability-edit-keeps-rate"
+        }
+      ]
+    },
+    {
+      "id": "replace-changes-the-kind",
+      "name": "Replacing a rate on the same date changes its kind too",
+      "description": "Only one lesson rate applies on a date, so saving a per-session rate over an hourly one must change the kind as well as the amount. Updating the amount alone would leave the row hourly and multiply it by the lesson length.",
+      "steps": [
+        {
+          "id": "hourly-first",
+          "description": "An hourly rate on a chosen date",
+          "action": "apiCall",
+          "method": "POST",
+          "endpoint": "/api/employee-rates",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "employee_id": "{{RATE_INSTRUCTOR_ID}}",
+            "service_id": "{{SERVICE_ID}}",
+            "pay_basis": "lesson_hourly",
+            "rate": 11000,
+            "effective_date": "2026-03-01",
+            "replace_existing": true
+          }
+        },
+        {
+          "id": "refuse-without-replace",
+          "description": "The same date is refused unless the office confirms the replacement",
+          "action": "apiCall",
+          "method": "POST",
+          "endpoint": "/api/employee-rates",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "employee_id": "{{RATE_INSTRUCTOR_ID}}",
+            "service_id": "{{SERVICE_ID}}",
+            "pay_basis": "lesson_flat",
+            "rate": 25000,
+            "effective_date": "2026-03-01"
+          },
+          "ignoreStatus": [
+            409
+          ]
+        },
+        {
+          "id": "replace-with-flat",
+          "description": "Confirmed: the same date becomes a per-session rate",
+          "action": "apiCall",
+          "method": "POST",
+          "endpoint": "/api/employee-rates",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "employee_id": "{{RATE_INSTRUCTOR_ID}}",
+            "service_id": "{{SERVICE_ID}}",
+            "pay_basis": "lesson_flat",
+            "rate": 25000,
+            "effective_date": "2026-03-01",
+            "replace_existing": true
+          }
+        },
+        {
+          "id": "leave-finance-tab",
+          "action": "click",
+          "selector": "[role='tab']:has-text('סקירה')"
+        },
+        {
+          "id": "return-finance-tab",
+          "action": "click",
+          "selector": "[role='tab']:has-text('פיננסים')"
+        },
+        {
+          "id": "wait-rates-panel",
+          "action": "waitForSelector",
+          "selector": "h3:has-text('תעריפי שכר')"
+        },
+        {
+          "id": "assert-history-shows-flat",
+          "description": "The replaced row is a per-session rate, not an hourly one",
+          "action": "click",
+          "selector": "article:has-text('{{SERVICE_NAME}}') button:has-text('היסטוריה')",
+          "first": true
+        },
+        {
+          "id": "assert-flat-in-history",
+          "action": "waitForSelector",
+          "selector": "article:has-text('{{SERVICE_NAME}}'):has-text('₪250.00 למפגש')"
+        },
+        {
+          "id": "assert-no-hourly-leftover",
+          "description": "The hourly amount it replaced is gone",
+          "action": "assert",
+          "type": "count",
+          "selector": "article:has-text('{{SERVICE_NAME}}') li:has-text('₪110.00 לשעה')",
+          "value": "0"
+        },
+        {
+          "id": "assert-form-keeps-unit",
+          "description": "Opening the update form on a per-session rate keeps למפגש selected, so a raise does not change the agreement",
+          "action": "click",
+          "selector": "article:has-text('{{SERVICE_NAME}}') button:has-text('עדכון תעריף')",
+          "first": true
+        },
+        {
+          "id": "assert-flat-preselected",
+          "action": "assert",
+          "type": "text",
+          "selector": "article:has-text('{{SERVICE_NAME}}') [role='combobox']",
+          "value": "למפגש"
+        },
+        {
+          "id": "close-form",
+          "action": "click",
+          "selector": "article:has-text('{{SERVICE_NAME}}') button:has-text('ביטול')",
+          "first": true
+        },
+        {
+          "id": "screenshot-replace",
+          "action": "screenshot",
+          "name": "07-replace-changes-kind"
         }
       ]
     },

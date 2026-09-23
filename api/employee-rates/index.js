@@ -210,8 +210,18 @@ export default async function employeeRates(context, req) {
 
     let saved = null;
     if (existingOnDate) {
+      // The kind is replaced along with the amount. Only one lesson rate applies on a date, so
+      // replacing an hourly rate with a per-session one has to change pay_basis too — otherwise the
+      // office picks "למפגש" and the row stays hourly, and the amount is multiplied by the lesson.
       const { data, error } = await withOrgScope(supabase, 'RateHistory', orgId)
-        .update({ rate: payload.rate, notes, created_by: userId, metadata: { source: 'employee-rates', replaced_at: new Date().toISOString() } })
+        .update({
+          rate: payload.rate,
+          pay_basis: payload.pay_basis,
+          service_id: payload.service_id,
+          notes,
+          created_by: userId,
+          metadata: { source: 'employee-rates', replaced_at: new Date().toISOString() },
+        })
         .eq('id', existingOnDate.id)
         .select('id, employee_id, service_id, pay_basis, rate, effective_date, created_at, notes, metadata')
         .single();
