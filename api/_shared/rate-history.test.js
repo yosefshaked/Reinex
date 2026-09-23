@@ -5,7 +5,6 @@ import {
   PAY_BASIS,
   buildRateChangeWarnings,
   normalizeRateRow,
-  resolveEmployeePayFields,
   resolveLessonRateOnDate,
   resolveRateOnDate,
   toRateDateKey,
@@ -125,27 +124,3 @@ test('invalid rows and dates are ignored', () => {
   assert.equal(resolveRateOnDate(ROWS, { employeeId: DANA, payBasis: 'bonus', date: '2026-06-01' }), null);
 });
 
-test('a rate says what the employee must be set to for it to pay anything', () => {
-  // api/payroll pays by exactly one model, so a rate of another kind is never read.
-  assert.deepEqual(
-    resolveEmployeePayFields(PAY_BASIS.ATTENDANCE_HOURLY, { payroll_model: 'lesson_based' }),
-    { payroll_model: 'hourly' },
-    'an hourly rate on a lesson-paid employee needs the model to change',
-  );
-  assert.equal(
-    resolveEmployeePayFields(PAY_BASIS.ATTENDANCE_HOURLY, { payroll_model: 'hourly' }),
-    null,
-    'nothing to change when the model already reads it',
-  );
-  assert.deepEqual(
-    resolveEmployeePayFields(PAY_BASIS.LESSON_FLAT, { payroll_model: 'monthly_salary' }),
-    { payroll_model: 'lesson_based' },
-    'both lesson kinds are paid by the lesson model',
-  );
-  assert.deepEqual(
-    resolveEmployeePayFields(PAY_BASIS.LEAVE_DAY, { payroll_model: 'hourly', leave_pay_method: 'average' }),
-    { leave_pay_method: 'fixed_rate' },
-    'a leave-day rate is read through the leave method, not the pay model',
-  );
-  assert.equal(resolveEmployeePayFields('bonus', {}), null, 'an unknown kind asks for nothing');
-});

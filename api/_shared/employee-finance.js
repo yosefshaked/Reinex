@@ -8,6 +8,7 @@ import { fetchLessonMutationState, isLockedState } from './calendar-editing.js';
 import {
   LESSON_PAY_BASES,
   PAY_BASIS,
+  hasRateKind,
   loadRateHistoryRows,
   resolveLessonRateOnDate,
   resolveRateOnDate,
@@ -442,7 +443,6 @@ export function resolveLeaveDayValue({
   leavePayPolicy = DEFAULT_LEAVE_PAY_POLICY,
   rateRows = [],
 }) {
-  const payrollModel = normalizeString(employee?.payroll_model).toLowerCase();
   const method = resolveLeavePayMethod(employee, leavePayPolicy);
   const targetKey = toDateKey(targetDate);
   const employeeId = employee?.id || null;
@@ -456,7 +456,9 @@ export function resolveLeaveDayValue({
     return coerceAgorot(leavePayPolicy.fixed_rate_default);
   }
 
-  if (payrollModel === 'monthly_salary') {
+  // A salaried employee's leave day is worth a day of salary. This follows the rate, not the label
+  // on the employee, so someone who is salaried and also teaches is still valued as salaried here.
+  if (hasRateKind(rateRows, { employeeId, payBasis: PAY_BASIS.MONTHLY_SALARY, onOrBefore: targetKey })) {
     const monthStart = startOfMonthKey(targetDate);
     const monthEnd = endOfMonthKey(targetDate);
     const workingDays = countWorkingDaysInRange(resolveEmployeeWorkingDays(employee), monthStart, monthEnd);
@@ -516,6 +518,31 @@ export function resolveOtherMinutes(row) {
   const worked = Number(row?.worked_minutes) || 0;
   if (worked <= 0) return 0;
   return ['system', 'correction'].includes(normalizeString(row?.source_type).toLowerCase()) ? 0 : worked;
+}
+
+/**
+ * What an employee is owed for a period: every part they actually have rates for, added together.
+ *
+ * Pay used to be chosen by `Employees.payroll_model` — one model, exclusively — so an instructor who
+ * also did office hours was paid for one of the two. Each part now comes from its own rates, and
+ * the pay model is a label. Paid leave is added only when there is no monthly salary: a salary is
+ * pro-rated over working days, which already covers the leave days inside the month.
+ */
+export function combinePayComponents({
+  lessonAmount = 0,
+  attendanceAmount = 0,
+  monthlySalaryAmount = 0,
+  paidLeaveTotal = 0,
+  correctionTotal = 0,
+  paysMonthlySalary = false,
+}) {
+  const base = coerceAgorot(lessonAmount) + coerceAgorot(attendanceAmount) + coerceAgorot(monthlySalaryAmount);
+  const leave = paysMonthlySalary ? 0 : coerceAgorot(paidLeaveTotal);
+  return {
+    baseAmount: coerceAgorot(base),
+    paidLeaveAmount: leave,
+    totalAmount: coerceAgorot(base + leave + coerceAgorot(correctionTotal)),
+  };
 }
 
 export function buildLeaveDayRows({

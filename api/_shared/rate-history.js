@@ -29,29 +29,16 @@ export const PAY_BASIS = Object.freeze({
 export const PAY_BASES = Object.freeze(new Set(Object.values(PAY_BASIS)));
 export const LESSON_PAY_BASES = Object.freeze(new Set([PAY_BASIS.LESSON_HOURLY, PAY_BASIS.LESSON_FLAT]));
 
-/**
- * What an employee must be set to for a rate of this kind to pay anything.
- *
- * `api/payroll` pays an employee by exactly one model, so a rate of a kind the employee's pay model
- * doesn't cover is never read. Saving such a rate can therefore carry the matching employee setting
- * with it; otherwise the office would set a rate that silently pays nothing.
- */
-const EMPLOYEE_PAY_FIELDS_BY_BASIS = Object.freeze({
-  [PAY_BASIS.LESSON_HOURLY]: { payroll_model: 'lesson_based' },
-  [PAY_BASIS.LESSON_FLAT]: { payroll_model: 'lesson_based' },
-  [PAY_BASIS.ATTENDANCE_HOURLY]: { payroll_model: 'hourly' },
-  [PAY_BASIS.MONTHLY_SALARY]: { payroll_model: 'monthly_salary' },
-  [PAY_BASIS.LEAVE_DAY]: { leave_pay_method: 'fixed_rate' },
-});
-
-/** The employee fields a rate of this kind needs, or null when the employee already has them. */
-export function resolveEmployeePayFields(payBasis, employee = {}) {
-  const required = EMPLOYEE_PAY_FIELDS_BY_BASIS[payBasis];
-  if (!required) return null;
-  const missing = Object.entries(required)
-    .filter(([field, value]) => employee?.[field] !== value)
-    .reduce((fields, [field, value]) => ({ ...fields, [field]: value }), {});
-  return Object.keys(missing).length > 0 ? missing : null;
+/** Whether the employee has any rate of this kind — what decides if that part of their pay exists. */
+export function hasRateKind(rows, { employeeId, payBasis, onOrBefore = null } = {}) {
+  const basis = normalizeString(payBasis).toLowerCase();
+  if (!PAY_BASES.has(basis)) return false;
+  return (Array.isArray(rows) ? rows : [])
+    .map(normalizeRateRow)
+    .some((row) => row
+      && row.employee_id === normalizeString(employeeId)
+      && row.pay_basis === basis
+      && (!onOrBefore || row.effective_date <= onOrBefore));
 }
 
 const RATE_HISTORY_COLUMNS = 'id, employee_id, service_id, pay_basis, rate, effective_date, created_at, notes, metadata';

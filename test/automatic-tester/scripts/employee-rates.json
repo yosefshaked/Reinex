@@ -3,8 +3,8 @@
     "id": "employee-rates",
     "name": "Employee Pay Rates — dated rates screen",
     "description": "Payroll phase 1b: the rates panel in an employee's finance tab. Creates an instructor with a service capability through the API (the DB trigger seeds its first rate), then in the UI schedules a future rate, checks the warnings for a back-dated rate and for a date that already has a rate, adds a rate for another service through the add-rate dialog, and adds an hourly rate — which switches the employee's pay model so the rate is actually read. Rates are never edited in place (PAY-A1, PAY-A2).",
-    "version": "1.5.0",
-    "last_validated_at": "2026-09-23T18:00:00Z",
+    "version": "1.6.0",
+    "last_validated_at": "2026-09-23T19:00:00Z",
     "author": "claude-ai",
     "dependencies": {
       "routes": [
@@ -586,8 +586,8 @@
     },
     {
       "id": "ui-add-hourly-rate",
-      "name": "UI – An hourly rate switches the pay model so it is read",
-      "description": "Payroll pays an employee by one model, so adding a kind the model does not read carries the model with it (PAY-A6).",
+      "name": "UI – An hourly rate is added on top of the lesson rates",
+      "description": "An instructor who also does stable or office work is paid for both: adding an hourly rate adds a part of the pay, it does not replace the lesson pay (PAY-A6).",
       "steps": [
         {
           "id": "open-add-dialog",
@@ -602,7 +602,7 @@
         },
         {
           "id": "choose-hourly",
-          "description": "Choose the hourly kind, which this instructor is not paid by",
+          "description": "Choose the hourly kind",
           "action": "click",
           "selector": "[role='dialog'] button:has-text('לפי שעות עבודה')"
         },
@@ -611,12 +611,6 @@
           "action": "fill",
           "selector": "[role='dialog'] input[type='number']",
           "value": "55"
-        },
-        {
-          "id": "assert-model-switch",
-          "description": "The dialog says the pay model will change",
-          "action": "waitForSelector",
-          "selector": "[role='dialog']:has-text('מודל השכר של העובד/ת יעבור')"
         },
         {
           "id": "save-rate",
@@ -630,15 +624,24 @@
           "selector": "article:has-text('שעתי'):has-text('₪55.00')"
         },
         {
-          "id": "assert-lesson-not-used",
-          "description": "The lesson rates are now marked as not read by payroll",
-          "action": "waitForSelector",
-          "selector": "article:has-text('{{SERVICE_NAME}}'):has-text('לא בשימוש')"
+          "id": "assert-lesson-rate-kept",
+          "description": "The lesson rate is still there and still paid — nothing was replaced",
+          "action": "assert",
+          "type": "visible",
+          "selector": "article:has-text('{{SERVICE_NAME}}'):has-text('נוכחי:')"
+        },
+        {
+          "id": "assert-nothing-marked-unused",
+          "description": "No rate is marked as unused: every kind the employee has is paid",
+          "action": "assert",
+          "type": "count",
+          "selector": "article:has-text('לא בשימוש')",
+          "value": "0"
         },
         {
           "id": "screenshot-hourly",
           "action": "screenshot",
-          "name": "05-hourly-rate-switches-model"
+          "name": "05-hourly-rate-added-on-top"
         }
       ]
     },

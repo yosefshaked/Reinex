@@ -21,13 +21,14 @@ import {
   loadInstructorProfilesMap,
   resolveEmployeeRecord,
   resolveEmployeeWorkingDays,
+  combinePayComponents,
   resolveLeaveDayValue,
   resolveOtherMinutes,
   startOfMonthKey,
   toDateKey,
 } from '../_shared/employee-finance.js';
 import { coerceAgorot } from '../_shared/currency.js';
-import { PAY_BASIS, loadRateHistoryRows, resolveRateOnDate } from '../_shared/rate-history.js';
+import { PAY_BASIS, hasRateKind, loadRateHistoryRows, resolveRateOnDate } from '../_shared/rate-history.js';
 
 function shiftMonths(dateKey, deltaMonths) {
   const date = new Date(`${dateKey}T00:00:00Z`);
@@ -143,60 +144,65 @@ async function buildEmployeePayrollPreview(client, orgId, employee, profile, sta
   const paidLeaveTotal = roundCurrency(leaveAmounts.reduce((sum, row) => sum + row.amount, 0));
   const correctionTotal = roundCurrency((corrections || []).reduce((sum, row) => sum + coerceAgorot(row.amount), 0));
 
-  let baseAmount = 0;
-  let attendanceAmount = 0;
-  let lessonAmount = 0;
-  let monthlySalaryAmount = 0;
+  // Each part of the pay comes from its own rates. An instructor who also does office hours has
+  // rows of both kinds and is paid for both; payroll_model is only a label now.
+  const paysMonthlySalary = hasRateKind(rateRows, {
+    employeeId: employee.id,
+    payBasis: PAY_BASIS.MONTHLY_SALARY,
+    onOrBefore: endDate,
+  });
 
-  if (payrollModel === 'lesson_based') {
-    lessonAmount = roundCurrency((lessonEarningsInPeriod || []).reduce((sum, row) => sum + coerceAgorot(row.payout_amount), 0));
-    baseAmount = lessonAmount;
-  } else if (payrollModel === 'hourly') {
-    attendanceAmount = roundCurrency((attendanceInPeriod || []).reduce((sum, row) => {
-      // The hourly rate in effect on each attendance day (RateHistory attendance_hourly).
-      const rate = resolveRateOnDate(rateRows, {
-        employeeId: employee.id,
-        payBasis: PAY_BASIS.ATTENDANCE_HOURLY,
-        date: toDateKey(row?.attendance_date),
-      })?.rate ?? 0;
-      if (rate <= 0) {
-        return sum;
-      }
-      // Office work only: lesson time on the same day is paid through lesson_earnings.
-      const workedMinutes = resolveOtherMinutes(row);
-      return sum + ((workedMinutes / 60) * rate);
-    }, 0));
-    baseAmount = attendanceAmount;
-  } else if (payrollModel === 'monthly_salary') {
-    const workingDates = collectWorkingDates(startDate, endDate, resolveEmployeeWorkingDays(employee, profile));
-    const leaveMap = new Map((leaveAmounts || []).map((row) => [row.leave_date, row]));
-    monthlySalaryAmount = roundCurrency(workingDates.reduce((sum, dateKey) => {
-      const monthStart = startOfMonthKey(dateKey);
-      const monthEnd = endOfMonthKey(dateKey);
-      const monthWorkingDays = Math.max(1, countWorkingDaysInRange(resolveEmployeeWorkingDays(employee, profile), monthStart, monthEnd));
-      // The monthly salary in effect on each working day (RateHistory monthly_salary).
-      const monthlySalary = resolveRateOnDate(rateRows, {
-        employeeId: employee.id,
-        payBasis: PAY_BASIS.MONTHLY_SALARY,
-        date: dateKey,
-      })?.rate ?? 0;
-      const dailyRate = monthlySalary / monthWorkingDays;
-      const leaveDay = leaveMap.get(dateKey);
-      if (leaveDay) {
-        return sum + (dailyRate * Number(leaveDay.pay_fraction || 0));
-      }
-      return sum + dailyRate;
-    }, 0));
-    baseAmount = monthlySalaryAmount;
-  }
+  const lessonAmount = roundCurrency(
+    (lessonEarningsInPeriod || []).reduce((sum, row) => sum + coerceAgorot(row.payout_amount), 0),
+  );
 
-  const totalAmount = roundCurrency(baseAmount + (payrollModel === 'monthly_salary' ? 0 : paidLeaveTotal) + correctionTotal);
+  const attendanceAmount = roundCurrency((attendanceInPeriod || []).reduce((sum, row) => {
+    // The hourly rate in effect on each attendance day (RateHistory attendance_hourly).
+    const rate = resolveRateOnDate(rateRows, {
+      employeeId: employee.id,
+      payBasis: PAY_BASIS.ATTENDANCE_HOURLY,
+      date: toDateKey(row?.attendance_date),
+    })?.rate ?? 0;
+    if (rate <= 0) {
+      return sum;
+    }
+    // Office work only: lesson time on the same day is paid through lesson_earnings.
+    return sum + ((resolveOtherMinutes(row) / 60) * rate);
+  }, 0));
+
+  const monthlySalaryAmount = paysMonthlySalary
+    ? roundCurrency(collectWorkingDates(startDate, endDate, resolveEmployeeWorkingDays(employee, profile))
+      .reduce((sum, dateKey) => {
+        const monthStart = startOfMonthKey(dateKey);
+        const monthEnd = endOfMonthKey(dateKey);
+        const monthWorkingDays = Math.max(1, countWorkingDaysInRange(resolveEmployeeWorkingDays(employee, profile), monthStart, monthEnd));
+        // The monthly salary in effect on each working day (RateHistory monthly_salary).
+        const monthlySalary = resolveRateOnDate(rateRows, {
+          employeeId: employee.id,
+          payBasis: PAY_BASIS.MONTHLY_SALARY,
+          date: dateKey,
+        })?.rate ?? 0;
+        const dailyRate = monthlySalary / monthWorkingDays;
+        const leaveDay = new Map((leaveAmounts || []).map((row) => [row.leave_date, row])).get(dateKey);
+        return sum + (leaveDay ? dailyRate * Number(leaveDay.pay_fraction || 0) : dailyRate);
+      }, 0))
+    : 0;
+
+  const { baseAmount, paidLeaveAmount, totalAmount } = combinePayComponents({
+    lessonAmount,
+    attendanceAmount,
+    monthlySalaryAmount,
+    paidLeaveTotal,
+    correctionTotal,
+    paysMonthlySalary,
+  });
+
   const leaveBreakdown = {
     employee_paid_days: leaveDays.filter((row) => row.leave_type === 'employee_paid').length,
     system_paid_days: leaveDays.filter((row) => row.leave_type === 'system_paid').length,
     unpaid_days: leaveDays.filter((row) => row.leave_type === 'unpaid').length,
     half_days: leaveDays.filter((row) => row.leave_type === 'half_day').length,
-    paid_leave_total: payrollModel === 'monthly_salary'
+    paid_leave_total: paysMonthlySalary
       ? roundCurrency(leaveAmounts.reduce((sum, row) => sum + row.amount, 0))
       : paidLeaveTotal,
   };
@@ -212,7 +218,7 @@ async function buildEmployeePayrollPreview(client, orgId, employee, profile, sta
     attendance_amount: roundCurrency(attendanceAmount),
     lesson_amount: roundCurrency(lessonAmount),
     monthly_salary_amount: roundCurrency(monthlySalaryAmount),
-    paid_leave_amount: payrollModel === 'monthly_salary' ? 0 : paidLeaveTotal,
+    paid_leave_amount: paidLeaveAmount,
     correction_amount: correctionTotal,
     total_amount: totalAmount,
     leave_breakdown: leaveBreakdown,

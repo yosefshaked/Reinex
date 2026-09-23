@@ -9,13 +9,14 @@ import { describe, it } from 'node:test';
 import {
   DEFAULT_INSTRUCTOR_EARNINGS_POLICY,
   buildLeaveDayRows,
+  combinePayComponents,
   resolveCompensationEligibleParticipants,
   resolveLeaveDayValue,
   resolveLessonInstructorPayout,
   resolveOtherMinutes,
 } from '../api/_shared/employee-finance.js';
 import { shouldParticipantTriggerInstructorCompensation } from '../api/_shared/calendar-workflow-decisions.js';
-import { PAY_BASIS, resolveLessonRateOnDate, resolveRateOnDate } from '../api/_shared/rate-history.js';
+import { PAY_BASIS, hasRateKind, resolveLessonRateOnDate, resolveRateOnDate } from '../api/_shared/rate-history.js';
 
 function rateRow(id, employeeId, serviceId, payBasis, rate, effectiveDate) {
   return { id, employee_id: employeeId, service_id: serviceId, pay_basis: payBasis, rate, effective_date: effectiveDate };
@@ -90,6 +91,31 @@ describe('PAY-A rates', () => {
   it('PAY-A6 an employee with lesson rates and an hourly rate is paid each part from its own rate', () => {
     assert.equal(resolveRateOnDate(RATES, { employeeId: 'dana', payBasis: PAY_BASIS.ATTENDANCE_HOURLY, date: '2026-10-05' }).rate, 5000);
     assert.equal(resolveLessonRateOnDate(RATES, { employeeId: 'dana', serviceId: 'riding', date: '2026-10-05' }).rate, 12000);
+
+    // Dana taught for 3,000 and did office hours worth 500 in the same month: she is paid both,
+    // where the old rule paid whichever single model was on her employee record.
+    const both = combinePayComponents({ lessonAmount: 300000, attendanceAmount: 50000 });
+    assert.equal(both.baseAmount, 350000);
+    assert.equal(both.totalAmount, 350000);
+
+    // Rates she does not have contribute nothing.
+    assert.equal(hasRateKind(RATES, { employeeId: 'dana', payBasis: PAY_BASIS.MONTHLY_SALARY }), false);
+    assert.equal(hasRateKind(RATES, { employeeId: 'omer', payBasis: PAY_BASIS.ATTENDANCE_HOURLY }), false);
+    assert.equal(hasRateKind(RATES, { employeeId: 'dana', payBasis: PAY_BASIS.ATTENDANCE_HOURLY }), true);
+  });
+
+  it('PAY-A6 paid leave is added on top, except for a salary that already covers the month', () => {
+    const hourly = combinePayComponents({ attendanceAmount: 50000, paidLeaveTotal: 20000, correctionTotal: 5000 });
+    assert.equal(hourly.paidLeaveAmount, 20000, 'an hourly employee is paid for the leave day itself');
+    assert.equal(hourly.totalAmount, 75000);
+
+    const salaried = combinePayComponents({
+      monthlySalaryAmount: 800000,
+      paidLeaveTotal: 20000,
+      paysMonthlySalary: true,
+    });
+    assert.equal(salaried.paidLeaveAmount, 0, 'the salary is pro-rated over the month, leave included');
+    assert.equal(salaried.totalAmount, 800000, 'so the leave day is not paid twice');
   });
 
   it.todo('PAY-A3 a back-dated rate recalculates open months and adds pay differences for closed months');

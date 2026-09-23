@@ -36,15 +36,11 @@ const RATE_KINDS = [
   { key: 'monthly_salary', payBasis: 'monthly_salary', title: 'חודשי', hint: 'משכורת קבועה', icon: CalendarDays, payrollModel: 'monthly_salary' },
 ];
 
-const PAYROLL_MODEL_LABEL = {
-  lesson_based: 'לפי מפגש',
-  hourly: 'שעתי',
-  monthly_salary: 'חודשי',
-};
-
-/** Whether a rate of this kind is read by payroll for this employee as they are set up now. */
-function isKindPaid(kind, employee) {
-  return (employee?.payroll_model || 'lesson_based') === kind.payrollModel;
+/** Whether the employee already has a rate of this kind. Every kind they have is paid. */
+function hasRateOfKind(kind, rates) {
+  return (Array.isArray(rates) ? rates : []).some((row) => (kind.key === 'lesson'
+    ? LESSON_BASES.includes(row.pay_basis)
+    : row.pay_basis === kind.payBasis && !row.service_id));
 }
 
 const BASIS_SUFFIX = {
@@ -242,9 +238,6 @@ function RateCard({ card, rates, today, onSave, saving }) {
             {card.unassigned ? (
               <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-800">שירות לא משויך</span>
             ) : null}
-            {card.unpaid ? (
-              <span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-500">לא בשימוש</span>
-            ) : null}
           </div>
           {card.hint ? <p className="mt-0.5 text-xs text-slate-500">{card.hint}</p> : null}
           {current ? (
@@ -329,7 +322,7 @@ function RateCard({ card, rates, today, onSave, saving }) {
  * then set it. A kind the employee's pay model doesn't read is offered too, and saving it switches
  * the employee to that model, so the rate actually pays.
  */
-function AddRateDialog({ open, onOpenChange, employee, services, rates, today, onSave, saving }) {
+function AddRateDialog({ open, onOpenChange, services, rates, today, onSave, saving }) {
   const [kindKey, setKindKey] = useState(RATE_KINDS[0].key);
   const [serviceId, setServiceId] = useState('');
   const [form, setForm] = useState(() => createEmptyForm('lesson_hourly', today));
@@ -339,11 +332,11 @@ function AddRateDialog({ open, onOpenChange, employee, services, rates, today, o
 
   useEffect(() => {
     if (!open) return;
-    const initial = RATE_KINDS.find((item) => isKindPaid(item, employee)) || RATE_KINDS[0];
+    const initial = RATE_KINDS.find((item) => hasRateOfKind(item, rates)) || RATE_KINDS[0];
     setKindKey(initial.key);
     setServiceId('');
     setForm(createEmptyForm(initial.payBasis, today));
-  }, [employee, open, today]);
+  }, [open, rates, today]);
 
   function chooseKind(nextKind) {
     setKindKey(nextKind.key);
@@ -365,7 +358,6 @@ function AddRateDialog({ open, onOpenChange, employee, services, rates, today, o
   const warnings = ready
     ? buildWarnings({ history, current, existingOnDate, effectiveDate: form.effectiveDate, today, isLesson: isLessonKind })
     : [];
-  const switchesPayModel = !isKindPaid(kind, employee);
 
   async function handleSave() {
     const saved = await onSave({
@@ -375,7 +367,6 @@ function AddRateDialog({ open, onOpenChange, employee, services, rates, today, o
       effectiveDate: form.effectiveDate,
       notes: form.notes || null,
       replaceExisting: Boolean(existingOnDate),
-      applyPayFields: switchesPayModel,
     });
     if (saved) onOpenChange(false);
   }
@@ -410,7 +401,7 @@ function AddRateDialog({ open, onOpenChange, employee, services, rates, today, o
                   <span className="min-w-0">
                     <span className="flex flex-wrap items-center gap-1.5">
                       <span className="text-sm font-bold text-slate-900">{item.title}</span>
-                      {isKindPaid(item, employee) ? (
+                      {hasRateOfKind(item, rates) ? (
                         <span className="rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-bold text-emerald-700">בשימוש</span>
                       ) : null}
                     </span>
@@ -449,12 +440,6 @@ function AddRateDialog({ open, onOpenChange, employee, services, rates, today, o
             saving={saving}
           />
 
-          {switchesPayModel ? (
-            <p className="flex items-start gap-1.5 rounded-xl bg-sky-50 px-3 py-2 text-xs text-sky-900">
-              <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-              <span>מודל השכר של העובד/ת יעבור ל&quot;{PAYROLL_MODEL_LABEL[kind.payrollModel]}&quot;.</span>
-            </p>
-          ) : null}
         </div>
 
         <DialogFooter className="gap-2 sm:justify-start">
@@ -514,19 +499,17 @@ export default function EmployeeRatesPanel({ employee, orgId, session, services 
       if (serviceId && !serviceIds.includes(serviceId)) serviceIds.push(serviceId);
     });
 
-    const lessonKind = RATE_KINDS[0];
     const lessonCards = serviceIds.map((serviceId) => ({
       key: `service-${serviceId}`,
       title: services.find((service) => service.id === serviceId)?.name || 'שירות',
       payBasis: 'lesson_hourly',
       serviceId,
       unassigned: !capabilities.some((capability) => capability.service_id === serviceId),
-      unpaid: !isKindPaid(lessonKind, employee),
     }));
 
     const otherCards = RATE_KINDS.slice(1)
       .filter((kind) => (
-        rates.some((row) => row.pay_basis === kind.payBasis && !row.service_id) || isKindPaid(kind, employee)
+        hasRateOfKind(kind, rates)
       ))
       // leave_day rows are never listed here: leave pay lives with the leave settings
       .map((kind) => ({
@@ -535,7 +518,6 @@ export default function EmployeeRatesPanel({ employee, orgId, session, services 
         hint: kind.hint,
         payBasis: kind.payBasis,
         serviceId: null,
-        unpaid: !isKindPaid(kind, employee),
       }));
 
     return [
@@ -544,10 +526,10 @@ export default function EmployeeRatesPanel({ employee, orgId, session, services 
     ].filter((group) => group.cards.length > 0);
   }, [employee, rates, services]);
 
-  async function handleSave({ payBasis, serviceId, rate, effectiveDate, notes, replaceExisting, applyPayFields }) {
+  async function handleSave({ payBasis, serviceId, rate, effectiveDate, notes, replaceExisting }) {
     setSaving(true);
     try {
-      const payload = await authenticatedFetch('employee-rates', {
+      await authenticatedFetch('employee-rates', {
         session,
         method: 'POST',
         body: {
@@ -559,11 +541,10 @@ export default function EmployeeRatesPanel({ employee, orgId, session, services 
           effective_date: effectiveDate,
           notes,
           replace_existing: replaceExisting,
-          apply_pay_fields: applyPayFields === true,
         },
       });
       await loadRates();
-      if (payload?.pay_fields_applied) await onEmployeeChanged?.();
+      await onEmployeeChanged?.();
       toast.success(effectiveDate > today ? 'התעריף נשמר ויחול מהתאריך שנבחר.' : 'התעריף נשמר.');
       return true;
     } catch (error) {
@@ -625,7 +606,6 @@ export default function EmployeeRatesPanel({ employee, orgId, session, services 
       <AddRateDialog
         open={addRateOpen}
         onOpenChange={setAddRateOpen}
-        employee={employee}
         services={services}
         rates={rates}
         today={today}

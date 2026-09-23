@@ -3,7 +3,7 @@
  * Employee pay rates (RateHistory): the dated rates pay is calculated from.
  *
  * GET  ?org_id&employee_id            -> { rates, today }
- * POST { org_id, employee_id, pay_basis, service_id?, rate, effective_date, notes?, replace_existing?, apply_pay_fields? }
+ * POST { org_id, employee_id, pay_basis, service_id?, rate, effective_date, notes?, replace_existing? }
  *
  * A rate is never edited in place: saving adds a row "from this date on". Saving on a date that already
  * has a rate of that kind is refused unless `replace_existing` is true. While the legacy rate fields
@@ -26,7 +26,6 @@ import {
   PAY_BASIS,
   buildRateChangeWarnings,
   loadRateHistoryRows,
-  resolveEmployeePayFields,
   toRateDateKey,
   validateRateInput,
 } from '../_shared/rate-history.js';
@@ -166,7 +165,7 @@ export default async function employeeRates(context, req) {
 
   try {
     const { data: employee, error: employeeError } = await withOrgScope(supabase, 'Employees', orgId)
-      .select('id, payroll_model, leave_pay_method')
+      .select('id')
       .eq('id', input.employeeId)
       .maybeSingle();
     if (employeeError) throw employeeError;
@@ -238,25 +237,8 @@ export default async function employeeRates(context, req) {
 
     await mirrorRateToLegacyColumn(supabase, orgId, input, context);
 
-    // A rate of a kind the employee's pay model doesn't cover pays nothing, so the office can apply
-    // the matching setting with the rate instead of hunting for it in the employee card.
-    const payFields = resolveEmployeePayFields(input.payBasis, employee);
-    let appliedPayFields = null;
-    if (payFields && body?.apply_pay_fields === true) {
-      const { error: payFieldsError } = await withOrgScope(supabase, 'Employees', orgId)
-        .update(payFields)
-        .eq('id', input.employeeId);
-      if (payFieldsError) throw payFieldsError;
-      appliedPayFields = payFields;
-    }
 
-    return respond(context, 200, {
-      rate: saved,
-      warnings,
-      today: todayDateKey(),
-      pay_fields_required: payFields,
-      pay_fields_applied: appliedPayFields,
-    });
+    return respond(context, 200, { rate: saved, warnings, today: todayDateKey() });
   } catch (saveError) {
     context.log?.error?.('employee-rates failed to save the rate', { message: saveError?.message, employeeId });
     return respondRatesError(context, 500, 'failed_to_save_rate', saveError, {
