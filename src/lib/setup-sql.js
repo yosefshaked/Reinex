@@ -7218,4 +7218,79 @@ BEGIN
       EXECUTE FUNCTION public.sync_attendance_minute_buckets();
   END IF;
 END $$;
+
+-- -----------------------------------------------------------------
+-- Patch 2026-09-23: lesson rates come only from RateHistory (phase A)
+-- -----------------------------------------------------------------
+-- instructor_service_capabilities.base_rate was written by converting a per-session amount into an
+-- hourly one (amount x 60 / duration), and a trigger copied that converted number into RateHistory
+-- as 'lesson_hourly'. Pay is then hourly x lesson length, so a lesson whose length changed paid an
+-- amount nobody agreed to. What the office actually typed survives in
+-- metadata.compensation_input, so each capability's rate is rebuilt from that, and the legacy
+-- writer is removed. Columns are NOT dropped here: that is a separate step once the rebuilt rates
+-- have been reviewed.
+
+-- 1. Rebuild the rate from what was typed: an amount entered per session becomes a real
+--    lesson_flat rate, an amount entered per hour stays lesson_hourly.
+INSERT INTO public."RateHistory" ("org_id", "employee_id", "service_id", "pay_basis", "rate", "effective_date", "metadata")
+SELECT
+  cap."org_id",
+  cap."employee_id",
+  cap."service_id",
+  CASE WHEN cap."metadata" -> 'compensation_input' ->> 'mode' = 'duration_based' THEN 'lesson_flat' ELSE 'lesson_hourly' END,
+  (cap."metadata" -> 'compensation_input' ->> 'amount_agorot')::integer,
+  COALESCE(emp."start_date", DATE '2000-01-01'),
+  jsonb_build_object(
+    'source', 'rebuild_2026_09',
+    'rebuilt_from', cap."metadata" -> 'compensation_input'
+  )
+FROM public.instructor_service_capabilities cap
+JOIN public."Employees" emp ON emp."id" = cap."employee_id"
+WHERE cap."metadata" ? 'compensation_input'
+  AND (cap."metadata" -> 'compensation_input' ->> 'amount_agorot') ~ '^[0-9]+$'
+  AND NOT EXISTS (
+    SELECT 1 FROM public."RateHistory" existing
+    WHERE existing."org_id" = cap."org_id"
+      AND existing."employee_id" = cap."employee_id"
+      AND existing."service_id" IS NOT DISTINCT FROM cap."service_id"
+      AND existing."pay_basis" IN ('lesson_hourly', 'lesson_flat')
+      AND existing."effective_date" = COALESCE(emp."start_date", DATE '2000-01-01')
+  );
+
+-- 2. Drop the rows that were derived from the legacy column, wherever a real rate now exists for
+--    the same employee and service. This also clears a converted row that was shadowing a
+--    per-session rate entered in the rates screen.
+DELETE FROM public."RateHistory" derived
+WHERE derived."pay_basis" IN ('lesson_hourly', 'lesson_flat')
+  AND COALESCE(derived."metadata" ->> 'source', '') IN ('instructor_service_capabilities.base_rate', 'backfill_2026_09')
+  AND EXISTS (
+    SELECT 1 FROM public."RateHistory" kept
+    WHERE kept."org_id" = derived."org_id"
+      AND kept."employee_id" = derived."employee_id"
+      AND kept."service_id" IS NOT DISTINCT FROM derived."service_id"
+      AND kept."pay_basis" IN ('lesson_hourly', 'lesson_flat')
+      AND COALESCE(kept."metadata" ->> 'source', '') NOT IN ('instructor_service_capabilities.base_rate', 'backfill_2026_09')
+  );
+
+-- 3. A capability that never recorded what the office typed keeps its number, read as hourly.
+--    Mark those rows so the farm can be shown exactly which rates were assumed rather than known.
+UPDATE public."RateHistory"
+SET "metadata" = COALESCE("metadata", '{}'::jsonb) || jsonb_build_object('rate_unit_assumed', 'hourly')
+WHERE "pay_basis" = 'lesson_hourly'
+  AND COALESCE("metadata" ->> 'source', '') IN ('instructor_service_capabilities.base_rate', 'backfill_2026_09')
+  AND NOT ("metadata" ? 'rate_unit_assumed');
+
+-- 4. Employees.current_rate was backfilled onto everyone who had one, including instructors, who
+--    are not paid by the hour. Those rows pay nothing today and would pay something wrong later.
+DELETE FROM public."RateHistory" r
+USING public."Employees" emp
+WHERE emp."id" = r."employee_id"
+  AND r."pay_basis" = 'attendance_hourly'
+  AND COALESCE(r."metadata" ->> 'source', '') = 'backfill_2026_09'
+  AND COALESCE(emp."payroll_model", '') <> 'hourly';
+
+-- 5. Remove the writer. The employee-level mirror stays: it copies current_rate,
+--    monthly_salary_amount and leave_fixed_day_rate verbatim, with no arithmetic and no service.
+DROP TRIGGER IF EXISTS trg_instructor_service_capabilities_mirror_rate_history ON public.instructor_service_capabilities;
+DROP FUNCTION IF EXISTS public.mirror_capability_rate_to_rate_history();
 `;

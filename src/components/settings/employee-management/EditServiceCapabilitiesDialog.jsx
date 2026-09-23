@@ -11,26 +11,18 @@ import { toast } from '@/lib/toast.jsx';
 import { authenticatedFetch } from '@/lib/api-client';
 import { DAY_OPTIONS } from '@/lib/day-of-week.js';
 import { getAvailabilitySummary, normalizeAvailabilityWindows } from '@/lib/instructor-availability.js';
-import CapabilityCompensationFields from './CapabilityCompensationFields.jsx';
-import {
-  buildCapabilityCompensationSummary,
-  hydrateCapabilityCompensationForm,
-  serializeCapabilityCompensation,
-} from '@/lib/instructor-compensation.js';
 
 function createEmptyWindow() {
   return { day: '', start: '', end: '' };
 }
 
 function createEmptyCapability(serviceId = '') {
-  const payConfig = hydrateCapabilityCompensationForm({ base_rate: 0, metadata: {} });
   return {
     service_id: serviceId,
     max_students: 1,
     base_rate: 0,
     availability_windows: serviceId ? [createEmptyWindow()] : [],
     metadata: {},
-    pay_config: { ...payConfig, amountInput: '' },
   };
 }
 
@@ -74,7 +66,6 @@ export default function EditServiceCapabilitiesDialog({
             ...capability,
             availability_windows: Array.isArray(capability.availability_windows) ? capability.availability_windows : [],
             metadata: capability.metadata || {},
-            pay_config: hydrateCapabilityCompensationForm(capability),
           }))
         : [];
 
@@ -213,7 +204,6 @@ export default function EditServiceCapabilitiesDialog({
           service_capabilities: capabilities.map((capability, index) => ({
             service_id: capability.service_id,
             max_students: capability.max_students || 1,
-            ...serializeCapabilityCompensation(capability),
             availability_windows: validationByCapability[index].value,
           })),
         },
@@ -332,22 +322,9 @@ export default function EditServiceCapabilitiesDialog({
                         </div>
                       </div>
 
-                      <CapabilityCompensationFields
-                        capability={capability}
-                        service={services.find((service) => service.id === capability.service_id) || null}
-                        disabled={isSaving}
-                        onChange={(payConfig) => updateCapability(capabilityIndex, 'pay_config', payConfig)}
-                      />
-
                       {capability.service_id ? (
                         <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600">
-                          {(() => {
-                            const summary = buildCapabilityCompensationSummary(
-                              capability,
-                              services.find((service) => service.id === capability.service_id) || null,
-                            );
-                            return `תעריף נוכחי: ${summary.valueLabel} • ${summary.basisLabel}. שינוי כאן נרשם כתעריף שתקף מהיום; לתעריף מתאריך אחר או לצפייה בהיסטוריה — לשונית פיננסים.`;
-                          })()}
+                          התעריף לשירות הזה נקבע בלשונית פיננסים, עם התאריך שממנו הוא חל.
                         </div>
                       ) : null}
 

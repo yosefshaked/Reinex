@@ -62,13 +62,21 @@ async function mirrorRateToLegacyColumn(client, orgId, { employeeId, payBasis, s
         .eq('service_id', serviceId);
       return;
     }
+    if (payBasis === PAY_BASIS.LESSON_FLAT) {
+      // base_rate can only express an hourly number, so a per-session rate clears it rather than
+      // leaving a stale figure behind for the screens that still read it.
+      await withOrgScope(client, 'instructor_service_capabilities', orgId)
+        .update({ base_rate: null })
+        .eq('employee_id', employeeId)
+        .eq('service_id', serviceId);
+      return;
+    }
     const column = LEGACY_EMPLOYEE_COLUMN_BY_BASIS[payBasis];
     if (column) {
       await withOrgScope(client, 'Employees', orgId)
         .update({ [column]: rate })
         .eq('id', employeeId);
     }
-    // lesson_flat has no legacy column (base_rate is an hourly value), so nothing is mirrored.
   } catch (mirrorError) {
     context.log?.warn?.('employee-rates failed to mirror the rate to the legacy column', {
       message: mirrorError?.message,

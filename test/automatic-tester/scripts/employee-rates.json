@@ -3,8 +3,8 @@
     "id": "employee-rates",
     "name": "Employee Pay Rates — dated rates screen",
     "description": "Payroll phase 1b: the rates panel in an employee's finance tab. Creates an instructor with a service capability through the API (the DB trigger seeds its first rate), then in the UI schedules a future rate, checks the warnings for a back-dated rate and for a date that already has a rate, adds a rate for another service through the add-rate dialog, and adds an hourly rate — which switches the employee's pay model so the rate is actually read. Rates are never edited in place (PAY-A1, PAY-A2).",
-    "version": "1.3.0",
-    "last_validated_at": "2026-09-22T14:00:00Z",
+    "version": "1.4.0",
+    "last_validated_at": "2026-09-23T15:00:00Z",
     "author": "claude-ai",
     "dependencies": {
       "routes": [
@@ -14,7 +14,8 @@
         "GET /api/services",
         "POST /api/instructors",
         "GET /api/employee-rates",
-        "POST /api/employee-rates"
+        "POST /api/employee-rates",
+        "PUT /api/instructors"
       ]
     }
   },
@@ -46,7 +47,7 @@
     {
       "id": "api-setup",
       "name": "API – Service and instructor with a rate",
-      "description": "Creates the fixture instructor and a service capability. Saving the capability seeds its first rate in RateHistory (effective from the beginning).",
+      "description": "Creates the fixture instructor and a service capability, then sets that service's rate through the rates endpoint. A capability no longer carries money, so the rate has to be created on its own.",
       "steps": [
         {
           "id": "get-service",
@@ -95,7 +96,7 @@
         },
         {
           "id": "create-capability",
-          "description": "Direct Supabase INSERT of a capability with an hourly rate of 100 (the trigger seeds RateHistory)",
+          "description": "Assign the service to the instructor (capacity and availability only — no rate)",
           "action": "apiCall",
           "method": "POST",
           "endpoint": "{{SUPABASE_URL}}/rest/v1/instructor_service_capabilities",
@@ -107,7 +108,6 @@
             "org_id": "{{TEST_ORG_ID}}",
             "employee_id": "{{RATE_INSTRUCTOR_ID}}",
             "service_id": "{{SERVICE_ID}}",
-            "base_rate": 10000,
             "max_students": 1,
             "availability_windows": [],
             "metadata": {}
@@ -115,6 +115,22 @@
           "ignoreStatus": [
             409
           ]
+        },
+        {
+          "id": "seed-rate",
+          "description": "The instructor's rate for that service, in effect from the start of employment",
+          "action": "apiCall",
+          "method": "POST",
+          "endpoint": "/api/employee-rates",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "employee_id": "{{RATE_INSTRUCTOR_ID}}",
+            "service_id": "{{SERVICE_ID}}",
+            "pay_basis": "lesson_hourly",
+            "rate": 10000,
+            "effective_date": "2000-01-01",
+            "replace_existing": true
+          }
         },
         {
           "id": "verify-seeded-rate",
@@ -353,6 +369,101 @@
           "id": "screenshot-service-rate",
           "action": "screenshot",
           "name": "04-service-rate-added"
+        }
+      ]
+    },
+    {
+      "id": "capability-edit-keeps-rate",
+      "name": "A capability edit no longer rewrites the rate",
+      "description": "A per-session rate set in the rates screen used to be replaced by an hourly one whenever anything else on the capability was saved: the capability carried base_rate, and a trigger copied it into RateHistory as lesson_hourly. The capability endpoint no longer carries money at all.",
+      "steps": [
+        {
+          "id": "set-flat-rate",
+          "description": "The office agrees ₪200 per session in the rates screen",
+          "action": "apiCall",
+          "method": "POST",
+          "endpoint": "/api/employee-rates",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "employee_id": "{{RATE_INSTRUCTOR_ID}}",
+            "service_id": "{{SERVICE_ID}}",
+            "pay_basis": "lesson_flat",
+            "rate": 20000,
+            "effective_date": "2026-01-15",
+            "replace_existing": true
+          }
+        },
+        {
+          "id": "edit-capability",
+          "description": "Later someone edits only the capacity and availability of that service",
+          "action": "apiCall",
+          "method": "PUT",
+          "endpoint": "/api/instructors",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "instructor_id": "{{RATE_INSTRUCTOR_ID}}",
+            "service_capabilities": [
+              {
+                "service_id": "{{SERVICE_ID}}",
+                "max_students": 2,
+                "availability_windows": []
+              }
+            ]
+          }
+        },
+        {
+          "id": "reload-employees",
+          "action": "navigate",
+          "url": "{{BASE_URL}}/#/employees"
+        },
+        {
+          "id": "wait-main",
+          "action": "waitForSelector",
+          "selector": "main, [role='main']"
+        },
+        {
+          "id": "open-employee",
+          "action": "click",
+          "selector": "button:has-text('בדיקה {{RUN_NUMERIC_ID}}')",
+          "first": true
+        },
+        {
+          "id": "open-finance-tab",
+          "action": "click",
+          "selector": "[role='tab']:has-text('פיננסים')"
+        },
+        {
+          "id": "wait-rates-panel",
+          "action": "waitForSelector",
+          "selector": "h3:has-text('תעריפי שכר')"
+        },
+        {
+          "id": "leave-finance-tab",
+          "description": "Leave the tab so the panel unmounts",
+          "action": "click",
+          "selector": "[role='tab']:has-text('סקירה')"
+        },
+        {
+          "id": "return-finance-tab",
+          "description": "Re-enter it, which refetches the rates",
+          "action": "click",
+          "selector": "[role='tab']:has-text('פיננסים')"
+        },
+        {
+          "id": "wait-rates-panel-again",
+          "action": "waitForSelector",
+          "selector": "h3:has-text('תעריפי שכר')"
+        },
+        {
+          "id": "assert-flat-survived",
+          "description": "The per-session rate is still the current one — nothing converted it",
+          "action": "waitForSelector",
+          "selector": "article:has-text('{{SERVICE_NAME}}'):has-text('₪200.00 למפגש')"
+        },
+        {
+          "id": "screenshot-survived",
+          "action": "screenshot",
+          "name": "06-capability-edit-keeps-rate"
         }
       ]
     },
