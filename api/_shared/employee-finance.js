@@ -1380,13 +1380,60 @@ export async function validateInstructorRateForLesson(
 
   // A rate of 0 is explicitly valid (volunteer / zero-rate service). Only a missing rate on that date is an error.
   if (!resolveLessonRateOnDate(rateRows, { employeeId: resolvedInstructorId, serviceId: resolvedServiceId, date: rateDate })) {
+    // The rate that does exist for this service, if any, starts after the lesson: say when, so the
+    // office knows the fix is a rate dated earlier rather than "no rate at all".
+    const nextRateDate = rateRows
+      .filter((row) => LESSON_PAY_BASES.has(row.pay_basis)
+        && row.employee_id === resolvedInstructorId
+        && row.service_id === resolvedServiceId
+        && row.effective_date > rateDate)
+      .map((row) => row.effective_date)
+      .sort()[0] || null;
+
+    const [{ data: employee }, { data: service }] = await Promise.all([
+      tenantClient.from('Employees').select('first_name, last_name').eq('id', resolvedInstructorId).maybeSingle(),
+      tenantClient.from('Services').select('name').eq('id', resolvedServiceId).maybeSingle(),
+    ]);
+
     return {
       code: 'instructor_rate_not_configured',
       instructor_employee_id: resolvedInstructorId,
       service_id: resolvedServiceId,
       rate_date: rateDate || null,
+      next_rate_date: nextRateDate,
+      message: describeMissingLessonRate({
+        instructorName: [employee?.first_name, employee?.last_name].filter(Boolean).join(' '),
+        serviceName: service?.name || '',
+        lessonDate: rateDate,
+        nextRateDate,
+      }),
     };
   }
 
   return null;
+}
+
+function formatHebrewDate(dateKey) {
+  const [year, month, day] = String(dateKey || '').split('-');
+  return year && month && day ? `${day}.${month}.${year}` : String(dateKey || '');
+}
+
+/**
+ * Why a lesson cannot be paid, and what the office does about it — not just "no rate".
+ *
+ * When the instructor already has a rate for the service but it starts after the lesson, the fix is
+ * a rate dated on or before the lesson, so say exactly that, with the dates.
+ */
+export function describeMissingLessonRate({ instructorName = '', serviceName = '', lessonDate, nextRateDate = null }) {
+  const name = instructorName || 'המדריך/ה';
+  const service = serviceName ? `"${serviceName}"` : 'השירות הזה';
+  const path = `עובדים ← ${name} ← פיננסים`;
+  const lesson = formatHebrewDate(lessonDate);
+  if (nextRateDate) {
+    return `${name} מקבל/ת תשלום על ${service} רק מ-${formatHebrewDate(nextRateDate)}, `
+      + `והמפגש הזה היה ב-${lesson}, לפני כן. `
+      + `כדי לשלם עליו, הוסיפו תעריף שחל מ-${lesson} או קודם: ${path} ← עדכון תעריף.`;
+  }
+  return `ל${name} אין תעריף על ${service}. `
+    + `כדי לשלם על המפגש, הגדירו תעריף שחל מ-${lesson} או קודם: ${path} ← הוספת תעריף.`;
 }

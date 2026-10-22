@@ -3,8 +3,8 @@
     "id": "employee-rates",
     "name": "Employee Pay Rates — dated rates screen",
     "description": "Payroll phase 1b: the rates panel in an employee's finance tab. Creates an instructor with a service capability through the API (the DB trigger seeds its first rate), then in the UI schedules a future rate, checks the warnings for a back-dated rate and for a date that already has a rate, adds a rate for another service through the add-rate dialog, and adds an hourly rate — which switches the employee's pay model so the rate is actually read. Rates are never edited in place (PAY-A1, PAY-A2).",
-    "version": "1.8.0",
-    "last_validated_at": "2026-09-23T20:00:00Z",
+    "version": "1.9.0",
+    "last_validated_at": "2026-10-22T12:00:00Z",
     "author": "claude-ai",
     "dependencies": {
       "routes": [
@@ -303,7 +303,7 @@
           "description": "The kind the employee is actually paid by is preselected and marked as in use",
           "action": "assert",
           "type": "visible",
-          "selector": "[role='dialog'] button[aria-pressed='true']:has-text('לפי מפגש')"
+          "selector": "[role='dialog'] button[aria-pressed='true']:has-text('הדרכה')"
         },
         {
           "id": "open-service-list",
@@ -364,6 +364,13 @@
           "action": "apiCall",
           "method": "GET",
           "endpoint": "/api/employee-rates?org_id={{TEST_ORG_ID}}&employee_id={{RATE_INSTRUCTOR_ID}}"
+        },
+        {
+          "id": "assert-can-assign-from-card",
+          "description": "A service the employee is not assigned to offers to set it up from the card",
+          "action": "assert",
+          "type": "visible",
+          "selector": "article:has-text('{{OTHER_SERVICE_NAME}}') button:has-text('הגדרת שיבוץ')"
         },
         {
           "id": "screenshot-service-rate",
@@ -567,9 +574,9 @@
         {
           "id": "assert-flat-preselected",
           "action": "assert",
-          "type": "text",
-          "selector": "article:has-text('{{SERVICE_NAME}}') [role='combobox']",
-          "value": "למפגש"
+          "type": "visible",
+          "selector": "article:has-text('{{SERVICE_NAME}}') [role='radio'][aria-checked='true']:has-text('למפגש')",
+          "description": "The unit toggle opens on למפגש — the unit already in effect"
         },
         {
           "id": "close-form",

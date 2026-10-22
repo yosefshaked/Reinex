@@ -22,6 +22,7 @@ import { toast } from '@/lib/toast.jsx';
 import { authenticatedFetch } from '@/lib/api-client.js';
 import { getAvailabilitySummary, normalizeAvailabilityWindows } from '@/lib/instructor-availability.js';
 import AvailabilityWindowsEditor from './AvailabilityWindowsEditor.jsx';
+import { buildCapabilitiesPayload } from '@/lib/instructor-capabilities.js';
 import { formatCurrency, toAgorot } from '@/lib/currency.js';
 
 const LESSON_BASES = ['lesson_hourly', 'lesson_flat'];
@@ -33,7 +34,7 @@ const LESSON_BASES = ['lesson_hourly', 'lesson_flat'];
  * or a fixed value), set with the other leave settings in the employee card.
  */
 const RATE_KINDS = [
-  { key: 'lesson', payBasis: 'lesson_hourly', title: 'לפי מפגש', hint: 'תעריף לכל שירות', icon: GraduationCap, payrollModel: 'lesson_based' },
+  { key: 'lesson', payBasis: 'lesson_hourly', title: 'הדרכה', hint: 'תעריף לכל שירות', icon: GraduationCap, payrollModel: 'lesson_based' },
   { key: 'attendance_hourly', payBasis: 'attendance_hourly', title: 'שעתי', hint: 'לפי שעות עבודה', icon: Clock, payrollModel: 'hourly' },
   { key: 'monthly_salary', payBasis: 'monthly_salary', title: 'חודשי', hint: 'משכורת קבועה', icon: CalendarDays, payrollModel: 'monthly_salary' },
 ];
@@ -127,17 +128,52 @@ function RateFields({ idPrefix, form, setForm, allowBasisChoice, warnings, savin
         <div className="space-y-1.5">
           <Label htmlFor={`rate-amount-${idPrefix}`} className="text-xs text-slate-600">
             סכום בשקלים
-            {BASIS_SUFFIX[unitBasis] ? <span className="text-slate-400"> · {BASIS_SUFFIX[unitBasis]}</span> : null}
+            {!allowBasisChoice && BASIS_SUFFIX[unitBasis] ? <span className="text-slate-400"> · {BASIS_SUFFIX[unitBasis]}</span> : null}
           </Label>
-          <Input
-            id={`rate-amount-${idPrefix}`}
-            type="number"
-            min="0"
-            step="0.01"
-            value={form.amount}
-            onChange={(event) => setForm((value) => ({ ...value, amount: event.target.value }))}
-            disabled={saving}
-          />
+          <div className="flex items-stretch gap-2">
+            <Input
+              id={`rate-amount-${idPrefix}`}
+              type="number"
+              min="0"
+              step="0.01"
+              className="min-w-0 flex-1"
+              value={form.amount}
+              onChange={(event) => setForm((value) => ({ ...value, amount: event.target.value }))}
+              disabled={saving}
+            />
+            {allowBasisChoice ? (
+              <div role="radiogroup" aria-label="יחידת התשלום" className="flex shrink-0 gap-1 rounded-md border border-slate-200 bg-slate-100 p-1">
+                {[
+                  { value: 'lesson_hourly', label: 'לשעה' },
+                  { value: 'lesson_flat', label: 'למפגש' },
+                ].map((option) => {
+                  const selected = form.basis === option.value;
+                  return (
+                    <button
+                      key={option.value}
+                      type="button"
+                      role="radio"
+                      aria-checked={selected}
+                      onClick={() => setForm((current) => ({ ...current, basis: option.value }))}
+                      disabled={saving}
+                      className={`rounded px-3 text-sm transition ${selected
+                        ? 'bg-white font-bold text-slate-900 shadow-sm'
+                        : 'font-medium text-slate-500 hover:text-slate-700'}`}
+                    >
+                      {option.label}
+                    </button>
+                  );
+                })}
+              </div>
+            ) : null}
+          </div>
+          {allowBasisChoice ? (
+            <p className="text-[11px] text-slate-500">
+              {form.basis === 'lesson_flat'
+                ? 'אותו סכום על כל מפגש, גם אם המפגש יתקצר או יתארך.'
+                : 'הסכום מוכפל באורך המפגש — מפגש ארוך משלם יותר.'}
+            </p>
+          ) : null}
         </div>
         <div className="space-y-1.5">
           <Label htmlFor={`rate-date-${idPrefix}`} className="text-xs text-slate-600">בתוקף מתאריך</Label>
@@ -150,19 +186,6 @@ function RateFields({ idPrefix, form, setForm, allowBasisChoice, warnings, savin
           />
         </div>
       </div>
-
-      {allowBasisChoice ? (
-        <div className="space-y-1.5">
-          <Label className="text-xs text-slate-600">אופן החישוב</Label>
-          <Select value={form.basis} onValueChange={(value) => setForm((current) => ({ ...current, basis: value }))} disabled={saving}>
-            <SelectTrigger><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="lesson_hourly">לפי שעה (הסכום מוכפל במשך המפגש)</SelectItem>
-              <SelectItem value="lesson_flat">למפגש (אותו סכום בכל אורך מפגש)</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-      ) : null}
 
       <div className="space-y-1.5">
         <Label htmlFor={`rate-notes-${idPrefix}`} className="text-xs text-slate-600">הערה (לא חובה)</Label>
@@ -405,15 +428,13 @@ function RateCard({ card, rates, today, onSave, onSaveScheduling, saving }) {
               <span className="font-bold text-slate-700">שיבוץ</span>
               <span className="text-slate-500">
                 {card.capability
-                  ? `עד ${card.capability.max_students || 1} רוכבים · ${card.availabilitySummary || 'לא הוגדרו שעות עבודה'}`
-                  : 'השירות אינו משויך לעובד/ת'}
+                  ? `${(card.capability.max_students || 1) === 1 ? 'רוכב אחד' : `עד ${card.capability.max_students} רוכבים`} · ${card.availabilitySummary || 'לא הוגדרו שעות עבודה'}`
+                  : 'עדיין לא משויך — הגדרת שיבוץ תשייך את השירות'}
               </span>
               <span className="flex-grow" />
-              {card.capability ? (
-                <Button type="button" size="sm" variant="ghost" className="text-xs" onClick={() => setSchedulingOpen(true)} disabled={saving}>
-                  שינוי
-                </Button>
-              ) : null}
+              <Button type="button" size="sm" variant="ghost" className="text-xs" onClick={() => setSchedulingOpen(true)} disabled={saving}>
+                {card.capability ? 'שינוי' : 'הגדרת שיבוץ'}
+              </Button>
             </div>
           )}
         </div>
@@ -632,7 +653,7 @@ export default function EmployeeRatesPanel({ employee, orgId, session, services 
       }));
 
     return [
-      { key: 'lesson', title: 'לפי מפגש', hint: 'תעריף לכל שירות', cards: lessonCards },
+      { key: 'lesson', title: 'הדרכה', hint: 'תעריף לכל שירות', cards: lessonCards },
       { key: 'employee', title: 'שכר עבודה', hint: 'שעות או משכורת', cards: otherCards },
     ].filter((group) => group.cards.length > 0);
   }, [employee, rates, services]);
@@ -657,13 +678,10 @@ export default function EmployeeRatesPanel({ employee, orgId, session, services 
         body: {
           org_id: orgId,
           instructor_id: employee.id,
-          service_capabilities: (employee?.service_capabilities || []).map((capability) => ({
-            service_id: capability.service_id,
-            max_students: capability.service_id === serviceId ? maxStudents : (capability.max_students || 1),
-            availability_windows: capability.service_id === serviceId
-              ? normalized.value
-              : (capability.availability_windows || []),
-          })),
+          service_capabilities: buildCapabilitiesPayload(
+            employee?.service_capabilities,
+            { serviceId, maxStudents, availabilityWindows: normalized.value },
+          ),
         },
       });
       await onEmployeeChanged?.();

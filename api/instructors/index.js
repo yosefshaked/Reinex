@@ -759,7 +759,11 @@ export default async function (context, req) {
     ).toLowerCase();
     const isRoleConversionToInstructor = existingEmployeeType !== 'instructor' && targetEmployeeType === 'instructor';
 
-    if (targetEmployeeType && targetPayrollModel && !validatePayrollModelForEmployeeType(targetEmployeeType, targetPayrollModel)) {
+    // payroll_model is a display label since pay became additive across rate kinds (api/payroll), so
+    // it is checked only when this request changes it or the employee type. A label left over from an
+    // earlier edit must not block an unrelated save, such as an instructor's working hours.
+    const changesPayLabel = updates.payroll_model !== undefined || updates.employee_type !== undefined;
+    if (changesPayLabel && targetEmployeeType && targetPayrollModel && !validatePayrollModelForEmployeeType(targetEmployeeType, targetPayrollModel)) {
       return respond(context, 400, { message: 'invalid_payroll_model_for_employee_type' });
     }
 

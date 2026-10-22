@@ -10,7 +10,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
-import { Loader2 } from 'lucide-react';
+import { Loader2, TriangleAlert } from 'lucide-react';
 import ConfirmDialog from '@/components/ui/ConfirmDialog.jsx';
 import { toast } from '@/lib/toast.jsx';
 import { authenticatedFetch } from '@/lib/api-client.js';
@@ -66,6 +66,22 @@ export default function EmployeeAttendancePanel({ employee, orgId, session }) {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({ status: 'present', workedMinutes: '', notes: '' });
+  const [hourlyRates, setHourlyRates] = useState([]);
+
+  // Office hours are paid from the hourly rate in effect that day. Loaded once so the day editor can
+  // say when hours being entered will not be paid.
+  useEffect(() => {
+    if (!employee?.id || !orgId) return undefined;
+    let active = true;
+    authenticatedFetch('employee-rates', { session, params: { org_id: orgId, employee_id: employee.id } })
+      .then((payload) => {
+        if (!active) return;
+        const rows = Array.isArray(payload?.rates) ? payload.rates : [];
+        setHourlyRates(rows.filter((row) => row.pay_basis === 'attendance_hourly' && !row.service_id));
+      })
+      .catch(() => { if (active) setHourlyRates([]); });
+    return () => { active = false; };
+  }, [employee?.id, orgId, session]);
 
   const monthStart = useMemo(() => toLocalDateString(startOfMonth(monthDate)), [monthDate]);
   const monthEnd = useMemo(() => toLocalDateString(endOfMonth(monthDate)), [monthDate]);
@@ -135,6 +151,9 @@ export default function EmployeeAttendancePanel({ employee, orgId, session }) {
 
   const selectedRecord = recordsByDate.get(selectedDate) || null;
   const selectedLessonMinutes = Math.max(0, Number(selectedRecord?.lesson_minutes) || 0);
+  const firstHourlyRateDate = hourlyRates.map((row) => row.effective_date).sort()[0] || null;
+  const hourlyRateOnSelectedDay = hourlyRates.some((row) => row.effective_date <= selectedDate);
+  const enteringOtherMinutes = Number(form.workedMinutes) > 0;
   const [confirmRemoveOpen, setConfirmRemoveOpen] = useState(false);
   const selectedLeave = leaveByDate.get(selectedDate) || null;
 
@@ -302,6 +321,16 @@ export default function EmployeeAttendancePanel({ employee, orgId, session }) {
               ) : null}
             </div>
             <Input id="worked-minutes" type="number" min="0" step="15" value={form.workedMinutes} onChange={(event) => setForm((current) => ({ ...current, workedMinutes: event.target.value }))} disabled={saving || Boolean(selectedLeave)} />
+            {enteringOtherMinutes && !hourlyRateOnSelectedDay ? (
+              <p className="flex items-start gap-1.5 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                <span>
+                  {firstHourlyRateDate
+                    ? `התעריף השעתי מתחיל רק ב-${firstHourlyRateDate.split('-').reverse().join('.')}. השעות יירשמו, אבל לא ישולמו — כדי לשלם עליהן, הוסיפו תעריף שעתי שחל מהיום הזה או קודם (לשונית פיננסים).`
+                    : 'לעובד/ת אין תעריף שעתי. השעות יירשמו, אבל לא ישולמו — כדי לשלם עליהן, הוסיפו תעריף שעתי בלשונית פיננסים.'}
+                </span>
+              </p>
+            ) : null}
           </div>
 
           <div className="space-y-2">

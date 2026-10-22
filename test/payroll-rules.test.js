@@ -10,6 +10,7 @@ import {
   DEFAULT_INSTRUCTOR_EARNINGS_POLICY,
   buildLeaveDayRows,
   combinePayComponents,
+  describeMissingLessonRate,
   resolveCompensationEligibleParticipants,
   resolveLeaveDayValue,
   resolveLessonInstructorPayout,
@@ -116,6 +117,23 @@ describe('PAY-A rates', () => {
     });
     assert.equal(salaried.paidLeaveAmount, 0, 'the salary is pro-rated over the month, leave included');
     assert.equal(salaried.totalAmount, 800000, 'so the leave day is not paid twice');
+  });
+
+  it('PAY-A4 a lesson before the rate started explains when pay starts and how to cover the lesson', () => {
+    const message = describeMissingLessonRate({
+      instructorName: 'דנה כהן',
+      serviceName: 'שיעור ניסיון',
+      lessonDate: '2026-09-15',
+      nextRateDate: '2026-10-22',
+    });
+    assert.match(message, /רק מ-22\.10\.2026/, 'when the existing rate starts');
+    assert.match(message, /היה ב-15\.09\.2026/, 'when the lesson was');
+    assert.match(message, /תעריף שחל מ-15\.09\.2026 או קודם/, 'the fix: a rate dated on or before the lesson');
+    assert.match(message, /עובדים ← דנה כהן ← פיננסים/, 'where to do it');
+
+    const none = describeMissingLessonRate({ instructorName: 'דנה כהן', serviceName: 'שיעור ניסיון', lessonDate: '2026-09-15' });
+    assert.match(none, /אין תעריף על "שיעור ניסיון"/);
+    assert.doesNotMatch(none, /רק מ-/, 'no start date is invented when there is no rate at all');
   });
 
   it.todo('PAY-A3 a back-dated rate recalculates open months and adds pay differences for closed months');
