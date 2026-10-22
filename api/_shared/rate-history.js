@@ -29,6 +29,18 @@ export const PAY_BASIS = Object.freeze({
 export const PAY_BASES = Object.freeze(new Set(Object.values(PAY_BASIS)));
 export const LESSON_PAY_BASES = Object.freeze(new Set([PAY_BASIS.LESSON_HOURLY, PAY_BASIS.LESSON_FLAT]));
 
+/** Whether the employee has any rate of this kind — what decides if that part of their pay exists. */
+export function hasRateKind(rows, { employeeId, payBasis, onOrBefore = null } = {}) {
+  const basis = normalizeString(payBasis).toLowerCase();
+  if (!PAY_BASES.has(basis)) return false;
+  return (Array.isArray(rows) ? rows : [])
+    .map(normalizeRateRow)
+    .some((row) => row
+      && row.employee_id === normalizeString(employeeId)
+      && row.pay_basis === basis
+      && (!onOrBefore || row.effective_date <= onOrBefore));
+}
+
 const RATE_HISTORY_COLUMNS = 'id, employee_id, service_id, pay_basis, rate, effective_date, created_at, notes, metadata';
 const DATE_KEY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -122,6 +134,75 @@ export function resolveLessonRateOnDate(rows, { employeeId = null, serviceId, da
   return pickLatest(candidateRows(rows, { employeeId, date }).filter((row) => (
     LESSON_PAY_BASES.has(row.pay_basis) && sameService(row.service_id, serviceId)
   )));
+}
+
+/**
+ * Validate a new rate before it is written. Returns `{ value }` or `{ error }` with a stable code.
+ * Lesson kinds need a service; the other kinds must not carry one.
+ */
+export function validateRateInput({ employeeId, payBasis, serviceId = null, rate, effectiveDate } = {}) {
+  const normalizedEmployeeId = normalizeString(employeeId);
+  if (!normalizedEmployeeId) return { error: 'missing_employee_id' };
+
+  const normalizedBasis = normalizeString(payBasis).toLowerCase();
+  if (!PAY_BASES.has(normalizedBasis)) return { error: 'invalid_pay_basis' };
+
+  const normalizedServiceId = normalizeString(serviceId) || null;
+  if (LESSON_PAY_BASES.has(normalizedBasis) && !normalizedServiceId) return { error: 'missing_service_id' };
+  if (!LESSON_PAY_BASES.has(normalizedBasis) && normalizedServiceId) return { error: 'service_not_allowed_for_pay_basis' };
+
+  const numericRate = Number(rate);
+  if (!Number.isFinite(numericRate) || !Number.isInteger(numericRate) || numericRate < 0) return { error: 'invalid_rate' };
+
+  const normalizedDate = normalizeString(effectiveDate);
+  if (!isDateKey(normalizedDate)) return { error: 'invalid_effective_date' };
+
+  return {
+    value: {
+      employeeId: normalizedEmployeeId,
+      payBasis: normalizedBasis,
+      serviceId: normalizedServiceId,
+      rate: coerceAgorot(numericRate),
+      effectiveDate: normalizedDate,
+    },
+  };
+}
+
+/**
+ * What the office should be told before a rate is saved, and the rows it interacts with.
+ * - effective_date_in_past: the rate applies to days that already happened.
+ * - effective_date_before_current_rate: it slots in before the current rate and only applies until the next one.
+ * - rate_exists_on_date: a rate of this kind already exists on that date (saving replaces it).
+ */
+export function buildRateChangeWarnings(rows, { employeeId, payBasis, serviceId = null, effectiveDate }, todayKey) {
+  const isLesson = LESSON_PAY_BASES.has(normalizeString(payBasis).toLowerCase());
+  const sameKind = (Array.isArray(rows) ? rows : [])
+    .map(normalizeRateRow)
+    .filter((row) => row
+      && row.employee_id === normalizeString(employeeId)
+      && (isLesson
+        ? (LESSON_PAY_BASES.has(row.pay_basis) && sameService(row.service_id, serviceId))
+        : (row.pay_basis === normalizeString(payBasis).toLowerCase() && !row.service_id)));
+
+  const currentRate = pickLatest(sameKind.filter((row) => row.effective_date <= todayKey));
+  const nextRate = sameKind
+    .filter((row) => row.effective_date > todayKey)
+    .sort((left, right) => left.effective_date.localeCompare(right.effective_date))[0] || null;
+  const existingOnDate = sameKind.find((row) => row.effective_date === effectiveDate
+    && (isLesson ? true : row.pay_basis === normalizeString(payBasis).toLowerCase())) || null;
+
+  const warnings = [];
+  if (isDateKey(effectiveDate) && isDateKey(todayKey) && effectiveDate < todayKey) {
+    warnings.push('effective_date_in_past');
+  }
+  if (currentRate && isDateKey(effectiveDate) && effectiveDate < currentRate.effective_date) {
+    warnings.push('effective_date_before_current_rate');
+  }
+  if (existingOnDate) {
+    warnings.push('rate_exists_on_date');
+  }
+
+  return { warnings, currentRate, nextRate, existingOnDate, history: sameKind };
 }
 
 /** Load RateHistory rows for employees (optionally only some kinds). */

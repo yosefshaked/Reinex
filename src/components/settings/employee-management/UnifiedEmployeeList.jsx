@@ -35,12 +35,14 @@ import EmployeeActivityTimeline from './EmployeeActivityTimeline.jsx';
 import EmployeeAttendancePanel from './EmployeeAttendancePanel.jsx';
 import EditEmployeeDialog from './EditEmployeeDialog.jsx';
 import EditServiceCapabilitiesDialog from './EditServiceCapabilitiesDialog.jsx';
+import ConfirmDialog from '@/components/ui/ConfirmDialog.jsx';
 import EmployeeFinancePanel from './EmployeeFinancePanel.jsx';
+import EmployeeRatesPanel from './EmployeeRatesPanel.jsx';
 import EmployeeLeavePanel from './EmployeeLeavePanel.jsx';
 import LinkEmployeeMemberDialog from './LinkEmployeeMemberDialog.jsx';
 import InstructorDocumentsSection from '../InstructorDocumentsSection.jsx';
 import { getAvailabilitySummary } from '@/lib/instructor-availability.js';
-import { buildCapabilityCompensationSummary } from '@/lib/instructor-compensation.js';
+import { getServiceCompensationBasisLabel } from '@/lib/instructor-compensation.js';
 
 const REQUEST = { idle: 'idle', loading: 'loading' };
 const TAB_KEYS = {
@@ -345,6 +347,7 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
   const [filterKey, setFilterKey] = useState(FILTER_ALL);
   const [activeTab, setActiveTab] = useState(TAB_KEYS.overview);
   const [actionState, setActionState] = useState(REQUEST.idle);
+  const [pendingDeactivate, setPendingDeactivate] = useState(null);
   const [overviewInstances, setOverviewInstances] = useState([]);
   const [employeeInstances, setEmployeeInstances] = useState([]);
   const [instancesLoading, setInstancesLoading] = useState(false);
@@ -569,9 +572,8 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
       service: services.find((service) => service.id === capability.service_id) || null,
       name: getServiceName(services, capability.service_id),
       availabilitySummary: getAvailabilitySummary(capability.availability_windows),
-      compensationSummary: buildCapabilityCompensationSummary(
-        capability,
-        services.find((service) => service.id === capability.service_id) || null,
+      paymentBasisLabel: getServiceCompensationBasisLabel(
+        services.find((service) => service.id === capability.service_id)?.payment_model,
       ),
     }))
   ), [currentEmployee, services]);
@@ -926,7 +928,7 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
                       </Button>
                     ) : null}
                     {currentEmployee.is_active ? (
-                      <Button size="sm" variant="outline" onClick={() => handleToggleActive(currentEmployee, false)} disabled={actionState === REQUEST.loading}>
+                      <Button size="sm" variant="outline" onClick={() => setPendingDeactivate(currentEmployee)} disabled={actionState === REQUEST.loading}>
                         <UserX className="me-2 h-4 w-4 text-red-600" />
                         השבת
                       </Button>
@@ -1198,7 +1200,7 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
 
                     <SectionCard
                       title="שירותים ויכולות"
-                      description="שירותים זמינים, קיבולת ואופן תשלום"
+                      description="שירותים זמינים, קיבולת ואופן תשלום. התעריפים עצמם וההיסטוריה שלהם נמצאים בלשונית פיננסים"
                       action={getEmployeeType(currentEmployee) === 'instructor' ? (
                         <Button size="sm" variant="outline" onClick={() => setShowCapabilitiesDialog(true)}>
                           <Briefcase className="me-2 h-4 w-4" />
@@ -1212,13 +1214,13 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
                             <div key={capability.service_id} className="rounded-2xl border border-slate-200 bg-slate-50/60 px-3 py-3">
                               <div className="text-sm font-bold text-slate-900">{capability.name}</div>
                               <div className="mt-1 text-xs text-slate-500">
-                                קיבולת {capability.max_students || 1} • {capability.compensationSummary.valueLabel} • {capability.compensationSummary.basisLabel} • {capability.setup_incomplete ? 'זמינות חסרה' : `ימי זמינות ${capability.availabilitySummary || '—'}`}
+                                קיבולת {capability.max_students || 1} • תשלום {capability.paymentBasisLabel} • {capability.setup_incomplete ? 'זמינות חסרה' : `ימי זמינות ${capability.availabilitySummary || '—'}`}
                               </div>
                             </div>
                           ))}
                         </div>
                       ) : (
-                        <EmptyState title="אין שירותים מוגדרים" body="הוסף שירותים לעובד כדי לנהל קיבולת ותעריפי בסיס." />
+                        <EmptyState title="אין שירותים מוגדרים" body="הוסף שירותים לעובד כדי לנהל קיבולת וזמינות." />
                       )}
                     </SectionCard>
                   </div>
@@ -1292,6 +1294,13 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
                 </TabsContent>
 
                 <TabsContent value={TAB_KEYS.finance} className="space-y-3">
+                  <EmployeeRatesPanel
+                    employee={currentEmployee}
+                    orgId={orgId}
+                    session={session}
+                    services={services}
+                    onEmployeeChanged={refetchInstructors}
+                  />
                   <EmployeeFinancePanel
                     employee={currentEmployee}
                     orgId={orgId}
@@ -1348,6 +1357,22 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
           await fetchOverviewInstances();
         }}
       />
+      <ConfirmDialog
+        open={Boolean(pendingDeactivate)}
+        onOpenChange={(open) => { if (!open) setPendingDeactivate(null); }}
+        onConfirm={() => {
+          const target = pendingDeactivate;
+          setPendingDeactivate(null);
+          if (target) void handleToggleActive(target, false);
+        }}
+        confirmLabel="השבתה"
+        destructive={false}
+        title="להשבית את העובד/ת?"
+        description={pendingDeactivate
+          ? `${getEmployeeName(pendingDeactivate)} לא יופיע/תופיע בשיבוץ ובחיפוש. המפגשים, הנוכחות והשכר שכבר נרשמו נשארים, ואפשר להפעיל מחדש בכל רגע.`
+          : ''}
+      />
+
       <EditEmployeeDialog
         open={showEditDialog}
         onOpenChange={setShowEditDialog}

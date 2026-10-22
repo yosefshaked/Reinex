@@ -10,7 +10,8 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
-import { Loader2 } from 'lucide-react';
+import { Loader2, TriangleAlert } from 'lucide-react';
+import ConfirmDialog from '@/components/ui/ConfirmDialog.jsx';
 import { toast } from '@/lib/toast.jsx';
 import { authenticatedFetch } from '@/lib/api-client.js';
 
@@ -47,6 +48,16 @@ const STATUS_OPTIONS = [
   { value: 'absent', label: 'נעדר/ת' },
 ];
 
+/** A day's minutes, kept apart: what came from lessons and what was entered as other work. */
+function describeMinutes(record) {
+  const lesson = Math.max(0, Number(record?.lesson_minutes) || 0);
+  const other = Math.max(0, Number(record?.other_minutes) || 0);
+  const parts = [];
+  if (lesson > 0) parts.push(`מפגשים ${lesson} דק׳`);
+  if (other > 0) parts.push(`עבודה אחרת ${other} דק׳`);
+  return parts.length > 0 ? parts.join(' • ') : '0 דק׳';
+}
+
 export default function EmployeeAttendancePanel({ employee, orgId, session }) {
   const [monthDate, setMonthDate] = useState(() => startOfMonth(new Date()));
   const [selectedDate, setSelectedDate] = useState(() => toLocalDateString(new Date()));
@@ -55,6 +66,22 @@ export default function EmployeeAttendancePanel({ employee, orgId, session }) {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({ status: 'present', workedMinutes: '', notes: '' });
+  const [hourlyRates, setHourlyRates] = useState([]);
+
+  // Office hours are paid from the hourly rate in effect that day. Loaded once so the day editor can
+  // say when hours being entered will not be paid.
+  useEffect(() => {
+    if (!employee?.id || !orgId) return undefined;
+    let active = true;
+    authenticatedFetch('employee-rates', { session, params: { org_id: orgId, employee_id: employee.id } })
+      .then((payload) => {
+        if (!active) return;
+        const rows = Array.isArray(payload?.rates) ? payload.rates : [];
+        setHourlyRates(rows.filter((row) => row.pay_basis === 'attendance_hourly' && !row.service_id));
+      })
+      .catch(() => { if (active) setHourlyRates([]); });
+    return () => { active = false; };
+  }, [employee?.id, orgId, session]);
 
   const monthStart = useMemo(() => toLocalDateString(startOfMonth(monthDate)), [monthDate]);
   const monthEnd = useMemo(() => toLocalDateString(endOfMonth(monthDate)), [monthDate]);
@@ -99,7 +126,7 @@ export default function EmployeeAttendancePanel({ employee, orgId, session }) {
     if (record) {
       setForm({
         status: record.status || 'present',
-        workedMinutes: record.worked_minutes ?? '',
+        workedMinutes: record.other_minutes ?? '',
         notes: record.notes || '',
       });
       return;
@@ -123,6 +150,11 @@ export default function EmployeeAttendancePanel({ employee, orgId, session }) {
   }, [leaveByDate, monthDate, recordsByDate]);
 
   const selectedRecord = recordsByDate.get(selectedDate) || null;
+  const selectedLessonMinutes = Math.max(0, Number(selectedRecord?.lesson_minutes) || 0);
+  const firstHourlyRateDate = hourlyRates.map((row) => row.effective_date).sort()[0] || null;
+  const hourlyRateOnSelectedDay = hourlyRates.some((row) => row.effective_date <= selectedDate);
+  const enteringOtherMinutes = Number(form.workedMinutes) > 0;
+  const [confirmRemoveOpen, setConfirmRemoveOpen] = useState(false);
   const selectedLeave = leaveByDate.get(selectedDate) || null;
 
   async function handleSave() {
@@ -143,7 +175,7 @@ export default function EmployeeAttendancePanel({ employee, orgId, session }) {
           employee_id: employee.id,
           attendance_date: selectedDate,
           status: form.status,
-          worked_minutes: form.workedMinutes === '' ? null : Number(form.workedMinutes),
+          other_minutes: form.workedMinutes === '' ? null : Number(form.workedMinutes),
           notes: form.notes || null,
         },
       });
@@ -169,6 +201,7 @@ export default function EmployeeAttendancePanel({ employee, orgId, session }) {
   }
 
   async function handleDelete() {
+    setConfirmRemoveOpen(false);
     if (!selectedRecord?.id || !employee?.id || !orgId) return;
     setSaving(true);
     try {
@@ -197,7 +230,9 @@ export default function EmployeeAttendancePanel({ employee, orgId, session }) {
         <div className="mb-3 flex items-center justify-between gap-3">
           <div>
             <h3 className="text-sm font-bold text-slate-900">נוכחות חודשית</h3>
-            <p className="text-xs text-slate-500">רישום ידני לעובדי משרד לפי יום. ימי חופשה חוסמים הזנה.</p>
+            <p className="text-xs text-slate-500">
+              שעות שאינן מפגש, לפי יום. דקות המפגשים נרשמות מהיומן ומשולמות דרך המפגש. ימי חופשה חוסמים הזנה.
+            </p>
           </div>
           <div className="flex items-center gap-2">
             <Button size="sm" variant="outline" onClick={() => setMonthDate(addMonths(monthDate, -1))}>הקודם</Button>
@@ -231,7 +266,7 @@ export default function EmployeeAttendancePanel({ employee, orgId, session }) {
                       {day.leave
                         ? `חופשה: ${day.leave.entry?.reason || day.leave.leave_type}`
                         : day.record
-                          ? `${STATUS_OPTIONS.find((item) => item.value === day.record.status)?.label || day.record.status} • ${day.record.worked_minutes ?? 0} דק׳`
+                          ? `${STATUS_OPTIONS.find((item) => item.value === day.record.status)?.label || day.record.status} • ${describeMinutes(day.record)}`
                           : 'ללא רישום'}
                     </div>
                   </div>
@@ -277,8 +312,25 @@ export default function EmployeeAttendancePanel({ employee, orgId, session }) {
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="worked-minutes" className="text-xs text-slate-600">דקות עבודה</Label>
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <Label htmlFor="worked-minutes" className="text-xs text-slate-600">דקות עבודה שאינה מפגש</Label>
+              {selectedLessonMinutes > 0 ? (
+                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-bold text-slate-600">
+                  מפגשים באותו יום: {selectedLessonMinutes} דק׳
+                </span>
+              ) : null}
+            </div>
             <Input id="worked-minutes" type="number" min="0" step="15" value={form.workedMinutes} onChange={(event) => setForm((current) => ({ ...current, workedMinutes: event.target.value }))} disabled={saving || Boolean(selectedLeave)} />
+            {enteringOtherMinutes && !hourlyRateOnSelectedDay ? (
+              <p className="flex items-start gap-1.5 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                <span>
+                  {firstHourlyRateDate
+                    ? `התעריף השעתי מתחיל רק ב-${firstHourlyRateDate.split('-').reverse().join('.')}. השעות יירשמו, אבל לא ישולמו — כדי לשלם עליהן, הוסיפו תעריף שעתי שחל מהיום הזה או קודם (לשונית פיננסים).`
+                    : 'לעובד/ת אין תעריף שעתי. השעות יירשמו, אבל לא ישולמו — כדי לשלם עליהן, הוסיפו תעריף שעתי בלשונית פיננסים.'}
+                </span>
+              </p>
+            ) : null}
           </div>
 
           <div className="space-y-2">
@@ -292,13 +344,23 @@ export default function EmployeeAttendancePanel({ employee, orgId, session }) {
               {selectedRecord ? 'עדכן נוכחות' : 'שמור נוכחות'}
             </Button>
             {selectedRecord ? (
-              <Button variant="outline" onClick={handleDelete} disabled={saving}>
+              <Button variant="outline" onClick={() => setConfirmRemoveOpen(true)} disabled={saving}>
                 הסר רישום
               </Button>
             ) : null}
           </div>
         </div>
       </section>
+      <ConfirmDialog
+        open={confirmRemoveOpen}
+        onOpenChange={setConfirmRemoveOpen}
+        onConfirm={handleDelete}
+        confirmLabel="הסרה"
+        title="להסיר את רישום הנוכחות?"
+        description={selectedLessonMinutes > 0
+          ? `שעות העבודה שאינן מפגש יימחקו. ${selectedLessonMinutes} דקות המפגשים של אותו יום יישארו, הן מגיעות מהיומן.`
+          : 'הרישום של אותו יום יימחק. אפשר להזין אותו מחדש, אבל מה שנרשם עד עכשיו יאבד.'}
+      />
     </div>
   );
 }
