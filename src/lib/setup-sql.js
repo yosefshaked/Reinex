@@ -7118,4 +7118,179 @@ BEGIN
       EXECUTE FUNCTION public.mirror_employee_rates_to_rate_history();
   END IF;
 END $$;
+
+-- -----------------------------------------------------------------
+-- Patch 2026-09-22: attendance separates lesson minutes from other work
+-- -----------------------------------------------------------------
+-- A day's worked_minutes held teaching time and office time in one number, and only one row per
+-- day was allowed across manual/import/system, so a manual office day hid the lesson minutes (and
+-- vice versa). Anything paying by attendance hours therefore paid for lesson time that lesson pay
+-- already covers. The day row now carries the two buckets separately:
+--   lesson_minutes — written from the lessons the instructor is compensated for that day
+--   other_minutes  — work that is not a lesson: office hours, stable work, meetings
+-- worked_minutes stays as the total of both, maintained by a trigger, so existing readers and
+-- reports keep working.
+
+ALTER TABLE public.employee_attendance_records
+  ADD COLUMN IF NOT EXISTS lesson_minutes integer NOT NULL DEFAULT 0;
+
+ALTER TABLE public.employee_attendance_records
+  ADD COLUMN IF NOT EXISTS other_minutes integer NOT NULL DEFAULT 0;
+
+-- Backfill: a system row's minutes were lesson minutes, every other row's were other work.
+UPDATE public.employee_attendance_records
+SET "lesson_minutes" = GREATEST(COALESCE("worked_minutes", 0), 0)
+WHERE "source_type" = 'system'
+  AND "lesson_minutes" = 0
+  AND COALESCE("worked_minutes", 0) <> 0;
+
+UPDATE public.employee_attendance_records
+SET "other_minutes" = GREATEST(COALESCE("worked_minutes", 0), 0)
+WHERE "source_type" <> 'system'
+  AND "other_minutes" = 0
+  AND COALESCE("worked_minutes", 0) > 0;
+
+-- Correction rows can subtract minutes, and they always correct lesson time (they come from a
+-- calendar correction), so they keep their sign in the lesson bucket.
+UPDATE public.employee_attendance_records
+SET "lesson_minutes" = COALESCE("worked_minutes", 0),
+    "other_minutes" = 0
+WHERE "source_type" = 'correction'
+  AND "lesson_minutes" = 0
+  AND COALESCE("worked_minutes", 0) <> 0;
+
+-- worked_minutes is the total of the two buckets. Writers that still set worked_minutes alone
+-- (older code, imports) keep working: their value lands in the bucket the row's source implies.
+CREATE OR REPLACE FUNCTION public.sync_attendance_minute_buckets()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = public
+AS $$
+DECLARE
+  v_buckets_touched boolean;
+BEGIN
+  v_buckets_touched := TG_OP = 'INSERT'
+    OR NEW."lesson_minutes" IS DISTINCT FROM OLD."lesson_minutes"
+    OR NEW."other_minutes" IS DISTINCT FROM OLD."other_minutes";
+
+  NEW."lesson_minutes" := COALESCE(NEW."lesson_minutes", 0);
+  NEW."other_minutes" := COALESCE(NEW."other_minutes", 0);
+
+  IF NOT v_buckets_touched
+    AND NEW."worked_minutes" IS DISTINCT FROM OLD."worked_minutes"
+    AND NEW."worked_minutes" IS NOT NULL
+  THEN
+    -- Only the total was written: put it in the bucket this row is about.
+    IF NEW."source_type" IN ('system', 'correction') THEN
+      NEW."lesson_minutes" := NEW."worked_minutes";
+      NEW."other_minutes" := 0;
+    ELSE
+      NEW."other_minutes" := NEW."worked_minutes";
+      NEW."lesson_minutes" := 0;
+    END IF;
+  ELSIF TG_OP = 'INSERT'
+    AND NEW."worked_minutes" IS NOT NULL
+    AND NEW."lesson_minutes" = 0
+    AND NEW."other_minutes" = 0
+  THEN
+    IF NEW."source_type" IN ('system', 'correction') THEN
+      NEW."lesson_minutes" := NEW."worked_minutes";
+    ELSE
+      NEW."other_minutes" := NEW."worked_minutes";
+    END IF;
+  END IF;
+
+  NEW."worked_minutes" := NEW."lesson_minutes" + NEW."other_minutes";
+  RETURN NEW;
+END;
+$$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_trigger
+    WHERE tgname = 'trg_employee_attendance_records_sync_minutes'
+      AND tgrelid = 'public.employee_attendance_records'::regclass
+  ) THEN
+    CREATE TRIGGER trg_employee_attendance_records_sync_minutes
+      BEFORE INSERT OR UPDATE ON public.employee_attendance_records
+      FOR EACH ROW
+      EXECUTE FUNCTION public.sync_attendance_minute_buckets();
+  END IF;
+END $$;
+
+-- -----------------------------------------------------------------
+-- Patch 2026-09-23: lesson rates come only from RateHistory (phase A)
+-- -----------------------------------------------------------------
+-- instructor_service_capabilities.base_rate was written by converting a per-session amount into an
+-- hourly one (amount x 60 / duration), and a trigger copied that converted number into RateHistory
+-- as 'lesson_hourly'. Pay is then hourly x lesson length, so a lesson whose length changed paid an
+-- amount nobody agreed to. What the office actually typed survives in
+-- metadata.compensation_input, so each capability's rate is rebuilt from that, and the legacy
+-- writer is removed. Columns are NOT dropped here: that is a separate step once the rebuilt rates
+-- have been reviewed.
+
+-- 1. Rebuild the rate from what was typed: an amount entered per session becomes a real
+--    lesson_flat rate, an amount entered per hour stays lesson_hourly.
+INSERT INTO public."RateHistory" ("org_id", "employee_id", "service_id", "pay_basis", "rate", "effective_date", "metadata")
+SELECT
+  cap."org_id",
+  cap."employee_id",
+  cap."service_id",
+  CASE WHEN cap."metadata" -> 'compensation_input' ->> 'mode' = 'duration_based' THEN 'lesson_flat' ELSE 'lesson_hourly' END,
+  (cap."metadata" -> 'compensation_input' ->> 'amount_agorot')::integer,
+  COALESCE(emp."start_date", DATE '2000-01-01'),
+  jsonb_build_object(
+    'source', 'rebuild_2026_09',
+    'rebuilt_from', cap."metadata" -> 'compensation_input'
+  )
+FROM public.instructor_service_capabilities cap
+JOIN public."Employees" emp ON emp."id" = cap."employee_id"
+WHERE cap."metadata" ? 'compensation_input'
+  AND (cap."metadata" -> 'compensation_input' ->> 'amount_agorot') ~ '^[0-9]+$'
+  AND NOT EXISTS (
+    SELECT 1 FROM public."RateHistory" existing
+    WHERE existing."org_id" = cap."org_id"
+      AND existing."employee_id" = cap."employee_id"
+      AND existing."service_id" IS NOT DISTINCT FROM cap."service_id"
+      AND existing."pay_basis" IN ('lesson_hourly', 'lesson_flat')
+      AND existing."effective_date" = COALESCE(emp."start_date", DATE '2000-01-01')
+  );
+
+-- 2. Drop the rows that were derived from the legacy column, wherever a real rate now exists for
+--    the same employee and service. This also clears a converted row that was shadowing a
+--    per-session rate entered in the rates screen.
+DELETE FROM public."RateHistory" derived
+WHERE derived."pay_basis" IN ('lesson_hourly', 'lesson_flat')
+  AND COALESCE(derived."metadata" ->> 'source', '') IN ('instructor_service_capabilities.base_rate', 'backfill_2026_09')
+  AND EXISTS (
+    SELECT 1 FROM public."RateHistory" kept
+    WHERE kept."org_id" = derived."org_id"
+      AND kept."employee_id" = derived."employee_id"
+      AND kept."service_id" IS NOT DISTINCT FROM derived."service_id"
+      AND kept."pay_basis" IN ('lesson_hourly', 'lesson_flat')
+      AND COALESCE(kept."metadata" ->> 'source', '') NOT IN ('instructor_service_capabilities.base_rate', 'backfill_2026_09')
+  );
+
+-- 3. A capability that never recorded what the office typed keeps its number, read as hourly.
+--    Mark those rows so the farm can be shown exactly which rates were assumed rather than known.
+UPDATE public."RateHistory"
+SET "metadata" = COALESCE("metadata", '{}'::jsonb) || jsonb_build_object('rate_unit_assumed', 'hourly')
+WHERE "pay_basis" = 'lesson_hourly'
+  AND COALESCE("metadata" ->> 'source', '') IN ('instructor_service_capabilities.base_rate', 'backfill_2026_09')
+  AND NOT ("metadata" ? 'rate_unit_assumed');
+
+-- 4. Employees.current_rate was backfilled onto everyone who had one, including instructors, who
+--    are not paid by the hour. Those rows pay nothing today and would pay something wrong later.
+DELETE FROM public."RateHistory" r
+USING public."Employees" emp
+WHERE emp."id" = r."employee_id"
+  AND r."pay_basis" = 'attendance_hourly'
+  AND COALESCE(r."metadata" ->> 'source', '') = 'backfill_2026_09'
+  AND COALESCE(emp."payroll_model", '') <> 'hourly';
+
+-- 5. Remove the writer. The employee-level mirror stays: it copies current_rate,
+--    monthly_salary_amount and leave_fixed_day_rate verbatim, with no arithmetic and no service.
+DROP TRIGGER IF EXISTS trg_instructor_service_capabilities_mirror_rate_history ON public.instructor_service_capabilities;
+DROP FUNCTION IF EXISTS public.mirror_capability_rate_to_rate_history();
 `;

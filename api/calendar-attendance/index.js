@@ -620,10 +620,12 @@ async function buildParticipantStatusPreview(client, orgId, body, {
     const previewError = new Error('instructor_rate_not_configured');
     previewError.status = 422;
     previewError.payload = {
-      message: 'לא ניתן לעדכן נוכחות: תעריף המדריך לשירות זה לא הוגדר. יש להגדיר תעריף בכרטיס המדריך.',
+      message: rateError.message || 'לא ניתן לעדכן נוכחות: תעריף המדריך לשירות זה לא הוגדר. יש להגדיר תעריף בכרטיס המדריך.',
       code: rateError.code,
       instructor_employee_id: rateError.instructor_employee_id,
       service_id: rateError.service_id,
+      rate_date: rateError.rate_date,
+      next_rate_date: rateError.next_rate_date,
     };
     throw previewError;
   }
@@ -648,7 +650,7 @@ async function buildParticipantStatusPreview(client, orgId, body, {
       .gte('datetime_start', lessonDayBounds?.startIso || '')
       .lt('datetime_start', lessonDayBounds?.endExclusiveIso || ''),
     withOrgScope(client, 'employee_attendance_records', orgId)
-      .select('id, status, worked_minutes, source_type, metadata')
+      .select('id, status, worked_minutes, lesson_minutes, other_minutes, source_type, metadata')
       .eq('employee_id', instanceDetail.instructor_employee_id)
       .eq('attendance_date', lessonDateKey)
       .in('source_type', ['manual', 'import', 'system'])
@@ -724,7 +726,10 @@ async function buildParticipantStatusPreview(client, orgId, body, {
   });
 
   const projectedWorkedMinutes = projectedAttendanceLessons.reduce((sum, row) => sum + Number(row.duration_minutes || 0), 0);
-  const currentAttendanceWorkedMinutes = Number(systemAttendanceRecord?.worked_minutes || 0);
+  // The lesson bucket of that day: office hours on the same day are not part of this projection.
+  const currentAttendanceWorkedMinutes = Number(
+    systemAttendanceRecord?.lesson_minutes ?? systemAttendanceRecord?.worked_minutes ?? 0,
+  );
   const effectiveProjectedWorkedMinutes = projectedWorkedMinutes;
 
   const openHmoTask = (dashboardTasks || []).find((task) => task.task_type === 'hmo_claim_submission' && task.status === 'open') || null;
@@ -1306,10 +1311,12 @@ async function handleMarkAttendance(context, body, dbContext, userId, isAdmin, a
     });
     if (rateError) {
       return respond(context, 422, {
-        message: 'לא ניתן לעדכן נוכחות: תעריף המדריך לשירות זה לא הוגדר. יש להגדיר תעריף בכרטיס המדריך.',
+        message: rateError.message || 'לא ניתן לעדכן נוכחות: תעריף המדריך לשירות זה לא הוגדר. יש להגדיר תעריף בכרטיס המדריך.',
         code: rateError.code,
         instructor_employee_id: rateError.instructor_employee_id,
         service_id: rateError.service_id,
+        rate_date: rateError.rate_date,
+        next_rate_date: rateError.next_rate_date,
       });
     }
   }

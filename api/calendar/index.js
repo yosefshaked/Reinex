@@ -1402,10 +1402,12 @@ async function handleUpdateInstance(context, req, body, dbContext, supabase, aut
     });
     if (rateError) {
       return respond(context, 422, {
-        message: 'לא ניתן להשלים את השיעור: תעריף המדריך לשירות זה לא הוגדר. יש להגדיר תעריף בכרטיס המדריך.',
+        message: rateError.message || 'לא ניתן להשלים את השיעור: תעריף המדריך לשירות זה לא הוגדר. יש להגדיר תעריף בכרטיס המדריך.',
         code: rateError.code,
         instructor_employee_id: rateError.instructor_employee_id,
         service_id: rateError.service_id,
+        rate_date: rateError.rate_date,
+        next_rate_date: rateError.next_rate_date,
       });
     }
   }
