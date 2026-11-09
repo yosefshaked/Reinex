@@ -11,6 +11,7 @@ import {
   buildLeaveDayRows,
   combinePayComponents,
   describeMissingLessonRate,
+  resolveRateCoverageRange,
   resolveCompensationEligibleParticipants,
   resolveLeaveDayValue,
   resolveLessonInstructorPayout,
@@ -134,6 +135,33 @@ describe('PAY-A rates', () => {
     const none = describeMissingLessonRate({ instructorName: 'דנה כהן', serviceName: 'שיעור ניסיון', lessonDate: '2026-09-15' });
     assert.match(none, /אין תעריף על "שיעור ניסיון"/);
     assert.doesNotMatch(none, /רק מ-/, 'no start date is invented when there is no rate at all');
+  });
+
+  it('PAY-A3 a saved lesson rate recalculates the lessons it covers, up to the next change and never the future', () => {
+    const rows = [
+      rateRow('r-jan', 'dana', 'riding', PAY_BASIS.LESSON_HOURLY, 10000, '2026-01-01'),
+      rateRow('r-oct', 'dana', 'riding', PAY_BASIS.LESSON_HOURLY, 12000, '2026-10-01'),
+      rateRow('other-service', 'dana', 'group', PAY_BASIS.LESSON_FLAT, 9000, '2026-03-01'),
+    ];
+    const today = '2026-11-09';
+
+    // A back-dated rate from 15.09 covers lessons until the October rate takes over.
+    assert.deepEqual(
+      resolveRateCoverageRange(rows, { employeeId: 'dana', serviceId: 'riding', fromDate: '2026-09-15', today }),
+      { startDate: '2026-09-15', endDate: '2026-09-30' },
+    );
+    // The latest rate covers everything up to today, never future lessons.
+    assert.deepEqual(
+      resolveRateCoverageRange(rows, { employeeId: 'dana', serviceId: 'riding', fromDate: '2026-10-01', today }),
+      { startDate: '2026-10-01', endDate: today },
+    );
+    // A rate that starts in the future covers nothing yet.
+    assert.equal(resolveRateCoverageRange(rows, { employeeId: 'dana', serviceId: 'riding', fromDate: '2027-01-01', today }), null);
+    // Another service's rate is not a "next change" for this one.
+    assert.deepEqual(
+      resolveRateCoverageRange(rows, { employeeId: 'dana', serviceId: 'group', fromDate: '2026-03-01', today }),
+      { startDate: '2026-03-01', endDate: today },
+    );
   });
 
   it.todo('PAY-A3 a back-dated rate recalculates open months and adds pay differences for closed months');

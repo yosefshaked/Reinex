@@ -20,12 +20,15 @@ import {
   withOrgScope,
 } from '../_shared/org-bff.js';
 import { parseJsonBodyWithLimit } from '../_shared/validation.js';
-import { canManageEmployeeOps } from '../_shared/employee-finance.js';
+import { canManageEmployeeOps, resyncLessonEarningsForRate } from '../_shared/employee-finance.js';
 import { attachErrorTracking, respondTracked } from '../_shared/error-events.js';
 import {
+  LESSON_PAY_BASES,
   PAY_BASIS,
   buildRateChangeWarnings,
   loadRateHistoryRows,
+  resolveLessonRateOnDate,
+  resolveRateOnDate,
   toRateDateKey,
   validateRateInput,
 } from '../_shared/rate-history.js';
@@ -47,35 +50,36 @@ function todayDateKey() {
 }
 
 /**
- * Keep the legacy rate fields showing the rate that is in effect today, so the employee card and the
- * capability list agree with RateHistory until those screens are retired. Never fails the request.
+ * Keep the legacy rate fields showing the rate that is in effect today, so the screens that still
+ * read them agree with RateHistory. Never fails the request.
+ *
+ * It mirrors the rate in effect TODAY, resolved after the save, never the row just saved: a
+ * back-dated or replaced rate is usually not today's rate, and the Employees mirror trigger records
+ * whatever lands in those columns as a new rate from today — so mirroring the saved row would
+ * silently make an old amount the current one.
  */
-async function mirrorRateToLegacyColumn(client, orgId, { employeeId, payBasis, serviceId, rate, effectiveDate }, context) {
-  if (effectiveDate > todayDateKey()) return;
-
+async function mirrorRateToLegacyColumn(client, orgId, { employeeId, payBasis, serviceId }, context) {
   try {
-    if (payBasis === PAY_BASIS.LESSON_HOURLY) {
+    const rows = await loadRateHistoryRows(client, orgId, { employeeIds: [employeeId] });
+    const today = todayDateKey();
+
+    if (LESSON_PAY_BASES.has(payBasis)) {
+      // base_rate can only express an hourly number: a per-session rate, or none, clears it.
+      const current = resolveLessonRateOnDate(rows, { employeeId, serviceId, date: today });
       await withOrgScope(client, 'instructor_service_capabilities', orgId)
-        .update({ base_rate: rate })
+        .update({ base_rate: current?.pay_basis === PAY_BASIS.LESSON_HOURLY ? current.rate : null })
         .eq('employee_id', employeeId)
         .eq('service_id', serviceId);
       return;
     }
-    if (payBasis === PAY_BASIS.LESSON_FLAT) {
-      // base_rate can only express an hourly number, so a per-session rate clears it rather than
-      // leaving a stale figure behind for the screens that still read it.
-      await withOrgScope(client, 'instructor_service_capabilities', orgId)
-        .update({ base_rate: null })
-        .eq('employee_id', employeeId)
-        .eq('service_id', serviceId);
-      return;
-    }
+
     const column = LEGACY_EMPLOYEE_COLUMN_BY_BASIS[payBasis];
-    if (column) {
-      await withOrgScope(client, 'Employees', orgId)
-        .update({ [column]: rate })
-        .eq('id', employeeId);
-    }
+    if (!column) return;
+    const current = resolveRateOnDate(rows, { employeeId, payBasis, date: today });
+    if (!current) return;
+    await withOrgScope(client, 'Employees', orgId)
+      .update({ [column]: current.rate })
+      .eq('id', employeeId);
   } catch (mirrorError) {
     context.log?.warn?.('employee-rates failed to mirror the rate to the legacy column', {
       message: mirrorError?.message,
@@ -237,8 +241,36 @@ export default async function employeeRates(context, req) {
 
     await mirrorRateToLegacyColumn(supabase, orgId, input, context);
 
+    // Lesson pay is stored per lesson, so the lessons this rate now covers are recalculated. The rate
+    // itself is already saved: a failure here is reported, not turned into a failed save.
+    let lessonsRecalculated = 0;
+    let recalculationFailed = false;
+    if (LESSON_PAY_BASES.has(input.payBasis)) {
+      try {
+        lessonsRecalculated = await resyncLessonEarningsForRate(supabase, {
+          orgId,
+          employeeId: input.employeeId,
+          serviceId: input.serviceId,
+          fromDate: input.effectiveDate,
+          today: todayDateKey(),
+          actorUserId: userId,
+        });
+      } catch (resyncError) {
+        recalculationFailed = true;
+        context.log?.error?.('employee-rates failed to recalculate lessons for the new rate', {
+          message: resyncError?.message,
+          employeeId,
+        });
+      }
+    }
 
-    return respond(context, 200, { rate: saved, warnings, today: todayDateKey() });
+    return respond(context, 200, {
+      rate: saved,
+      warnings,
+      today: todayDateKey(),
+      lessons_recalculated: lessonsRecalculated,
+      recalculation_failed: recalculationFailed,
+    });
   } catch (saveError) {
     context.log?.error?.('employee-rates failed to save the rate', { message: saveError?.message, employeeId });
     return respondRatesError(context, 500, 'failed_to_save_rate', saveError, {

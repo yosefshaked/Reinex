@@ -23,6 +23,7 @@ import { authenticatedFetch } from '@/lib/api-client.js';
 import { getAvailabilitySummary, normalizeAvailabilityWindows } from '@/lib/instructor-availability.js';
 import AvailabilityWindowsEditor from './AvailabilityWindowsEditor.jsx';
 import { buildCapabilitiesPayload } from '@/lib/instructor-capabilities.js';
+import { formatDateKey } from '@/lib/date-key-format.js';
 import { formatCurrency, toAgorot } from '@/lib/currency.js';
 
 const LESSON_BASES = ['lesson_hourly', 'lesson_flat'];
@@ -59,11 +60,7 @@ function todayKey() {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
 }
 
-function formatDate(dateKey) {
-  if (!dateKey) return '';
-  const [year, month, day] = dateKey.split('-');
-  return `${day}.${month}.${year}`;
-}
+const formatDate = formatDateKey;
 
 function isLessonBasis(basis) {
   return LESSON_BASES.includes(basis);
@@ -100,7 +97,7 @@ function describeRate(row) {
 function buildWarnings({ history, current, existingOnDate, effectiveDate, today, isLesson }) {
   const warnings = [];
   if (effectiveDate && effectiveDate < today) {
-    warnings.push('התעריף יחול על ימים שכבר עברו. שכר של חודשים פתוחים יחושב מחדש.');
+    warnings.push('התעריף יחול על ימים שכבר עברו. מפגשים שכבר התקיימו מהתאריך הזה יחושבו מחדש לפיו.');
   }
   if (current && effectiveDate && effectiveDate < current.effective_date) {
     warnings.push(`התעריף ייכנס לפני התעריף הנוכחי (מ-${formatDate(current.effective_date)}) ויהיה בתוקף רק עד אליו.`);
@@ -241,6 +238,12 @@ function RateCard({ card, rates, today, onSave, onSaveScheduling, saving }) {
   const [windowsDraft, setWindowsDraft] = useState(() => (
     Array.isArray(card.capability?.availability_windows) ? card.capability.availability_windows : []
   ));
+
+  function openScheduling() {
+    setCapacityInput(String(card.capability?.max_students || 1));
+    setWindowsDraft(Array.isArray(card.capability?.availability_windows) ? card.capability.availability_windows : []);
+    setSchedulingOpen(true);
+  }
 
   function closeScheduling() {
     setCapacityInput(String(card.capability?.max_students || 1));
@@ -432,7 +435,7 @@ function RateCard({ card, rates, today, onSave, onSaveScheduling, saving }) {
                   : 'עדיין לא משויך — הגדרת שיבוץ תשייך את השירות'}
               </span>
               <span className="flex-grow" />
-              <Button type="button" size="sm" variant="ghost" className="text-xs" onClick={() => setSchedulingOpen(true)} disabled={saving}>
+              <Button type="button" size="sm" variant="ghost" className="text-xs" onClick={openScheduling} disabled={saving}>
                 {card.capability ? 'שינוי' : 'הגדרת שיבוץ'}
               </Button>
             </div>
@@ -699,7 +702,7 @@ export default function EmployeeRatesPanel({ employee, orgId, session, services 
   async function handleSave({ payBasis, serviceId, rate, effectiveDate, notes, replaceExisting }) {
     setSaving(true);
     try {
-      await authenticatedFetch('employee-rates', {
+      const result = await authenticatedFetch('employee-rates', {
         session,
         method: 'POST',
         body: {
@@ -714,8 +717,14 @@ export default function EmployeeRatesPanel({ employee, orgId, session, services 
         },
       });
       await loadRates();
-      await onEmployeeChanged?.();
-      toast.success(effectiveDate > today ? 'התעריף נשמר ויחול מהתאריך שנבחר.' : 'התעריף נשמר.');
+      const recalculated = Number(result?.lessons_recalculated) || 0;
+      if (result?.recalculation_failed) {
+        toast.error('התעריף נשמר, אבל חישוב המפגשים מחדש נכשל. סמנו שוב נוכחות במפגשים הרלוונטיים או פנו לתמיכה.');
+      } else if (recalculated > 0) {
+        toast.success(`התעריף נשמר. ${recalculated === 1 ? 'מפגש אחד חושב' : `${recalculated} מפגשים חושבו`} מחדש לפיו.`);
+      } else {
+        toast.success(effectiveDate > today ? 'התעריף נשמר ויחול מהתאריך שנבחר.' : 'התעריף נשמר.');
+      }
       return true;
     } catch (error) {
       console.error('Failed to save rate', error);

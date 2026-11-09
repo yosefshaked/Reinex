@@ -170,6 +170,7 @@ async function buildEmployeePayrollPreview(client, orgId, employee, profile, sta
     return sum + ((resolveOtherMinutes(row) / 60) * rate);
   }, 0));
 
+  const leaveByDate = new Map((leaveAmounts || []).map((row) => [row.leave_date, row]));
   const monthlySalaryAmount = paysMonthlySalary
     ? roundCurrency(collectWorkingDates(startDate, endDate, resolveEmployeeWorkingDays(employee, profile))
       .reduce((sum, dateKey) => {
@@ -183,7 +184,7 @@ async function buildEmployeePayrollPreview(client, orgId, employee, profile, sta
           date: dateKey,
         })?.rate ?? 0;
         const dailyRate = monthlySalary / monthWorkingDays;
-        const leaveDay = new Map((leaveAmounts || []).map((row) => [row.leave_date, row])).get(dateKey);
+        const leaveDay = leaveByDate.get(dateKey);
         return sum + (leaveDay ? dailyRate * Number(leaveDay.pay_fraction || 0) : dailyRate);
       }, 0))
     : 0;

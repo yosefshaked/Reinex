@@ -12,6 +12,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Loader2, TriangleAlert } from 'lucide-react';
 import ConfirmDialog from '@/components/ui/ConfirmDialog.jsx';
+import { formatDateKey } from '@/lib/date-key-format.js';
 import { toast } from '@/lib/toast.jsx';
 import { authenticatedFetch } from '@/lib/api-client.js';
 
@@ -326,7 +327,7 @@ export default function EmployeeAttendancePanel({ employee, orgId, session }) {
                 <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                 <span>
                   {firstHourlyRateDate
-                    ? `התעריף השעתי מתחיל רק ב-${firstHourlyRateDate.split('-').reverse().join('.')}. השעות יירשמו, אבל לא ישולמו — כדי לשלם עליהן, הוסיפו תעריף שעתי שחל מהיום הזה או קודם (לשונית פיננסים).`
+                    ? `התעריף השעתי מתחיל רק ב-${formatDateKey(firstHourlyRateDate)}. השעות יירשמו, אבל לא ישולמו — כדי לשלם עליהן, הוסיפו תעריף שעתי שחל מהיום הזה או קודם (לשונית פיננסים).`
                     : 'לעובד/ת אין תעריף שעתי. השעות יירשמו, אבל לא ישולמו — כדי לשלם עליהן, הוסיפו תעריף שעתי בלשונית פיננסים.'}
                 </span>
               </p>

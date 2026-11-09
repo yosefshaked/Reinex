@@ -1122,6 +1122,72 @@ async function clearLessonMinutes(attendanceScope, existingRecord, otherMinutes,
     .eq('id', existingRecord.id);
 }
 
+function shiftDateKey(dateKey, days) {
+  const date = new Date(`${dateKey}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+/**
+ * The lessons a lesson rate covers: from its date until the day before the next rate change for the
+ * same instructor and service, and never past today (a future lesson has no pay yet).
+ * Returns null when the range is empty.
+ */
+export function resolveRateCoverageRange(rateRows, { employeeId, serviceId, fromDate, today }) {
+  const nextChange = (Array.isArray(rateRows) ? rateRows : [])
+    .filter((row) => LESSON_PAY_BASES.has(row?.pay_basis)
+      && row.employee_id === employeeId
+      && row.service_id === serviceId
+      && row.effective_date > fromDate)
+    .map((row) => row.effective_date)
+    .sort()[0] || null;
+  const until = nextChange ? shiftDateKey(nextChange, -1) : today;
+  const endDate = until < today ? until : today;
+  return fromDate <= endDate ? { startDate: fromDate, endDate } : null;
+}
+
+/**
+ * A lesson rate was added or replaced: recompute the stored pay of every lesson it covers.
+ *
+ * Lesson pay is stored per lesson (lesson_earnings) when attendance is recorded, so a rate saved
+ * afterwards — a back-dated raise, or a rate added because a lesson came before the first one —
+ * would otherwise leave those lessons at the old pay, or unpaid. Returns how many lessons were
+ * recalculated.
+ */
+export async function resyncLessonEarningsForRate(tenantClient, {
+  orgId,
+  employeeId,
+  serviceId,
+  fromDate,
+  today,
+  actorUserId = null,
+}) {
+  if (!orgId || !employeeId || !serviceId || !fromDate || !today) return 0;
+  const rateRows = await loadRateHistoryRows(tenantClient, orgId, {
+    employeeIds: [employeeId],
+    payBases: [...LESSON_PAY_BASES],
+  });
+  const range = resolveRateCoverageRange(rateRows, { employeeId, serviceId, fromDate, today });
+  if (!range) return 0;
+
+  const bounds = buildUtcBoundsForTimezoneDateRange(range.startDate, range.endDate);
+  if (!bounds?.startIso || !bounds?.endExclusiveIso) return 0;
+  const { data: lessons, error } = await withOrgScope(tenantClient, 'lesson_instances', orgId)
+    .select('id')
+    .eq('instructor_employee_id', employeeId)
+    .eq('service_id', serviceId)
+    .gte('datetime_start', bounds.startIso)
+    .lt('datetime_start', bounds.endExclusiveIso);
+  if (error) throw error;
+
+  let recalculated = 0;
+  for (const lesson of lessons || []) {
+    await syncLessonInstructorEarnings(tenantClient, lesson.id, actorUserId);
+    recalculated += 1;
+  }
+  return recalculated;
+}
+
 /**
  * Auto-sync instructor attendance when lesson workflow decisions imply
  * that the instructor should be compensated for the lesson.

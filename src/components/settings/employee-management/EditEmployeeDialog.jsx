@@ -51,8 +51,6 @@ function buildInitialState(employee) {
     email: employee?.email || '',
     phone: employee?.phone || '',
     startDate: employee?.start_date || '',
-    currentRate: employee?.current_rate != null ? toShekel(employee.current_rate) : '',
-    monthlySalaryAmount: employee?.monthly_salary_amount != null ? toShekel(employee.monthly_salary_amount) : '',
     annualLeaveDays: employee?.annual_leave_days ?? '',
     leavePayMethod: employee?.leave_pay_method || '',
     leaveFixedDayRate: employee?.leave_fixed_day_rate != null ? toShekel(employee.leave_fixed_day_rate) : '',
@@ -254,8 +252,6 @@ export default function EditEmployeeDialog({
         email: form.email || null,
         phone: form.phone || null,
         start_date: form.startDate || null,
-        current_rate: form.currentRate === '' ? null : toAgorot(form.currentRate),
-        monthly_salary_amount: form.monthlySalaryAmount === '' ? null : toAgorot(form.monthlySalaryAmount),
         annual_leave_days: form.annualLeaveDays === '' ? null : Number(form.annualLeaveDays),
         leave_pay_method: form.leavePayMethod || null,
         leave_fixed_day_rate: form.leaveFixedDayRate === '' ? null : toAgorot(form.leaveFixedDayRate),
@@ -425,17 +421,12 @@ export default function EditEmployeeDialog({
                   </SelectContent>
                 </Select>
               </div>
-              {form.payrollModel === 'monthly_salary' ? (
-                <div className="space-y-2">
-                  <Label htmlFor="monthly_salary_amount" className="text-xs text-slate-600">שכר חודשי</Label>
-                  <Input id="monthly_salary_amount" type="number" min="0" step="0.01" value={form.monthlySalaryAmount} onChange={(e) => updateField('monthlySalaryAmount', e.target.value)} disabled={isSaving} />
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  <Label htmlFor="current_rate" className="text-xs text-slate-600">תעריף שעתי</Label>
-                  <Input id="current_rate" type="number" min="0" step="0.01" value={form.currentRate} onChange={(e) => updateField('currentRate', e.target.value)} disabled={isSaving} />
-                </div>
-              )}
+              <div className="space-y-2">
+                <span className="text-xs text-slate-600">תעריף / משכורת</span>
+                <p className="rounded-md border border-dashed border-slate-200 px-3 py-2 text-xs text-slate-500">
+                  נקבעים בלשונית פיננסים, עם התאריך שממנו הם חלים.
+                </p>
+              </div>
             </div>
 
             <div className="grid gap-4 md:grid-cols-3">
