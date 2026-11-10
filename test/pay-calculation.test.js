@@ -1,0 +1,339 @@
+// Pay computed from the facts (api/_shared/pay-calculation.js): the rules for one lesson as pure
+// tests, and the loader and the period total against an in-memory database.
+import assert from 'node:assert/strict';
+import { describe, it } from 'node:test';
+
+import { DEFAULT_INSTRUCTOR_EARNINGS_POLICY, DEFAULT_LEAVE_PAY_POLICY } from '../api/_shared/employee-finance.js';
+import {
+  applyCorrectionOverlay,
+  computeEmployeePay,
+  loadCountedLessons,
+  resolveCountedLesson,
+  summarizeLessonsByDate,
+} from '../api/_shared/pay-calculation.js';
+import { PAY_BASIS } from '../api/_shared/rate-history.js';
+
+const ORG = '11111111-1111-4111-8111-111111111111';
+const NOW = new Date('2026-10-20T12:00:00Z');
+const POLICIES = {
+  instructorEarningsPolicy: { ...DEFAULT_INSTRUCTOR_EARNINGS_POLICY },
+  leavePayPolicy: { ...DEFAULT_LEAVE_PAY_POLICY },
+};
+
+function rateRow(id, employeeId, serviceId, payBasis, rate, effectiveDate) {
+  return { id, org_id: ORG, employee_id: employeeId, service_id: serviceId, pay_basis: payBasis, rate, effective_date: effectiveDate };
+}
+
+// Dana teaches riding at 100 ₪/hour until 30.9 and 120 ₪/hour from 1.10. Omer teaches at 110 ₪/hour.
+const RATES = [
+  rateRow('dana-100', 'dana', 'riding', PAY_BASIS.LESSON_HOURLY, 10000, '2026-01-01'),
+  rateRow('dana-120', 'dana', 'riding', PAY_BASIS.LESSON_HOURLY, 12000, '2026-10-01'),
+  rateRow('omer-110', 'omer', 'riding', PAY_BASIS.LESSON_HOURLY, 11000, '2026-01-01'),
+  rateRow('dana-office', 'dana', null, PAY_BASIS.ATTENDANCE_HOURLY, 5000, '2026-01-01'),
+];
+
+function lesson(id, employeeId, start, overrides = {}) {
+  return {
+    id,
+    org_id: ORG,
+    instructor_employee_id: employeeId,
+    service_id: 'riding',
+    datetime_start: start,
+    duration_minutes: 60,
+    status: 'scheduled',
+    ...overrides,
+  };
+}
+
+function participant(id, lessonId, status, decision = null) {
+  return {
+    id,
+    org_id: ORG,
+    lesson_instance_id: lessonId,
+    student_id: `student-${id}`,
+    participant_status: status,
+    metadata: decision ? { workflow: { instructor_compensation: { decision } } } : {},
+  };
+}
+
+const counted = (instance, participants, extra = {}) => resolveCountedLesson({
+  instance, participants, policies: POLICIES, rateRows: RATES, now: NOW, ...extra,
+});
+
+describe('one lesson', () => {
+  it('a marked lesson pays the rate valid on the lesson date', () => {
+    const september = counted(lesson('l1', 'dana', '2026-09-28T08:00:00Z'), [participant('p1', 'l1', 'attended')]);
+    const october = counted(lesson('l2', 'dana', '2026-10-05T08:00:00Z'), [participant('p2', 'l2', 'attended')]);
+    assert.equal(september.payout_amount, 10000);
+    assert.equal(october.payout_amount, 12000);
+    assert.equal(october.rate_history_id, 'dana-120');
+    assert.equal(october.unmarked, false);
+  });
+
+  it('a lesson that ended and nobody marked is paid as attended and flagged as unmarked', () => {
+    const result = counted(lesson('l1', 'dana', '2026-10-05T08:00:00Z'), [participant('p1', 'l1', 'scheduled')]);
+    assert.equal(result.counted, true);
+    assert.equal(result.payout_amount, 12000);
+    assert.equal(result.unmarked, true);
+    assert.equal(result.unmarked_amount, 12000);
+  });
+
+  it('a lesson that has not ended yet pays nothing', () => {
+    const result = counted(lesson('l1', 'dana', '2026-10-25T08:00:00Z'), [participant('p1', 'l1', 'scheduled')]);
+    assert.equal(result.counted, false);
+    assert.equal(result.payout_amount, 0);
+  });
+
+  it('a cancelled lesson is never assumed to have taken place', () => {
+    const result = counted(
+      lesson('l1', 'dana', '2026-10-05T08:00:00Z', { status: 'cancelled' }),
+      [participant('p1', 'l1', 'scheduled')],
+    );
+    assert.equal(result.counted, false);
+  });
+
+  it('an unmarked participant the office decided not to pay for stays unpaid', () => {
+    const result = counted(
+      lesson('l1', 'dana', '2026-10-05T08:00:00Z'),
+      [participant('p1', 'l1', 'scheduled', 'not_compensated')],
+    );
+    assert.equal(result.counted, false);
+  });
+
+  it('once per lesson: an unmarked rider next to a marked one puts no money at stake', () => {
+    const result = counted(
+      lesson('l1', 'dana', '2026-10-05T08:00:00Z'),
+      [participant('p1', 'l1', 'attended'), participant('p2', 'l1', 'scheduled')],
+    );
+    assert.equal(result.payout_amount, 12000);
+    assert.equal(result.unmarked, true);
+    assert.equal(result.unmarked_amount, 0);
+  });
+
+  it('per rider: only the unmarked rider\'s share is at stake', () => {
+    const result = counted(
+      lesson('l1', 'dana', '2026-10-05T08:00:00Z'),
+      [participant('p1', 'l1', 'attended'), participant('p2', 'l1', 'scheduled'), participant('p3', 'l1', 'cancelled_student')],
+      { servicePaymentModel: 'per_student' },
+    );
+    assert.equal(result.paid_participant_count, 2);
+    assert.equal(result.payout_amount, 24000);
+    assert.equal(result.unmarked_amount, 12000);
+  });
+
+  it('a lesson before the instructor\'s first rate counts, pays nothing and is flagged', () => {
+    const result = counted(lesson('l1', 'dana', '2025-12-10T08:00:00Z'), [participant('p1', 'l1', 'attended')]);
+    assert.equal(result.counted, true);
+    assert.equal(result.missing_rate, true);
+    assert.equal(result.payout_amount, 0);
+  });
+
+  it('an excused absence pays nothing even when the status alone would', () => {
+    const result = counted(
+      lesson('l1', 'dana', '2026-10-05T08:00:00Z'),
+      [participant('p1', 'l1', 'no_show')],
+      { graceParticipantIds: new Set(['p1']) },
+    );
+    assert.equal(result.counted, false);
+  });
+
+  it('the lesson date is the farm\'s date, not the UTC date', () => {
+    // 22:30 UTC on 30.9 is already 1.10 in Israel, so the October rate applies.
+    const result = counted(lesson('l1', 'dana', '2026-09-30T22:30:00Z'), [participant('p1', 'l1', 'attended')]);
+    assert.equal(result.lesson_date, '2026-10-01');
+    assert.equal(result.payout_amount, 12000);
+  });
+
+  it('a correction replaces the instructor and the outcome the lesson is paid by', () => {
+    const original = lesson('l1', 'dana', '2026-10-05T08:00:00Z');
+    const { instance, participants } = applyCorrectionOverlay(original, [participant('p1', 'l1', 'attended')], {
+      effective_state: {
+        instance: { instructor_employee_id: 'omer' },
+        participants: [participant('p1', 'l1', 'attended')],
+      },
+    });
+    const result = counted(instance, participants);
+    assert.equal(result.employee_id, 'omer');
+    assert.equal(result.payout_amount, 11000);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// An in-memory stand-in for the database client: enough of the query builder for the loader.
+// ---------------------------------------------------------------------------------------------
+function createFakeClient(tables) {
+  const calls = [];
+  function builder(table) {
+    const filters = [];
+    let window = null;
+    const api = {
+      select() { return api; },
+      eq(column, value) { filters.push((row) => row[column] === value); return api; },
+      in(column, values) { filters.push((row) => values.includes(row[column])); return api; },
+      gte(column, value) { filters.push((row) => String(row[column]) >= String(value)); return api; },
+      lte(column, value) { filters.push((row) => String(row[column]) <= String(value)); return api; },
+      lt(column, value) { filters.push((row) => String(row[column]) < String(value)); return api; },
+      order() { return api; },
+      range(from, to) { window = [from, to]; return api; },
+      then(resolve, reject) {
+        calls.push(table);
+        const rows = (tables[table] || []).filter((row) => filters.every((filter) => filter(row)));
+        const data = window ? rows.slice(window[0], window[1] + 1) : rows;
+        return Promise.resolve({ data, error: null }).then(resolve, reject);
+      },
+    };
+    return api;
+  }
+  return { from: builder, calls };
+}
+
+function baseTables(extra = {}) {
+  return {
+    lesson_instances: [],
+    lesson_participants: [],
+    calendar_instance_corrections: [],
+    grace_cancellation_requests: [],
+    Services: [{ id: 'riding', org_id: ORG, name: 'רכיבה', payment_model: 'fixed_rate' }],
+    RateHistory: RATES,
+    Settings: [],
+    employee_attendance_records: [],
+    employee_leave_days: [],
+    employee_leave_entries: [],
+    finance_corrections: [],
+    ...extra,
+  };
+}
+
+describe('the lessons of a period', () => {
+  it('returns one instructor\'s counted lessons inside the dates, oldest first', async () => {
+    const client = createFakeClient(baseTables({
+      lesson_instances: [
+        lesson('october', 'dana', '2026-10-05T08:00:00Z'),
+        lesson('september', 'dana', '2026-09-28T08:00:00Z'),
+        lesson('omer-lesson', 'omer', '2026-10-06T08:00:00Z'),
+        lesson('future', 'dana', '2026-10-28T08:00:00Z'),
+      ],
+      lesson_participants: [
+        participant('p1', 'october', 'attended'),
+        participant('p2', 'september', 'attended'),
+        participant('p3', 'omer-lesson', 'attended'),
+        participant('p4', 'future', 'scheduled'),
+      ],
+    }));
+
+    const lessons = await loadCountedLessons(client, ORG, {
+      employeeId: 'dana', startDate: '2026-10-01', endDate: '2026-10-31', policies: POLICIES, now: NOW,
+    });
+
+    assert.deepEqual(lessons.map((row) => row.lesson_instance_id), ['october']);
+    assert.equal(lessons[0].service_name, 'רכיבה');
+    assert.equal(lessons[0].payout_amount, 12000);
+  });
+
+  it('a lesson corrected over to another instructor is paid to that instructor only', async () => {
+    const tables = baseTables({
+      lesson_instances: [lesson('moved', 'dana', '2026-10-05T08:00:00Z')],
+      lesson_participants: [participant('p1', 'moved', 'attended')],
+      calendar_instance_corrections: [{
+        id: 'c1',
+        org_id: ORG,
+        original_instance_id: 'moved',
+        status: 'applied',
+        created_at: '2026-10-06T10:00:00Z',
+        effective_state: { instance: { instructor_employee_id: 'omer' }, participants: [] },
+      }],
+    });
+    const period = { startDate: '2026-10-01', endDate: '2026-10-31', policies: POLICIES, now: NOW };
+
+    const dana = await loadCountedLessons(createFakeClient(tables), ORG, { employeeId: 'dana', ...period });
+    const omer = await loadCountedLessons(createFakeClient(tables), ORG, { employeeId: 'omer', ...period });
+
+    assert.deepEqual(dana, []);
+    assert.equal(omer.length, 1);
+    assert.equal(omer[0].payout_amount, 11000);
+  });
+
+  it('adds up lesson minutes per day for the days tab', async () => {
+    const client = createFakeClient(baseTables({
+      lesson_instances: [
+        lesson('a', 'dana', '2026-10-05T08:00:00Z'),
+        lesson('b', 'dana', '2026-10-05T10:00:00Z', { duration_minutes: 45 }),
+        lesson('c', 'dana', '2026-10-06T08:00:00Z'),
+      ],
+      lesson_participants: [
+        participant('p1', 'a', 'attended'),
+        participant('p2', 'b', 'scheduled'),
+        participant('p3', 'c', 'cancelled_student'),
+      ],
+    }));
+
+    const byDate = summarizeLessonsByDate(await loadCountedLessons(client, ORG, {
+      employeeId: 'dana', startDate: '2026-10-01', endDate: '2026-10-31', policies: POLICIES, now: NOW,
+    }));
+
+    assert.deepEqual([...byDate.keys()], ['2026-10-05']);
+    assert.equal(byDate.get('2026-10-05').lesson_minutes, 105);
+    assert.equal(byDate.get('2026-10-05').unmarked_lesson_count, 1);
+  });
+});
+
+describe('the pay of a period', () => {
+  it('adds lessons, office hours and hand-entered corrections, and reports what is unmarked', async () => {
+    const client = createFakeClient(baseTables({
+      lesson_instances: [
+        lesson('marked', 'dana', '2026-10-05T08:00:00Z'),
+        lesson('unmarked', 'dana', '2026-10-06T08:00:00Z'),
+      ],
+      lesson_participants: [
+        participant('p1', 'marked', 'attended'),
+        participant('p2', 'unmarked', 'scheduled'),
+      ],
+      employee_attendance_records: [{
+        id: 'a1', org_id: ORG, employee_id: 'dana', attendance_date: '2026-10-05', source_type: 'manual', other_minutes: 90,
+      }],
+      finance_corrections: [{
+        id: 'f1', org_id: ORG, employee_id: 'dana', correction_type: 'bonus', amount: 5000, effective_date: '2026-10-10',
+      }],
+    }));
+
+    const pay = await computeEmployeePay(client, ORG, {
+      employee: { id: 'dana', first_name: 'דנה' },
+      startDate: '2026-10-01',
+      endDate: '2026-10-31',
+      policies: POLICIES,
+      rateRows: RATES,
+      now: NOW,
+      includeDetails: true,
+    });
+
+    assert.equal(pay.lesson_amount, 24000);
+    assert.equal(pay.lesson_count, 2);
+    assert.equal(pay.unmarked_lesson_count, 1);
+    assert.equal(pay.unmarked_lesson_amount, 12000);
+    assert.equal(pay.attendance_amount, 7500);
+    assert.equal(pay.correction_amount, 5000);
+    assert.equal(pay.total_amount, 36500);
+    assert.equal(pay.details.lessons.length, 2);
+  });
+
+  it('a rate added for a past date changes the pay of that month straight away', async () => {
+    const tables = baseTables({
+      lesson_instances: [lesson('old', 'noa', '2026-09-10T08:00:00Z')],
+      lesson_participants: [participant('p1', 'old', 'attended')],
+    });
+    const period = {
+      employee: { id: 'noa' }, startDate: '2026-09-01', endDate: '2026-09-30', policies: POLICIES, now: NOW,
+    };
+
+    const before = await computeEmployeePay(createFakeClient(tables), ORG, { ...period, rateRows: [] });
+    const after = await computeEmployeePay(createFakeClient(tables), ORG, {
+      ...period,
+      rateRows: [rateRow('noa-90', 'noa', 'riding', PAY_BASIS.LESSON_FLAT, 9000, '2026-09-01')],
+    });
+
+    assert.equal(before.lesson_amount, 0);
+    assert.equal(before.missing_rate_lesson_count, 1);
+    assert.equal(after.lesson_amount, 9000);
+    assert.equal(after.missing_rate_lesson_count, 0);
+  });
+});
