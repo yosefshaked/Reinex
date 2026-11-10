@@ -781,6 +781,79 @@
       ]
     },
     {
+      "id": "attendance-other-work-only",
+      "name": "Attendance keeps only other work; lesson minutes are read from the calendar",
+      "description": "Pay is computed live from facts. An attendance day stores only the minutes of work that is not a lesson; the endpoint returns the lesson minutes of each day next to the records, read from the calendar, and nothing is copied onto the row.",
+      "steps": [
+        {
+          "id": "enter-office-minutes",
+          "description": "The office enters 45 minutes of other work on the first day of this month",
+          "action": "apiCall",
+          "method": "POST",
+          "endpoint": "/api/employee-attendance",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "employee_id": "{{RATE_INSTRUCTOR_ID}}",
+            "attendance_date": "{{CURRENT_MONTH_FIRST_DAY}}",
+            "status": "present",
+            "other_minutes": 45
+          },
+          "store": "ATTENDANCE_OTHER_MINUTES",
+          "storeField": "other_minutes"
+        },
+        {
+          "id": "read-lesson-days",
+          "description": "The month's read returns the lesson-days list (empty for an instructor with no lessons)",
+          "action": "apiCall",
+          "method": "GET",
+          "endpoint": "/api/employee-attendance?org_id={{TEST_ORG_ID}}&employee_id={{RATE_INSTRUCTOR_ID}}&start_date={{CURRENT_MONTH_FIRST_DAY}}&end_date={{CURRENT_MONTH_FIRST_DAY}}",
+          "store": "ATTENDANCE_LESSON_DAY_COUNT",
+          "storeField": "lesson_days.length"
+        },
+        {
+          "id": "navigate-employees",
+          "action": "navigate",
+          "url": "{{BASE_URL}}/#/employees"
+        },
+        {
+          "id": "wait-main",
+          "action": "waitForSelector",
+          "selector": "main, [role='main']"
+        },
+        {
+          "id": "open-employee",
+          "description": "Select the fixture instructor in the roster",
+          "action": "click",
+          "selector": "button:has-text('בדיקה {{RUN_NUMERIC_ID}}')",
+          "first": true
+        },
+        {
+          "id": "open-attendance-tab",
+          "action": "click",
+          "selector": "[role='tab']:has-text('נוכחות')"
+        },
+        {
+          "id": "assert-other-work-shown",
+          "description": "The day shows the other work that was entered, and no lesson minutes",
+          "action": "waitForSelector",
+          "selector": "text=עבודה אחרת 45 דק׳"
+        },
+        {
+          "id": "assert-no-lesson-minutes",
+          "description": "No day shows lesson minutes: this instructor has no lessons this month",
+          "action": "assert",
+          "type": "count",
+          "selector": "text=/מפגשים \\d+ דק׳/",
+          "value": "0"
+        },
+        {
+          "id": "screenshot-attendance",
+          "action": "screenshot",
+          "name": "attendance-other-work"
+        }
+      ]
+    },
+    {
       "id": "logout",
       "name": "Logout",
       "steps": [

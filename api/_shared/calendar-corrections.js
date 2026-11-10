@@ -545,8 +545,8 @@ export async function enrichInstancesWithCorrectionState(tenantClient, instances
         .map((lock) => lock.lock_source_id),
     ].filter(Boolean)));
 
-    const hasInstanceFinanceLocks = instanceLockRows.some((lock) => lock.lock_source_type === 'payroll_run' || lock.lock_source_type === 'claim_batch');
-    const hasParticipantFinanceLocks = participantRows.some((participant) => participant.locks.some((lock) => lock.lock_source_type === 'payroll_run' || lock.lock_source_type === 'claim_batch'));
+    const hasInstanceFinanceLocks = instanceLockRows.some((lock) => lock.lock_source_type === 'claim_batch');
+    const hasParticipantFinanceLocks = participantRows.some((participant) => participant.locks.some((lock) => lock.lock_source_type === 'claim_batch'));
     const latestCorrection = latestCorrectionByInstanceId.get(row.id) || null;
     return {
       ...row,

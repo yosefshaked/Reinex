@@ -39,52 +39,6 @@ function safePasswordEquals(candidate, expected) {
   return timingSafeEqual(Buffer.from(left), Buffer.from(right));
 }
 
-async function lockLessonForPayroll({ client, orgId, lessonInstanceId, userId }) {
-  const now = new Date();
-  const periodStart = now.toISOString().slice(0, 10);
-
-  const { data: payrollRun, error: payrollRunError } = await withOrgScope(client, 'payroll_runs', orgId)
-    .insert({
-      period_start: periodStart,
-      period_end: periodStart,
-      status: 'finalized',
-      finalized_at: now.toISOString(),
-      finalized_by: userId,
-      metadata: {
-        debug_uat_tool: true,
-      },
-    })
-    .select('id, status, finalized_at')
-    .single();
-
-  if (payrollRunError) {
-    throw payrollRunError;
-  }
-
-  const { data: lock, error: lockError } = await withOrgScope(client, 'instance_locks', orgId)
-    .insert({
-      lesson_instance_id: lessonInstanceId,
-      lock_source_type: 'payroll_run',
-      lock_source_id: payrollRun.id,
-      lock_reason: 'debug_uat_payroll_lock',
-      created_by: userId,
-      metadata: {
-        debug_uat_tool: true,
-      },
-    })
-    .select('id, lesson_instance_id, lock_source_type, lock_source_id, lock_reason, created_at')
-    .single();
-
-  if (lockError) {
-    throw lockError;
-  }
-
-  return {
-    lock,
-    source: payrollRun,
-  };
-}
-
 async function lockLessonForPaidClaim({ client, orgId, lessonInstanceId, userId }) {
   const now = new Date();
   const periodStart = now.toISOString().slice(0, 10);
@@ -354,7 +308,7 @@ export default async function debugUatTools(context, req) {
     return respond(context, 400, { message: 'missing_lesson_instance_id' });
   }
 
-  if (action === 'lock_lesson' && !['payroll', 'paid_claim'].includes(lockKind)) {
+  if (action === 'lock_lesson' && lockKind !== 'paid_claim') {
     return respond(context, 400, { message: 'invalid_lock_kind' });
   }
 
@@ -408,9 +362,7 @@ export default async function debugUatTools(context, req) {
       });
     }
 
-    const result = lockKind === 'payroll'
-      ? await lockLessonForPayroll({ client: supabase, orgId, lessonInstanceId, userId })
-      : await lockLessonForPaidClaim({ client: supabase, orgId, lessonInstanceId, userId });
+    const result = await lockLessonForPaidClaim({ client: supabase, orgId, lessonInstanceId, userId });
 
     await logAuditEvent(supabase, {
       orgId,

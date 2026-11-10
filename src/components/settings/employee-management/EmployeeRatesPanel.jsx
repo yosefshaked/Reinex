@@ -97,7 +97,7 @@ function describeRate(row) {
 function buildWarnings({ history, current, existingOnDate, effectiveDate, today, isLesson }) {
   const warnings = [];
   if (effectiveDate && effectiveDate < today) {
-    warnings.push('התעריף יחול על ימים שכבר עברו. מפגשים שכבר התקיימו מהתאריך הזה יחושבו מחדש לפיו.');
+    warnings.push('התעריף יחול על ימים שכבר עברו. השכר על מפגשים שכבר התקיימו מהתאריך הזה ישתנה לפיו.');
   }
   if (current && effectiveDate && effectiveDate < current.effective_date) {
     warnings.push(`התעריף ייכנס לפני התעריף הנוכחי (מ-${formatDate(current.effective_date)}) ויהיה בתוקף רק עד אליו.`);
@@ -702,7 +702,7 @@ export default function EmployeeRatesPanel({ employee, orgId, session, services 
   async function handleSave({ payBasis, serviceId, rate, effectiveDate, notes, replaceExisting }) {
     setSaving(true);
     try {
-      const result = await authenticatedFetch('employee-rates', {
+      await authenticatedFetch('employee-rates', {
         session,
         method: 'POST',
         body: {
@@ -717,14 +717,7 @@ export default function EmployeeRatesPanel({ employee, orgId, session, services 
         },
       });
       await loadRates();
-      const recalculated = Number(result?.lessons_recalculated) || 0;
-      if (result?.recalculation_failed) {
-        toast.error('התעריף נשמר, אבל חישוב המפגשים מחדש נכשל. סמנו שוב נוכחות במפגשים הרלוונטיים או פנו לתמיכה.');
-      } else if (recalculated > 0) {
-        toast.success(`התעריף נשמר. ${recalculated === 1 ? 'מפגש אחד חושב' : `${recalculated} מפגשים חושבו`} מחדש לפיו.`);
-      } else {
-        toast.success(effectiveDate > today ? 'התעריף נשמר ויחול מהתאריך שנבחר.' : 'התעריף נשמר.');
-      }
+      toast.success(effectiveDate > today ? 'התעריף נשמר ויחול מהתאריך שנבחר.' : 'התעריף נשמר.');
       return true;
     } catch (error) {
       console.error('Failed to save rate', error);

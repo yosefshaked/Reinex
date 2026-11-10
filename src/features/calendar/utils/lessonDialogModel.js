@@ -365,7 +365,7 @@ export function getImpactGroupMeta(type) {
   if (['instructor_earning_reversal', 'instructor_earning_add', 'instructor_earning_update'].includes(type)) {
     return { key: 'payroll', label: 'שכר מדריך', borderClass: 'border-emerald-200', bgClass: 'bg-emerald-50/70' };
   }
-  if (['instructor_attendance_remove', 'instructor_attendance_update', 'instructor_attendance_add'].includes(type)) {
+  if (type === 'instructor_attendance_update') {
     return { key: 'attendance', label: 'נוכחות מדריך', borderClass: 'border-sky-200', bgClass: 'bg-sky-50/70' };
   }
   if (['hmo_task_resolve', 'hmo_split_detail'].includes(type)) {

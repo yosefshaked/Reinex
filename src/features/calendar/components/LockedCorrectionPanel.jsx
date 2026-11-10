@@ -30,14 +30,12 @@ const PARTICIPANT_STATUS_LABELS = {
 }
 
 const LOCK_SOURCE_LABELS = {
-  payroll_run: 'הרצת שכר',
   claim_batch: 'אצוות תביעות',
   manual_compliance_lock: 'נעילת ציות ידנית',
 }
 
 const LOCK_REASON_LABELS = {
   hmo_claim_submitted: 'התביעה הוגשה לגורם המממן',
-  debug_uat_payroll_lock: 'נעילת בדיקה של שכר',
   debug_uat_paid_claim_lock: 'נעילת בדיקה של תביעה ששולמה',
 }
 

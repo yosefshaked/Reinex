@@ -728,7 +728,7 @@ describe('lessonDialogModel: groupPreviewImpacts / getOpenActionTab / formatters
     assert.equal(getImpactGroupMeta('billing_charge').key, 'billing');
     assert.equal(getImpactGroupMeta('post_coverage_charge').key, 'billing');
     assert.equal(getImpactGroupMeta('instructor_earning_update').key, 'payroll');
-    assert.equal(getImpactGroupMeta('instructor_attendance_remove').key, 'attendance');
+    assert.equal(getImpactGroupMeta('instructor_attendance_update').key, 'attendance');
     assert.equal(getImpactGroupMeta('hmo_split_detail').key, 'hmo');
     assert.deepEqual(getImpactGroupMeta('something_else'), {
       key: 'workflow',
@@ -745,7 +745,7 @@ describe('lessonDialogModel: groupPreviewImpacts / getOpenActionTab / formatters
       { id: 3, type: 'status_change' },
       { id: 4, type: 'billing_reversal' },
       { id: 5, type: 'hmo_task_resolve' },
-      { id: 6, type: 'instructor_attendance_add' },
+      { id: 6, type: 'instructor_attendance_update' },
       { id: 7, type: 'instructor_earning_reversal' },
     ];
     const groups = groupPreviewImpacts(impacts);

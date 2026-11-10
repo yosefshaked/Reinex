@@ -775,7 +775,7 @@ async function deleteTestOrg(supabaseUrl, serviceKey) {
 
   // Clean up dependent tables first
   const deps = [
-    'ledger_transactions', 'lesson_earnings', 'commitments',
+    'ledger_transactions', 'commitments',
     'lesson_instances', 'lesson_templates', 'students',
     'client_profiles', 'Employees', 'Services', 'forms',
     'org_memberships',

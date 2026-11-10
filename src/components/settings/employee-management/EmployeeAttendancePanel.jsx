@@ -49,9 +49,9 @@ const STATUS_OPTIONS = [
   { value: 'absent', label: 'נעדר/ת' },
 ];
 
-/** A day's minutes, kept apart: what came from lessons and what was entered as other work. */
-function describeMinutes(record) {
-  const lesson = Math.max(0, Number(record?.lesson_minutes) || 0);
+/** A day's minutes, kept apart: lesson time read from the calendar and the other work entered here. */
+function describeMinutes(record, lessonDay) {
+  const lesson = Math.max(0, Number(lessonDay?.lesson_minutes) || 0);
   const other = Math.max(0, Number(record?.other_minutes) || 0);
   const parts = [];
   if (lesson > 0) parts.push(`מפגשים ${lesson} דק׳`);
@@ -63,6 +63,7 @@ export default function EmployeeAttendancePanel({ employee, orgId, session }) {
   const [monthDate, setMonthDate] = useState(() => startOfMonth(new Date()));
   const [selectedDate, setSelectedDate] = useState(() => toLocalDateString(new Date()));
   const [records, setRecords] = useState([]);
+  const [lessonDays, setLessonDays] = useState([]);
   const [leaveDays, setLeaveDays] = useState([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -104,6 +105,7 @@ export default function EmployeeAttendancePanel({ employee, orgId, session }) {
       .then((payload) => {
         if (!active) return;
         setRecords(Array.isArray(payload?.records) ? payload.records : []);
+        setLessonDays(Array.isArray(payload?.lesson_days) ? payload.lesson_days : []);
         setLeaveDays(Array.isArray(payload?.leave_days) ? payload.leave_days : []);
       })
       .catch((error) => {
@@ -120,6 +122,7 @@ export default function EmployeeAttendancePanel({ employee, orgId, session }) {
   }, [employee?.id, monthEnd, monthStart, orgId, session]);
 
   const recordsByDate = useMemo(() => new Map(records.map((record) => [record.attendance_date, record])), [records]);
+  const lessonsByDate = useMemo(() => new Map(lessonDays.map((row) => [row.date, row])), [lessonDays]);
   const leaveByDate = useMemo(() => new Map(leaveDays.map((row) => [row.leave_date, row])), [leaveDays]);
 
   useEffect(() => {
@@ -144,14 +147,15 @@ export default function EmployeeAttendancePanel({ employee, orgId, session }) {
       items.push({
         date: dateKey,
         record: recordsByDate.get(dateKey) || null,
+        lessons: lessonsByDate.get(dateKey) || null,
         leave: leaveByDate.get(dateKey) || null,
       });
     }
     return items;
-  }, [leaveByDate, monthDate, recordsByDate]);
+  }, [leaveByDate, lessonsByDate, monthDate, recordsByDate]);
 
   const selectedRecord = recordsByDate.get(selectedDate) || null;
-  const selectedLessonMinutes = Math.max(0, Number(selectedRecord?.lesson_minutes) || 0);
+  const selectedLessonMinutes = Math.max(0, Number(lessonsByDate.get(selectedDate)?.lesson_minutes) || 0);
   const firstHourlyRateDate = hourlyRates.map((row) => row.effective_date).sort()[0] || null;
   const hourlyRateOnSelectedDay = hourlyRates.some((row) => row.effective_date <= selectedDate);
   const enteringOtherMinutes = Number(form.workedMinutes) > 0;
@@ -191,6 +195,7 @@ export default function EmployeeAttendancePanel({ employee, orgId, session }) {
         },
       });
       setRecords(Array.isArray(payload?.records) ? payload.records : []);
+      setLessonDays(Array.isArray(payload?.lesson_days) ? payload.lesson_days : []);
       setLeaveDays(Array.isArray(payload?.leave_days) ? payload.leave_days : []);
       toast.success('הנוכחות נשמרה.');
     } catch (error) {
@@ -232,7 +237,7 @@ export default function EmployeeAttendancePanel({ employee, orgId, session }) {
           <div>
             <h3 className="text-sm font-bold text-slate-900">נוכחות חודשית</h3>
             <p className="text-xs text-slate-500">
-              שעות שאינן מפגש, לפי יום. דקות המפגשים נרשמות מהיומן ומשולמות דרך המפגש. ימי חופשה חוסמים הזנה.
+              שעות שאינן מפגש, לפי יום. דקות המפגשים מגיעות מהיומן ומשולמות דרך המפגש. ימי חופשה חוסמים הזנה.
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -267,14 +272,18 @@ export default function EmployeeAttendancePanel({ employee, orgId, session }) {
                       {day.leave
                         ? `חופשה: ${day.leave.entry?.reason || day.leave.leave_type}`
                         : day.record
-                          ? `${STATUS_OPTIONS.find((item) => item.value === day.record.status)?.label || day.record.status} • ${describeMinutes(day.record)}`
-                          : 'ללא רישום'}
+                          ? `${STATUS_OPTIONS.find((item) => item.value === day.record.status)?.label || day.record.status} • ${describeMinutes(day.record, day.lessons)}`
+                          : day.lessons
+                            ? describeMinutes(null, day.lessons)
+                            : 'ללא רישום'}
                     </div>
                   </div>
                   {day.leave ? (
                     <Badge variant="outline" className="border-amber-300 bg-amber-50 text-amber-900">חופשה</Badge>
                   ) : day.record ? (
                     <Badge variant="outline">{STATUS_OPTIONS.find((item) => item.value === day.record.status)?.label || day.record.status}</Badge>
+                  ) : day.lessons ? (
+                    <Badge variant="outline">מפגשים</Badge>
                   ) : (
                     <Badge variant="outline" className="text-slate-400">ריק</Badge>
                   )}

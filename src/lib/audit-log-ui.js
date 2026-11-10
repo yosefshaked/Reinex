@@ -142,7 +142,7 @@ const DETAIL_LABELS_HE = {
   billing_amount_added: 'סכום שחויב לתלמיד',
   instructor_earning_removed: 'סכום שהוסר משכר מדריך',
   instructor_earning_added: 'סכום שהתווסף לשכר מדריך',
-  instructor_attendance_worked_minutes: 'דקות נוכחות מדריך לאחר השחזור',
+  instructor_attendance_worked_minutes: 'דקות המפגשים של המדריך באותו יום',
   hmo_task_resolved: 'משימת תביעה טופלה',
   previous_status: 'סטטוס קודם',
   next_status: 'סטטוס חדש',
@@ -159,7 +159,6 @@ const DETAIL_LABELS_HE = {
   hmo_task_id_to_resolve: 'משימת תביעה לטיפול',
   instructor_compensation_decision: 'החלטת פיצוי למדריך',
   settled_claim_batch_ids: 'אצוות תביעה שסגרו את השיעור',
-  finalized_payroll_run_ids: 'הרצות שכר שסגרו את השיעור',
 };
 
 const VALUE_LABELS_BY_KEY = {
@@ -230,9 +229,7 @@ const VALUE_LABELS_BY_KEY = {
     instructor_earning_reversal: 'הסרת שכר מדריך',
     instructor_earning_add: 'הוספת שכר מדריך',
     instructor_earning_update: 'עדכון שכר מדריך',
-    instructor_attendance_remove: 'הסרת נוכחות מדריך',
-    instructor_attendance_update: 'עדכון נוכחות מדריך',
-    instructor_attendance_add: 'יצירת נוכחות מדריך',
+    instructor_attendance_update: 'עדכון שעות המפגשים של המדריך',
     hmo_task_resolve: 'סגירת משימת גורם מממן',
     instructor_compensation_decision: 'החלטת פיצוי למדריך',
   },

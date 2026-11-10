@@ -20,7 +20,7 @@ import {
   withOrgScope,
 } from '../_shared/org-bff.js';
 import { parseJsonBodyWithLimit } from '../_shared/validation.js';
-import { canManageEmployeeOps, resyncLessonEarningsForRate } from '../_shared/employee-finance.js';
+import { canManageEmployeeOps } from '../_shared/employee-finance.js';
 import { attachErrorTracking, respondTracked } from '../_shared/error-events.js';
 import {
   LESSON_PAY_BASES,
@@ -241,35 +241,10 @@ export default async function employeeRates(context, req) {
 
     await mirrorRateToLegacyColumn(supabase, orgId, input, context);
 
-    // Lesson pay is stored per lesson, so the lessons this rate now covers are recalculated. The rate
-    // itself is already saved: a failure here is reported, not turned into a failed save.
-    let lessonsRecalculated = 0;
-    let recalculationFailed = false;
-    if (LESSON_PAY_BASES.has(input.payBasis)) {
-      try {
-        lessonsRecalculated = await resyncLessonEarningsForRate(supabase, {
-          orgId,
-          employeeId: input.employeeId,
-          serviceId: input.serviceId,
-          fromDate: input.effectiveDate,
-          today: todayDateKey(),
-          actorUserId: userId,
-        });
-      } catch (resyncError) {
-        recalculationFailed = true;
-        context.log?.error?.('employee-rates failed to recalculate lessons for the new rate', {
-          message: resyncError?.message,
-          employeeId,
-        });
-      }
-    }
-
     return respond(context, 200, {
       rate: saved,
       warnings,
       today: todayDateKey(),
-      lessons_recalculated: lessonsRecalculated,
-      recalculation_failed: recalculationFailed,
     });
   } catch (saveError) {
     context.log?.error?.('employee-rates failed to save the rate', { message: saveError?.message, employeeId });

@@ -41,7 +41,7 @@ export const SETUP_SQL_SCRIPT = String.raw`-- ==================================
 --   hmo_provider_tracks (default_customer_charge_amount, default_insurer_claim_amount, default_post_coverage_policy),
 --   hmo_authorizations (covered_customer_charge_amount, covered_insurer_claim_amount, post_coverage_policy),
 --   commitments (total_amount, default_charge_amount),
---   ledger_transactions (amount), lesson_earnings (rate_used, payout_amount).
+--   ledger_transactions (amount).
 --   Non-currency numerics (annual_leave_days, balance_days_delta, pay_fraction,
 --   quantity_days) remain as numeric. get_student_remaining_balance() -> bigint.
 -- - [SCHEMA] ledger_transactions usage_type DEBIT enum extended: +transfer_debit, +refund.
@@ -521,6 +521,20 @@ CREATE INDEX IF NOT EXISTS active_routing_routing_info_gin_idx
 CREATE UNIQUE INDEX IF NOT EXISTS active_routing_active_org_user_uidx
   ON public.active_routing (user_id)
   WHERE user_id IS NOT NULL AND category = 'active_org' AND expires_at IS NULL;
+
+-- -----------------------------------------------------------------
+-- public.schema_migrations
+-- -----------------------------------------------------------------
+-- One row per file in migrations/ that was applied to this database. This script is the snapshot
+-- of the schema as it should be; one-time changes to an existing database (dropping a table or a
+-- column, moving data) live in migrations/ and record themselves here.
+
+CREATE TABLE IF NOT EXISTS public.schema_migrations (
+  version text PRIMARY KEY,
+  applied_at timestamptz NOT NULL DEFAULT now()
+);
+
+ALTER TABLE public.schema_migrations ENABLE ROW LEVEL SECURITY;
 
 -- -----------------------------------------------------------------
 -- public.audit_log (unified: replaces both control audit_log and
@@ -1140,7 +1154,9 @@ CREATE TABLE IF NOT EXISTS public.employee_attendance_records (
   employee_id uuid NOT NULL,
   attendance_date date NOT NULL,
   status text NOT NULL DEFAULT 'present',
-  worked_minutes integer NULL,
+  -- Work that is not a lesson: office hours, stable work, meetings. Lesson time is never stored
+  -- here; it is read from the calendar when it is needed.
+  other_minutes integer NOT NULL DEFAULT 0,
   notes text NULL,
   source_type text NOT NULL DEFAULT 'manual',
   version int NOT NULL DEFAULT 1,
@@ -1151,21 +1167,16 @@ CREATE TABLE IF NOT EXISTS public.employee_attendance_records (
   metadata jsonb NULL,
   CONSTRAINT employee_attendance_records_employee_id_fkey FOREIGN KEY (employee_id) REFERENCES public."Employees"(id),
   CONSTRAINT employee_attendance_records_status_check CHECK (status IN ('present', 'partial', 'absent', 'remote')),
-  CONSTRAINT employee_attendance_records_source_type_check CHECK (source_type IN ('manual', 'import', 'system', 'correction'))
+  CONSTRAINT employee_attendance_records_source_type_check CHECK (source_type IN ('manual', 'import'))
 );
 
 DROP INDEX IF EXISTS public.employee_attendance_records_employee_date_uidx;
 
 CREATE UNIQUE INDEX IF NOT EXISTS employee_attendance_records_primary_date_uidx
-  ON public.employee_attendance_records (org_id, employee_id, attendance_date)
-  WHERE source_type IN ('manual', 'import', 'system');
+  ON public.employee_attendance_records (org_id, employee_id, attendance_date);
 
 CREATE INDEX IF NOT EXISTS employee_attendance_records_date_idx
   ON public.employee_attendance_records (org_id, attendance_date);
-
-CREATE INDEX IF NOT EXISTS employee_attendance_records_correction_idx
-  ON public.employee_attendance_records (org_id, employee_id, attendance_date, source_type)
-  WHERE source_type = 'correction';
 
 -- -----------------------------------------------------------------
 -- public.employee_leave_entries
@@ -1806,29 +1817,6 @@ CREATE INDEX IF NOT EXISTS grace_cancellation_requests_created_at_idx
   ON public.grace_cancellation_requests (org_id, created_at DESC);
 
 -- -----------------------------------------------------------------
--- public.payroll_runs
--- -----------------------------------------------------------------
-
-CREATE TABLE IF NOT EXISTS public.payroll_runs (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  org_id uuid NOT NULL REFERENCES public.organizations(id),
-  period_start date NOT NULL,
-  period_end date NOT NULL,
-  status text NOT NULL DEFAULT 'draft',
-  finalized_at timestamptz NULL,
-  finalized_by uuid NULL,
-  version int NOT NULL DEFAULT 1,
-  created_at timestamptz NOT NULL DEFAULT now(),
-  updated_at timestamptz NOT NULL DEFAULT now(),
-  metadata jsonb NULL,
-  CONSTRAINT payroll_runs_status_check CHECK (status IN ('draft', 'finalized', 'cancelled'))
-);
-
-
-CREATE INDEX IF NOT EXISTS payroll_runs_period_idx
-  ON public.payroll_runs (org_id, period_start, period_end, status);
-
--- -----------------------------------------------------------------
 -- public.claim_batches
 -- -----------------------------------------------------------------
 
@@ -1870,7 +1858,7 @@ CREATE TABLE IF NOT EXISTS public.instance_locks (
   created_at timestamptz NOT NULL DEFAULT now(),
   metadata jsonb NULL,
   CONSTRAINT instance_locks_lesson_instance_id_fkey FOREIGN KEY (lesson_instance_id) REFERENCES public.lesson_instances(id) ON DELETE CASCADE,
-  CONSTRAINT instance_locks_source_type_check CHECK (lock_source_type IN ('payroll_run', 'claim_batch', 'manual_compliance_lock'))
+  CONSTRAINT instance_locks_source_type_check CHECK (lock_source_type IN ('claim_batch', 'manual_compliance_lock'))
 );
 
 
@@ -1895,7 +1883,7 @@ CREATE TABLE IF NOT EXISTS public.participant_locks (
   created_at timestamptz NOT NULL DEFAULT now(),
   metadata jsonb NULL,
   CONSTRAINT participant_locks_lesson_participant_id_fkey FOREIGN KEY (lesson_participant_id) REFERENCES public.lesson_participants(id) ON DELETE CASCADE,
-  CONSTRAINT participant_locks_source_type_check CHECK (lock_source_type IN ('payroll_run', 'claim_batch', 'manual_compliance_lock'))
+  CONSTRAINT participant_locks_source_type_check CHECK (lock_source_type IN ('claim_batch', 'manual_compliance_lock'))
 );
 
 
@@ -2412,33 +2400,6 @@ BEGIN
   RETURN v_credits - v_debits;
 END;
 $$;
-
--- -----------------------------------------------------------------
--- public.lesson_earnings
--- -----------------------------------------------------------------
-
-CREATE TABLE IF NOT EXISTS public.lesson_earnings (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  org_id uuid NOT NULL REFERENCES public.organizations(id),
-  employee_id uuid NOT NULL,
-  lesson_instance_id uuid NOT NULL,
-  rate_used integer NOT NULL,
-  payout_amount integer NOT NULL,
-  created_at timestamptz NOT NULL DEFAULT now(),
-  metadata jsonb NULL,
-  CONSTRAINT lesson_earnings_employee_id_fkey FOREIGN KEY (employee_id) REFERENCES public."Employees"(id),
-  CONSTRAINT lesson_earnings_lesson_instance_id_fkey FOREIGN KEY (lesson_instance_id) REFERENCES public.lesson_instances(id)
-);
-
-CREATE UNIQUE INDEX IF NOT EXISTS lesson_earnings_employee_lesson_unique
-  ON public.lesson_earnings (org_id, employee_id, lesson_instance_id);
-
-
-CREATE INDEX IF NOT EXISTS lesson_earnings_employee_id_idx
-  ON public.lesson_earnings (org_id, employee_id);
-
-CREATE INDEX IF NOT EXISTS lesson_earnings_lesson_instance_id_idx
-  ON public.lesson_earnings (org_id, lesson_instance_id);
 
 -- -----------------------------------------------------------------
 -- public.forms
@@ -3109,7 +3070,7 @@ BEGIN
     FROM public.instance_locks
     WHERE lesson_instance_id = p_instance_id
       AND org_id = p_org_id
-      AND lock_source_type IN ('payroll_run', 'claim_batch')
+      AND lock_source_type = 'claim_batch'
   ) OR EXISTS (
     SELECT 1
     FROM public.participant_locks lock_row
@@ -3117,7 +3078,7 @@ BEGIN
       ON participant.id = lock_row.lesson_participant_id
     WHERE participant.lesson_instance_id = p_instance_id
       AND participant.org_id = p_org_id
-      AND lock_row.lock_source_type IN ('payroll_run', 'claim_batch')
+      AND lock_row.lock_source_type = 'claim_batch'
   ) THEN
     RETURN QUERY
     SELECT
@@ -3386,7 +3347,7 @@ BEGIN
     FROM public.instance_locks
     WHERE lesson_instance_id = p_instance_id
       AND org_id = p_org_id
-      AND lock_source_type IN ('payroll_run', 'claim_batch')
+      AND lock_source_type = 'claim_batch'
   ) OR EXISTS (
     SELECT 1
     FROM public.participant_locks lock_row
@@ -3394,7 +3355,7 @@ BEGIN
       ON participant.id = lock_row.lesson_participant_id
     WHERE participant.lesson_instance_id = p_instance_id
       AND participant.org_id = p_org_id
-      AND lock_row.lock_source_type IN ('payroll_run', 'claim_batch')
+      AND lock_row.lock_source_type = 'claim_batch'
   ) THEN
     RETURN QUERY
     SELECT
@@ -3605,7 +3566,7 @@ BEGIN
     FROM public.instance_locks
     WHERE lesson_instance_id = p_instance_id
       AND org_id = p_org_id
-      AND lock_source_type IN ('payroll_run', 'claim_batch')
+      AND lock_source_type = 'claim_batch'
   ) OR EXISTS (
     SELECT 1
     FROM public.participant_locks lock_row
@@ -3613,7 +3574,7 @@ BEGIN
       ON participant.id = lock_row.lesson_participant_id
     WHERE participant.lesson_instance_id = p_instance_id
       AND participant.org_id = p_org_id
-      AND lock_row.lock_source_type IN ('payroll_run', 'claim_batch')
+      AND lock_row.lock_source_type = 'claim_batch'
   ) THEN
     RETURN QUERY
     SELECT
@@ -3924,17 +3885,6 @@ BEGIN
 
   IF NOT EXISTS (
     SELECT 1 FROM pg_trigger
-    WHERE tgname = 'trg_payroll_runs_set_updated_at_version'
-      AND tgrelid = 'public.payroll_runs'::regclass
-  ) THEN
-    CREATE TRIGGER trg_payroll_runs_set_updated_at_version
-      BEFORE UPDATE ON public.payroll_runs
-      FOR EACH ROW
-      EXECUTE FUNCTION public.set_entity_updated_at_and_version();
-  END IF;
-
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_trigger
     WHERE tgname = 'trg_claim_batches_set_updated_at_version'
       AND tgrelid = 'public.claim_batches'::regclass
   ) THEN
@@ -3990,7 +3940,6 @@ CREATE INDEX IF NOT EXISTS hmo_authorizations_status_idx ON public.hmo_authoriza
 CREATE INDEX IF NOT EXISTS employee_leave_entries_status_idx ON public.employee_leave_entries (org_id, status);
 CREATE INDEX IF NOT EXISTS employee_leave_days_date_idx ON public.employee_leave_days (org_id, leave_date);
 CREATE INDEX IF NOT EXISTS finance_corrections_type_idx ON public.finance_corrections (org_id, correction_type);
-CREATE INDEX IF NOT EXISTS payroll_runs_status_idx ON public.payroll_runs (org_id, status, finalized_at);
 CREATE INDEX IF NOT EXISTS claim_batches_status_idx ON public.claim_batches (org_id, status, paid_at);
 CREATE INDEX IF NOT EXISTS dashboard_tasks_resource_idx ON public.dashboard_tasks (org_id, resource_type, resource_id, status);
 
@@ -4472,7 +4421,6 @@ ALTER TABLE public.employee_leave_entries ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.employee_leave_days ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.employee_leave_balance_events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.finance_corrections ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.payroll_runs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.claim_batches ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.instance_locks ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.participant_locks ENABLE ROW LEVEL SECURITY;
@@ -4490,7 +4438,6 @@ ALTER TABLE public.instructor_break_templates ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.grace_cancellation_requests ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.commitments ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.ledger_transactions ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.lesson_earnings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.forms ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.shared_form_blocks ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.form_shared_block_links ENABLE ROW LEVEL SECURITY;
@@ -4523,7 +4470,6 @@ BEGIN
     'employee_leave_days',
     'employee_leave_balance_events',
     'finance_corrections',
-    'payroll_runs',
     'claim_batches',
     'instance_locks',
     'participant_locks',
@@ -4541,7 +4487,6 @@ BEGIN
     'grace_cancellation_requests',
     'commitments',
     'ledger_transactions',
-    'lesson_earnings',
     'forms',
     'shared_form_blocks',
     'form_shared_block_links',
@@ -4621,7 +4566,6 @@ GRANT ALL ON TABLE public.employee_leave_entries TO app_user;
 GRANT ALL ON TABLE public.employee_leave_days TO app_user;
 GRANT ALL ON TABLE public.employee_leave_balance_events TO app_user;
 GRANT ALL ON TABLE public.finance_corrections TO app_user;
-GRANT ALL ON TABLE public.payroll_runs TO app_user;
 GRANT ALL ON TABLE public.claim_batches TO app_user;
 GRANT ALL ON TABLE public.instance_locks TO app_user;
 GRANT ALL ON TABLE public.participant_locks TO app_user;
@@ -4641,7 +4585,6 @@ GRANT ALL ON TABLE public.instructor_break_templates TO app_user;
 GRANT ALL ON TABLE public.grace_cancellation_requests TO app_user;
 GRANT ALL ON TABLE public.commitments TO app_user;
 GRANT ALL ON TABLE public.ledger_transactions TO app_user;
-GRANT ALL ON TABLE public.lesson_earnings TO app_user;
 GRANT ALL ON TABLE public.forms TO app_user;
 GRANT ALL ON TABLE public.shared_form_blocks TO app_user;
 GRANT ALL ON TABLE public.form_shared_block_links TO app_user;
@@ -4916,7 +4859,6 @@ DECLARE
     'grace_cancellation_requests',
     'commitments',
     'ledger_transactions',
-    'lesson_earnings',
     'forms',
     'form_submissions',
     'otp_challenges',
@@ -7116,106 +7058,6 @@ BEGIN
       AFTER INSERT OR UPDATE ON public."Employees"
       FOR EACH ROW
       EXECUTE FUNCTION public.mirror_employee_rates_to_rate_history();
-  END IF;
-END $$;
-
--- -----------------------------------------------------------------
--- Patch 2026-09-22: attendance separates lesson minutes from other work
--- -----------------------------------------------------------------
--- A day's worked_minutes held teaching time and office time in one number, and only one row per
--- day was allowed across manual/import/system, so a manual office day hid the lesson minutes (and
--- vice versa). Anything paying by attendance hours therefore paid for lesson time that lesson pay
--- already covers. The day row now carries the two buckets separately:
---   lesson_minutes — written from the lessons the instructor is compensated for that day
---   other_minutes  — work that is not a lesson: office hours, stable work, meetings
--- worked_minutes stays as the total of both, maintained by a trigger, so existing readers and
--- reports keep working.
-
-ALTER TABLE public.employee_attendance_records
-  ADD COLUMN IF NOT EXISTS lesson_minutes integer NOT NULL DEFAULT 0;
-
-ALTER TABLE public.employee_attendance_records
-  ADD COLUMN IF NOT EXISTS other_minutes integer NOT NULL DEFAULT 0;
-
--- Backfill: a system row's minutes were lesson minutes, every other row's were other work.
-UPDATE public.employee_attendance_records
-SET "lesson_minutes" = GREATEST(COALESCE("worked_minutes", 0), 0)
-WHERE "source_type" = 'system'
-  AND "lesson_minutes" = 0
-  AND COALESCE("worked_minutes", 0) <> 0;
-
-UPDATE public.employee_attendance_records
-SET "other_minutes" = GREATEST(COALESCE("worked_minutes", 0), 0)
-WHERE "source_type" <> 'system'
-  AND "other_minutes" = 0
-  AND COALESCE("worked_minutes", 0) > 0;
-
--- Correction rows can subtract minutes, and they always correct lesson time (they come from a
--- calendar correction), so they keep their sign in the lesson bucket.
-UPDATE public.employee_attendance_records
-SET "lesson_minutes" = COALESCE("worked_minutes", 0),
-    "other_minutes" = 0
-WHERE "source_type" = 'correction'
-  AND "lesson_minutes" = 0
-  AND COALESCE("worked_minutes", 0) <> 0;
-
--- worked_minutes is the total of the two buckets. Writers that still set worked_minutes alone
--- (older code, imports) keep working: their value lands in the bucket the row's source implies.
-CREATE OR REPLACE FUNCTION public.sync_attendance_minute_buckets()
-RETURNS trigger
-LANGUAGE plpgsql
-SET search_path = public
-AS $$
-DECLARE
-  v_buckets_touched boolean;
-BEGIN
-  v_buckets_touched := TG_OP = 'INSERT'
-    OR NEW."lesson_minutes" IS DISTINCT FROM OLD."lesson_minutes"
-    OR NEW."other_minutes" IS DISTINCT FROM OLD."other_minutes";
-
-  NEW."lesson_minutes" := COALESCE(NEW."lesson_minutes", 0);
-  NEW."other_minutes" := COALESCE(NEW."other_minutes", 0);
-
-  IF NOT v_buckets_touched
-    AND NEW."worked_minutes" IS DISTINCT FROM OLD."worked_minutes"
-    AND NEW."worked_minutes" IS NOT NULL
-  THEN
-    -- Only the total was written: put it in the bucket this row is about.
-    IF NEW."source_type" IN ('system', 'correction') THEN
-      NEW."lesson_minutes" := NEW."worked_minutes";
-      NEW."other_minutes" := 0;
-    ELSE
-      NEW."other_minutes" := NEW."worked_minutes";
-      NEW."lesson_minutes" := 0;
-    END IF;
-  ELSIF TG_OP = 'INSERT'
-    AND NEW."worked_minutes" IS NOT NULL
-    AND NEW."lesson_minutes" = 0
-    AND NEW."other_minutes" = 0
-  THEN
-    IF NEW."source_type" IN ('system', 'correction') THEN
-      NEW."lesson_minutes" := NEW."worked_minutes";
-    ELSE
-      NEW."other_minutes" := NEW."worked_minutes";
-    END IF;
-  END IF;
-
-  NEW."worked_minutes" := NEW."lesson_minutes" + NEW."other_minutes";
-  RETURN NEW;
-END;
-$$;
-
-DO $$
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_trigger
-    WHERE tgname = 'trg_employee_attendance_records_sync_minutes'
-      AND tgrelid = 'public.employee_attendance_records'::regclass
-  ) THEN
-    CREATE TRIGGER trg_employee_attendance_records_sync_minutes
-      BEFORE INSERT OR UPDATE ON public.employee_attendance_records
-      FOR EACH ROW
-      EXECUTE FUNCTION public.sync_attendance_minute_buckets();
   END IF;
 END $$;
 

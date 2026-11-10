@@ -25,7 +25,6 @@ import {
   resolveEmployeeWorkingDays,
   resolveLeaveDayValue,
   resolveLessonInstructorPayout,
-  resolveOtherMinutes,
   startOfMonthKey,
   toDateKey,
 } from './employee-finance.js';
@@ -390,7 +389,7 @@ export async function computeEmployeePay(client, orgId, {
     amount: coerceAgorot(resolveLeaveDayValue({
       employee,
       targetDate: leaveDay.leave_date,
-      lessonEarnings: lessonHistory,
+      lessonHistory,
       attendanceRecords: attendanceHistory,
       leavePayPolicy: resolvedPolicies.leavePayPolicy,
       rateRows: resolvedRateRows,
@@ -412,7 +411,7 @@ export async function computeEmployeePay(client, orgId, {
       payBasis: PAY_BASIS.ATTENDANCE_HOURLY,
       date: dateKey,
     })?.rate ?? 0;
-    const minutes = resolveOtherMinutes(row);
+    const minutes = Math.max(0, Number(row?.other_minutes) || 0);
     return {
       attendance_date: dateKey,
       other_minutes: minutes,

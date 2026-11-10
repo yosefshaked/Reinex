@@ -22,8 +22,11 @@ import {
   startOfMonthKey,
   toDateKey,
 } from '../_shared/employee-finance.js';
+import { loadCountedLessons, summarizeLessonsByDate } from '../_shared/pay-calculation.js';
 
 const MAX_BODY_BYTES = 64 * 1024;
+const RECORD_COLUMNS = 'id, employee_id, attendance_date, status, other_minutes, notes, source_type, created_by, updated_by, created_at, updated_at, metadata';
+const SOURCE_TYPES = new Set(['manual', 'import']);
 
 function normalizeWorkedMinutes(value) {
   if (value === undefined) {
@@ -126,16 +129,34 @@ export default async function (context, req) {
     }
 
     const employee = employeeResult.employee;
-    const [records, leaveDays] = await Promise.all([
-      fetchAttendanceRecords(supabase, { employeeId: employee.id, startDate: resolvedStart, endDate: resolvedEnd }),
-      fetchApprovedLeaveDays(supabase, { employeeId: employee.id, startDate: resolvedStart, endDate: resolvedEnd }),
-    ]);
+    // Office hours come from the attendance records. Lesson time is not stored: it is read from
+    // the calendar here, with the same rules the pay calculation uses.
+    let records, leaveDays, lessons;
+    try {
+      [records, leaveDays, lessons] = await Promise.all([
+        fetchAttendanceRecords(supabase, { employeeId: employee.id, startDate: resolvedStart, endDate: resolvedEnd }),
+        fetchApprovedLeaveDays(supabase, { employeeId: employee.id, startDate: resolvedStart, endDate: resolvedEnd }),
+        loadCountedLessons(supabase, orgId, { employeeId: employee.id, startDate: resolvedStart, endDate: resolvedEnd }),
+      ]);
+    } catch (loadError) {
+      context.log?.error?.('employee-attendance failed to load the month', { employeeId: employee.id, message: loadError?.message });
+      return respond(context, 500, { message: 'failed_to_load_attendance' });
+    }
+    const lessonDays = Array.from(summarizeLessonsByDate(lessons).entries())
+      .map(([date, day]) => ({
+        date,
+        lesson_minutes: day.lesson_minutes,
+        lesson_count: day.lesson_count,
+        unmarked_lesson_count: day.unmarked_lesson_count,
+      }))
+      .sort((a, b) => a.date.localeCompare(b.date));
 
     return respond(context, 200, {
       employee_id: employee.id,
       start_date: resolvedStart,
       end_date: resolvedEnd,
       records,
+      lesson_days: lessonDays,
       leave_days: leaveDays,
     });
   }
@@ -149,11 +170,10 @@ export default async function (context, req) {
     const attendanceDate = normalizeString(body?.attendance_date);
     const status = normalizeAttendanceStatus(body?.status);
     const notes = normalizeString(body?.notes) || null;
-    // The office enters work that is not a lesson. Lesson minutes of the same day are written by the
-    // lesson sync and are paid through the lesson, so this endpoint never touches them.
-    const otherMinutesResult = normalizeWorkedMinutes(
-      body?.other_minutes !== undefined ? body.other_minutes : body?.worked_minutes,
-    );
+    // The office enters work that is not a lesson. Lesson time is read from the calendar and paid
+    // through the lesson, so it is never stored here.
+    const otherMinutesResult = normalizeWorkedMinutes(body?.other_minutes);
+    const requestedSourceType = normalizeString(body?.source_type).toLowerCase();
 
     if (!employeeId) {
       return respond(context, 400, { message: 'missing_employee_id' });
@@ -165,7 +185,7 @@ export default async function (context, req) {
       return respond(context, 400, { message: 'invalid_status' });
     }
     if (!otherMinutesResult.valid) {
-      return respond(context, 400, { message: 'invalid_worked_minutes' });
+      return respond(context, 400, { message: 'invalid_other_minutes' });
     }
 
     const conflict = await assertNoLeaveForAttendance(supabase, {
@@ -184,7 +204,7 @@ export default async function (context, req) {
       status,
       other_minutes: otherMinutesResult.value ?? 0,
       notes,
-      source_type: normalizeString(body?.source_type).toLowerCase() || 'manual',
+      source_type: SOURCE_TYPES.has(requestedSourceType) ? requestedSourceType : 'manual',
       updated_by: userId,
       updated_at: new Date().toISOString(),
     };
@@ -194,7 +214,7 @@ export default async function (context, req) {
       payload.created_at = new Date().toISOString();
       const { data, error } = await withOrgScope(supabase, 'employee_attendance_records', orgId)
         .insert(payload)
-        .select('id, employee_id, attendance_date, status, worked_minutes, lesson_minutes, other_minutes, notes, source_type, created_by, updated_by, created_at, updated_at, metadata')
+        .select(RECORD_COLUMNS)
         .single();
 
       if (error) {
@@ -219,7 +239,7 @@ export default async function (context, req) {
     }
 
     const { data, error } = await query
-      .select('id, employee_id, attendance_date, status, worked_minutes, lesson_minutes, other_minutes, notes, source_type, created_by, updated_by, created_at, updated_at, metadata')
+      .select(RECORD_COLUMNS)
       .maybeSingle();
 
     if (error) {
@@ -240,32 +260,6 @@ export default async function (context, req) {
 
     if (!recordId && !(employeeId && isYmdDate(attendanceDate))) {
       return respond(context, 400, { message: 'missing_delete_target' });
-    }
-
-    // A day that also holds lesson minutes is not deleted: only the office hours are cleared, so
-    // removing an office entry never erases the instructor's teaching time for that day.
-    let existingQuery = withOrgScope(supabase, 'employee_attendance_records', orgId)
-      .select('id, lesson_minutes');
-    existingQuery = recordId
-      ? existingQuery.eq('id', recordId)
-      : existingQuery.eq('employee_id', employeeId).eq('attendance_date', attendanceDate);
-    const { data: existing, error: existingError } = await existingQuery.maybeSingle();
-    if (existingError) {
-      context.log?.error?.('employee-attendance failed to read record before delete', { message: existingError.message });
-      return respond(context, 500, { message: 'failed_to_delete_attendance_record' });
-    }
-
-    if (existing && Number(existing.lesson_minutes || 0) > 0) {
-      const { data: cleared, error: clearError } = await withOrgScope(supabase, 'employee_attendance_records', orgId)
-        .update({ other_minutes: 0, updated_by: userId, updated_at: new Date().toISOString() })
-        .eq('id', existing.id)
-        .select('id')
-        .maybeSingle();
-      if (clearError) {
-        context.log?.error?.('employee-attendance failed to clear office minutes', { message: clearError.message });
-        return respond(context, 500, { message: 'failed_to_delete_attendance_record' });
-      }
-      return respond(context, 200, { id: cleared?.id || existing.id, deleted: false, other_minutes_cleared: true });
     }
 
     let query = withOrgScope(supabase, 'employee_attendance_records', orgId).delete();

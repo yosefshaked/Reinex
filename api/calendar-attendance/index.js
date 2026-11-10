@@ -24,8 +24,6 @@ import {
   lessonHasInstructorCompensation,
   loadGraceCancellationParticipantIds,
   loadFinancePolicies,
-  syncLessonInstructorEarnings,
-  syncInstructorAttendanceFromLessons,
   validateInstructorRateForLesson,
 } from '../_shared/employee-finance.js';
 import BillingLedgerService from '../_shared/BillingLedgerService.js';
@@ -1432,8 +1430,6 @@ async function handleMarkAttendance(context, body, dbContext, userId, isAdmin, a
       actorUserId: userId,
       reasonCode: 'attendance_changed',
     });
-    await syncLessonInstructorEarnings(client, body.instance_id, userId);
-    await syncInstructorAttendanceFromLessons(client, body.instance_id, userId);
     billingWarnings = (billingResult?.participantResults || [])
       .filter((row) => row.status === 'blocked')
       .map((row) => ({

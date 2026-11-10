@@ -1287,7 +1287,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
 
   if (!instance || !displayInstance) return null;
 
-  const LOCK_SOURCE_LABELS = { payroll_run: 'הרצת שכר', claim_batch: 'אצוות תביעות', manual_compliance_lock: 'נעילת ציות ידנית' };
+  const LOCK_SOURCE_LABELS = { claim_batch: 'אצוות תביעות', manual_compliance_lock: 'נעילת ציות ידנית' };
   const REMAINING_LABELS = {
     student_billing_unresolved: 'חיוב לקוחות',
     hmo_claim_unresolved: 'תביעת גורם מממן',

@@ -159,7 +159,7 @@ export function respondWithVersionConflict(context, options) {
 }
 
 export function isLockedState(state) {
-  const isFinanceLock = (lock) => ['payroll_run', 'claim_batch'].includes(normalizeString(lock?.lock_source_type));
+  const isFinanceLock = (lock) => normalizeString(lock?.lock_source_type) === 'claim_batch';
   const hasInstanceFinanceLocks = Array.isArray(state?.instanceLocks) && state.instanceLocks.some(isFinanceLock);
   const hasParticipantFinanceLocks = Array.isArray(state?.participantLocks) && state.participantLocks.some(isFinanceLock);
   return Boolean(

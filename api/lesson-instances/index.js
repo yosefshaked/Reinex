@@ -27,7 +27,6 @@ import {
   withOrgScope,
 } from '../_shared/org-bff.js';
 import BillingLedgerService from '../_shared/BillingLedgerService.js';
-import { syncLessonInstructorEarnings, syncInstructorAttendanceFromLessons } from '../_shared/employee-finance.js';
 import { syncLessonClosureState } from '../_shared/calendar-workflow.js';
 import { buildUtcBoundsForTimezoneDateRange } from '../_shared/instructor-availability.js';
 import {
@@ -1133,7 +1132,7 @@ export default async function lessonInstances(context, req) {
       };
     }
 
-    // Sync financial artifacts and instructor attendance when status changes
+    // Sync the charges and the closure state when the status changes
     if (nextStatus) {
       try {
         await billingService.syncLessonInstanceCharges({
@@ -1141,8 +1140,6 @@ export default async function lessonInstances(context, req) {
           actorUserId: userId,
           reasonCode: 'lesson_updated',
         });
-        await syncLessonInstructorEarnings(supabase, lessonInstanceId, userId);
-        await syncInstructorAttendanceFromLessons(supabase, lessonInstanceId, userId);
         await syncLessonClosureState(supabase, lessonInstanceId, userId);
       } catch (syncError) {
         context.log?.error?.('lesson-instances failed to sync financial artifacts', {
@@ -1582,8 +1579,6 @@ export default async function lessonInstances(context, req) {
             actorUserId: userId,
             reasonCode: 'lesson_updated',
           });
-          await syncLessonInstructorEarnings(client, instId, userId);
-          await syncInstructorAttendanceFromLessons(client, instId, userId);
           await syncLessonClosureState(client, instId, userId);
         } catch (syncError) {
           context.log?.error?.('lesson-instances bulk-cancel failed to sync lesson workflow', {

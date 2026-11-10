@@ -167,6 +167,7 @@ function buildDynamicVars() {
   return {
     CURRENT_MONTH_START: new Date(Date.UTC(y, m,     1, 8, 0, 0)).toISOString(),
     PREV_MONTH_START:    new Date(Date.UTC(y, m - 1, 1, 8, 0, 0)).toISOString(),
+    CURRENT_MONTH_FIRST_DAY: `${y}-${String(m + 1).padStart(2, '0')}-01`,
     RUN_ID:              `run-${runNumericId}`,
     RUN_NUMERIC_ID:      runNumericId,
   };

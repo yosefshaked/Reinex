@@ -21,7 +21,7 @@ import {
   withOrgScope,
 } from '../_shared/org-bff.js';
 import { parseJsonBodyWithLimit } from '../_shared/validation.js';
-import { assertNoLeaveForLesson, syncInstructorAttendanceFromLessons, syncLessonInstructorEarnings, toDateKey, validateInstructorRateForLesson } from '../_shared/employee-finance.js';
+import { assertNoLeaveForLesson, toDateKey, validateInstructorRateForLesson } from '../_shared/employee-finance.js';
 import BillingLedgerService from '../_shared/BillingLedgerService.js';
 import { logTenantAuditEvent, TENANT_AUDIT_RETENTION } from '../_shared/tenant-audit.js';
 import { syncLessonClosureState } from '../_shared/calendar-workflow.js';
@@ -1109,7 +1109,6 @@ async function handleCreateInstance(context, body, dbContext, supabase, authCont
       actorUserId: userId,
       reasonCode: 'lesson_updated',
     });
-    await syncLessonInstructorEarnings(client, instance.id, userId);
     await syncLessonClosureState(client, instance.id, userId);
   } catch (syncError) {
     context.log?.error?.('calendar/instances failed to sync financial artifacts after create', {
@@ -1841,8 +1840,6 @@ async function handleUpdateInstance(context, req, body, dbContext, supabase, aut
       actorUserId: userId,
       reasonCode: 'lesson_updated',
     });
-    await syncLessonInstructorEarnings(client, body.id, userId);
-    await syncInstructorAttendanceFromLessons(client, body.id, userId);
     await syncLessonClosureState(client, body.id, userId);
     billingWarnings = (billingResult?.participantResults || [])
       .filter((row) => row.status === 'blocked')
