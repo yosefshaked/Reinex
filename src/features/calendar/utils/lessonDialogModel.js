@@ -272,7 +272,6 @@ export function deriveDisplayWorkflowDecisions(participant, billingPolicy) {
 export function getWorkflowReasonLabel(reason) {
   if (reason === 'attendance_unresolved') return 'יש משתתפים שטרם קיבלו סטטוס סופי.';
   if (reason === 'student_billing_unresolved') return 'יש חיוב שעדיין לא הושלם.';
-  if (reason === 'instructor_compensation_unresolved') return 'שכר המדריך עדיין לא נסגר דרך הרצת שכר.';
   if (reason === 'hmo_claim_unresolved') return 'יש תביעת גורם מממן שעדיין לא הושלמה.';
   if (reason === 'missing_instance') return 'פרטי השיעור אינם זמינים.';
   return reason || 'קיים שלב פתוח בתהליך הסגירה.';
@@ -350,7 +349,7 @@ export function getOpenActionToneClass(tone) {
 export function getOpenActionTab(actionId) {
   if (actionId === 'attendance') return 'participants';
   if (actionId === 'reminders') return 'participants';
-  if (['documentation', 'billing', 'payroll', 'hmo', 'closure'].includes(actionId)) return 'workflow';
+  if (['documentation', 'billing', 'hmo', 'closure'].includes(actionId)) return 'workflow';
   if (actionId === 'exception') return 'overview';
   return 'overview';
 }

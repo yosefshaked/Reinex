@@ -1290,7 +1290,6 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
   const LOCK_SOURCE_LABELS = { payroll_run: 'הרצת שכר', claim_batch: 'אצוות תביעות', manual_compliance_lock: 'נעילת ציות ידנית' };
   const REMAINING_LABELS = {
     student_billing_unresolved: 'חיוב לקוחות',
-    instructor_compensation_unresolved: 'שכר מדריך/ה',
     hmo_claim_unresolved: 'תביעת גורם מממן',
   };
   const isLessonLocked = Boolean(instance.is_locked || hardBlockedByPaidClaim);

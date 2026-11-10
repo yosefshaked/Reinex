@@ -24,15 +24,14 @@ import {
   lessonHasInstructorCompensation,
   loadGraceCancellationParticipantIds,
   loadFinancePolicies,
-  resolveCompensationEligibleParticipants,
-  resolveLessonInstructorPayout,
   syncLessonInstructorEarnings,
   syncInstructorAttendanceFromLessons,
   validateInstructorRateForLesson,
 } from '../_shared/employee-finance.js';
 import BillingLedgerService from '../_shared/BillingLedgerService.js';
 import { coerceAgorot, toShekel } from '../_shared/currency.js';
-import { LESSON_PAY_BASES, loadRateHistoryRows, resolveLessonRateOnDate } from '../_shared/rate-history.js';
+import { loadCountedLessons, resolveCountedLesson } from '../_shared/pay-calculation.js';
+import { LESSON_PAY_BASES, loadRateHistoryRows } from '../_shared/rate-history.js';
 import { buildBillingDecision, buildDirectClientBillingDecision } from '../_shared/student-billing.js';
 import { resolveLessonCoverageDecision } from '../_shared/hmo.js';
 import { logTenantAuditEvent, TENANT_AUDIT_RETENTION } from '../_shared/tenant-audit.js';
@@ -42,7 +41,7 @@ import { listDashboardTasks, resolveDashboardTask } from '../_shared/dashboard-t
 import { mergeParticipantWorkflowMetadata, syncLessonClosureState } from '../_shared/calendar-workflow.js';
 import { normalizeWorkflowDecision } from '../_shared/calendar-workflow-decisions.js';
 import { normalizeLessonInstanceStatus } from '../_shared/lesson-instance-status.js';
-import { buildUtcBoundsForTimezoneDateRange, getDateKeyInTimezone } from '../_shared/instructor-availability.js';
+import { getDateKeyInTimezone } from '../_shared/instructor-availability.js';
 import { buildAttendanceTransitionAuditChanges } from '../_shared/attendance-audit.js';
 import { attachErrorTracking, respondTracked } from '../_shared/error-events.js';
 import { findBlockingReportParticipantIds } from '../_shared/session-reports-guards.js';
@@ -568,16 +567,13 @@ async function buildParticipantStatusPreview(client, orgId, body, {
     ? null
     : await getAttendanceStatusRequirements(client, orgId, resolvedTargetStatus);
 
-  const [{ data: instanceDetail, error: instanceDetailError }, { data: allParticipants, error: participantsError }, { data: lessonEarningRows, error: earningError }, { data: participantLedgerRows, error: ledgerError }, dashboardTasks] = await Promise.all([
+  const [{ data: instanceDetail, error: instanceDetailError }, { data: allParticipants, error: participantsError }, { data: participantLedgerRows, error: ledgerError }, dashboardTasks] = await Promise.all([
     withOrgScope(client, 'lesson_instances', orgId)
       .select('id, instructor_employee_id, service_id, duration_minutes, status, datetime_start')
       .eq('id', body.instance_id)
       .maybeSingle(),
     withOrgScope(client, 'lesson_participants', orgId)
       .select('id, student_id, client_profile_id, participant_status, lesson_instance_id, metadata')
-      .eq('lesson_instance_id', body.instance_id),
-    withOrgScope(client, 'lesson_earnings', orgId)
-      .select('id, employee_id, rate_used, payout_amount, metadata')
       .eq('lesson_instance_id', body.instance_id),
     withOrgScope(client, 'ledger_transactions', orgId)
       .select('id, student_id, client_profile_id, hmo_provider_id, direction, amount, lesson_participant_id, reverses_transaction_id, source_type, metadata')
@@ -593,7 +589,6 @@ async function buildParticipantStatusPreview(client, orgId, body, {
 
   if (instanceDetailError) throw instanceDetailError;
   if (participantsError) throw participantsError;
-  if (earningError && earningError.code !== 'PGRST116' && earningError.code !== '42P01') throw earningError;
   if (ledgerError && ledgerError.code !== '42P01') throw ledgerError;
   if (!instanceDetail) return null;
 
@@ -639,22 +634,8 @@ async function buildParticipantStatusPreview(client, orgId, body, {
   let billingArtifactRows = Array.isArray(participantLedgerRows) ? [...participantLedgerRows] : [];
 
   const lessonDateKey = getDateKeyInTimezone(instanceDetail.datetime_start || Date.now());
-  const lessonDayBounds = lessonDateKey
-    ? buildUtcBoundsForTimezoneDateRange(lessonDateKey, lessonDateKey)
-    : null;
   const policiesPromise = loadFinancePolicies(client, orgId);
-  const [{ data: dayLessons, error: dayLessonsError }, { data: systemAttendanceRecord, error: attendanceError }, { data: employeeRow, error: employeeError }, { data: studentRow, error: studentError }, { data: clientProfileRow, error: clientProfileError }, { data: serviceRow, error: serviceError }, { data: rateRows, error: rateRowsError }, policies] = await Promise.all([
-    withOrgScope(client, 'lesson_instances', orgId)
-      .select('id, status, duration_minutes')
-      .eq('instructor_employee_id', instanceDetail.instructor_employee_id)
-      .gte('datetime_start', lessonDayBounds?.startIso || '')
-      .lt('datetime_start', lessonDayBounds?.endExclusiveIso || ''),
-    withOrgScope(client, 'employee_attendance_records', orgId)
-      .select('id, status, worked_minutes, lesson_minutes, other_minutes, source_type, metadata')
-      .eq('employee_id', instanceDetail.instructor_employee_id)
-      .eq('attendance_date', lessonDateKey)
-      .in('source_type', ['manual', 'import', 'system'])
-      .maybeSingle(),
+  const [{ data: employeeRow, error: employeeError }, { data: studentRow, error: studentError }, { data: clientProfileRow, error: clientProfileError }, { data: serviceRow, error: serviceError }, { data: rateRows, error: rateRowsError }, policies] = await Promise.all([
     withOrgScope(client, 'Employees', orgId)
       .select('id, first_name, middle_name, last_name')
       .eq('id', instanceDetail.instructor_employee_id)
@@ -682,71 +663,47 @@ async function buildParticipantStatusPreview(client, orgId, body, {
     policiesPromise,
   ]);
 
-  if (dayLessonsError) throw dayLessonsError;
-  if (attendanceError && attendanceError.code !== 'PGRST116' && attendanceError.code !== '42P01') throw attendanceError;
   if (employeeError && employeeError.code !== 'PGRST116') throw employeeError;
   if (studentError && studentError.code !== 'PGRST116') throw studentError;
   if (clientProfileError && clientProfileError.code !== 'PGRST116') throw clientProfileError;
   if (serviceError && serviceError.code !== 'PGRST116') throw serviceError;
   if (rateRowsError) throw rateRowsError;
-  const currentShouldInstructorEarn = Array.isArray(lessonEarningRows) && lessonEarningRows.length > 0;
-  const projectedCompensationParticipants = resolveCompensationEligibleParticipants(
-    projectedParticipants,
+  // Instructor pay and lesson hours before and after the change, by the same rules every pay
+  // screen uses. A lesson that ended with unmarked participants already counts as attended.
+  const now = new Date();
+  const payOf = (participants) => resolveCountedLesson({
+    instance: instanceDetail,
+    participants,
     policies,
     graceParticipantIds,
-  );
-  const projectedShouldInstructorEarn = projectedCompensationParticipants.length > 0;
-
-  const allDayLessons = dayLessons || [];
-  const dayLessonIds = allDayLessons.map((row) => row.id).filter(Boolean);
-  const { data: dayParticipants, error: dayParticipantsError } = dayLessonIds.length > 0
-    ? await withOrgScope(client, 'lesson_participants', orgId)
-      .select('lesson_instance_id, participant_status, metadata')
-      .in('lesson_instance_id', dayLessonIds)
-    : { data: [], error: null };
-  if (dayParticipantsError && dayParticipantsError.code !== '42P01') throw dayParticipantsError;
-
-  const participantsByLesson = new Map();
-  for (const row of dayParticipants || []) {
-    if (!participantsByLesson.has(row.lesson_instance_id)) {
-      participantsByLesson.set(row.lesson_instance_id, []);
-    }
-    participantsByLesson.get(row.lesson_instance_id).push(row);
-  }
-
-  const projectedAttendanceLessons = allDayLessons.filter((lesson) => {
-    const lessonParticipants = lesson.id === body.instance_id
-      ? projectedParticipants.map((row) => ({
-          lesson_instance_id: body.instance_id,
-          participant_status: row.participant_status,
-          metadata: row.metadata,
-        }))
-      : (participantsByLesson.get(lesson.id) || []);
-    return lessonHasInstructorCompensation(lessonParticipants, policies);
+    rateRows,
+    servicePaymentModel: serviceRow?.payment_model,
+    now,
   });
+  const currentPay = payOf(currentParticipants);
+  const projectedPay = payOf(projectedParticipants);
+  const currentShouldInstructorEarn = currentPay.counted;
+  const projectedShouldInstructorEarn = projectedPay.counted;
+  const lessonEarningAmount = coerceAgorot(currentPay.payout_amount);
+  const inferredLessonEarningAmount = coerceAgorot(projectedPay.payout_amount);
 
-  const projectedWorkedMinutes = projectedAttendanceLessons.reduce((sum, row) => sum + Number(row.duration_minutes || 0), 0);
-  // The lesson bucket of that day: office hours on the same day are not part of this projection.
-  const currentAttendanceWorkedMinutes = Number(
-    systemAttendanceRecord?.lesson_minutes ?? systemAttendanceRecord?.worked_minutes ?? 0,
-  );
-  const effectiveProjectedWorkedMinutes = projectedWorkedMinutes;
+  const dayLessons = lessonDateKey
+    ? await loadCountedLessons(client, orgId, {
+      employeeId: instanceDetail.instructor_employee_id,
+      startDate: lessonDateKey,
+      endDate: lessonDateKey,
+      policies,
+      rateRows,
+      now,
+    })
+    : [];
+  const otherLessonMinutes = dayLessons
+    .filter((lesson) => lesson.lesson_instance_id !== instanceDetail.id)
+    .reduce((sum, lesson) => sum + lesson.duration_minutes, 0);
+  const currentLessonMinutes = otherLessonMinutes + (currentPay.counted ? currentPay.duration_minutes : 0);
+  const projectedLessonMinutes = otherLessonMinutes + (projectedPay.counted ? projectedPay.duration_minutes : 0);
 
   const openHmoTask = (dashboardTasks || []).find((task) => task.task_type === 'hmo_claim_submission' && task.status === 'open') || null;
-  const storedLessonEarningAmount = coerceAgorot((lessonEarningRows || []).reduce((sum, row) => sum + coerceAgorot(row?.payout_amount), 0));
-  const projectedLessonRate = resolveLessonRateOnDate(rateRows, {
-    employeeId: instanceDetail.instructor_employee_id,
-    serviceId: instanceDetail.service_id,
-    date: lessonDateKey,
-  });
-  const inferredLessonEarningAmount = resolveLessonInstructorPayout({
-    instance: instanceDetail,
-    rateUsed: projectedLessonRate?.rate || 0,
-    servicePaymentModel: serviceRow?.payment_model,
-    compensationParticipants: projectedCompensationParticipants,
-    payBasis: projectedLessonRate?.pay_basis,
-  }).payoutAmount;
-  const lessonEarningAmount = storedLessonEarningAmount;
   const ledgerAmount = coerceAgorot((billingArtifactRows || []).reduce((sum, row) => {
     if (row.direction === 'DEBIT') return sum + coerceAgorot(row.amount);
     if (row.direction === 'CREDIT') return sum - coerceAgorot(row.amount);
@@ -904,22 +861,10 @@ async function buildParticipantStatusPreview(client, orgId, body, {
       message: `שכר השיעור של ${instructorName} עבור ${monthLabel} יעודכן מ-₪${fmtILS(lessonEarningAmount)} ל-₪${fmtILS(inferredLessonEarningAmount)}.`,
     });
   }
-  if (systemAttendanceRecord?.source_type === 'system') {
-    if (currentAttendanceWorkedMinutes > 0 && effectiveProjectedWorkedMinutes === 0) {
-      impacts.push({
-        type: 'instructor_attendance_remove',
-        message: `נוכחות המדריך של ${instructorName} בתאריך ${lessonDateKey} תוסר.`,
-      });
-    } else if (currentAttendanceWorkedMinutes !== effectiveProjectedWorkedMinutes) {
-      impacts.push({
-        type: 'instructor_attendance_update',
-        message: `נוכחות המדריך של ${instructorName} בתאריך ${lessonDateKey} תשתנה ל-${effectiveProjectedWorkedMinutes} דקות.`,
-      });
-    }
-  } else if (!systemAttendanceRecord && projectedWorkedMinutes > 0) {
+  if (currentLessonMinutes !== projectedLessonMinutes) {
     impacts.push({
-      type: 'instructor_attendance_add',
-      message: `נוכחות מערכתית של ${instructorName} בתאריך ${lessonDateKey} תיווצר עם ${projectedWorkedMinutes} דקות.`,
+      type: 'instructor_attendance_update',
+      message: `שעות המפגשים של ${instructorName} בתאריך ${lessonDateKey} ישתנו מ-${currentLessonMinutes} ל-${projectedLessonMinutes} דקות.`,
     });
   }
   if (openHmoTask && resolvedTargetStatus === 'scheduled') {
@@ -959,8 +904,9 @@ async function buildParticipantStatusPreview(client, orgId, body, {
       instructor_earning_after: projectedShouldInstructorEarn ? inferredLessonEarningAmount : 0,
       instructor_earning_removed: currentShouldInstructorEarn && !projectedShouldInstructorEarn && lessonEarningAmount !== 0 ? lessonEarningAmount : 0,
       instructor_earning_added: !currentShouldInstructorEarn && projectedShouldInstructorEarn && inferredLessonEarningAmount !== 0 ? inferredLessonEarningAmount : 0,
-      instructor_attendance_worked_minutes_before: currentAttendanceWorkedMinutes > 0 ? currentAttendanceWorkedMinutes : null,
-      instructor_attendance_worked_minutes: effectiveProjectedWorkedMinutes > 0 ? effectiveProjectedWorkedMinutes : null,
+      instructor_attendance_worked_minutes_before: currentLessonMinutes > 0 ? currentLessonMinutes : null,
+      instructor_attendance_worked_minutes: projectedLessonMinutes > 0 ? projectedLessonMinutes : null,
+      instructor_missing_rate: projectedPay.missing_rate,
       hmo_task_id_to_resolve: resolvedTargetStatus === 'scheduled' ? (openHmoTask?.id || null) : null,
       instructor_compensation_decision: requestedInstructorCompensationDecision === 'unknown' ? null : requestedInstructorCompensationDecision,
     },

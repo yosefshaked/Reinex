@@ -773,7 +773,6 @@ describe('lessonDialogModel: groupPreviewImpacts / getOpenActionTab / formatters
       reminders: 'participants',
       documentation: 'workflow',
       billing: 'workflow',
-      payroll: 'workflow',
       hmo: 'workflow',
       closure: 'workflow',
       exception: 'overview',

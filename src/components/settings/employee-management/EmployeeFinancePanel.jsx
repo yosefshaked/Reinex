@@ -246,10 +246,16 @@ export default function EmployeeFinancePanel({ employee, orgId, session, onEditE
               </div>
             </div>
 
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-700">
-              {preview.payroll_model === 'lesson_based' ? `שיעורים: ${formatCurrency(preview.lesson_amount)}` : null}
-              {preview.payroll_model === 'hourly' ? `נוכחות: ${formatCurrency(preview.attendance_amount)}` : null}
-              {preview.payroll_model === 'monthly_salary' ? `שכר חודשי יחסי: ${formatCurrency(preview.monthly_salary_amount)}` : null}
+            <div className="space-y-1 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-700">
+              {preview.lesson_count > 0 ? <div>{`מפגשים: ${preview.lesson_count}, ${formatCurrency(preview.lesson_amount)}`}</div> : null}
+              {preview.attendance_amount > 0 ? <div>{`שעות משרד: ${formatCurrency(preview.attendance_amount)}`}</div> : null}
+              {preview.monthly_salary_amount > 0 ? <div>{`שכר חודשי יחסי: ${formatCurrency(preview.monthly_salary_amount)}`}</div> : null}
+              {preview.unmarked_lesson_count > 0 ? (
+                <div className="text-amber-800">{`לא סומן אם הגיעו: ${preview.unmarked_lesson_count} מפגשים, ${formatCurrency(preview.unmarked_lesson_amount)}`}</div>
+              ) : null}
+              {preview.missing_rate_lesson_count > 0 ? (
+                <div className="text-red-700">{`חסר תעריף: ${preview.missing_rate_lesson_count} מפגשים`}</div>
+              ) : null}
             </div>
           </div>
         ) : (

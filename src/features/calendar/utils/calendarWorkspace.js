@@ -95,15 +95,6 @@ export function getLessonOpenActions(instance, now = new Date()) {
     });
   }
 
-  if (workflowReasons.includes('instructor_compensation_unresolved')) {
-    actions.push({
-      id: 'payroll',
-      label: 'שכר מדריך פתוח',
-      description: 'שכר המדריך עדיין לא נסגר דרך הרצת שכר.',
-      tone: 'warn',
-    });
-  }
-
   if (workflowReasons.includes('hmo_claim_unresolved')) {
     actions.push({
       id: 'hmo',
@@ -212,7 +203,6 @@ export function buildCalendarWorkspaceSummary({ currentDate, viewMode, instances
   ));
   const reminderPending = visibleInstances.filter(hasReminderPending);
   const billingOpen = visibleInstances.filter((instance) => getWorkflowReasons(instance).includes('student_billing_unresolved'));
-  const payrollOpen = visibleInstances.filter((instance) => getWorkflowReasons(instance).includes('instructor_compensation_unresolved'));
   const hmoOpen = visibleInstances.filter((instance) => getWorkflowReasons(instance).includes('hmo_claim_unresolved'));
   const scopedAvailabilityInstructors = visibleInstructors.length > 0
     ? visibleInstructors
@@ -277,8 +267,8 @@ export function buildCalendarWorkspaceSummary({ currentDate, viewMode, instances
       id: 'finance',
       label: 'חיוב / שכר / גורם מממן',
       description: 'שיעורים עם חסימות סגירה פיננסיות או תביעות פתוחות.',
-      count: new Set([...billingOpen, ...payrollOpen, ...hmoOpen].map((instance) => instance.id)).size,
-      items: [...new Map([...billingOpen, ...payrollOpen, ...hmoOpen].map((instance) => [instance.id, { id: instance.id, instance }])).values()],
+      count: new Set([...billingOpen, ...hmoOpen].map((instance) => instance.id)).size,
+      items: [...new Map([...billingOpen, ...hmoOpen].map((instance) => [instance.id, { id: instance.id, instance }])).values()],
       tone: 'warn',
     },
     {
@@ -369,7 +359,6 @@ export function buildCalendarWorkspaceSummary({ currentDate, viewMode, instances
     attendanceOpen,
     reminderPending,
     billingOpen,
-    payrollOpen,
     hmoOpen,
     attentionLessons,
     availabilityIssues,

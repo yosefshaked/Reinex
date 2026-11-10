@@ -1,18 +1,12 @@
 /* eslint-env node */
-import {
-  lessonHasInstructorCompensation,
-  loadGraceCancellationParticipantIds,
-  loadFinancePolicies,
-  resolveCompensationEligibleParticipants,
-  resolveLessonInstructorPayout,
-  toDateKey,
-} from './employee-finance.js';
+import { loadGraceCancellationParticipantIds, loadFinancePolicies } from './employee-finance.js';
+import { resolveCountedLesson } from './pay-calculation.js';
 import { normalizeEntityVersion } from './calendar-editing.js';
 import { normalizeString } from './org-bff.js';
 import { buildBillingDecision, buildDirectClientBillingDecision } from './student-billing.js';
 import { normalizeLessonInstanceStatus } from './lesson-instance-status.js';
 import { coerceAgorot } from './currency.js';
-import { LESSON_PAY_BASES, loadRateHistoryRows, resolveLessonRateOnDate, toRateDateKey } from './rate-history.js';
+import { LESSON_PAY_BASES, loadRateHistoryRows, toRateDateKey } from './rate-history.js';
 
 const LESSON_BILLING_USAGE_TYPES = ['lesson_charge', 'reversal', 'manual_adjustment', 'manual_payment'];
 const PARTICIPANT_STATUSES = new Set(['scheduled', 'attended', 'no_show', 'cancelled_student', 'cancelled_clinic']);
@@ -114,17 +108,6 @@ async function loadServicesMap(tenantClient, serviceIds = []) {
   return new Map(asArray(data).map((service) => [service.id, service]));
 }
 
-function shouldInstructorEarn(instance, participants, policies) {
-  void instance;
-  return lessonHasInstructorCompensation(participants, policies);
-}
-
-function computeWorkedMinutes(instance, participants, policies) {
-  return lessonHasInstructorCompensation(participants, policies)
-    ? Number(instance?.duration_minutes || 0)
-    : 0;
-}
-
 async function computeParticipantChargeDecision(tenantClient, instance, participant, serviceMap, policies) {
   if (participant?.student_id) {
     return buildBillingDecision({
@@ -205,12 +188,7 @@ async function loadCorrectionContext(tenantClient, originalInstanceId) {
   }));
   const participantIds = participantRows.map((participant) => participant.id);
 
-  const [{ data: earnings, error: earningsError }, { data: ledgerRows, error: ledgerError }, { data: instanceLocks, error: instanceLocksError }, { data: participantLocks, error: participantLocksError }, { data: latestCorrectionRows, error: latestCorrectionError }, { data: financeAdjustmentRows, error: financeAdjustmentError }, { data: attendanceCorrectionRows, error: attendanceCorrectionError }, { data: correctionLedgerRows, error: correctionLedgerError }] = await Promise.all([
-    tenantClient
-      .from('lesson_earnings')
-      .select('employee_id, lesson_instance_id, rate_used, payout_amount, metadata')
-      .eq('lesson_instance_id', originalInstanceId)
-      .maybeSingle(),
+  const [{ data: ledgerRows, error: ledgerError }, { data: instanceLocks, error: instanceLocksError }, { data: participantLocks, error: participantLocksError }, { data: latestCorrectionRows, error: latestCorrectionError }, { data: correctionLedgerRows, error: correctionLedgerError }] = await Promise.all([
     participantIds.length > 0
       ? tenantClient
         .from('ledger_transactions')
@@ -236,22 +214,11 @@ async function loadCorrectionContext(tenantClient, originalInstanceId) {
       .order('created_at', { ascending: false })
       .limit(1),
     tenantClient
-      .from('finance_corrections')
-      .select('id, amount, effective_date, metadata')
-      .contains('metadata', { source_type: 'calendar_instance_correction', original_instance_id: originalInstanceId }),
-    tenantClient
-      .from('employee_attendance_records')
-      .select('id, worked_minutes, attendance_date, metadata')
-      .contains('metadata', { source_type: 'calendar_instance_correction', original_instance_id: originalInstanceId }),
-    tenantClient
       .from('ledger_transactions')
       .select('id, student_id, client_profile_id, hmo_provider_id, direction, source_type, amount, lesson_participant_id, reverses_transaction_id, metadata')
       .contains('metadata', { source_type: 'calendar_instance_correction', original_instance_id: originalInstanceId }),
   ]);
 
-  if (earningsError && earningsError.code !== 'PGRST116' && !isMissingRelationError(earningsError)) {
-    throw earningsError;
-  }
   if (ledgerError) {
     throw ledgerError;
   }
@@ -263,12 +230,6 @@ async function loadCorrectionContext(tenantClient, originalInstanceId) {
   }
   if (latestCorrectionError) {
     throw latestCorrectionError;
-  }
-  if (financeAdjustmentError && !isMissingRelationError(financeAdjustmentError)) {
-    throw financeAdjustmentError;
-  }
-  if (attendanceCorrectionError && !isMissingRelationError(attendanceCorrectionError)) {
-    throw attendanceCorrectionError;
   }
   if (correctionLedgerError && !isMissingRelationError(correctionLedgerError)) {
     throw correctionLedgerError;
@@ -293,29 +254,13 @@ async function loadCorrectionContext(tenantClient, originalInstanceId) {
   return {
     instance,
     participants: participantRows,
-    earning: earnings || null,
     latestCorrection: asArray(latestCorrectionRows)[0] || null,
     ledgerRows: asArray(ledgerRows),
-    financeAdjustmentRows: asArray(financeAdjustmentRows),
-    attendanceCorrectionRows: asArray(attendanceCorrectionRows),
     correctionLedgerRows: asArray(correctionLedgerRows),
     instanceLocks: asArray(instanceLocks),
     participantLocks: asArray(participantLocks),
     claimBatches: asArray(claimBatches),
   };
-}
-
-// Resolves the lesson rate (RateHistory, hourly or flat) in effect on each instance's own date.
-async function loadLessonRateResolver(tenantClient, orgId, employeeIds) {
-  const rows = await loadRateHistoryRows(tenantClient, orgId, {
-    employeeIds: asArray(employeeIds).filter(Boolean),
-    payBases: [...LESSON_PAY_BASES],
-  });
-  return (instance) => resolveLessonRateOnDate(rows, {
-    employeeId: instance?.instructor_employee_id,
-    serviceId: instance?.service_id,
-    date: toRateDateKey(instance?.datetime_start),
-  });
 }
 
 function buildChargeMap(ledgerRows) {
@@ -356,15 +301,11 @@ export async function buildInstanceCorrectionPreview(tenantClient, options) {
   effectiveInstance.status = normalizeLessonInstanceStatus(effectiveInstance.status);
   validateCorrectionEffectiveState(effectiveInstance, effectiveParticipants);
 
-  const resolveLessonRate = await loadLessonRateResolver(
-    tenantClient,
-    context.instance?.org_id || context.originalInstance?.org_id,
-    [
-      context.instance.instructor_employee_id,
-      currentInstance.instructor_employee_id,
-      effectiveInstance.instructor_employee_id,
-    ],
-  );
+  const orgId = context.instance?.org_id;
+  const rateRows = await loadRateHistoryRows(tenantClient, orgId, {
+    employeeIds: [currentInstance.instructor_employee_id, effectiveInstance.instructor_employee_id].filter(Boolean),
+    payBases: [...LESSON_PAY_BASES],
+  });
   const serviceMap = await loadServicesMap(tenantClient, [
     context.instance.service_id,
     currentInstance.service_id,
@@ -374,47 +315,25 @@ export async function buildInstanceCorrectionPreview(tenantClient, options) {
     tenantClient,
     currentParticipants.map((participant) => participant.id).filter(Boolean),
   );
-  const currentCompensationParticipants = resolveCompensationEligibleParticipants(
-    context.participants,
+
+  // Pay before and after, by the same rules every pay screen uses. "Before" is the lesson as it
+  // stands today, after any earlier correction.
+  const now = new Date();
+  const payOf = (instance, participants) => resolveCountedLesson({
+    instance,
+    participants,
     policies,
     graceParticipantIds,
-  );
-  const proposedCompensationParticipants = resolveCompensationEligibleParticipants(
-    effectiveParticipants,
-    policies,
-    graceParticipantIds,
-  );
-
-  const originalLessonRate = resolveLessonRate(context.instance);
-  const proposedLessonRate = resolveLessonRate(effectiveInstance);
-  const originalRate = originalLessonRate?.rate || 0;
-  const proposedRate = proposedLessonRate?.rate || 0;
-  const baseCurrentPayout = shouldInstructorEarn(context.instance, context.participants, policies)
-    ? resolveLessonInstructorPayout({
-      instance: context.instance,
-      rateUsed: originalRate,
-      payBasis: originalLessonRate?.pay_basis,
-      servicePaymentModel: serviceMap.get(context.instance.service_id)?.payment_model,
-      compensationParticipants: currentCompensationParticipants,
-    }).payoutAmount
-    : 0;
-  const correctionPayrollDelta = roundCurrency(
-    context.financeAdjustmentRows.reduce((sum, row) => sum + coerceAgorot(row.amount), 0),
-  );
-  const currentPayout = roundCurrency(baseCurrentPayout + correctionPayrollDelta);
-  const proposedPayout = shouldInstructorEarn(effectiveInstance, effectiveParticipants, policies)
-    ? resolveLessonInstructorPayout({
-      instance: effectiveInstance,
-      rateUsed: proposedRate,
-      payBasis: proposedLessonRate?.pay_basis,
-      servicePaymentModel: serviceMap.get(effectiveInstance.service_id)?.payment_model,
-      compensationParticipants: proposedCompensationParticipants,
-    }).payoutAmount
-    : 0;
-
-  const currentWorkedMinutes = computeWorkedMinutes(context.instance, context.participants, policies)
-    + context.attendanceCorrectionRows.reduce((sum, row) => sum + Number(row.worked_minutes || 0), 0);
-  const proposedWorkedMinutes = computeWorkedMinutes(effectiveInstance, effectiveParticipants, policies);
+    rateRows,
+    servicePaymentModel: serviceMap.get(instance.service_id)?.payment_model,
+    now,
+  });
+  const currentPay = payOf(currentInstance, currentParticipants);
+  const proposedPay = payOf(effectiveInstance, effectiveParticipants);
+  const currentPayout = roundCurrency(currentPay.payout_amount);
+  const proposedPayout = roundCurrency(proposedPay.payout_amount);
+  const currentWorkedMinutes = currentPay.counted ? currentPay.duration_minutes : 0;
+  const proposedWorkedMinutes = proposedPay.counted ? proposedPay.duration_minutes : 0;
   const currentChargeMap = buildChargeMap([...context.ledgerRows, ...context.correctionLedgerRows]);
 
   const participantImpact = await Promise.all(effectiveParticipants.map(async (participant) => {
@@ -479,14 +398,17 @@ export async function buildInstanceCorrectionPreview(tenantClient, options) {
     },
     impact_snapshot: {
       payroll: {
-        current_rate: originalRate,
-        proposed_rate: proposedRate,
+        current_employee_id: currentPay.employee_id,
+        proposed_employee_id: proposedPay.employee_id,
+        current_rate: currentPay.rate_used || 0,
+        proposed_rate: proposedPay.rate_used || 0,
+        proposed_missing_rate: proposedPay.missing_rate,
         current_payout: currentPayout,
         proposed_payout: proposedPayout,
         delta_amount: roundCurrency(proposedPayout - currentPayout),
       },
       operational: {
-        attendance_date: toDateKey(currentInstance.datetime_start),
+        attendance_date: toRateDateKey(currentInstance.datetime_start),
         current_worked_minutes: currentWorkedMinutes,
         proposed_worked_minutes: proposedWorkedMinutes,
         delta_minutes: proposedWorkedMinutes - currentWorkedMinutes,
