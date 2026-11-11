@@ -23,6 +23,7 @@ import {
   isResolvedParticipantStatus,
   normalizeInstanceStatus,
   parseIsoDateSafe,
+  readMissingLessonRate,
   resolveClosureStepState,
   resolveLatestWorkflowState,
   resolveMutationError,
@@ -375,6 +376,36 @@ describe('lessonDialogModel: getDisplayInstance / getDisplayParticipants', () =>
     assert.deepEqual(getDisplayParticipants(null), []);
     assert.deepEqual(getDisplayParticipants({}), []);
     assert.deepEqual(getDisplayParticipants({ participants: 'nope' }), []);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// readMissingLessonRate
+// ---------------------------------------------------------------------------
+describe('lessonDialogModel: readMissingLessonRate', () => {
+  it('reads who, what and when from the missing-rate refusal, with the server message', () => {
+    const message = 'לדנה כהן אין תעריף על "רכיבה".';
+    const error = apiError({
+      message,
+      code: 'instructor_rate_not_configured',
+      instructor_employee_id: 'dana',
+      service_id: 'riding',
+      rate_date: '2026-11-20',
+      next_rate_date: null,
+    }, 422);
+    assert.deepEqual(readMissingLessonRate(error), {
+      instructorEmployeeId: 'dana',
+      serviceId: 'riding',
+      rateDate: '2026-11-20',
+      message,
+    });
+    assert.equal(error.message, message, 'the plain error text is already the Hebrew explanation');
+  });
+
+  it('is null for any other error', () => {
+    assert.equal(readMissingLessonRate(apiError({ message: 'capacity_exceeded' }, 422)), null);
+    assert.equal(readMissingLessonRate(new Error('network')), null);
+    assert.equal(readMissingLessonRate(apiError({ message: 'x', code: 'instructor_rate_not_configured' }, 422)), null);
   });
 });
 

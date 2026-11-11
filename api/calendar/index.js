@@ -990,6 +990,24 @@ async function handleCreateInstance(context, body, dbContext, supabase, authCont
     return respondTracked(context, 500, { message: 'failed_to_validate_instructor_availability' }, undefined, { error: availabilityError });
   }
 
+  // A person choosing an instructor, service and date must choose one that pays. Lessons the
+  // system makes (template generation, imports) are written elsewhere and never pass through here.
+  let rateError;
+  try {
+    rateError = await validateInstructorRateForLesson(client, {
+      orgId,
+      instructorEmployeeId: body.instructor_employee_id,
+      serviceId: body.service_id,
+      lessonDate: body.datetime_start,
+    });
+  } catch (rateCheckError) {
+    context.log?.error?.('calendar/instances failed to check instructor rate on create', { message: rateCheckError?.message });
+    return respondTracked(context, 500, { message: 'failed_to_validate_instructor_rate' }, undefined, { error: rateCheckError });
+  }
+  if (rateError) {
+    return respond(context, 422, rateError);
+  }
+
   // Create lesson instance
   const instanceData = {
     template_id: body.template_id || null,
@@ -1356,6 +1374,36 @@ async function handleUpdateInstance(context, req, body, dbContext, supabase, aut
     }
   }
 
+  // Moving a lesson to another instructor, service or day is a person's choice, so it must land on
+  // a combination that pays. Marking the outcome or completing the lesson is never blocked.
+  const instructorChanged = String(targetInstructorId || '') !== String(existingInstance.instructor_employee_id || '');
+  const lessonDateChanged = Boolean(body.datetime_start)
+    && targetDate !== toDateKey(existingInstance.datetime_start);
+  if (instructorChanged || serviceChanged || lessonDateChanged) {
+    let rateError;
+    try {
+      rateError = await validateInstructorRateForLesson(client, {
+        orgId,
+        instructorEmployeeId: targetInstructorId,
+        serviceId: targetServiceId,
+        lessonDate: body.datetime_start || existingInstance.datetime_start,
+      });
+    } catch (rateCheckError) {
+      context.log?.error?.('calendar/instances failed to check instructor rate on update', {
+        message: rateCheckError?.message,
+        instanceId: body.id,
+      });
+      return respondTrackedCalendarError({
+        message: 'failed_to_validate_instructor_rate',
+        error: rateCheckError,
+        metadata: { instructor_employee_id: targetInstructorId, service_id: targetServiceId },
+      });
+    }
+    if (rateError) {
+      return respond(context, 422, rateError);
+    }
+  }
+
   if (isPreviewUpdate) {
     if (!canManageAll) {
       return respond(context, 403, { message: 'forbidden' });
@@ -1386,29 +1434,6 @@ async function handleUpdateInstance(context, req, body, dbContext, supabase, aut
       instance_version: existingInstance.version,
       preview,
     });
-  }
-
-  // Instructor rate pre-flight: block completion if no base_rate is configured.
-  // Instance cancellation does not trigger instructor earnings; participant-level policies do.
-  const EARNING_STATUSES = new Set(['completed']);
-  const newStatus = typeof body.status === 'string' ? body.status.trim().toLowerCase() : '';
-  if (EARNING_STATUSES.has(newStatus)) {
-    const rateError = await validateInstructorRateForLesson(client, {
-      orgId,
-      instructorEmployeeId: body.instructor_employee_id || existingInstance.instructor_employee_id,
-      serviceId: body.service_id || existingInstance.service_id,
-      lessonDate: body.datetime_start || existingInstance.datetime_start,
-    });
-    if (rateError) {
-      return respond(context, 422, {
-        message: rateError.message || 'לא ניתן להשלים את השיעור: תעריף המדריך לשירות זה לא הוגדר. יש להגדיר תעריף בכרטיס המדריך.',
-        code: rateError.code,
-        instructor_employee_id: rateError.instructor_employee_id,
-        service_id: rateError.service_id,
-        rate_date: rateError.rate_date,
-        next_rate_date: rateError.next_rate_date,
-      });
-    }
   }
 
   if (body.closed_reason !== undefined) {

@@ -309,11 +309,6 @@ function startOfLookbackRange(targetDate, months) {
 }
 
 
-
-export function lessonHasInstructorCompensation(participants = [], policies = null) {
-  return (participants || []).some((participant) => shouldParticipantTriggerInstructorCompensation(participant, policies));
-}
-
 export function normalizeServicePaymentModel(value) {
   const normalized = normalizeString(value).toLowerCase();
   return SERVICE_PAYMENT_MODELS.has(normalized) ? normalized : 'fixed_rate';
@@ -874,10 +869,13 @@ export async function listFinanceCorrections(tenantClient, { employeeId = '', st
  * Validates that the instructor has a lesson rate (RateHistory, hourly or flat) for the lesson's
  * service in effect on the lesson's date.
  * Returns null when valid.
- * Returns { code, instructor_employee_id, service_id, rate_date } when validation fails.
+ * Returns the 422 body when it fails: { message, code: 'instructor_rate_not_configured',
+ * instructor_employee_id, service_id, rate_date, next_rate_date }, so callers send it as is.
  *
- * Call this BEFORE marking a lesson completed or recording attendance, so the user
- * can be told exactly what to fix before proceeding.
+ * Call it where a person chooses an instructor, service and date: adding a lesson, creating or
+ * changing a recurring template, moving a lesson to another instructor, service or day. Never call it
+ * when marking attendance or completing a lesson (that must always work), and never for lessons the
+ * system makes (template generation, imports): the monthly review flags those as "missing rate".
  */
 export async function validateInstructorRateForLesson(
   tenantClient,
@@ -978,7 +976,7 @@ export function describeMissingLessonRate({ instructorName = '', serviceName = '
   const lesson = formatHebrewDate(lessonDate);
   if (nextRateDate) {
     return `${name} מקבל/ת תשלום על ${service} רק מ-${formatHebrewDate(nextRateDate)}, `
-      + `והמפגש הזה היה ב-${lesson}, לפני כן. `
+      + `והמפגש הזה ב-${lesson}, לפני כן. `
       + `כדי לשלם עליו, הוסיפו תעריף שחל מ-${lesson} או קודם: ${path} ← עדכון תעריף.`;
   }
   return `ל${name} אין תעריף על ${service}. `

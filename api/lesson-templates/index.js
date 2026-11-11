@@ -4,7 +4,13 @@ import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../_shared/s
 import { logAuditEvent, AUDIT_ACTIONS, AUDIT_CATEGORIES } from '../_shared/audit-log.js';
 import { logTenantAuditEvent, TENANT_AUDIT_RETENTION } from '../_shared/tenant-audit.js';
 import { normalizeDayToken, daySortValue } from '../_shared/day-of-week.js';
-import { hasConfiguredAvailability, isWithinAvailabilityWindows, timeToMinutes } from '../_shared/instructor-availability.js';
+import {
+  getCurrentDateInTimezone,
+  hasConfiguredAvailability,
+  isWithinAvailabilityWindows,
+  timeToMinutes,
+} from '../_shared/instructor-availability.js';
+import { validateInstructorRateForLesson } from '../_shared/employee-finance.js';
 import {
   UUID_PATTERN,
   ensureMembership,
@@ -435,6 +441,22 @@ async function validateInstructorServiceAvailability(client, orgId, {
   return { ok: true, code: null };
 }
 
+/**
+ * The rate check for a recurring template: the instructor needs a rate for the service on the first
+ * lesson the template will make, which is its start date, or today when it started in the past
+ * (lessons already in the calendar are not made again).
+ */
+async function checkTemplateInstructorRate(client, orgId, { instructorEmployeeId, serviceId, validFrom }) {
+  const today = getCurrentDateInTimezone();
+  const firstLessonDate = validFrom && today && validFrom > today ? validFrom : (today || validFrom);
+  return validateInstructorRateForLesson(client, {
+    orgId,
+    instructorEmployeeId,
+    serviceId,
+    lessonDate: firstLessonDate,
+  });
+}
+
 async function writeTenantAudit(context, client, params) {
   try {
     await logTenantAuditEvent(client, params);
@@ -787,6 +809,17 @@ export default async function lessonTemplates(context, req) {
         serviceId,
       });
       return tracked500('failed_to_create_lesson_template');
+    }
+
+    let createRateError;
+    try {
+      createRateError = await checkTemplateInstructorRate(supabase, orgId, { instructorEmployeeId, serviceId, validFrom });
+    } catch (rateCheckError) {
+      context.log?.error?.('lesson-templates failed to check instructor rate on create', { message: rateCheckError?.message });
+      return tracked500('failed_to_validate_instructor_rate', rateCheckError);
+    }
+    if (createRateError) {
+      return respond(context, 422, createRateError);
     }
 
     let waitingListEntry = null;
@@ -1362,6 +1395,32 @@ export default async function lessonTemplates(context, req) {
 
     if (!hasScheduleUpdates && !hasParticipantUpdates && !waitingListEntryId) {
       return respond(context, 400, { message: 'missing_updates' });
+    }
+
+    // A new instructor, service or start date (or switching the template back on) is a person's
+    // choice of who teaches what from when, so it must pay. Adding or removing riders is not.
+    const nextInstructorId = updates.instructor_employee_id ?? existingTemplate.instructor_employee_id;
+    const nextServiceId = updates.service_id ?? existingTemplate.service_id;
+    const nextValidFrom = updates.valid_from ?? existingTemplate.valid_from;
+    const choosesWhoTeachesWhat = nextInstructorId !== existingTemplate.instructor_employee_id
+      || nextServiceId !== existingTemplate.service_id
+      || nextValidFrom !== existingTemplate.valid_from
+      || (updates.is_active === true && !existingTemplate.is_active);
+    if (choosesWhoTeachesWhat) {
+      let updateRateError;
+      try {
+        updateRateError = await checkTemplateInstructorRate(supabase, orgId, {
+          instructorEmployeeId: nextInstructorId,
+          serviceId: nextServiceId,
+          validFrom: nextValidFrom,
+        });
+      } catch (rateCheckError) {
+        context.log?.error?.('lesson-templates failed to check instructor rate on update', { message: rateCheckError?.message, templateId });
+        return tracked500('failed_to_validate_instructor_rate', rateCheckError);
+      }
+      if (updateRateError) {
+        return respond(context, 422, updateRateError);
+      }
     }
 
     // Validate waiting list entry up front (capacity-mode assignment) before any DB writes

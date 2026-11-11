@@ -39,6 +39,7 @@ import {
 import { attachErrorTracking, respondTracked } from '../_shared/error-events.js';
 import { findBlockingReportParticipantIds } from '../_shared/session-reports-guards.js';
 import { buildLessonHistoryEvents, collectLessonHistoryReferenceIds } from '../_shared/lesson-history.js';
+import { validateInstructorRateForLesson } from '../_shared/employee-finance.js';
 
 function respondLessonInstanceError(context, status, message, error, metadata = {}) {
   return respondTracked(context, status, { message }, undefined, {
@@ -565,6 +566,27 @@ export default async function lessonInstances(context, req) {
 
     if (normalizedStudentIds.length === 0 && normalizedClientProfileIds.length === 0) {
       return respond(context, 400, { message: 'missing_participants' });
+    }
+
+    // A person choosing an instructor, service and date must choose one that pays.
+    let rateError;
+    try {
+      rateError = await validateInstructorRateForLesson(supabase, {
+        orgId,
+        instructorEmployeeId,
+        serviceId,
+        lessonDate: datetimeStart,
+      });
+    } catch (rateCheckError) {
+      context.log?.error?.('lesson-instances failed to check instructor rate on create', { message: rateCheckError?.message });
+      return respondLessonInstanceError(context, 500, 'failed_to_validate_instructor_rate', rateCheckError, {
+        action: 'validate_instructor_rate',
+        instructor_employee_id: instructorEmployeeId,
+        service_id: serviceId,
+      });
+    }
+    if (rateError) {
+      return respond(context, 422, rateError);
     }
 
     const { data: instanceRow, error: instanceError } = await withOrgScope(supabase, 'lesson_instances', orgId)

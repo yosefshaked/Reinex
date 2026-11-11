@@ -20,6 +20,7 @@ import { LockedCorrectionPanel } from './LockedCorrectionPanel';
 import { LessonParticipantRoster } from './LessonParticipantRoster.jsx';
 import { LessonDialogHeader } from './LessonDialogHeader.jsx';
 import { LessonHistoryTab } from './LessonHistoryTab.jsx';
+import { MissingRateNotice } from './MissingRateNotice.jsx';
 import { useVersionConflictResolver } from './useVersionConflictResolver';
 import { dayTokenForJsDay } from '@/lib/day-of-week.js';
 import { hasConfiguredAvailability, isWithinAvailabilityWindows } from '@/lib/instructor-availability.js';
@@ -41,6 +42,7 @@ import {
   getDisplayInstance,
   getDisplayParticipants,
   resolveMutationError,
+  readMissingLessonRate,
   getParticipantStatusLabel,
   getWorkflowReasonLabel,
   resolveLatestWorkflowState,
@@ -186,6 +188,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
   const [cancelPreviewLoading, setCancelPreviewLoading] = useState(false);
   const [editPreview, setEditPreview] = useState(null);
   const [editPreviewError, setEditPreviewError] = useState('');
+  const [editMissingRate, setEditMissingRate] = useState(null);
   const [editPreviewLoading, setEditPreviewLoading] = useState(false);
   const [pendingEditBody, setPendingEditBody] = useState(null);
   const [addingParticipantId, setAddingParticipantId] = useState(null);
@@ -209,6 +212,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
   useEffect(() => {
     setEditPreview(null);
     setEditPreviewError('');
+    setEditMissingRate(null);
     setEditPreviewLoading(false);
     setPendingEditBody(null);
   }, [formData, useSchedulingOverride, selectedOverrideReasonCode, customOverrideReason]);
@@ -246,6 +250,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
     setCustomOverrideReason(overrideState.customReason);
     setEditPreview(null);
     setEditPreviewError('');
+    setEditMissingRate(null);
     setEditPreviewLoading(false);
     setPendingEditBody(null);
   }, [displayInstance]);
@@ -283,6 +288,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
     setCancelPreviewLoading(false);
     setEditPreview(null);
     setEditPreviewError('');
+    setEditMissingRate(null);
     setEditPreviewLoading(false);
     setPendingEditBody(null);
     setActiveViewTab('lesson');
@@ -564,11 +570,19 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
 
       setEditPreview(null);
       setEditPreviewError('');
+      setEditMissingRate(null);
       setPendingEditBody(null);
       setIsEditMode(false);
       onUpdate?.();
     } catch (err) {
       console.error('Error updating lesson:', err);
+      const missing = readMissingLessonRate(err);
+      if (missing) {
+        setEditPreview(null);
+        setPendingEditBody(null);
+        setEditMissingRate(missing);
+        return;
+      }
       const handled = await handleVersionConflict(err, createSaveConflictAdapter(), {
         formData: { ...formData },
         useSchedulingOverride,
@@ -586,6 +600,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
   async function handleSave() {
     setError(null);
     setEditPreviewError('');
+    setEditMissingRate(null);
     setEditPreview(null);
     setPendingEditBody(null);
 
@@ -612,7 +627,12 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
     } catch (err) {
       setEditPreview(null);
       setPendingEditBody(null);
-      setEditPreviewError(resolveMutationError(err));
+      const missing = readMissingLessonRate(err);
+      if (missing) {
+        setEditMissingRate(missing);
+      } else {
+        setEditPreviewError(resolveMutationError(err));
+      }
     } finally {
       setEditPreviewLoading(false);
     }
@@ -1813,7 +1833,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
 
   const editFooter = (
     <div className="flex flex-col gap-2.5">
-      {(editChanges.length || editPreview || editPreviewError) ? (
+      {(editChanges.length || editPreview || editPreviewError || editMissingRate) ? (
         <div className="flex max-h-[32vh] flex-col gap-2 overflow-y-auto">
           {editChanges.length ? (
             <div className="flex flex-wrap gap-1.5">
@@ -1827,6 +1847,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
               ))}
             </div>
           ) : null}
+          <MissingRateNotice missingRate={editMissingRate} onRateAdded={() => setEditMissingRate(null)} />
           {editPreviewError ? (
             <div className="flex items-start gap-2 rounded-lg bg-red-50 px-2.5 py-2 text-xs font-medium text-red-800">
               <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" /> <span>{editPreviewError}</span>

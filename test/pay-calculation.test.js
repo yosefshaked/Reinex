@@ -3,7 +3,11 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { DEFAULT_INSTRUCTOR_EARNINGS_POLICY, DEFAULT_LEAVE_PAY_POLICY } from '../api/_shared/employee-finance.js';
+import {
+  DEFAULT_INSTRUCTOR_EARNINGS_POLICY,
+  DEFAULT_LEAVE_PAY_POLICY,
+  validateInstructorRateForLesson,
+} from '../api/_shared/employee-finance.js';
 import {
   applyCorrectionOverlay,
   computeEmployeePay,
@@ -175,6 +179,11 @@ function createFakeClient(tables) {
       lt(column, value) { filters.push((row) => String(row[column]) < String(value)); return api; },
       order() { return api; },
       range(from, to) { window = [from, to]; return api; },
+      maybeSingle() {
+        calls.push(table);
+        const row = (tables[table] || []).find((candidate) => filters.every((filter) => filter(candidate))) || null;
+        return Promise.resolve({ data: row, error: null });
+      },
       then(resolve, reject) {
         calls.push(table);
         const rows = (tables[table] || []).filter((row) => filters.every((filter) => filter(row)));
@@ -314,6 +323,59 @@ describe('the pay of a period', () => {
     assert.equal(pay.correction_amount, 5000);
     assert.equal(pay.total_amount, 36500);
     assert.equal(pay.details.lessons.length, 2);
+  });
+
+  it('reassigning one lesson to another instructor moves its pay and its minutes to that instructor', async () => {
+    const tables = baseTables({
+      lesson_instances: [
+        lesson('stays', 'dana', '2026-10-05T08:00:00Z'),
+        lesson('reassigned', 'dana', '2026-10-06T08:00:00Z', { duration_minutes: 45 }),
+      ],
+      lesson_participants: [
+        participant('p1', 'stays', 'attended'),
+        participant('p2', 'reassigned', 'attended'),
+      ],
+    });
+    const period = { startDate: '2026-10-01', endDate: '2026-10-31', policies: POLICIES, rateRows: RATES, now: NOW };
+    const payOf = (employeeId) => computeEmployeePay(createFakeClient(tables), ORG, { ...period, employee: { id: employeeId } });
+    const minutesOf = async (employeeId) => summarizeLessonsByDate(
+      await loadCountedLessons(createFakeClient(tables), ORG, { ...period, employeeId }),
+    );
+
+    const danaBefore = await payOf('dana');
+    assert.equal(danaBefore.lesson_amount, 12000 + 9000);
+    assert.equal(danaBefore.lesson_minutes, 105);
+    assert.equal((await payOf('omer')).lesson_amount, 0);
+
+    // The office gives the 6.10 lesson to Omer (calendar edit: the lesson row's instructor changes).
+    // Omer has a riding rate on that date, so the change is allowed.
+    assert.equal(await validateInstructorRateForLesson(createFakeClient(tables), {
+      orgId: ORG, instructorEmployeeId: 'omer', serviceId: 'riding', lessonDate: '2026-10-06T08:00:00Z',
+    }), null);
+    tables.lesson_instances[1] = { ...tables.lesson_instances[1], instructor_employee_id: 'omer' };
+
+    const danaAfter = await payOf('dana');
+    const omerAfter = await payOf('omer');
+    assert.equal(danaAfter.lesson_amount, 12000, 'Dana keeps only the lesson she still teaches');
+    assert.equal(danaAfter.lesson_minutes, 60);
+    assert.equal(omerAfter.lesson_amount, 8250, 'Omer is paid 45 minutes at his own 110 ₪/hour');
+    assert.equal(omerAfter.lesson_minutes, 45);
+    assert.deepEqual([...(await minutesOf('dana')).keys()], ['2026-10-05']);
+    assert.equal((await minutesOf('omer')).get('2026-10-06').lesson_minutes, 45);
+  });
+
+  it('a lesson cannot be given to an instructor without a rate for its service on its date', async () => {
+    const tables = baseTables({
+      Employees: [{ id: 'noa', org_id: ORG, first_name: 'נועה', last_name: 'לוי' }],
+    });
+    const blocked = await validateInstructorRateForLesson(createFakeClient(tables), {
+      orgId: ORG, instructorEmployeeId: 'noa', serviceId: 'riding', lessonDate: '2026-10-06T08:00:00Z',
+    });
+    assert.equal(blocked.code, 'instructor_rate_not_configured');
+    assert.equal(blocked.instructor_employee_id, 'noa');
+    assert.equal(blocked.service_id, 'riding');
+    assert.equal(blocked.rate_date, '2026-10-06');
+    assert.match(blocked.message, /לנועה לוי אין תעריף על "רכיבה"/);
   });
 
   it('a rate added for a past date changes the pay of that month straight away', async () => {

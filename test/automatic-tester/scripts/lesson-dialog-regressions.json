@@ -130,6 +130,22 @@
           "ignoreStatus": [409]
         },
         {
+          "id": "seed-single-instructor-lesson-rate",
+          "action": "apiCall",
+          "description": "The instructor's lesson rate for the service, from the start of employment. A lesson cannot be added for an instructor without a rate for its service on its date.",
+          "method": "POST",
+          "endpoint": "/api/employee-rates",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "employee_id": "{{SINGLE_INSTRUCTOR_ID}}",
+            "service_id": "{{SERVICE_ID}}",
+            "pay_basis": "lesson_hourly",
+            "rate": 10000,
+            "effective_date": "2000-01-01",
+            "replace_existing": true
+          }
+        },
+        {
           "id": "create-instructor-group",
           "action": "apiCall",
           "description": "Create the instructor for the group lesson",
@@ -167,6 +183,22 @@
             "metadata": {}
           },
           "ignoreStatus": [409]
+        },
+        {
+          "id": "seed-group-instructor-lesson-rate",
+          "action": "apiCall",
+          "description": "The instructor's lesson rate for the service, from the start of employment. A lesson cannot be added for an instructor without a rate for its service on its date.",
+          "method": "POST",
+          "endpoint": "/api/employee-rates",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "employee_id": "{{GROUP_INSTRUCTOR_ID}}",
+            "service_id": "{{SERVICE_ID}}",
+            "pay_basis": "lesson_hourly",
+            "rate": 10000,
+            "effective_date": "2000-01-01",
+            "replace_existing": true
+          }
         }
       ]
     },

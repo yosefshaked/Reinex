@@ -21,10 +21,8 @@ import {
 } from '../_shared/org-bff.js';
 import { parseJsonBodyWithLimit } from '../_shared/validation.js';
 import {
-  lessonHasInstructorCompensation,
   loadGraceCancellationParticipantIds,
   loadFinancePolicies,
-  validateInstructorRateForLesson,
 } from '../_shared/employee-finance.js';
 import BillingLedgerService from '../_shared/BillingLedgerService.js';
 import { coerceAgorot, toShekel } from '../_shared/currency.js';
@@ -37,7 +35,7 @@ import { AUDIT_CATEGORIES, logAuditEvent } from '../_shared/audit-log.js';
 import { createDashboardTask } from '../_shared/dashboard-tasks.js';
 import { listDashboardTasks, resolveDashboardTask } from '../_shared/dashboard-tasks.js';
 import { mergeParticipantWorkflowMetadata, syncLessonClosureState } from '../_shared/calendar-workflow.js';
-import { normalizeWorkflowDecision } from '../_shared/calendar-workflow-decisions.js';
+import { normalizeWorkflowDecision, resolveMarkedInstructorCompensationDecision } from '../_shared/calendar-workflow-decisions.js';
 import { normalizeLessonInstanceStatus } from '../_shared/lesson-instance-status.js';
 import { getDateKeyInTimezone } from '../_shared/instructor-availability.js';
 import { buildAttendanceTransitionAuditChanges } from '../_shared/attendance-audit.js';
@@ -177,7 +175,7 @@ async function recordGraceCancellationRequest(client, orgId, {
 function buildParticipantWorkflowDecisionState(
   participantStatus,
   requestedInstructorCompensationDecision,
-  { studentBillingApplies = null } = {},
+  { studentBillingApplies = null, instructorEarningsApplies = null } = {},
 ) {
   if (participantStatus === 'scheduled') {
     return {
@@ -203,11 +201,11 @@ function buildParticipantWorkflowDecisionState(
       reason: participantStatus,
     },
     instructor_compensation: {
-      decision: participantStatus === 'attended'
-        ? 'compensated'
-        : (requestedInstructorCompensationDecision === 'compensated' || requestedInstructorCompensationDecision === 'not_compensated'
-          ? requestedInstructorCompensationDecision
-          : 'unknown'),
+      decision: resolveMarkedInstructorCompensationDecision(
+        participantStatus,
+        requestedInstructorCompensationDecision,
+        instructorEarningsApplies,
+      ),
       reason: participantStatus,
     },
     hmo_claim: {
@@ -264,6 +262,9 @@ async function getAttendanceStatusRequirements(client, orgId, participantStatus)
     participant_status: normalizedStatus,
     student_billing_applies: studentBillingApplies,
     requires_instructor_compensation_decision: requiresInstructorCompensationDecision,
+    // The policy in force now, stored on the participant at the mark so a later policy change
+    // does not alter months already paid.
+    instructor_earnings_applies: Boolean(policies?.instructorEarningsPolicy?.[normalizedStatus]),
   };
 }
 
@@ -290,6 +291,7 @@ function projectParticipantsForStatusChange(
       null,
       {
         studentBillingApplies: statusRequirements?.student_billing_applies,
+        instructorEarningsApplies: statusRequirements?.instructor_earnings_applies ?? null,
       },
     );
     return {
@@ -297,31 +299,6 @@ function projectParticipantsForStatusChange(
       participant_status: resolvedTargetStatus,
       metadata: mergeParticipantWorkflowMetadata(currentMetadata, workflowPatch),
     };
-  });
-}
-
-async function validateProjectedInstructorRate(client, orgId, instance, participants, {
-  targetStatus,
-  participantId,
-  requestedInstructorCompensationDecision = 'unknown',
-  statusRequirements = null,
-} = {}) {
-  const projectedParticipants = projectParticipantsForStatusChange(
-    participants,
-    participantId,
-    targetStatus,
-    requestedInstructorCompensationDecision,
-    statusRequirements,
-  );
-  const policies = await loadFinancePolicies(client, orgId);
-  if (!lessonHasInstructorCompensation(projectedParticipants, policies)) {
-    return null;
-  }
-  return validateInstructorRateForLesson(client, {
-    orgId,
-    instructorEmployeeId: instance?.instructor_employee_id,
-    serviceId: instance?.service_id,
-    lessonDate: instance?.datetime_start || null,
   });
 }
 
@@ -602,26 +579,6 @@ async function buildParticipantStatusPreview(client, orgId, body, {
     requestedInstructorCompensationDecision,
     statusRequirements,
   );
-
-  const rateError = await validateProjectedInstructorRate(client, orgId, instanceDetail, currentParticipants, {
-    targetStatus: resolvedTargetStatus,
-    participantId: body.participant_id,
-    requestedInstructorCompensationDecision,
-    statusRequirements,
-  });
-  if (rateError) {
-    const previewError = new Error('instructor_rate_not_configured');
-    previewError.status = 422;
-    previewError.payload = {
-      message: rateError.message || 'לא ניתן לעדכן נוכחות: תעריף המדריך לשירות זה לא הוגדר. יש להגדיר תעריף בכרטיס המדריך.',
-      code: rateError.code,
-      instructor_employee_id: rateError.instructor_employee_id,
-      service_id: rateError.service_id,
-      rate_date: rateError.rate_date,
-      next_rate_date: rateError.next_rate_date,
-    };
-    throw previewError;
-  }
 
   const projectedInstanceStatus = deriveAggregateInstanceStatus(projectedParticipants, instance.status);
 
@@ -1037,9 +994,6 @@ async function handleMarkAttendance(context, body, dbContext, userId, isAdmin, a
       }
       return respond(context, 200, preview);
     } catch (error) {
-      if (error?.status && error?.payload) {
-        return respond(context, error.status, error.payload);
-      }
       context.log?.error?.('calendar/attendance failed to build restore preview', {
         message: error?.message,
         instanceId: body.instance_id,
@@ -1073,9 +1027,6 @@ async function handleMarkAttendance(context, body, dbContext, userId, isAdmin, a
       }
       return respond(context, 200, preview);
     } catch (error) {
-      if (error?.status && error?.payload) {
-        return respond(context, error.status, error.payload);
-      }
       context.log?.error?.('calendar/attendance failed to build participant status preview', {
         message: error?.message,
         instanceId: body.instance_id,
@@ -1212,6 +1163,7 @@ async function handleMarkAttendance(context, body, dbContext, userId, isAdmin, a
       new Date().toISOString(),
       {
         studentBillingApplies: statusRequirements?.student_billing_applies,
+        instructorEarningsApplies: statusRequirements?.instructor_earnings_applies ?? null,
       },
     );
     const metadataBase = participantUpdate.metadata && typeof participantUpdate.metadata === 'object'
@@ -1233,35 +1185,6 @@ async function handleMarkAttendance(context, body, dbContext, userId, isAdmin, a
         grace_decided_at: new Date().toISOString(),
         grace_decided_by: userId,
       };
-    }
-
-    const { data: participantRowsForRate, error: participantRowsForRateError } = await withOrgScope(client, 'lesson_participants', orgId)
-      .select('id, participant_status, metadata')
-      .eq('lesson_instance_id', body.instance_id);
-
-    if (participantRowsForRateError) {
-      context.log?.error?.('calendar/attendance failed to load participants for rate validation', {
-        message: participantRowsForRateError.message,
-        instanceId: body.instance_id,
-      });
-      return respondTracked(context, 500, { message: 'failed_to_load_attendance_state' }, undefined, { error: participantRowsForRateError });
-    }
-
-    const rateError = await validateProjectedInstructorRate(client, orgId, instance, participantRowsForRate || [], {
-      targetStatus: participantStatus,
-      participantId: body.participant_id,
-      requestedInstructorCompensationDecision,
-      statusRequirements,
-    });
-    if (rateError) {
-      return respond(context, 422, {
-        message: rateError.message || 'לא ניתן לעדכן נוכחות: תעריף המדריך לשירות זה לא הוגדר. יש להגדיר תעריף בכרטיס המדריך.',
-        code: rateError.code,
-        instructor_employee_id: rateError.instructor_employee_id,
-        service_id: rateError.service_id,
-        rate_date: rateError.rate_date,
-        next_rate_date: rateError.next_rate_date,
-      });
     }
   }
 

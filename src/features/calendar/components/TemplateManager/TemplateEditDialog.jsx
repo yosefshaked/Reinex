@@ -20,6 +20,7 @@ import {
   isWithinAvailabilityWindows,
 } from '@/lib/instructor-availability.js';
 import { ceilClockTimeToGrid } from '@/lib/time-grid.js';
+import { MissingRateNotice } from '../MissingRateNotice.jsx';
 
 function formatTime(timeString) {
   return ceilClockTimeToGrid(timeString);
@@ -86,6 +87,7 @@ export function TemplateEditDialog({ template, open, onClose, onUpdate, onFixAva
   const [newOverrideDate, setNewOverrideDate] = useState('');
 
   const [error, setError] = useState(null);
+  const [missingRate, setMissingRate] = useState(null);
 
   function formatDate(dateString) {
     if (!dateString) return '—';
@@ -124,6 +126,7 @@ export function TemplateEditDialog({ template, open, onClose, onUpdate, onFixAva
       });
       setNewOverrideDate('');
       setError(null);
+      setMissingRate(null);
     }
   }, [template, open]);
 
@@ -271,6 +274,7 @@ export function TemplateEditDialog({ template, open, onClose, onUpdate, onFixAva
 
   async function handleSave() {
     setError(null);
+    setMissingRate(null);
 
     if (missingCapability) {
       setError('לא ניתן לשמור בלי יכולת שירות פעילה למדריך/ה עבור השירות שנבחר.');
@@ -318,7 +322,12 @@ export function TemplateEditDialog({ template, open, onClose, onUpdate, onFixAva
       return;
     }
 
-    const { error: apiError } = await updateTemplate(template.id, updates);
+    const { error: apiError, missingRate: apiMissingRate } = await updateTemplate(template.id, updates);
+
+    if (apiMissingRate) {
+      setMissingRate(apiMissingRate);
+      return;
+    }
 
     if (apiError) {
       setError(
@@ -361,6 +370,7 @@ export function TemplateEditDialog({ template, open, onClose, onUpdate, onFixAva
 
   async function handleReactivate() {
     setError(null);
+    setMissingRate(null);
 
     if (!reactivationRange.valid_from) {
       setError('כדי להפעיל מחדש יש לבחור טווח תוקף חדש (תוקף מ- הוא שדה חובה).');
@@ -372,11 +382,16 @@ export function TemplateEditDialog({ template, open, onClose, onUpdate, onFixAva
       return;
     }
 
-    const { error: apiError } = await updateTemplate(template.id, {
+    const { error: apiError, missingRate: apiMissingRate } = await updateTemplate(template.id, {
       is_active: true,
       valid_from: reactivationRange.valid_from,
       valid_until: reactivationRange.valid_until || null,
     });
+
+    if (apiMissingRate) {
+      setMissingRate(apiMissingRate);
+      return;
+    }
 
     if (apiError) {
       setError(
@@ -772,6 +787,8 @@ export function TemplateEditDialog({ template, open, onClose, onUpdate, onFixAva
               </div>
             </div>
 
+            <MissingRateNotice missingRate={missingRate} onRateAdded={() => setMissingRate(null)} />
+
             {error && (
               <Alert variant="destructive">
                 <AlertCircle className="h-4 w-4" />
@@ -950,6 +967,8 @@ export function TemplateEditDialog({ template, open, onClose, onUpdate, onFixAva
                 />
               </div>
             </div>
+
+            <MissingRateNotice missingRate={missingRate} onRateAdded={() => setMissingRate(null)} />
 
             {error && (
               <Alert variant="destructive">

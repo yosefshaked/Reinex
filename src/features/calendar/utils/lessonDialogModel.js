@@ -120,6 +120,24 @@ export function getDisplayParticipants(instance) {
   }));
 }
 
+/**
+ * The "instructor has no rate for this service on this date" refusal from a lesson or template save,
+ * as { instructorEmployeeId, serviceId, rateDate, message }, or null for any other error. The form
+ * uses it to offer adding the rate there and then.
+ */
+export function readMissingLessonRate(error) {
+  const data = error?.data;
+  if (!data || data.code !== 'instructor_rate_not_configured' || !data.instructor_employee_id || !data.service_id) {
+    return null;
+  }
+  return {
+    instructorEmployeeId: String(data.instructor_employee_id),
+    serviceId: String(data.service_id),
+    rateDate: typeof data.rate_date === 'string' ? data.rate_date : '',
+    message: typeof data.message === 'string' && data.message ? data.message : 'למדריך/ה אין תעריף על השירות הזה בתאריך הזה.',
+  };
+}
+
 export function resolveMutationError(error) {
   const supportMessage = resolveApiErrorMessage(error);
   if (extractSupportCode(supportMessage)) {

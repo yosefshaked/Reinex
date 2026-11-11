@@ -15,7 +15,10 @@ import {
   resolveLeaveDayValue,
   resolveLessonInstructorPayout,
 } from '../api/_shared/employee-finance.js';
-import { shouldParticipantTriggerInstructorCompensation } from '../api/_shared/calendar-workflow-decisions.js';
+import {
+  resolveMarkedInstructorCompensationDecision,
+  shouldParticipantTriggerInstructorCompensation,
+} from '../api/_shared/calendar-workflow-decisions.js';
 import { PAY_BASIS, hasRateKind, resolveLessonRateOnDate, resolveRateOnDate } from '../api/_shared/rate-history.js';
 
 function rateRow(id, employeeId, serviceId, payBasis, rate, effectiveDate) {
@@ -126,7 +129,7 @@ describe('PAY-A rates', () => {
       nextRateDate: '2026-10-22',
     });
     assert.match(message, /רק מ-22\.10\.2026/, 'when the existing rate starts');
-    assert.match(message, /היה ב-15\.09\.2026/, 'when the lesson was');
+    assert.match(message, /המפגש הזה ב-15\.09\.2026/, 'when the lesson is');
     assert.match(message, /תעריף שחל מ-15\.09\.2026 או קודם/, 'the fix: a rate dated on or before the lesson');
     assert.match(message, /עובדים ← דנה כהן ← פיננסים/, 'where to do it');
 
@@ -170,6 +173,19 @@ describe('PAY-B instructor pay per participant outcome', () => {
 
   it('PAY-B7 a participant still scheduled never triggers pay, whatever the decision', () => {
     assert.equal(paysInstructor(participant('p1', 'scheduled', 'compensated')), false);
+  });
+
+  it('PAY-B8 the mark stores the paid / not paid decision, so a later policy change leaves past months alone', () => {
+    // Marked under a policy that pays no-shows: stored as paid.
+    const marked = participant('p1', 'no_show', resolveMarkedInstructorCompensationDecision('no_show', 'unknown', true));
+    const strictPolicy = { instructorEarningsPolicy: { ...POLICIES.instructorEarningsPolicy, no_show: false } };
+    assert.equal(shouldParticipantTriggerInstructorCompensation(marked, strictPolicy), true, 'the new policy does not reach back');
+
+    assert.equal(resolveMarkedInstructorCompensationDecision('cancelled_student', 'unknown', false), 'not_compensated');
+    assert.equal(resolveMarkedInstructorCompensationDecision('cancelled_student', 'compensated', false), 'compensated', 'the absence form wins');
+    assert.equal(resolveMarkedInstructorCompensationDecision('attended', 'unknown', null), 'compensated');
+    assert.equal(resolveMarkedInstructorCompensationDecision('scheduled', 'compensated', true), 'unknown', 'restoring clears the decision');
+    assert.equal(resolveMarkedInstructorCompensationDecision('no_show', 'unknown', null), 'unknown', 'no policy read, nothing invented');
   });
 
   it.todo('PAY-B3 the cancellation cutoff is when the day\'s list was sent to the instructor (recorded per instructor and day)');

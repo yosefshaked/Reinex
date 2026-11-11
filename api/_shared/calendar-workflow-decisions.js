@@ -45,6 +45,33 @@ export function readParticipantWorkflowMetadata(metadata) {
   };
 }
 
+/**
+ * The pay decision written on a participant when someone marks the outcome.
+ *
+ * It is stored as an explicit 'compensated' / 'not_compensated', never left to the org policy, so a
+ * later change of the policy does not change what past lessons paid. An attended participant always
+ * pays; a choice made in the absence form wins; otherwise the policy in force at the mark decides.
+ * `instructorEarningsApplies` is that policy for the status (null when it was not read, which keeps
+ * the old 'unknown' and with it the live policy).
+ */
+export function resolveMarkedInstructorCompensationDecision(participantStatus, requestedDecision, instructorEarningsApplies = null) {
+  const status = normalizeString(participantStatus).toLowerCase();
+  if (!RESOLVED_PARTICIPANT_STATUSES.has(status)) {
+    return 'unknown';
+  }
+  if (status === 'attended') {
+    return 'compensated';
+  }
+  const requested = normalizeWorkflowDecision(requestedDecision, 'unknown');
+  if (requested === 'compensated' || requested === 'not_compensated') {
+    return requested;
+  }
+  if (typeof instructorEarningsApplies === 'boolean') {
+    return instructorEarningsApplies ? 'compensated' : 'not_compensated';
+  }
+  return 'unknown';
+}
+
 export function shouldParticipantTriggerInstructorCompensation(participant, policies) {
   const status = normalizeString(participant?.participant_status).toLowerCase();
   const workflow = readParticipantWorkflowMetadata(participant?.metadata);

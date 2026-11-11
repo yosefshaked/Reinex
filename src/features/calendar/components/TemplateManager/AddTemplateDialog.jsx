@@ -22,6 +22,7 @@ import {
   timeToMinutes,
 } from '@/lib/instructor-availability.js';
 import { ceilClockTimeToGrid } from '@/lib/time-grid.js';
+import { MissingRateNotice } from '../MissingRateNotice.jsx';
 
 function formatTemplateTime(timeString) {
   if (!timeString) return '—';
@@ -112,6 +113,7 @@ export function AddTemplateDialog({
   });
 
   const [error, setError] = useState(null);
+  const [missingRate, setMissingRate] = useState(null);
   const [requiredFormWarnings, setRequiredFormWarnings] = useState(null);
   const activeServices = useMemo(
     () => (services || []).filter((s) => s?.is_active === true),
@@ -206,6 +208,7 @@ export function AddTemplateDialog({
         valid_until: '',
       });
       setError(null);
+      setMissingRate(null);
       setRequiredFormWarnings(null);
     }
   }, [open, defaultInstructorId, defaultDayOfWeek, defaultClientProfileId, defaultStudentId, defaultServiceId, defaultTimeOfDay, defaultDurationMinutes]);
@@ -378,6 +381,7 @@ export function AddTemplateDialog({
   async function handleSubmit(e, { acknowledgeRequiredFormWarnings = false } = {}) {
     e?.preventDefault();
     setError(null);
+    setMissingRate(null);
 
     const hasStudents = selectedStudents.length > 0;
     const hasClientProfile = Boolean(formData.client_profile_id && !hasStudents);
@@ -423,7 +427,7 @@ export function AddTemplateDialog({
       return;
     }
 
-    const { data: createdTemplate, error: apiError } = await createTemplate({
+    const { data: createdTemplate, error: apiError, missingRate: apiMissingRate } = await createTemplate({
       client_profile_id: formData.client_profile_id || null,
       student_ids: hasStudents ? selectedStudents.map((s) => s.id) : undefined,
       instructor_employee_id: formData.instructor_employee_id,
@@ -439,6 +443,11 @@ export function AddTemplateDialog({
     // Soft gate: API returns 200 with required_form_warnings when forms are missing but enforcement is 'warn'
     if (createdTemplate?.required_form_warnings?.length > 0) {
       setRequiredFormWarnings(createdTemplate.required_form_warnings);
+      return;
+    }
+
+    if (apiMissingRate) {
+      setMissingRate(apiMissingRate);
       return;
     }
 
@@ -875,6 +884,8 @@ export function AddTemplateDialog({
               </AlertDescription>
             </Alert>
           )}
+
+          <MissingRateNotice missingRate={missingRate} onRateAdded={() => setMissingRate(null)} />
 
           {/* Error */}
           {error && (

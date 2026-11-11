@@ -2,8 +2,8 @@
   "meta": {
     "id": "employee-rates",
     "name": "Employee Pay Rates — dated rates screen",
-    "description": "Payroll phase 1b: the rates panel in an employee's finance tab. Creates an instructor with a service capability through the API (the DB trigger seeds its first rate), then in the UI schedules a future rate, checks the warnings for a back-dated rate and for a date that already has a rate, adds a rate for another service through the add-rate dialog, and adds an hourly rate — which switches the employee's pay model so the rate is actually read. Rates are never edited in place (PAY-A1, PAY-A2).",
-    "version": "1.10.0",
+    "description": "Payroll phase 1b: the rates panel in an employee's finance tab. Creates an instructor with a service capability through the API (the DB trigger seeds its first rate), then in the UI schedules a future rate, checks the warnings for a back-dated rate and for a date that already has a rate, adds a rate for another service through the add-rate dialog, and adds an hourly rate — which switches the employee's pay model so the rate is actually read. Rates are never edited in place (PAY-A1, PAY-A2). A missing rate blocks adding a lesson (422 instructor_rate_not_configured) but never blocks marking attendance.",
+    "version": "1.11.0",
     "last_validated_at": "2026-11-09T12:00:00Z",
     "author": "claude-ai",
     "dependencies": {
@@ -15,7 +15,10 @@
         "POST /api/instructors",
         "GET /api/employee-rates",
         "POST /api/employee-rates",
-        "PUT /api/instructors"
+        "PUT /api/instructors",
+        "POST /api/students-list",
+        "POST /api/lesson-instances",
+        "POST /api/calendar/attendance"
       ]
     }
   },
@@ -836,20 +839,499 @@
           "id": "assert-other-work-shown",
           "description": "The day shows the other work that was entered, and no lesson minutes",
           "action": "waitForSelector",
-          "selector": "text=עבודה אחרת 45 דק׳"
+          "selector": "td:has-text('עבודה אחרת'):has-text('0:45')"
         },
         {
           "id": "assert-no-lesson-minutes",
           "description": "No day shows lesson minutes: this instructor has no lessons this month",
           "action": "assert",
           "type": "count",
-          "selector": "text=/מפגשים \\d+ דק׳/",
+          "selector": "td:has-text('מפגשים')",
           "value": "0"
         },
         {
           "id": "screenshot-attendance",
           "action": "screenshot",
           "name": "attendance-other-work"
+        }
+      ]
+    },
+    {
+      "id": "missing-rate-blocks-adding-not-marking",
+      "name": "A missing rate blocks adding a lesson, never marking attendance",
+      "description": "A person who adds a lesson must pick an instructor who is paid for that service on that date: without a rate the save is refused with a stable code and the fields the form needs to offer adding the rate. Marking what happened in a lesson always works, even when the rate is missing: the monthly review shows the lesson as missing a rate instead.",
+      "steps": [
+        {
+          "id": "create-unrated-instructor",
+          "description": "An instructor with no rate at all",
+          "action": "apiCall",
+          "method": "POST",
+          "endpoint": "/api/instructors",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "first_name": "ללא",
+            "last_name": "תעריף {{RUN_NUMERIC_ID}}",
+            "employee_id": "TEST-NORATE-{{RUN_NUMERIC_ID}}",
+            "employee_type": "instructor",
+            "payroll_model": "lesson_based"
+          },
+          "store": "UNRATED_INSTRUCTOR_ID",
+          "storeField": "id"
+        },
+        {
+          "id": "create-rider",
+          "description": "A rider for the lesson",
+          "action": "apiCall",
+          "method": "POST",
+          "endpoint": "/api/students-list",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "first_name": "רוכב",
+            "last_name": "תעריף {{RUN_NUMERIC_ID}}",
+            "identity_number": "994{{RUN_NUMERIC_ID}}",
+            "phone": "0501234514"
+          },
+          "store": "UNRATED_RIDER_ID",
+          "storeField": "id"
+        },
+        {
+          "id": "add-lesson-refused",
+          "description": "Adding a lesson for the instructor is refused with 422 and code instructor_rate_not_configured",
+          "action": "apiCall",
+          "method": "POST",
+          "endpoint": "/api/lesson-instances",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "datetime_start": "{{CURRENT_MONTH_START}}",
+            "duration_minutes": 45,
+            "instructor_employee_id": "{{UNRATED_INSTRUCTOR_ID}}",
+            "service_id": "{{SERVICE_ID}}",
+            "student_ids": [
+              "{{UNRATED_RIDER_ID}}"
+            ]
+          },
+          "ignoreStatus": [
+            422
+          ],
+          "stores": [
+            {
+              "variable": "REFUSAL_CODE",
+              "field": "code"
+            },
+            {
+              "variable": "REFUSAL_EMPLOYEE_ID",
+              "field": "instructor_employee_id"
+            }
+          ]
+        },
+        {
+          "id": "probe-refusal-code",
+          "description": "Puts the refusal code in the address (before the hash, which the app never rewrites) so it can be asserted; a lesson created instead would leave no code there",
+          "action": "navigate",
+          "url": "{{BASE_URL}}/?rate_refusal={{REFUSAL_CODE}}&employee={{REFUSAL_EMPLOYEE_ID}}#/employees"
+        },
+        {
+          "id": "assert-refusal-code",
+          "action": "assert",
+          "type": "url",
+          "pattern": "rate_refusal=instructor_rate_not_configured&employee={{UNRATED_INSTRUCTOR_ID}}"
+        },
+        {
+          "id": "add-the-rate",
+          "description": "The office adds the rate the refusal asked for",
+          "action": "apiCall",
+          "method": "POST",
+          "endpoint": "/api/employee-rates",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "employee_id": "{{UNRATED_INSTRUCTOR_ID}}",
+            "service_id": "{{SERVICE_ID}}",
+            "pay_basis": "lesson_hourly",
+            "rate": 9000,
+            "effective_date": "2000-01-01",
+            "replace_existing": true
+          }
+        },
+        {
+          "id": "add-lesson-again",
+          "description": "The same lesson saves once the rate exists",
+          "action": "apiCall",
+          "method": "POST",
+          "endpoint": "/api/lesson-instances",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "datetime_start": "{{CURRENT_MONTH_START}}",
+            "duration_minutes": 45,
+            "instructor_employee_id": "{{UNRATED_INSTRUCTOR_ID}}",
+            "service_id": "{{SERVICE_ID}}",
+            "student_ids": [
+              "{{UNRATED_RIDER_ID}}"
+            ]
+          },
+          "stores": [
+            {
+              "variable": "UNRATED_LESSON_ID",
+              "field": "id"
+            },
+            {
+              "variable": "UNRATED_PARTICIPANT_ID",
+              "field": "participants.0.id"
+            }
+          ]
+        },
+        {
+          "id": "rate-now-starts-later",
+          "description": "Move the rate to start after the lesson (direct Supabase PATCH), so the lesson has no rate on its date",
+          "action": "apiCall",
+          "method": "PATCH",
+          "endpoint": "{{SUPABASE_URL}}/rest/v1/RateHistory?employee_id=eq.{{UNRATED_INSTRUCTOR_ID}}&org_id=eq.{{TEST_ORG_ID}}",
+          "headers": {
+            "apikey": "{{SERVICE_ROLE_KEY}}",
+            "Prefer": "return=minimal"
+          },
+          "body": {
+            "effective_date": "2099-01-01"
+          }
+        },
+        {
+          "id": "mark-attended-without-rate",
+          "description": "Marking the rider attended still works: attendance is never blocked by a missing rate (any error status fails the run)",
+          "action": "apiCall",
+          "method": "POST",
+          "endpoint": "/api/calendar/attendance",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "instance_id": "{{UNRATED_LESSON_ID}}",
+            "participant_id": "{{UNRATED_PARTICIPANT_ID}}",
+            "participant_status": "attended"
+          }
+        },
+        {
+          "id": "mark-no-show-without-rate",
+          "description": "Changing the mark to a no-show also works, with the pay decision from the absence form",
+          "action": "apiCall",
+          "method": "POST",
+          "endpoint": "/api/calendar/attendance",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "instance_id": "{{UNRATED_LESSON_ID}}",
+            "participant_id": "{{UNRATED_PARTICIPANT_ID}}",
+            "participant_status": "no_show",
+            "instructor_compensation_decision": "compensated"
+          }
+        }
+      ]
+    },
+    {
+      "id": "ui-missing-rate-in-lesson-form",
+      "name": "UI – The lesson form offers to add a missing rate and keeps what was typed",
+      "description": "In the calendar's add-lesson form, an instructor without a rate for the service on the date is refused by the server. The form stays open with the missing-rate notice; 'הוספת תעריף' opens the rate dialog prefilled with that service and date; after the rate is saved the form still holds everything typed, and saving again creates the lesson.",
+      "steps": [
+        {
+          "id": "create-form-instructor",
+          "description": "An instructor who can teach the service but has no rate",
+          "action": "apiCall",
+          "method": "POST",
+          "endpoint": "/api/instructors",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "first_name": "טופס",
+            "last_name": "תעריף {{RUN_NUMERIC_ID}}",
+            "employee_id": "TEST-FORMRATE-{{RUN_NUMERIC_ID}}",
+            "employee_type": "instructor",
+            "payroll_model": "lesson_based"
+          },
+          "store": "FORM_INSTRUCTOR_ID",
+          "storeField": "id"
+        },
+        {
+          "id": "create-form-capability",
+          "description": "Capability for the service, available every day 06:00-22:00, so the form offers the instructor and 09:00",
+          "action": "apiCall",
+          "method": "POST",
+          "endpoint": "{{SUPABASE_URL}}/rest/v1/instructor_service_capabilities",
+          "headers": {
+            "apikey": "{{SERVICE_ROLE_KEY}}",
+            "Prefer": "return=minimal"
+          },
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "employee_id": "{{FORM_INSTRUCTOR_ID}}",
+            "service_id": "{{SERVICE_ID}}",
+            "max_students": 1,
+            "availability_windows": [
+              {
+                "day": "sunday",
+                "start": "06:00",
+                "end": "22:00"
+              },
+              {
+                "day": "monday",
+                "start": "06:00",
+                "end": "22:00"
+              },
+              {
+                "day": "tuesday",
+                "start": "06:00",
+                "end": "22:00"
+              },
+              {
+                "day": "wednesday",
+                "start": "06:00",
+                "end": "22:00"
+              },
+              {
+                "day": "thursday",
+                "start": "06:00",
+                "end": "22:00"
+              },
+              {
+                "day": "friday",
+                "start": "06:00",
+                "end": "22:00"
+              },
+              {
+                "day": "saturday",
+                "start": "06:00",
+                "end": "22:00"
+              }
+            ],
+            "metadata": {}
+          },
+          "ignoreStatus": [
+            409
+          ]
+        },
+        {
+          "id": "create-form-rider",
+          "description": "A rider to pick in the form",
+          "action": "apiCall",
+          "method": "POST",
+          "endpoint": "/api/students-list",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "first_name": "רוכבת",
+            "last_name": "טופס {{RUN_NUMERIC_ID}}",
+            "identity_number": "995{{RUN_NUMERIC_ID}}",
+            "phone": "0501234515"
+          },
+          "store": "FORM_RIDER_ID",
+          "storeField": "id"
+        },
+        {
+          "id": "navigate-calendar",
+          "action": "navigate",
+          "url": "{{BASE_URL}}/#/calendar"
+        },
+        {
+          "id": "wait-new-lesson-button",
+          "action": "waitForSelector",
+          "selector": "button:has-text('שיעור חדש')"
+        },
+        {
+          "id": "open-new-lesson",
+          "description": "Open the add-lesson form",
+          "action": "click",
+          "selector": "button:has-text('שיעור חדש')",
+          "first": true
+        },
+        {
+          "id": "wait-lesson-form",
+          "action": "waitForSelector",
+          "selector": "[role='dialog']:has-text('פרטי שיבוץ')"
+        },
+        {
+          "id": "type-rider",
+          "description": "Search the rider in the participant picker",
+          "action": "fill",
+          "selector": "[role='dialog'] #primary-student",
+          "value": "טופס {{RUN_NUMERIC_ID}}"
+        },
+        {
+          "id": "pick-rider",
+          "action": "click",
+          "selector": "[role='option']:has-text('טופס {{RUN_NUMERIC_ID}}')",
+          "first": true
+        },
+        {
+          "id": "open-service",
+          "action": "click",
+          "selector": "[role='dialog'] #service"
+        },
+        {
+          "id": "pick-service",
+          "action": "click",
+          "selector": "[role='option']:has-text('{{SERVICE_NAME}}')",
+          "first": true
+        },
+        {
+          "id": "fill-date",
+          "description": "The lesson date: the first of this month",
+          "action": "fill",
+          "selector": "[role='dialog'] #date",
+          "value": "{{CURRENT_MONTH_FIRST_DAY}}"
+        },
+        {
+          "id": "open-instructor",
+          "action": "click",
+          "selector": "[role='dialog'] #instructor"
+        },
+        {
+          "id": "pick-instructor",
+          "action": "click",
+          "selector": "[role='option']:has-text('טופס תעריף {{RUN_NUMERIC_ID}}')",
+          "first": true
+        },
+        {
+          "id": "save-lesson-refused",
+          "description": "Save: the server refuses because the instructor has no rate",
+          "action": "click",
+          "selector": "[role='dialog'] button[type='submit']:has-text('צור שיעור')"
+        },
+        {
+          "id": "wait-notice",
+          "description": "(1) The missing-rate notice with its button appears",
+          "action": "waitForSelector",
+          "selector": "[role='dialog'] [data-missing-rate-notice] button:has-text('הוספת תעריף')"
+        },
+        {
+          "id": "assert-form-still-open",
+          "description": "(1) The lesson form stays open",
+          "action": "assert",
+          "type": "visible",
+          "selector": "[role='dialog']:has-text('פרטי שיבוץ')"
+        },
+        {
+          "id": "scroll-to-notice",
+          "description": "Bring the notice and its button into view for the screenshot",
+          "action": "scrollTo",
+          "selector": "[role='dialog'] [data-missing-rate-notice]"
+        },
+        {
+          "id": "screenshot-notice",
+          "action": "screenshot",
+          "name": "08-missing-rate-notice"
+        },
+        {
+          "id": "open-add-rate",
+          "action": "click",
+          "selector": "[role='dialog'] [data-missing-rate-notice] button:has-text('הוספת תעריף')"
+        },
+        {
+          "id": "wait-rate-dialog",
+          "action": "waitForSelector",
+          "selector": "[role='dialog']:has-text('כל תעריף חל מהתאריך שנבחר')"
+        },
+        {
+          "id": "assert-rate-service",
+          "description": "(2) The rate dialog opens on the lesson's service",
+          "action": "assert",
+          "type": "visible",
+          "selector": "[role='dialog']:has-text('כל תעריף חל מהתאריך שנבחר') [role='combobox']:has-text('{{SERVICE_NAME}}')"
+        },
+        {
+          "id": "assert-rate-date",
+          "description": "(2) ... and on the lesson's date",
+          "action": "assert",
+          "type": "value",
+          "selector": "#rate-date-add-rate",
+          "value": "{{CURRENT_MONTH_FIRST_DAY}}"
+        },
+        {
+          "id": "screenshot-rate-dialog",
+          "action": "screenshot",
+          "name": "09-add-rate-prefilled"
+        },
+        {
+          "id": "fill-rate",
+          "action": "fill",
+          "selector": "#rate-amount-add-rate",
+          "value": "80"
+        },
+        {
+          "id": "save-rate",
+          "action": "click",
+          "selector": "[role='dialog']:has-text('כל תעריף חל מהתאריך שנבחר') button:has-text('שמירת תעריף')"
+        },
+        {
+          "id": "wait-rate-dialog-closed",
+          "action": "waitForSelector",
+          "selector": "[role='dialog']:has-text('כל תעריף חל מהתאריך שנבחר')",
+          "state": "hidden"
+        },
+        {
+          "id": "assert-notice-gone",
+          "action": "assert",
+          "type": "count",
+          "selector": "[data-missing-rate-notice]",
+          "value": "0"
+        },
+        {
+          "id": "assert-rider-kept",
+          "description": "(3) The form still holds the rider",
+          "action": "assert",
+          "type": "visible",
+          "selector": "[role='dialog'] p.font-medium:has-text('טופס {{RUN_NUMERIC_ID}}')"
+        },
+        {
+          "id": "assert-service-kept",
+          "description": "(3) ... the service",
+          "action": "assert",
+          "type": "visible",
+          "selector": "[role='dialog'] #service:has-text('{{SERVICE_NAME}}')"
+        },
+        {
+          "id": "assert-instructor-kept",
+          "description": "(3) ... the instructor",
+          "action": "assert",
+          "type": "visible",
+          "selector": "[role='dialog'] #instructor:has-text('טופס תעריף {{RUN_NUMERIC_ID}}')"
+        },
+        {
+          "id": "assert-date-kept",
+          "description": "(3) ... and the date",
+          "action": "assert",
+          "type": "value",
+          "selector": "[role='dialog'] #date",
+          "value": "{{CURRENT_MONTH_FIRST_DAY}}"
+        },
+        {
+          "id": "save-lesson-again",
+          "description": "(4) Save again",
+          "action": "click",
+          "selector": "[role='dialog'] button[type='submit']:has-text('צור שיעור')"
+        },
+        {
+          "id": "wait-lesson-form-closed",
+          "description": "(4) The lesson is created and the form closes",
+          "action": "waitForSelector",
+          "selector": "[role='dialog']:has-text('פרטי שיבוץ')",
+          "state": "hidden"
+        },
+        {
+          "id": "find-created-lesson",
+          "description": "(4) Read the instructor's lessons (direct Supabase read)",
+          "action": "apiCall",
+          "method": "GET",
+          "endpoint": "{{SUPABASE_URL}}/rest/v1/lesson_instances?instructor_employee_id=eq.{{FORM_INSTRUCTOR_ID}}&org_id=eq.{{TEST_ORG_ID}}&select=id",
+          "headers": {
+            "apikey": "{{SERVICE_ROLE_KEY}}"
+          },
+          "store": "FORM_LESSON_ID",
+          "storeField": "0.id"
+        },
+        {
+          "id": "probe-lesson-created",
+          "description": "Puts the found lesson id in the address so it can be asserted (no lesson stores '[]')",
+          "action": "navigate",
+          "url": "{{BASE_URL}}/?form_lesson={{FORM_LESSON_ID}}#/calendar"
+        },
+        {
+          "id": "assert-lesson-created",
+          "description": "(4) Exactly the lesson the form saved exists",
+          "action": "assert",
+          "type": "url",
+          "pattern": "form_lesson=[0-9a-f]{8}-"
         }
       ]
     },

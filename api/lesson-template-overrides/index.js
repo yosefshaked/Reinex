@@ -13,6 +13,7 @@ import {
   resolveOrgId,
   withOrgScope,
 } from '../_shared/org-bff.js';
+import { validateInstructorRateForLesson } from '../_shared/employee-finance.js';
 
 function normalizeUuid(value) {
   const normalized = normalizeString(value);
@@ -253,7 +254,7 @@ export default async function lessonTemplateOverrides(context, req) {
     }
 
     const { data: existingTemplate, error: existingTemplateError } = await withOrgScope(supabase, 'lesson_templates', orgId)
-      .select('id, valid_from, valid_until')
+      .select('id, instructor_employee_id, service_id, valid_from, valid_until')
       .eq('id', templateId)
       .maybeSingle();
 
@@ -271,6 +272,29 @@ export default async function lessonTemplateOverrides(context, req) {
 
     if (!isDateWithinTemplateRange(targetDate, existingTemplate)) {
       return respond(context, 400, { message: 'target_date_outside_template_range' });
+    }
+
+    // Giving one date of a template to another instructor or service is a person's choice, so it
+    // must pay, like any other lesson someone adds or moves.
+    if (overrideType === 'modify' && (newInstructorEmployeeId || newServiceId)) {
+      let rateError;
+      try {
+        rateError = await validateInstructorRateForLesson(supabase, {
+          orgId,
+          instructorEmployeeId: newInstructorEmployeeId || existingTemplate.instructor_employee_id,
+          serviceId: newServiceId || existingTemplate.service_id,
+          lessonDate: targetDate,
+        });
+      } catch (rateCheckError) {
+        context.log?.error?.('lesson-template-overrides failed to check instructor rate', {
+          message: rateCheckError?.message,
+          templateId,
+        });
+        return respond(context, 500, { message: 'failed_to_validate_instructor_rate' });
+      }
+      if (rateError) {
+        return respond(context, 422, rateError);
+      }
     }
 
     const { data, error } = await withOrgScope(supabase, 'lesson_template_overrides', orgId)

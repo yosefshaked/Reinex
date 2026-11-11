@@ -86,7 +86,7 @@
     {
       "id": "api-setup-instructor",
       "name": "API – Create a test instructor employee",
-      "description": "Creates a standalone instructor employee and sets a service capability (base_rate=0) by inserting directly into Supabase so the instructor rate validation passes during attendance marking.",
+      "description": "Creates a standalone instructor employee and sets a service capability (base_rate=0) by inserting directly into Supabase, then gives the instructor a lesson rate for the service so the lessons can be added.",
       "steps": [
         {
           "id": "create-instructor",
@@ -126,6 +126,22 @@
             "metadata": {}
           },
           "ignoreStatus": [409]
+        },
+        {
+          "id": "seed-instructor-lesson-rate",
+          "action": "apiCall",
+          "description": "The instructor's lesson rate for the service, from the start of employment. A lesson cannot be added for an instructor without a rate for its service on its date.",
+          "method": "POST",
+          "endpoint": "/api/employee-rates",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "employee_id": "{{INSTRUCTOR_ID}}",
+            "service_id": "{{SERVICE_ID}}",
+            "pay_basis": "lesson_hourly",
+            "rate": 10000,
+            "effective_date": "2000-01-01",
+            "replace_existing": true
+          }
         }
       ]
     },

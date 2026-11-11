@@ -25,6 +25,7 @@ import AvailabilityWindowsEditor from './AvailabilityWindowsEditor.jsx';
 import { buildCapabilitiesPayload } from '@/lib/instructor-capabilities.js';
 import { formatDateKey } from '@/lib/date-key-format.js';
 import { formatCurrency, toAgorot } from '@/lib/currency.js';
+import { useServices } from '@/hooks/useOrgData.js';
 
 const LESSON_BASES = ['lesson_hourly', 'lesson_flat'];
 
@@ -451,7 +452,17 @@ function RateCard({ card, rates, today, onSave, onSaveScheduling, saving }) {
  * then set it. A kind the employee's pay model doesn't read is offered too, and saving it switches
  * the employee to that model, so the rate actually pays.
  */
-function AddRateDialog({ open, onOpenChange, services, rates, today, onSave, saving }) {
+function AddRateDialog({
+  open,
+  onOpenChange,
+  services,
+  rates,
+  today,
+  onSave,
+  saving,
+  initialServiceId = '',
+  initialEffectiveDate = '',
+}) {
   const [kindKey, setKindKey] = useState(RATE_KINDS[0].key);
   const [serviceId, setServiceId] = useState('');
   const [form, setForm] = useState(() => createEmptyForm('lesson_hourly', today));
@@ -461,11 +472,19 @@ function AddRateDialog({ open, onOpenChange, services, rates, today, onSave, sav
 
   useEffect(() => {
     if (!open) return;
+    // Opened for one lesson (from the lesson or template form): a lesson rate for that service,
+    // from that lesson's date.
+    if (initialServiceId) {
+      setKindKey(RATE_KINDS[0].key);
+      setServiceId(initialServiceId);
+      setForm(createEmptyForm(RATE_KINDS[0].payBasis, initialEffectiveDate || today));
+      return;
+    }
     const initial = RATE_KINDS.find((item) => hasRateOfKind(item, rates)) || RATE_KINDS[0];
     setKindKey(initial.key);
     setServiceId('');
     setForm(createEmptyForm(initial.payBasis, today));
-  }, [open, rates, today]);
+  }, [open, rates, today, initialServiceId, initialEffectiveDate]);
 
   function chooseKind(nextKind) {
     setKindKey(nextKind.key);
@@ -587,6 +606,92 @@ function AddRateDialog({ open, onOpenChange, services, rates, today, onSave, sav
   );
 }
 
+async function fetchEmployeeRates({ orgId, employeeId, session }) {
+  const payload = await authenticatedFetch('employee-rates', {
+    session,
+    params: { org_id: orgId, employee_id: employeeId },
+  });
+  return Array.isArray(payload?.rates) ? payload.rates : [];
+}
+
+async function saveEmployeeRate({ orgId, employeeId, session }, { payBasis, serviceId, rate, effectiveDate, notes, replaceExisting }) {
+  await authenticatedFetch('employee-rates', {
+    session,
+    method: 'POST',
+    body: {
+      org_id: orgId,
+      employee_id: employeeId,
+      pay_basis: payBasis,
+      service_id: serviceId,
+      rate,
+      effective_date: effectiveDate,
+      notes,
+      replace_existing: replaceExisting,
+    },
+  });
+}
+
+function rateSavedMessage(effectiveDate, today) {
+  return effectiveDate > today ? 'התעריף נשמר ויחול מהתאריך שנבחר.' : 'התעריף נשמר.';
+}
+
+/**
+ * The same "add rate" dialog, opened from a lesson or template form that was refused because the
+ * instructor has no rate for the service on the lesson's date. It comes prefilled with that service
+ * and date; `onSaved` runs after the rate is stored so the form can be saved again as it was.
+ */
+export function AddLessonRateDialog({ open, onOpenChange, orgId, session, employeeId, serviceId, rateDate, onSaved }) {
+  const { services } = useServices({ enabled: open && Boolean(orgId), orgId, session });
+  const [rates, setRates] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const today = todayKey();
+
+  useEffect(() => {
+    if (!open || !orgId || !employeeId) {
+      setRates(null);
+      return undefined;
+    }
+    let cancelled = false;
+    fetchEmployeeRates({ orgId, employeeId, session })
+      .then((rows) => { if (!cancelled) setRates(rows); })
+      .catch((error) => {
+        console.error('Failed to load employee rates', error);
+        if (!cancelled) setRates([]);
+      });
+    return () => { cancelled = true; };
+  }, [open, orgId, employeeId, session]);
+
+  async function handleSave(values) {
+    setSaving(true);
+    try {
+      await saveEmployeeRate({ orgId, employeeId, session }, values);
+      toast.success(rateSavedMessage(values.effectiveDate, today));
+      onSaved?.();
+      return true;
+    } catch (error) {
+      console.error('Failed to save rate', error);
+      toast.error(error?.message || 'שמירת התעריף נכשלה.');
+      return false;
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <AddRateDialog
+      open={open && rates !== null}
+      onOpenChange={onOpenChange}
+      services={services || []}
+      rates={rates || []}
+      today={today}
+      saving={saving}
+      onSave={handleSave}
+      initialServiceId={serviceId}
+      initialEffectiveDate={rateDate || today}
+    />
+  );
+}
+
 /**
  * Pay rates of one employee: what they earn per service, and from when (RateHistory).
  * Rates are never edited in place; saving adds a rate that applies from the date you choose.
@@ -602,11 +707,7 @@ export default function EmployeeRatesPanel({ employee, orgId, session, services 
     if (!employee?.id || !orgId) return;
     setLoading(true);
     try {
-      const payload = await authenticatedFetch('employee-rates', {
-        session,
-        params: { org_id: orgId, employee_id: employee.id },
-      });
-      setRates(Array.isArray(payload?.rates) ? payload.rates : []);
+      setRates(await fetchEmployeeRates({ orgId, employeeId: employee.id, session }));
     } catch (error) {
       console.error('Failed to load employee rates', error);
       toast.error(error?.message || 'טעינת התעריפים נכשלה.');
@@ -702,22 +803,12 @@ export default function EmployeeRatesPanel({ employee, orgId, session, services 
   async function handleSave({ payBasis, serviceId, rate, effectiveDate, notes, replaceExisting }) {
     setSaving(true);
     try {
-      await authenticatedFetch('employee-rates', {
-        session,
-        method: 'POST',
-        body: {
-          org_id: orgId,
-          employee_id: employee.id,
-          pay_basis: payBasis,
-          service_id: serviceId,
-          rate,
-          effective_date: effectiveDate,
-          notes,
-          replace_existing: replaceExisting,
-        },
-      });
+      await saveEmployeeRate(
+        { orgId, employeeId: employee.id, session },
+        { payBasis, serviceId, rate, effectiveDate, notes, replaceExisting },
+      );
       await loadRates();
-      toast.success(effectiveDate > today ? 'התעריף נשמר ויחול מהתאריך שנבחר.' : 'התעריף נשמר.');
+      toast.success(rateSavedMessage(effectiveDate, today));
       return true;
     } catch (error) {
       console.error('Failed to save rate', error);

@@ -28,6 +28,8 @@ import {
 } from '../utils/schedulingOverride.js';
 import { parseLocalDateString } from '../utils/localDate.js';
 import { toAgorot } from '@/lib/currency.js';
+import { readMissingLessonRate } from '../utils/lessonDialogModel.js';
+import { MissingRateNotice } from './MissingRateNotice.jsx';
 
 function toLocalDateString(dateObj) {
   if (!(dateObj instanceof Date) || Number.isNaN(dateObj.getTime())) return null;
@@ -169,6 +171,7 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
   const [isCheckingConflicts, setIsCheckingConflicts] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState(null);
+  const [missingRate, setMissingRate] = useState(null);
   const [studentDetails, setStudentDetails] = useState(null); // Cache first student details
   const [useSchedulingOverride, setUseSchedulingOverride] = useState(false);
   const [selectedOverrideReasonCode, setSelectedOverrideReasonCode] = useState('');
@@ -190,6 +193,7 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
     setFormData(buildInitialFormData(defaultDate, defaultSelection, defaultServiceId));
     setConflicts([]);
     setError(null);
+    setMissingRate(null);
     setStudentDetails(null);
     setIsGroupSession(false);
     setUseSchedulingOverride(false);
@@ -593,6 +597,7 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
     e.preventDefault();
     setIsSubmitting(true);
     setError(null);
+    setMissingRate(null);
 
     try {
       const serviceIds = new Set(
@@ -671,6 +676,11 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
       onClose();
     } catch (err) {
       console.error('Error creating lesson:', err);
+      const missing = readMissingLessonRate(err);
+      if (missing) {
+        setMissingRate(missing);
+        return;
+      }
       const apiError = err?.message || '';
       setError(
         apiError === 'missing_instructor_service_capability'
@@ -1168,6 +1178,8 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
               </AlertDescription>
             </Alert>
           )}
+
+          <MissingRateNotice missingRate={missingRate} onRateAdded={() => setMissingRate(null)} />
 
           {/* Error Message */}
           {error && (

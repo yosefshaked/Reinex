@@ -40,6 +40,8 @@ import {
   SCHEDULING_OVERRIDE_REASON_OPTIONS,
 } from '../utils/schedulingOverride.js';
 import { getParticipantDisplayName } from '../utils/participantDisplay.js';
+import { readMissingLessonRate } from '../utils/lessonDialogModel.js';
+import { MissingRateNotice } from './MissingRateNotice.jsx';
 import { addLocalDays, CALENDAR_WEEK_START, getWeekStartDate, parseLocalDateString, toLocalDateString as toCalendarLocalDateString } from '../utils/localDate.js';
 import './reinex-fullcalendar.css';
 
@@ -797,7 +799,7 @@ export default function ReinexFullCalendar({
       }
       setPendingDropInfo((current) => (
         current?.rawInfo === dropInfo
-          ? { ...current, preview: null, previewError: '', previewLoading: false, previewRequestKey: '' }
+          ? { ...current, preview: null, previewError: '', previewMissingRate: null, previewLoading: false, previewRequestKey: '' }
           : current
       ));
       return undefined;
@@ -821,7 +823,7 @@ export default function ReinexFullCalendar({
 
     setPendingDropInfo((current) => (
       current?.rawInfo === dropInfo
-        ? { ...current, preview: null, previewError: '', previewLoading: true, previewRequestKey: requestKey }
+        ? { ...current, preview: null, previewError: '', previewMissingRate: null, previewLoading: true, previewRequestKey: requestKey }
         : current
     ));
 
@@ -845,13 +847,20 @@ export default function ReinexFullCalendar({
 
         setPendingDropInfo((current) => (
           current?.rawInfo === dropInfo && current?.previewRequestKey === requestKey
-            ? { ...current, preview: payload?.preview || null, previewError: '', previewLoading: false, previewRequestKey: requestKey }
+            ? { ...current, preview: payload?.preview || null, previewError: '', previewMissingRate: null, previewLoading: false, previewRequestKey: requestKey }
             : current
         ));
       } catch (error) {
         setPendingDropInfo((current) => (
           current?.rawInfo === dropInfo && current?.previewRequestKey === requestKey
-            ? { ...current, preview: null, previewError: error?.message || 'לא ניתן היה לבנות תצוגה מקדימה להעברה.', previewLoading: false, previewRequestKey: requestKey }
+            ? {
+              ...current,
+              preview: null,
+              previewError: error?.message || 'לא ניתן היה לבנות תצוגה מקדימה להעברה.',
+              previewMissingRate: readMissingLessonRate(error),
+              previewLoading: false,
+              previewRequestKey: requestKey,
+            }
             : current
         ));
       }
@@ -1449,7 +1458,14 @@ export default function ReinexFullCalendar({
               </div>
             ) : null}
 
-            {pendingDropInfo?.previewError ? (
+            {pendingDropInfo?.previewMissingRate ? (
+              <MissingRateNotice
+                missingRate={pendingDropInfo.previewMissingRate}
+                onRateAdded={() => setPendingDropInfo((current) => (current
+                  ? { ...current, preview: null, previewError: '', previewMissingRate: null, previewRequestKey: '' }
+                  : current))}
+              />
+            ) : pendingDropInfo?.previewError ? (
               <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-950">
                 {pendingDropInfo.previewError}
               </div>
