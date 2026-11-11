@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -9,7 +9,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Badge } from '@/components/ui/badge';
+import { createPortal } from 'react-dom';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { cn } from '@/lib/utils';
+import { attendanceTotals, buildMonthWeeks, formatMinutes } from './attendance-month-grid.js';
 import { Loader2, TriangleAlert } from 'lucide-react';
 import ConfirmDialog from '@/components/ui/ConfirmDialog.jsx';
 import { formatDateKey } from '@/lib/date-key-format.js';
@@ -49,17 +52,8 @@ const STATUS_OPTIONS = [
   { value: 'absent', label: 'נעדר/ת' },
 ];
 
-/** A day's minutes, kept apart: lesson time read from the calendar and the other work entered here. */
-function describeMinutes(record, lessonDay) {
-  const lesson = Math.max(0, Number(lessonDay?.lesson_minutes) || 0);
-  const other = Math.max(0, Number(record?.other_minutes) || 0);
-  const parts = [];
-  if (lesson > 0) parts.push(`מפגשים ${lesson} דק׳`);
-  if (other > 0) parts.push(`עבודה אחרת ${other} דק׳`);
-  return parts.length > 0 ? parts.join(' • ') : '0 דק׳';
-}
-
 export default function EmployeeAttendancePanel({ employee, orgId, session }) {
+  const editorRef = useRef(null);
   const [monthDate, setMonthDate] = useState(() => startOfMonth(new Date()));
   const [selectedDate, setSelectedDate] = useState(() => toLocalDateString(new Date()));
   const [records, setRecords] = useState([]);
@@ -154,6 +148,8 @@ export default function EmployeeAttendancePanel({ employee, orgId, session }) {
     return items;
   }, [leaveByDate, lessonsByDate, monthDate, recordsByDate]);
 
+  const weeks = useMemo(() => buildMonthWeeks(days), [days]);
+  const monthTotals = useMemo(() => attendanceTotals(days), [days]);
   const selectedRecord = recordsByDate.get(selectedDate) || null;
   const selectedLessonMinutes = Math.max(0, Number(lessonsByDate.get(selectedDate)?.lesson_minutes) || 0);
   const firstHourlyRateDate = hourlyRates.map((row) => row.effective_date).sort()[0] || null;
@@ -231,9 +227,9 @@ export default function EmployeeAttendancePanel({ employee, orgId, session }) {
   }
 
   return (
-    <div className="grid gap-3 xl:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]">
-      <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="mb-3 flex items-center justify-between gap-3">
+    <div className="grid min-w-0 max-w-full gap-3">
+      <section className="min-w-0 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
           <div>
             <h3 className="text-sm font-bold text-slate-900">נוכחות חודשית</h3>
             <p className="text-xs text-slate-500">
@@ -253,48 +249,96 @@ export default function EmployeeAttendancePanel({ employee, orgId, session }) {
             טוען נתוני נוכחות...
           </div>
         ) : (
-          <div className="space-y-2">
-            {days.map((day) => (
-              <button
-                key={day.date}
-                type="button"
-                onClick={() => setSelectedDate(day.date)}
-                className={`w-full rounded-2xl border px-3 py-3 text-start transition ${
-                  selectedDate === day.date
-                    ? 'border-blue-500 bg-blue-50'
-                    : 'border-slate-200 bg-slate-50/50 hover:bg-slate-100'
-                }`}
-              >
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <div className="text-sm font-semibold text-slate-900">{formatDate(day.date)}</div>
-                    <div className="mt-1 text-xs text-slate-500">
-                      {day.leave
-                        ? `חופשה: ${day.leave.entry?.reason || day.leave.leave_type}`
-                        : day.record
-                          ? `${STATUS_OPTIONS.find((item) => item.value === day.record.status)?.label || day.record.status} • ${describeMinutes(day.record, day.lessons)}`
-                          : day.lessons
-                            ? describeMinutes(null, day.lessons)
-                            : 'ללא רישום'}
-                    </div>
-                  </div>
-                  {day.leave ? (
-                    <Badge variant="outline" className="border-amber-300 bg-amber-50 text-amber-900">חופשה</Badge>
-                  ) : day.record ? (
-                    <Badge variant="outline">{STATUS_OPTIONS.find((item) => item.value === day.record.status)?.label || day.record.status}</Badge>
-                  ) : day.lessons ? (
-                    <Badge variant="outline">מפגשים</Badge>
-                  ) : (
-                    <Badge variant="outline" className="text-slate-400">ריק</Badge>
-                  )}
-                </div>
-              </button>
-            ))}
-          </div>
+          <TooltipProvider delayDuration={200}>
+            <p className="mb-3 flex flex-wrap items-baseline gap-x-4 gap-y-1 text-sm text-slate-600">
+              <span className="font-semibold text-slate-900">סה"כ בחודש: <bdi dir="ltr">{formatMinutes(monthTotals.totalMinutes)}</bdi> שעות</span>
+              <span>מפגשים <bdi dir="ltr">{formatMinutes(monthTotals.lessonMinutes)}</bdi> · עבודה אחרת <bdi dir="ltr">{formatMinutes(monthTotals.otherMinutes)}</bdi></span>
+            </p>
+            <div className="max-w-full overflow-x-auto rounded-xl border border-slate-200" dir="rtl" role="region" aria-label="טבלת נוכחות חודשית" tabIndex={0}>
+              <table className="w-full min-w-[1000px] table-fixed border-collapse text-start">
+                <caption className="sr-only">{formatMonth(monthDate)} — בחירת יום לעריכה</caption>
+                <thead className="bg-slate-50 text-xs text-slate-600">
+                  <tr>
+                    {['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת', 'סה"כ שבועי'].map((label) => (
+                      <th key={label} scope="col" className="border-b p-2 text-start font-semibold">{label}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {weeks.map((week, index) => (
+                    <tr key={index}>
+                      {week.map((day, weekday) => {
+                        if (!day) return <td key={weekday} className="border border-slate-100 bg-slate-50/40" />;
+                        const totals = attendanceTotals([day]);
+                        const empty = !day.record && !day.lessons && !day.leave;
+                        const quietWeekend = empty && weekday >= 5;
+                        const emptyLabel = quietWeekend ? 'סוף שבוע' : 'אין רישום';
+                        const leaveLabel = day.leave ? `חופשה: ${day.leave.entry?.reason || day.leave.leave_type}` : null;
+                        const status = day.record ? STATUS_OPTIONS.find((item) => item.value === day.record.status)?.label || day.record.status : null;
+                        return (
+                          <td key={day.date} className="h-36 border border-slate-100 p-0 align-top">
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <button
+                                  type="button"
+                                  aria-label={`${formatDate(day.date)} — ${leaveLabel || (empty ? emptyLabel : formatMinutes(totals.totalMinutes) + ' שעות')} — עריכת יום`}
+                                  aria-pressed={selectedDate === day.date}
+                                  onClick={() => {
+                                    setSelectedDate(day.date);
+                                    editorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                                  }}
+                                  className={cn('flex h-full min-h-36 w-full flex-col items-start gap-1 p-2 text-start transition hover:bg-blue-50 focus-visible:relative focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-600',
+                                    quietWeekend ? 'bg-slate-100 text-slate-400' : 'bg-white text-slate-700',
+                                    day.leave && 'bg-amber-50 text-amber-900',
+                                    selectedDate === day.date && 'bg-blue-50 ring-2 ring-inset ring-blue-500')}
+                                >
+                                  <span className="text-xs">{Number(day.date.slice(-2))}</span>
+                                  {empty ? <span className="mt-2 text-xs">{emptyLabel}</span> : (
+                                    <>
+                                      {totals.totalMinutes > 0 ? (
+                                        <>
+                                          <bdi dir="ltr" className="text-xl font-bold tabular-nums">{formatMinutes(totals.totalMinutes)}</bdi>
+                                          <span className="text-[11px] leading-4">
+                                            {totals.lessonMinutes > 0 ? <>מפגשים <bdi dir="ltr">{formatMinutes(totals.lessonMinutes)}</bdi></> : null}
+                                            {totals.lessonMinutes > 0 && totals.otherMinutes > 0 ? ' · ' : null}
+                                            {totals.otherMinutes > 0 ? <>עבודה אחרת <bdi dir="ltr">{formatMinutes(totals.otherMinutes)}</bdi></> : null}
+                                          </span>
+                                        </>
+                                      ) : null}
+                                      {leaveLabel ? <span className="line-clamp-2 text-xs font-semibold">{leaveLabel}</span> : null}
+                                    </>
+                                  )}
+                                </button>
+                              </TooltipTrigger>
+                              {createPortal(
+                                <TooltipContent dir="rtl" className="max-w-[min(320px,calc(100vw-24px))] space-y-1 whitespace-pre-wrap break-words">
+                                  <p className="font-semibold">{formatDate(day.date)}</p>
+                                  {leaveLabel ? <p>{leaveLabel}</p> : null}
+                                  {status ? <p>{status}</p> : null}
+                                  <p>סה"כ <bdi dir="ltr">{formatMinutes(totals.totalMinutes)}</bdi> שעות</p>
+                                  <p>מפגשים <bdi dir="ltr">{formatMinutes(totals.lessonMinutes)}</bdi> · עבודה אחרת <bdi dir="ltr">{formatMinutes(totals.otherMinutes)}</bdi></p>
+                                  {day.lessons ? <p>מספר מפגשים: {day.lessons.lesson_count || 0} · ללא סימון נוכחות: {day.lessons.unmarked_lesson_count || 0}</p> : null}
+                                  {day.record?.notes ? <p>{day.record.notes}</p> : null}
+                                  {empty ? <p>{emptyLabel}</p> : null}
+                                  <p>לחצו לעריכת היום</p>
+                                </TooltipContent>, document.body)}
+                            </Tooltip>
+                          </td>
+                        );
+                      })}
+                      <td className="border border-slate-100 bg-slate-50 p-2 align-middle text-lg font-semibold tabular-nums text-slate-700">
+                        <bdi dir="ltr">{formatMinutes(attendanceTotals(week).totalMinutes)}</bdi>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </TooltipProvider>
         )}
       </section>
 
-      <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+      <section ref={editorRef} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
         <div className="mb-3">
           <h3 className="text-sm font-bold text-slate-900">עריכת יום</h3>
           <p className="text-xs text-slate-500">{formatDate(selectedDate)}</p>
