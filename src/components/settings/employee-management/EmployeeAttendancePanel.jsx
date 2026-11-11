@@ -255,7 +255,7 @@ export default function EmployeeAttendancePanel({ employee, orgId, session }) {
               <span>מפגשים <bdi dir="ltr">{formatMinutes(monthTotals.lessonMinutes)}</bdi> · עבודה אחרת <bdi dir="ltr">{formatMinutes(monthTotals.otherMinutes)}</bdi></span>
             </p>
             <div className="max-w-full overflow-x-auto rounded-xl border border-slate-200" dir="rtl" role="region" aria-label="טבלת נוכחות חודשית" tabIndex={0}>
-              <table className="w-full min-w-[1000px] table-fixed border-collapse text-start">
+              <table className="w-full min-w-[640px] table-fixed border-collapse text-start">
                 <caption className="sr-only">{formatMonth(monthDate)} — בחירת יום לעריכה</caption>
                 <thead className="bg-slate-50 text-xs text-slate-600">
                   <tr>
@@ -276,7 +276,7 @@ export default function EmployeeAttendancePanel({ employee, orgId, session }) {
                         const leaveLabel = day.leave ? `חופשה: ${day.leave.entry?.reason || day.leave.leave_type}` : null;
                         const status = day.record ? STATUS_OPTIONS.find((item) => item.value === day.record.status)?.label || day.record.status : null;
                         return (
-                          <td key={day.date} className="h-36 border border-slate-100 p-0 align-top">
+                          <td key={day.date} className="h-24 border border-slate-100 p-0 align-top">
                             <Tooltip>
                               <TooltipTrigger asChild>
                                 <button
@@ -287,7 +287,7 @@ export default function EmployeeAttendancePanel({ employee, orgId, session }) {
                                     setSelectedDate(day.date);
                                     editorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
                                   }}
-                                  className={cn('flex h-full min-h-36 w-full flex-col items-start gap-1 p-2 text-start transition hover:bg-blue-50 focus-visible:relative focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-600',
+                                  className={cn('flex h-full min-h-24 w-full flex-col items-start gap-1 p-2 text-start transition hover:bg-blue-50 focus-visible:relative focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-600',
                                     quietWeekend ? 'bg-slate-100 text-slate-400' : 'bg-white text-slate-700',
                                     day.leave && 'bg-amber-50 text-amber-900',
                                     selectedDate === day.date && 'bg-blue-50 ring-2 ring-inset ring-blue-500')}
