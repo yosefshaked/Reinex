@@ -15,6 +15,7 @@ import { Loader2 } from 'lucide-react';
 import { toast } from '@/lib/toast.jsx';
 import { authenticatedFetch } from '@/lib/api-client.js';
 import { toAgorot, formatCurrency } from '@/lib/currency.js';
+import { LeaveDayRateEditor } from './EmployeeRatesPanel.jsx';
 
 function startOfMonth(date) {
   return new Date(date.getFullYear(), date.getMonth(), 1);
@@ -40,19 +41,14 @@ function formatMonth(date) {
 
 /**
  * How a paid leave day is valued. This is a method on the employee, not a rate for work: the legal
- * average is the default, and a farm can override it per employee with a fixed day value.
+ * average is the default, and a farm can override it per employee with a fixed day value, which is
+ * a dated leave_day rate set right here.
  */
 function getLeavePayMethodLabel(method) {
   if (method === 'fixed_rate') return 'ערך קבוע ליום';
   if (method === 'legal') return 'ממוצע חוקי';
   if (method === 'avg_hourly_x_avg_day_hours') return 'ממוצע היסטורי';
   return 'ברירת מחדל ארגונית';
-}
-
-function getPayrollModelLabel(value) {
-  if (value === 'lesson_based') return 'מבוסס שיעורים';
-  if (value === 'monthly_salary') return 'שכר חודשי';
-  return 'שעתי';
 }
 
 export default function EmployeeFinancePanel({ employee, orgId, session, onEditEmployee }) {
@@ -190,33 +186,22 @@ export default function EmployeeFinancePanel({ employee, orgId, session, onEditE
           </div>
         </div>
 
-        <div className="mb-4 grid gap-2 md:grid-cols-3">
-          <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3">
-            <div className="text-[11px] text-slate-500">מודל שכר</div>
-            <div className="mt-1 text-lg font-bold text-slate-900">{getPayrollModelLabel(employee?.payroll_model || (employee?.employee_type === 'instructor' ? 'lesson_based' : 'hourly'))}</div>
-          </div>
-          <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3">
-            <div className="text-[11px] text-slate-500">תעריף / שכר</div>
-            <div className="mt-1 text-lg font-bold text-slate-900">
-              {employee?.payroll_model === 'monthly_salary'
-                ? formatCurrency(employee?.monthly_salary_amount)
-                : employee?.payroll_model === 'lesson_based'
-                  ? <span className="text-sm text-slate-600">לפי תעריפי השירותים למעלה</span>
-                  : formatCurrency(employee?.current_rate)}
-            </div>
-          </div>
-          <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3">
-            <div className="text-[11px] text-slate-500">תשלום חופשה</div>
-            <div className="mt-1 text-lg font-bold text-slate-900">{getLeavePayMethodLabel(employee?.leave_pay_method)}</div>
-            {employee?.leave_pay_method === 'fixed_rate' ? (
-              <div className="text-xs text-slate-500">{formatCurrency(employee?.leave_fixed_day_rate)} ליום</div>
-            ) : null}
-          </div>
+        <div className="mb-4 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3">
+          <div className="text-[11px] text-slate-500">תשלום חופשה</div>
+          <div className="mt-1 text-lg font-bold text-slate-900">{getLeavePayMethodLabel(employee?.leave_pay_method)}</div>
+          {employee?.leave_pay_method === 'fixed_rate' ? (
+            <LeaveDayRateEditor
+              employeeId={employee?.id}
+              orgId={orgId}
+              session={session}
+              onSaved={loadData}
+            />
+          ) : null}
         </div>
 
         {onEditEmployee ? (
           <div className="mb-4">
-            <Button size="sm" variant="outline" onClick={onEditEmployee}>ערוך הגדרות שכר בכרטיס העובד</Button>
+            <Button size="sm" variant="outline" onClick={onEditEmployee}>עריכת כרטיס העובד</Button>
           </div>
         ) : null}
 

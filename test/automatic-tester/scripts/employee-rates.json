@@ -90,9 +90,7 @@
             "first_name": "תעריף",
             "last_name": "בדיקה {{RUN_NUMERIC_ID}}",
             "employee_id": "TEST-RATE-{{RUN_NUMERIC_ID}}",
-            "employee_type": "instructor",
-            "payroll_model": "lesson_based",
-            "current_rate": 20000
+            "employee_type": "instructor"
           },
           "store": "RATE_INSTRUCTOR_ID",
           "storeField": "id"
@@ -385,7 +383,7 @@
     {
       "id": "capability-edit-keeps-rate",
       "name": "A capability edit no longer rewrites the rate",
-      "description": "A per-session rate set in the rates screen used to be replaced by an hourly one whenever anything else on the capability was saved: the capability carried base_rate, and a trigger copied it into RateHistory as lesson_hourly. The capability endpoint no longer carries money at all.",
+      "description": "A per-session rate set in the rates screen used to be replaced by an hourly one whenever anything else on the capability was saved: the capability carried an hourly rate, and a trigger copied it into RateHistory as lesson_hourly. The capability endpoint no longer carries money at all.",
       "steps": [
         {
           "id": "set-flat-rate",
@@ -784,6 +782,87 @@
       ]
     },
     {
+      "id": "ui-leave-day-value",
+      "name": "UI – A fixed leave-day value is set with the leave pay in the finance tab",
+      "description": "The fixed value of a paid leave day is a dated leave_day rate, set in the finance tab's leave-pay box and saved through api/employee-rates. There is no leave-day column on the employee any more.",
+      "steps": [
+        {
+          "id": "set-fixed-leave-method",
+          "description": "The employee's leave is paid by a fixed day value",
+          "action": "apiCall",
+          "method": "PUT",
+          "endpoint": "/api/instructors",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "instructor_id": "{{RATE_INSTRUCTOR_ID}}",
+            "leave_pay_method": "fixed_rate"
+          }
+        },
+        {
+          "id": "navigate-employees",
+          "action": "navigate",
+          "url": "{{BASE_URL}}/?leave_day=1#/employees"
+        },
+        {
+          "id": "wait-main",
+          "action": "waitForSelector",
+          "selector": "main, [role='main']"
+        },
+        {
+          "id": "open-employee",
+          "action": "click",
+          "selector": "button:has-text('בדיקה {{RUN_NUMERIC_ID}}')",
+          "first": true
+        },
+        {
+          "id": "open-finance-tab",
+          "action": "click",
+          "selector": "[role='tab']:has-text('פיננסים')"
+        },
+        {
+          "id": "assert-no-value-yet",
+          "description": "No leave-day value has been set yet",
+          "action": "waitForSelector",
+          "selector": "text=לא הוגדר ערך ליום"
+        },
+        {
+          "id": "open-leave-day-form",
+          "action": "click",
+          "selector": "button:text-is('הגדרה')"
+        },
+        {
+          "id": "fill-leave-day",
+          "action": "fill",
+          "selector": "#rate-amount-leave-day",
+          "value": "250"
+        },
+        {
+          "id": "save-leave-day",
+          "action": "click",
+          "selector": "button:text-is('שמירה')"
+        },
+        {
+          "id": "assert-leave-day-shown",
+          "description": "The value is shown per day in the leave-pay box",
+          "action": "waitForSelector",
+          "selector": "text=₪250.00 ליום"
+        },
+        {
+          "id": "assert-not-a-rate-card",
+          "description": "Leave pay is not one of the rates for work: no rate card for it",
+          "action": "assert",
+          "type": "count",
+          "selector": "article:has-text('ליום')",
+          "value": "0"
+        },
+        {
+          "id": "screenshot-leave-day",
+          "action": "screenshot",
+          "name": "05b-leave-day-value"
+        }
+      ]
+    },
+    {
       "id": "attendance-other-work-only",
       "name": "Attendance keeps only other work; lesson minutes are read from the calendar",
       "description": "Pay is computed live from facts. An attendance day stores only the minutes of work that is not a lesson; the endpoint returns the lesson minutes of each day next to the records, read from the calendar, and nothing is copied onto the row.",
@@ -872,8 +951,7 @@
             "first_name": "ללא",
             "last_name": "תעריף {{RUN_NUMERIC_ID}}",
             "employee_id": "TEST-NORATE-{{RUN_NUMERIC_ID}}",
-            "employee_type": "instructor",
-            "payroll_model": "lesson_based"
+            "employee_type": "instructor"
           },
           "store": "UNRATED_INSTRUCTOR_ID",
           "storeField": "id"
@@ -1038,8 +1116,7 @@
             "first_name": "טופס",
             "last_name": "תעריף {{RUN_NUMERIC_ID}}",
             "employee_id": "TEST-FORMRATE-{{RUN_NUMERIC_ID}}",
-            "employee_type": "instructor",
-            "payroll_model": "lesson_based"
+            "employee_type": "instructor"
           },
           "store": "FORM_INSTRUCTOR_ID",
           "storeField": "id"

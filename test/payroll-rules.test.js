@@ -297,7 +297,7 @@ describe('PAY-E hours', () => {
   });
 
   it('PAY-E2 the leave-day average counts a teaching day once, not as lesson pay plus hourly pay', () => {
-    const employee = { id: 'dana', payroll_model: 'lesson_based', leave_pay_method: 'legal' };
+    const employee = { id: 'dana', leave_pay_method: 'legal' };
     const rateRows = [rateRow('dana-office', 'dana', null, PAY_BASIS.ATTENDANCE_HOURLY, 5000, '2026-01-01')];
     const lessonHistory = [{ lesson_date: '2026-09-10', payout_amount: 30000, duration_minutes: 120 }];
     const attendanceRecords = [{
@@ -337,7 +337,7 @@ describe('PAY-G annual leave', () => {
   });
 
   it('PAY-G1 farm override: the fixed leave-day rate in effect on the leave date is used as is', () => {
-    const employee = { id: 'dana', payroll_model: 'lesson_based', leave_pay_method: 'fixed_rate' };
+    const employee = { id: 'dana', leave_pay_method: 'fixed_rate' };
     const rateRows = [
       rateRow('leave-250', 'dana', null, PAY_BASIS.LEAVE_DAY, 25000, '2026-01-01'),
       rateRow('leave-280', 'dana', null, PAY_BASIS.LEAVE_DAY, 28000, '2026-10-01'),

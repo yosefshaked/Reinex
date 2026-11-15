@@ -334,7 +334,6 @@ async function handleGet(context, req, client, orgId, userId, canManageAll) {
     policy: {
       annual_leave_days: employee.annual_leave_days ?? null,
       leave_pay_method: employee.leave_pay_method || null,
-      leave_fixed_day_rate: employee.leave_fixed_day_rate ?? null,
     },
     ledger_status: balanceEvents.length > 0 ? 'employee_leave_balance_events' : 'unavailable',
     entry_count: balanceEvents.length,

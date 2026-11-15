@@ -20,7 +20,7 @@ import { getAuthUserById } from '../_shared/auth-users.js';
 import { buildAccountDisplayName } from '../_shared/account-profile.js';
 import { attachErrorTracking, respondTracked } from '../_shared/error-events.js';
 
-const EMPLOYEE_SELECT_COLUMNS = 'id, user_id, first_name, middle_name, last_name, employee_id, employee_type, payroll_model, current_rate, monthly_salary_amount, phone, email, start_date, is_active, notes, working_days, annual_leave_days, leave_pay_method, leave_fixed_day_rate, employment_scope, metadata, instructor_types';
+const EMPLOYEE_SELECT_COLUMNS = 'id, user_id, first_name, middle_name, last_name, employee_id, employee_type, phone, email, start_date, is_active, notes, working_days, annual_leave_days, leave_pay_method, employment_scope, metadata, instructor_types';
 
 async function respondTrackedInstructorError(context, status, message, error, metadata = {}) {
   return respondTracked(context, status, { message }, undefined, {
@@ -29,26 +29,6 @@ async function respondTrackedInstructorError(context, status, message, error, me
     orgId: metadata.orgId || null,
     userId: metadata.userId || metadata.actorUserId || null,
   });
-}
-
-function resolveDefaultPayrollModel(employeeType) {
-  if (employeeType === 'instructor') {
-    return 'lesson_based';
-  }
-  return 'hourly';
-}
-
-function validatePayrollModelForEmployeeType(employeeType, payrollModel) {
-  if (!employeeType || !payrollModel) {
-    return true;
-  }
-  if (employeeType === 'instructor') {
-    return payrollModel === 'lesson_based';
-  }
-  if (employeeType === 'office') {
-    return payrollModel === 'hourly' || payrollModel === 'monthly_salary';
-  }
-  return true;
 }
 
 function normalizeWorkingDaysInput(value) {
@@ -96,11 +76,6 @@ function normalizeServiceCapabilitiesInput(value) {
     if (item?.metadata !== undefined && (typeof item.metadata !== 'object' || Array.isArray(item.metadata) || item.metadata === null)) {
       return { provided: true, valid: false, value: [] };
     }
-
-    // Pay is not set here. A rate belongs to RateHistory and is written only by api/employee-rates,
-    // so what this endpoint receives about money is dropped rather than stored: keeping it would
-    // give the farm a second, silent way to change what an instructor is paid.
-    delete metadata.compensation_input;
 
     normalized.push({
       service_id: serviceId,
@@ -161,7 +136,7 @@ async function enrichEmployees({ client, orgId, employees }) {
       .select('employee_id, break_time_minutes, metadata')
       .in('employee_id', employeeIds),
     withOrgScope(client, 'instructor_service_capabilities', orgId)
-      .select('employee_id, service_id, max_students, base_rate, availability_windows, metadata')
+      .select('employee_id, service_id, max_students, availability_windows, metadata')
       .in('employee_id', employeeIds),
   ]);
 
@@ -232,7 +207,7 @@ async function fetchUnlinkedMembers({ supabase, orgId, enrichedEmployees }) {
 async function writeServiceCapabilities(client, orgId, instructorId, serviceCapabilities) {
   const normalizedCapabilities = Array.isArray(serviceCapabilities) ? serviceCapabilities : [];
   const { data: previousRows, error: previousError } = await withOrgScope(client, 'instructor_service_capabilities', orgId)
-    .select('employee_id, service_id, max_students, base_rate, availability_windows, metadata')
+    .select('employee_id, service_id, max_students, availability_windows, metadata')
     .eq('employee_id', instructorId);
 
   if (previousError) {
@@ -253,7 +228,6 @@ async function writeServiceCapabilities(client, orgId, instructorId, serviceCapa
       employee_id: instructorId,
       service_id: capability.service_id,
       max_students: capability.max_students || 1,
-      base_rate: capability.base_rate || 0,
       availability_windows: capability.availability_windows || [],
       metadata: capability.metadata || {},
     }));
@@ -532,10 +506,6 @@ export default async function (context, req) {
     const fallbackLast = nameParts.length > 1 ? nameParts.slice(1).join(' ') : '';
 
     const employeeType = validation.employeeType || 'instructor';
-    const payrollModel = validation.payrollModel || resolveDefaultPayrollModel(employeeType);
-    if (!validatePayrollModelForEmployeeType(employeeType, payrollModel)) {
-      return respond(context, 400, { message: 'invalid_payroll_model_for_employee_type' });
-    }
     const hasAnnualLeaveDaysInput =
       Object.prototype.hasOwnProperty.call(body, 'annual_leave_days') ||
       Object.prototype.hasOwnProperty.call(body, 'annualLeaveDays');
@@ -546,9 +516,6 @@ export default async function (context, req) {
       last_name: validation.lastName || fallbackLast || (validation.isManual ? '' : validation.userId),
       employee_id: validation.employeeId,
       employee_type: employeeType,
-      payroll_model: payrollModel,
-      current_rate: validation.currentRate,
-      monthly_salary_amount: validation.monthlySalaryAmount,
       email: validation.email || profileEmail || null,
       phone: validation.phone || null,
       start_date: validation.startDate,
@@ -556,7 +523,6 @@ export default async function (context, req) {
       notes: validation.notes || null,
       working_days: employeeType === 'office' ? workingDaysInput.value : null,
       leave_pay_method: validation.leavePayMethod || null,
-      leave_fixed_day_rate: validation.leaveFixedDayRate,
       employment_scope: validation.employmentScope || null,
     };
     if (hasAnnualLeaveDaysInput) {
@@ -754,22 +720,7 @@ export default async function (context, req) {
 
     const targetEmployeeType = normalizeString(updates.employee_type ?? existingEmployee.employee_type).toLowerCase();
     const existingEmployeeType = normalizeString(existingEmployee.employee_type).toLowerCase();
-    const targetPayrollModel = normalizeString(
-      updates.payroll_model ?? existingEmployee.payroll_model ?? resolveDefaultPayrollModel(targetEmployeeType || existingEmployeeType)
-    ).toLowerCase();
     const isRoleConversionToInstructor = existingEmployeeType !== 'instructor' && targetEmployeeType === 'instructor';
-
-    // payroll_model is a display label since pay became additive across rate kinds (api/payroll), so
-    // it is checked only when this request changes it or the employee type. A label left over from an
-    // earlier edit must not block an unrelated save, such as an instructor's working hours.
-    const changesPayLabel = updates.payroll_model !== undefined || updates.employee_type !== undefined;
-    if (changesPayLabel && targetEmployeeType && targetPayrollModel && !validatePayrollModelForEmployeeType(targetEmployeeType, targetPayrollModel)) {
-      return respond(context, 400, { message: 'invalid_payroll_model_for_employee_type' });
-    }
-
-    if (!existingEmployee.payroll_model && !updates.payroll_model) {
-      updates.payroll_model = resolveDefaultPayrollModel(targetEmployeeType || existingEmployeeType || 'office');
-    }
 
     if (isRoleConversionToInstructor) {
       if (!serviceCapabilitiesInput.provided || serviceCapabilitiesInput.value.length === 0) {
@@ -848,7 +799,7 @@ export default async function (context, req) {
     if (serviceCapabilitiesInput.provided) {
       try {
         const { data: previousCapabilities } = await withOrgScope(supabase, 'instructor_service_capabilities', orgId)
-          .select('employee_id, service_id, max_students, base_rate, availability_windows, metadata')
+          .select('employee_id, service_id, max_students, availability_windows, metadata')
           .eq('employee_id', instructorId);
         await writeServiceCapabilities(supabase, orgId, instructorId, serviceCapabilitiesInput.value);
         changedFields.push('service_capabilities');

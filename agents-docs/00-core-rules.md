@@ -33,7 +33,7 @@
 - Current instructor shape is split across:
   - [`Employees`](../api/instructors/index.js): base row, including `working_days`
   - [`instructor_profiles`](../api/instructors/index.js): `break_time_minutes`, `metadata`
-  - [`instructor_service_capabilities`](../api/instructors/index.js): `service_id`, `max_students`, `base_rate`, `availability_windows`, `metadata`
+  - [`instructor_service_capabilities`](../api/instructors/index.js): `service_id`, `max_students`, `availability_windows`, `metadata` (no pay: rates live in `RateHistory`)
 - `GET /api/instructors` manually loads those tables and returns merged rows with `instructor_profile` and `service_capabilities`.
 - Invitation UI lives in Employees management via [`DirectoryView.jsx`](../src/components/settings/employee-management/DirectoryView.jsx) + [`InviteUserDialog.jsx`](../src/components/settings/employee-management/InviteUserDialog.jsx); do not move new invitation work back into Settings.
 - Azure Functions must return through `respond(context, ...)`, must read auth with `resolveBearerAuthorization(req)`, and must use `supabase.auth.getUser(token).data.user`.

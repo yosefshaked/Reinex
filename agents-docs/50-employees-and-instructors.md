@@ -39,10 +39,7 @@
 - New employee creation should omit `annual_leave_days` when the client has no explicit value so the `Employees.annual_leave_days` database default applies; explicit create/update values still override it.
 - `leave_pay_method` may remain null on `Employees`; payroll/leave calculations resolve null to the org `leave_pay_policy.default_method` (`legal` in the seeded default policy).
 - Service capabilities include `availability_windows`; scheduling rules depend on them.
-- Instructor service capability pay setup is hybrid:
-  - `base_rate` remains the canonical hourly payout in agorot for payroll math
-  - the admin-facing original entry choice is preserved in `metadata.compensation_input`
-  - supported preserved modes are `hourly` and `duration_based`
+- A service capability carries no pay. Every rate (per service, hourly, monthly, leave day) is a dated `RateHistory` row written only by `api/employee-rates`; `Employees` has no rate or pay-model columns (removed in `migrations/0002_remove_legacy_rate_columns.sql`).
 - User linking and invitations are handled inside employee management, not a separate team-management system.
 - Employee invite flows may rotate an existing pending invite instead of failing hard:
   - a fresh resend should keep the same pending `org_invitations` row and rotate its token/expiry in place

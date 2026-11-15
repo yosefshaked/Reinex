@@ -6,8 +6,7 @@
  * POST { org_id, employee_id, pay_basis, service_id?, rate, effective_date, notes?, replace_existing? }
  *
  * A rate is never edited in place: saving adds a row "from this date on". Saving on a date that already
- * has a rate of that kind is refused unless `replace_existing` is true. While the legacy rate fields
- * still exist, a rate that is in effect today is mirrored back to them so the older screens agree.
+ * has a rate of that kind is refused unless `replace_existing` is true.
  */
 import { resolveBearerAuthorization } from '../_shared/http.js';
 import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../_shared/supabase-admin.js';
@@ -23,23 +22,13 @@ import { parseJsonBodyWithLimit } from '../_shared/validation.js';
 import { canManageEmployeeOps } from '../_shared/employee-finance.js';
 import { attachErrorTracking, respondTracked } from '../_shared/error-events.js';
 import {
-  LESSON_PAY_BASES,
-  PAY_BASIS,
   buildRateChangeWarnings,
   loadRateHistoryRows,
-  resolveLessonRateOnDate,
-  resolveRateOnDate,
   toRateDateKey,
   validateRateInput,
 } from '../_shared/rate-history.js';
 
 const MAX_BODY_BYTES = 16 * 1024;
-
-const LEGACY_EMPLOYEE_COLUMN_BY_BASIS = Object.freeze({
-  [PAY_BASIS.ATTENDANCE_HOURLY]: 'current_rate',
-  [PAY_BASIS.MONTHLY_SALARY]: 'monthly_salary_amount',
-  [PAY_BASIS.LEAVE_DAY]: 'leave_fixed_day_rate',
-});
 
 function respondRatesError(context, status, message, error, metadata = {}) {
   return respondTracked(context, status, { message }, undefined, { error, metadata });
@@ -47,46 +36,6 @@ function respondRatesError(context, status, message, error, metadata = {}) {
 
 function todayDateKey() {
   return toRateDateKey(new Date().toISOString());
-}
-
-/**
- * Keep the legacy rate fields showing the rate that is in effect today, so the screens that still
- * read them agree with RateHistory. Never fails the request.
- *
- * It mirrors the rate in effect TODAY, resolved after the save, never the row just saved: a
- * back-dated or replaced rate is usually not today's rate, and the Employees mirror trigger records
- * whatever lands in those columns as a new rate from today — so mirroring the saved row would
- * silently make an old amount the current one.
- */
-async function mirrorRateToLegacyColumn(client, orgId, { employeeId, payBasis, serviceId }, context) {
-  try {
-    const rows = await loadRateHistoryRows(client, orgId, { employeeIds: [employeeId] });
-    const today = todayDateKey();
-
-    if (LESSON_PAY_BASES.has(payBasis)) {
-      // base_rate can only express an hourly number: a per-session rate, or none, clears it.
-      const current = resolveLessonRateOnDate(rows, { employeeId, serviceId, date: today });
-      await withOrgScope(client, 'instructor_service_capabilities', orgId)
-        .update({ base_rate: current?.pay_basis === PAY_BASIS.LESSON_HOURLY ? current.rate : null })
-        .eq('employee_id', employeeId)
-        .eq('service_id', serviceId);
-      return;
-    }
-
-    const column = LEGACY_EMPLOYEE_COLUMN_BY_BASIS[payBasis];
-    if (!column) return;
-    const current = resolveRateOnDate(rows, { employeeId, payBasis, date: today });
-    if (!current) return;
-    await withOrgScope(client, 'Employees', orgId)
-      .update({ [column]: current.rate })
-      .eq('id', employeeId);
-  } catch (mirrorError) {
-    context.log?.warn?.('employee-rates failed to mirror the rate to the legacy column', {
-      message: mirrorError?.message,
-      employeeId,
-      payBasis,
-    });
-  }
 }
 
 export default async function employeeRates(context, req) {
@@ -238,8 +187,6 @@ export default async function employeeRates(context, req) {
       if (error) throw error;
       saved = data;
     }
-
-    await mirrorRateToLegacyColumn(supabase, orgId, input, context);
 
     return respond(context, 200, {
       rate: saved,

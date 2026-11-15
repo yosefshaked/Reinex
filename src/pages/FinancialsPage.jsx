@@ -1083,7 +1083,6 @@ export default function FinancialsPage() {
                     <thead>
                       <tr className="border-b border-border text-muted-foreground">
                         <th className="pb-2 text-start font-medium">עובד</th>
-                        <th className="pb-2 text-start font-medium">מודל</th>
                         <th className="pb-2 text-start font-medium">בסיס</th>
                         <th className="pb-2 text-start font-medium">חופשה</th>
                         <th className="pb-2 text-start font-medium">תיקונים</th>
@@ -1094,7 +1093,6 @@ export default function FinancialsPage() {
                       {(payroll?.employees || []).map((row) => (
                         <tr key={row.employee_id} className="border-b border-border/60">
                           <td className="py-3 font-medium">{row.employee_name}</td>
-                          <td className="py-3">{row.payroll_model}</td>
                           <td className="py-3">{formatCurrency(row.base_amount)}</td>
                           <td className="py-3">{formatCurrency(row.paid_leave_amount)}</td>
                           <td className="py-3">{formatCurrency(row.correction_amount)}</td>
@@ -1103,7 +1101,7 @@ export default function FinancialsPage() {
                       ))}
                       {(payroll?.employees || []).length === 0 ? (
                         <tr>
-                          <td colSpan={6} className="py-6 text-center text-sm text-muted-foreground">
+                          <td colSpan={5} className="py-6 text-center text-sm text-muted-foreground">
                             אין נתוני שכר להצגה בטווח החודש הנבחר.
                           </td>
                         </tr>

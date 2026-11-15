@@ -33,12 +33,12 @@ const LESSON_BASES = ['lesson_hourly', 'lesson_flat'];
  * The kinds of pay for work the office can set, in the order they are offered.
  *
  * Leave pay is not one of them: it is a method on the employee (legal average, historical average
- * or a fixed value), set with the other leave settings in the employee card.
+ * or a fixed value), set with the other leave settings in the finance tab.
  */
 const RATE_KINDS = [
-  { key: 'lesson', payBasis: 'lesson_hourly', title: 'הדרכה', hint: 'תעריף לכל שירות', icon: GraduationCap, payrollModel: 'lesson_based' },
-  { key: 'attendance_hourly', payBasis: 'attendance_hourly', title: 'שעתי', hint: 'לפי שעות עבודה', icon: Clock, payrollModel: 'hourly' },
-  { key: 'monthly_salary', payBasis: 'monthly_salary', title: 'חודשי', hint: 'משכורת קבועה', icon: CalendarDays, payrollModel: 'monthly_salary' },
+  { key: 'lesson', payBasis: 'lesson_hourly', title: 'הדרכה', hint: 'תעריף לכל שירות', icon: GraduationCap },
+  { key: 'attendance_hourly', payBasis: 'attendance_hourly', title: 'שעתי', hint: 'לפי שעות עבודה', icon: Clock },
+  { key: 'monthly_salary', payBasis: 'monthly_salary', title: 'חודשי', hint: 'משכורת קבועה', icon: CalendarDays },
 ];
 
 /** Whether the employee already has a rate of this kind. Every kind they have is paid. */
@@ -448,9 +448,8 @@ function RateCard({ card, rates, today, onSave, onSaveScheduling, saving }) {
 }
 
 /**
- * One way in for every kind of rate: pick what the rate is (per service, hourly, monthly, leave day),
- * then set it. A kind the employee's pay model doesn't read is offered too, and saving it switches
- * the employee to that model, so the rate actually pays.
+ * One way in for every kind of rate for work: pick what the rate is (per service, hourly, monthly),
+ * then set it. Every kind the employee has a rate for is paid.
  */
 function AddRateDialog({
   open,
@@ -689,6 +688,108 @@ export function AddLessonRateDialog({ open, onOpenChange, orgId, session, employ
       initialServiceId={serviceId}
       initialEffectiveDate={rateDate || today}
     />
+  );
+}
+
+/**
+ * The fixed value of a paid leave day (pay_basis leave_day), for an employee whose leave is paid by
+ * the fixed value method. It sits with the leave settings in the finance tab, not with the rates for
+ * work, and is saved the same way: a dated row in RateHistory through api/employee-rates.
+ */
+export function LeaveDayRateEditor({ employeeId, orgId, session, onSaved }) {
+  const [rates, setRates] = useState([]);
+  const [open, setOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const today = todayKey();
+  const [form, setForm] = useState(() => createEmptyForm('leave_day', today));
+
+  const loadRates = useCallback(async () => {
+    if (!employeeId || !orgId) return;
+    try {
+      setRates(await fetchEmployeeRates({ orgId, employeeId, session }));
+    } catch (error) {
+      console.error('Failed to load employee rates', error);
+      toast.error(error?.message || 'טעינת ערך יום החופשה נכשלה.');
+    }
+  }, [employeeId, orgId, session]);
+
+  useEffect(() => {
+    void loadRates();
+  }, [loadRates]);
+
+  const history = useMemo(() => rowsForCard(rates, { serviceId: null, payBasis: 'leave_day' }), [rates]);
+  const current = history.find((row) => row.effective_date <= today) || null;
+  const existingOnDate = history.find((row) => row.effective_date === form.effectiveDate) || null;
+  const warnings = buildWarnings({
+    history,
+    current,
+    existingOnDate,
+    effectiveDate: form.effectiveDate,
+    today,
+    isLesson: false,
+  });
+
+  function close() {
+    setForm(createEmptyForm('leave_day', today));
+    setOpen(false);
+  }
+
+  async function handleSave() {
+    setSaving(true);
+    try {
+      await saveEmployeeRate({ orgId, employeeId, session }, {
+        payBasis: 'leave_day',
+        serviceId: null,
+        rate: toAgorot(form.amount),
+        effectiveDate: form.effectiveDate,
+        notes: form.notes || null,
+        replaceExisting: Boolean(existingOnDate),
+      });
+      await loadRates();
+      toast.success(rateSavedMessage(form.effectiveDate, today));
+      close();
+      onSaved?.();
+    } catch (error) {
+      console.error('Failed to save leave day value', error);
+      toast.error(error?.message || 'שמירת ערך יום החופשה נכשלה.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="mt-1 space-y-2">
+      <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
+        {current ? (
+          <span>{describeRate(current)} · {effectiveFromLabel(current)}</span>
+        ) : (
+          <span className="font-bold text-amber-700">לא הוגדר ערך ליום</span>
+        )}
+        <Button type="button" size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => (open ? close() : setOpen(true))} disabled={saving}>
+          {current ? 'עדכון' : 'הגדרה'}
+        </Button>
+      </div>
+      {open ? (
+        <div className="grid gap-3 rounded-xl border border-dashed border-slate-300 bg-white p-3">
+          <RateFields
+            idPrefix="leave-day"
+            form={form}
+            setForm={setForm}
+            allowBasisChoice={false}
+            unitBasis="leave_day"
+            warnings={warnings}
+            saving={saving}
+          />
+          <div className="flex flex-wrap items-center gap-2">
+            <Button type="button" size="sm" onClick={handleSave} disabled={saving || form.amount === '' || !form.effectiveDate}>
+              {saving ? <Loader2 className="me-2 h-4 w-4 animate-spin" /> : null}
+              שמירה
+            </Button>
+            <Button type="button" size="sm" variant="ghost" onClick={close} disabled={saving}>ביטול</Button>
+          </div>
+        </div>
+      ) : null}
+    </div>
   );
 }
 

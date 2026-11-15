@@ -20,7 +20,6 @@ function createEmptyCapability(serviceId = '') {
   return {
     service_id: serviceId,
     max_students: 1,
-    base_rate: 0,
     availability_windows: serviceId ? [createEmptyWindow()] : [],
     metadata: {},
   };

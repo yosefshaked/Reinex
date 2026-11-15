@@ -88,7 +88,7 @@
     {
       "id": "api-setup-instructors",
       "name": "API – Create two dedicated instructors",
-      "description": "Creates one instructor for the single lesson and one for the group lesson (separate calendar columns, no double-booking), each with a base_rate=0 service capability so attendance rate validation passes.",
+      "description": "Creates one instructor for the single lesson and one for the group lesson (separate calendar columns, no double-booking), each with a service capability and a lesson rate for the service so the lessons can be added.",
       "steps": [
         {
           "id": "create-instructor-single",
@@ -101,9 +101,7 @@
             "first_name": "מדריך",
             "last_name": "דיאלוג יחיד",
             "employee_id": "TEST-DLG-S-{{RUN_NUMERIC_ID}}",
-            "employee_type": "instructor",
-            "payroll_model": "lesson_based",
-            "current_rate": 20000
+            "employee_type": "instructor"
           },
           "store": "SINGLE_INSTRUCTOR_ID",
           "storeField": "id"
@@ -111,7 +109,7 @@
         {
           "id": "set-single-instructor-rate-direct",
           "action": "apiCall",
-          "description": "Direct Supabase INSERT of a base_rate=0 capability for the service (ignore 409 if it exists)",
+          "description": "Direct Supabase INSERT of a capability for the service (ignore 409 if it exists)",
           "method": "POST",
           "endpoint": "{{SUPABASE_URL}}/rest/v1/instructor_service_capabilities",
           "headers": {
@@ -122,7 +120,6 @@
             "org_id": "{{TEST_ORG_ID}}",
             "employee_id": "{{SINGLE_INSTRUCTOR_ID}}",
             "service_id": "{{SERVICE_ID}}",
-            "base_rate": 0,
             "max_students": 1,
             "availability_windows": [],
             "metadata": {}
@@ -156,9 +153,7 @@
             "first_name": "מדריך",
             "last_name": "דיאלוג קבוצה",
             "employee_id": "TEST-DLG-G-{{RUN_NUMERIC_ID}}",
-            "employee_type": "instructor",
-            "payroll_model": "lesson_based",
-            "current_rate": 20000
+            "employee_type": "instructor"
           },
           "store": "GROUP_INSTRUCTOR_ID",
           "storeField": "id"
@@ -166,7 +161,7 @@
         {
           "id": "set-group-instructor-rate-direct",
           "action": "apiCall",
-          "description": "Direct Supabase INSERT of a base_rate=0 capability with room for two participants (ignore 409 if it exists)",
+          "description": "Direct Supabase INSERT of a capability with room for two participants (ignore 409 if it exists)",
           "method": "POST",
           "endpoint": "{{SUPABASE_URL}}/rest/v1/instructor_service_capabilities",
           "headers": {
@@ -177,7 +172,6 @@
             "org_id": "{{TEST_ORG_ID}}",
             "employee_id": "{{GROUP_INSTRUCTOR_ID}}",
             "service_id": "{{SERVICE_ID}}",
-            "base_rate": 0,
             "max_students": 2,
             "availability_windows": [],
             "metadata": {}

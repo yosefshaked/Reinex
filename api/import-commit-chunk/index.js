@@ -413,7 +413,6 @@ async function commitInstructor(supabase, orgId, workspaceId, candidate) {
       last_name: normalizeString(data.last_name) || '',
       employee_id: `${sourceSystem}:${sourceInstructorId}`,
       employee_type: 'instructor',
-      payroll_model: null,
       is_active: data.is_active === true,
       metadata: importMetadata,
     })

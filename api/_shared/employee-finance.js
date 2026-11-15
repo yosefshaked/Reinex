@@ -53,7 +53,6 @@ export const LEAVE_TYPES = new Set(['employee_paid', 'system_paid', 'unpaid', 'h
 export const LEAVE_ENTRY_STATUSES = new Set(['approved', 'cancelled']);
 export const LEAVE_DURATION_MODES = new Set(['full_day', 'half_day']);
 export const HALF_DAY_PARTS = new Set(['first_half', 'second_half']);
-export const PAYROLL_MODELS = new Set(['hourly', 'monthly_salary', 'lesson_based']);
 export const SERVICE_PAYMENT_MODELS = new Set(['fixed_rate', 'per_student']);
 export const FINANCE_CORRECTION_TYPES = new Set(['bonus', 'deduction', 'adjustment', 'correction']);
 export const BILLING_SOURCE_TYPES = new Set(['lesson', 'transfer', 'adjustment']);
@@ -224,7 +223,7 @@ export async function loadFinancePolicies(tenantClient, orgId) {
 export async function resolveEmployeeRecord(tenantClient, { employeeId, userId, canManageAll = false }) {
   let query = tenantClient
     .from('Employees')
-    .select('id, user_id, first_name, last_name, employee_type, payroll_model, current_rate, monthly_salary_amount, start_date, annual_leave_days, leave_pay_method, leave_fixed_day_rate, employment_scope, working_days')
+    .select('id, user_id, first_name, last_name, employee_type, start_date, annual_leave_days, leave_pay_method, employment_scope, working_days')
     .limit(1);
 
   if (employeeId) {
@@ -500,10 +499,10 @@ export function resolveLeaveDayValue({
 /**
  * What an employee is owed for a period: every part they actually have rates for, added together.
  *
- * Pay used to be chosen by `Employees.payroll_model` — one model, exclusively — so an instructor who
- * also did office hours was paid for one of the two. Each part now comes from its own rates, and
- * the pay model is a label. Paid leave is added only when there is no monthly salary: a salary is
- * pro-rated over working days, which already covers the leave days inside the month.
+ * Each part comes from its own rates (RateHistory), so an instructor who also does office hours is
+ * paid for both; there is no "pay model" choosing one. Paid leave is added only when there is no
+ * monthly salary: a salary is pro-rated over working days, which already covers the leave days
+ * inside the month.
  */
 export function combinePayComponents({
   lessonAmount = 0,

@@ -223,13 +223,7 @@ export function validateSessionWrite(body) {
 // ----- Instructors write validation (SOT) -----
 const PHONE_PATTERN = /^[0-9+\-()\s]{6,20}$/;
 const SIMPLE_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
-const PAYROLL_MODELS = new Set(['hourly', 'monthly_salary', 'lesson_based']);
 const LEAVE_PAY_METHODS = new Set(['legal', 'avg_hourly_x_avg_day_hours', 'fixed_rate']);
-
-function normalizePayrollModel(value) {
-  const normalized = normalizeString(value).toLowerCase();
-  return PAYROLL_MODELS.has(normalized) ? normalized : '';
-}
 
 function normalizeLeavePayMethod(value) {
   const normalized = normalizeString(value).toLowerCase();
@@ -298,24 +292,11 @@ export function validateInstructorCreate(body) {
   if (!startDateResult.valid) {
     return { error: 'invalid_start_date' };
   }
-  const currentRateResult = coerceOptionalNumberValue(body?.current_rate ?? body?.currentRate);
-  if (!currentRateResult.valid) {
-    return { error: 'invalid_current_rate' };
-  }
   const annualLeaveDaysResult = coerceOptionalNumberValue(body?.annual_leave_days ?? body?.annualLeaveDays);
   if (!annualLeaveDaysResult.valid) {
     return { error: 'invalid_annual_leave_days' };
   }
-  const monthlySalaryAmountResult = coerceOptionalNumberValue(body?.monthly_salary_amount ?? body?.monthlySalaryAmount);
-  if (!monthlySalaryAmountResult.valid) {
-    return { error: 'invalid_monthly_salary_amount' };
-  }
-  const leaveFixedDayRateResult = coerceOptionalNumberValue(body?.leave_fixed_day_rate ?? body?.leaveFixedDayRate);
-  if (!leaveFixedDayRateResult.valid) {
-    return { error: 'invalid_leave_fixed_day_rate' };
-  }
   const employeeType = normalizeString(body?.employee_type ?? body?.employeeType).toLowerCase() || '';
-  const payrollModel = normalizePayrollModel(body?.payroll_model ?? body?.payrollModel);
   const leavePayMethod = normalizeLeavePayMethod(body?.leave_pay_method ?? body?.leavePayMethod);
   const employmentScope = normalizeString(body?.employment_scope ?? body?.employmentScope) || '';
 
@@ -338,12 +319,8 @@ export function validateInstructorCreate(body) {
     employeeId,
     employeeType,
     startDate: startDateResult.value,
-    currentRate: currentRateResult.value,
-    payrollModel,
-    monthlySalaryAmount: monthlySalaryAmountResult.value,
     annualLeaveDays: annualLeaveDaysResult.value,
     leavePayMethod,
-    leaveFixedDayRate: leaveFixedDayRateResult.value,
     employmentScope,
   };
 }
@@ -442,33 +419,6 @@ export function validateInstructorUpdate(body, orgPermissions = {}) {
     updates.start_date = result.value;
   }
 
-  if (Object.prototype.hasOwnProperty.call(body, 'current_rate') || Object.prototype.hasOwnProperty.call(body, 'currentRate')) {
-    const result = coerceOptionalNumberValue(
-      Object.prototype.hasOwnProperty.call(body, 'current_rate') ? body.current_rate : body.currentRate
-    );
-    if (!result.valid) {
-      return { error: 'invalid_current_rate' };
-    }
-    updates.current_rate = result.value;
-  }
-
-  if (Object.prototype.hasOwnProperty.call(body, 'payroll_model') || Object.prototype.hasOwnProperty.call(body, 'payrollModel')) {
-    const v = normalizePayrollModel(
-      Object.prototype.hasOwnProperty.call(body, 'payroll_model') ? body.payroll_model : body.payrollModel
-    );
-    updates.payroll_model = v || null;
-  }
-
-  if (Object.prototype.hasOwnProperty.call(body, 'monthly_salary_amount') || Object.prototype.hasOwnProperty.call(body, 'monthlySalaryAmount')) {
-    const result = coerceOptionalNumberValue(
-      Object.prototype.hasOwnProperty.call(body, 'monthly_salary_amount') ? body.monthly_salary_amount : body.monthlySalaryAmount
-    );
-    if (!result.valid) {
-      return { error: 'invalid_monthly_salary_amount' };
-    }
-    updates.monthly_salary_amount = result.value;
-  }
-
   if (Object.prototype.hasOwnProperty.call(body, 'annual_leave_days') || Object.prototype.hasOwnProperty.call(body, 'annualLeaveDays')) {
     const result = coerceOptionalNumberValue(
       Object.prototype.hasOwnProperty.call(body, 'annual_leave_days') ? body.annual_leave_days : body.annualLeaveDays
@@ -484,16 +434,6 @@ export function validateInstructorUpdate(body, orgPermissions = {}) {
       Object.prototype.hasOwnProperty.call(body, 'leave_pay_method') ? body.leave_pay_method : body.leavePayMethod
     );
     updates.leave_pay_method = v || null;
-  }
-
-  if (Object.prototype.hasOwnProperty.call(body, 'leave_fixed_day_rate') || Object.prototype.hasOwnProperty.call(body, 'leaveFixedDayRate')) {
-    const result = coerceOptionalNumberValue(
-      Object.prototype.hasOwnProperty.call(body, 'leave_fixed_day_rate') ? body.leave_fixed_day_rate : body.leaveFixedDayRate
-    );
-    if (!result.valid) {
-      return { error: 'invalid_leave_fixed_day_rate' };
-    }
-    updates.leave_fixed_day_rate = result.value;
   }
 
   if (Object.prototype.hasOwnProperty.call(body, 'employment_scope') || Object.prototype.hasOwnProperty.call(body, 'employmentScope')) {

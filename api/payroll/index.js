@@ -26,15 +26,6 @@ function roundCurrency(value) {
   return coerceAgorot(value);
 }
 
-// A label only, kept until the column is removed; it no longer decides what is paid.
-function getPayrollModel(employee) {
-  const explicit = normalizeString(employee?.payroll_model).toLowerCase();
-  if (explicit) {
-    return explicit;
-  }
-  return normalizeString(employee?.employee_type).toLowerCase() === 'instructor' ? 'lesson_based' : 'hourly';
-}
-
 export default async function (context, req) {
   const method = String(req.method || 'GET').toUpperCase();
   if (method !== 'GET') {
@@ -93,7 +84,7 @@ export default async function (context, req) {
   let employees = [];
   if (canManageAll) {
     let query = withOrgScope(supabase, 'Employees', orgId)
-      .select('id, user_id, first_name, last_name, employee_id, employee_type, payroll_model, current_rate, monthly_salary_amount, start_date, annual_leave_days, leave_pay_method, leave_fixed_day_rate, working_days')
+      .select('id, user_id, first_name, last_name, employee_id, employee_type, start_date, annual_leave_days, leave_pay_method, working_days')
       .eq('is_active', true)
       .order('first_name', { ascending: true });
 
@@ -138,7 +129,7 @@ export default async function (context, req) {
         now,
         includeDetails,
       });
-      previews.push({ ...pay, payroll_model: getPayrollModel(employee) });
+      previews.push(pay);
     }
   } catch (payError) {
     context.log?.error?.('payroll failed to compute pay', { message: payError?.message });

@@ -34,9 +34,8 @@ export const SETUP_SQL_SCRIPT = String.raw`-- ==================================
 -- Patch Notes (2026-04-09):
 -- - [AGOROT MIGRATION] Converted ALL currency/money columns from numeric to integer (agorot).
 --   1 shekel = 100 agorot. Financial values stored as integers (e.g. ₪10.50 = 1050 agorot).
---   Affected: Employees (current_rate, monthly_salary_amount, leave_fixed_day_rate),
---   Services (default_customer_charge_amount), RateHistory (rate),
---   finance_corrections (amount), instructor_service_capabilities (base_rate),
+--   Affected: Services (default_customer_charge_amount), RateHistory (rate),
+--   finance_corrections (amount),
 --   lesson_templates (price_override), lesson_participants (price_charged),
 --   hmo_provider_tracks (default_customer_charge_amount, default_insurer_claim_amount, default_post_coverage_policy),
 --   hmo_authorizations (covered_customer_charge_amount, covered_insurer_claim_amount, post_coverage_policy),
@@ -1067,9 +1066,6 @@ CREATE TABLE IF NOT EXISTS public."Employees" (
   "last_name" text,
   "employee_id" text NOT NULL,
   "employee_type" text,
-  "payroll_model" text,
-  "current_rate" integer,
-  "monthly_salary_amount" integer,
   "phone" text,
   "email" text,
   "start_date" date,
@@ -1078,12 +1074,10 @@ CREATE TABLE IF NOT EXISTS public."Employees" (
   "working_days" jsonb,
   "annual_leave_days" numeric DEFAULT 12,
   "leave_pay_method" text,
-  "leave_fixed_day_rate" integer,
   "employment_scope" text,
   "instructor_types" uuid[],
   "metadata" jsonb,
-  CONSTRAINT "Employees_pkey" PRIMARY KEY ("id"),
-  CONSTRAINT Employees_payroll_model_check CHECK ("payroll_model" IS NULL OR "payroll_model" IN ('hourly', 'monthly_salary', 'lesson_based'))
+  CONSTRAINT "Employees_pkey" PRIMARY KEY ("id")
 );
 
 
@@ -1319,7 +1313,6 @@ CREATE TABLE IF NOT EXISTS public.instructor_service_capabilities (
   employee_id uuid NOT NULL,
   service_id uuid NOT NULL,
   max_students int NOT NULL DEFAULT 1,
-  base_rate integer NULL,
   availability_windows jsonb NOT NULL DEFAULT '[]'::jsonb,
   metadata jsonb NULL,
   CONSTRAINT instructor_service_capabilities_employee_id_fkey FOREIGN KEY (employee_id) REFERENCES public."Employees"(id),
@@ -6858,281 +6851,4 @@ END $$;
 
 CREATE INDEX IF NOT EXISTS "RateHistory_employee_basis_effective_date_idx"
   ON public."RateHistory" ("org_id", "employee_id", "pay_basis", "effective_date");
-
--- Backfill: every current rate becomes a first row that applies from the beginning (2000-01-01),
--- so every existing lesson and month keeps exactly the pay it has today.
-INSERT INTO public."RateHistory" ("org_id", "employee_id", "service_id", "pay_basis", "rate", "effective_date", "metadata")
-SELECT
-  cap."org_id",
-  cap."employee_id",
-  cap."service_id",
-  'lesson_hourly',
-  cap."base_rate",
-  DATE '2000-01-01',
-  jsonb_strip_nulls(jsonb_build_object(
-    'source', 'backfill_2026_09',
-    'compensation_input', cap."metadata" -> 'compensation_input'
-  ))
-FROM public.instructor_service_capabilities cap
-WHERE cap."base_rate" IS NOT NULL
-  AND NOT EXISTS (
-    SELECT 1 FROM public."RateHistory" existing_rate
-    WHERE existing_rate."org_id" = cap."org_id"
-      AND existing_rate."employee_id" = cap."employee_id"
-      AND existing_rate."service_id" = cap."service_id"
-      AND existing_rate."pay_basis" IN ('lesson_hourly', 'lesson_flat')
-  );
-
-INSERT INTO public."RateHistory" ("org_id", "employee_id", "service_id", "pay_basis", "rate", "effective_date", "metadata")
-SELECT
-  emp."org_id",
-  emp."id",
-  NULL::uuid,
-  legacy_rate.pay_basis,
-  legacy_rate.rate,
-  DATE '2000-01-01',
-  jsonb_build_object('source', 'backfill_2026_09')
-FROM public."Employees" emp
-CROSS JOIN LATERAL (
-  VALUES
-    ('attendance_hourly', emp."current_rate"),
-    ('monthly_salary', emp."monthly_salary_amount"),
-    ('leave_day', emp."leave_fixed_day_rate")
-) AS legacy_rate(pay_basis, rate)
-WHERE legacy_rate.rate IS NOT NULL
-  AND NOT EXISTS (
-    SELECT 1 FROM public."RateHistory" existing_rate
-    WHERE existing_rate."org_id" = emp."org_id"
-      AND existing_rate."employee_id" = emp."id"
-      AND existing_rate."pay_basis" = legacy_rate.pay_basis
-  );
-
--- Transition: until every rate screen writes RateHistory with an effective date, changes to the legacy
--- rate columns are mirrored here. A pairing's first rate applies from the beginning; a later change
--- applies from today (Israel date). Writing the same rate again is a no-op.
-CREATE OR REPLACE FUNCTION public.record_rate_history_from_legacy_value(
-  p_org_id uuid,
-  p_employee_id uuid,
-  p_service_id uuid,
-  p_pay_basis text,
-  p_rate integer,
-  p_source text,
-  p_metadata jsonb DEFAULT NULL
-)
-RETURNS void
-LANGUAGE plpgsql
-SET search_path = public
-AS $$
-DECLARE
-  v_today date := (now() AT TIME ZONE 'Asia/Jerusalem')::date;
-  v_kinds text[] := CASE
-    WHEN p_service_id IS NULL THEN ARRAY[p_pay_basis]
-    ELSE ARRAY['lesson_hourly', 'lesson_flat']
-  END;
-  v_current_rate integer;
-  v_has_rows boolean;
-  v_effective_date date;
-BEGIN
-  IF p_rate IS NULL OR p_org_id IS NULL OR p_employee_id IS NULL THEN
-    RETURN;
-  END IF;
-
-  SELECT rh."rate" INTO v_current_rate
-  FROM public."RateHistory" rh
-  WHERE rh."org_id" = p_org_id
-    AND rh."employee_id" = p_employee_id
-    AND rh."pay_basis" = ANY (v_kinds)
-    AND rh."service_id" IS NOT DISTINCT FROM p_service_id
-    AND rh."effective_date" <= v_today
-  ORDER BY rh."effective_date" DESC, rh."created_at" DESC
-  LIMIT 1;
-
-  IF FOUND AND v_current_rate = p_rate THEN
-    RETURN;
-  END IF;
-
-  SELECT EXISTS (
-    SELECT 1 FROM public."RateHistory" rh
-    WHERE rh."org_id" = p_org_id
-      AND rh."employee_id" = p_employee_id
-      AND rh."pay_basis" = ANY (v_kinds)
-      AND rh."service_id" IS NOT DISTINCT FROM p_service_id
-  ) INTO v_has_rows;
-
-  v_effective_date := CASE WHEN v_has_rows THEN v_today ELSE DATE '2000-01-01' END;
-
-  UPDATE public."RateHistory" rh
-  SET "rate" = p_rate,
-      "metadata" = COALESCE(rh."metadata", '{}'::jsonb) || COALESCE(p_metadata, '{}'::jsonb) || jsonb_build_object('source', p_source)
-  WHERE rh."org_id" = p_org_id
-    AND rh."employee_id" = p_employee_id
-    AND rh."pay_basis" = p_pay_basis
-    AND rh."service_id" IS NOT DISTINCT FROM p_service_id
-    AND rh."effective_date" = v_effective_date;
-
-  IF NOT FOUND THEN
-    INSERT INTO public."RateHistory" ("org_id", "employee_id", "service_id", "pay_basis", "rate", "effective_date", "metadata")
-    VALUES (
-      p_org_id,
-      p_employee_id,
-      p_service_id,
-      p_pay_basis,
-      p_rate,
-      v_effective_date,
-      COALESCE(p_metadata, '{}'::jsonb) || jsonb_build_object('source', p_source)
-    );
-  END IF;
-END;
-$$;
-
-CREATE OR REPLACE FUNCTION public.mirror_capability_rate_to_rate_history()
-RETURNS trigger
-LANGUAGE plpgsql
-SET search_path = public
-AS $$
-BEGIN
-  IF TG_OP = 'UPDATE' AND OLD."base_rate" IS NOT DISTINCT FROM NEW."base_rate" THEN
-    RETURN NEW;
-  END IF;
-
-  PERFORM public.record_rate_history_from_legacy_value(
-    NEW."org_id",
-    NEW."employee_id",
-    NEW."service_id",
-    'lesson_hourly',
-    NEW."base_rate",
-    'instructor_service_capabilities.base_rate',
-    jsonb_strip_nulls(jsonb_build_object('compensation_input', NEW."metadata" -> 'compensation_input'))
-  );
-  RETURN NEW;
-END;
-$$;
-
-CREATE OR REPLACE FUNCTION public.mirror_employee_rates_to_rate_history()
-RETURNS trigger
-LANGUAGE plpgsql
-SET search_path = public
-AS $$
-BEGIN
-  IF TG_OP = 'INSERT' OR OLD."current_rate" IS DISTINCT FROM NEW."current_rate" THEN
-    PERFORM public.record_rate_history_from_legacy_value(
-      NEW."org_id", NEW."id", NULL, 'attendance_hourly', NEW."current_rate", 'Employees.current_rate', NULL
-    );
-  END IF;
-
-  IF TG_OP = 'INSERT' OR OLD."monthly_salary_amount" IS DISTINCT FROM NEW."monthly_salary_amount" THEN
-    PERFORM public.record_rate_history_from_legacy_value(
-      NEW."org_id", NEW."id", NULL, 'monthly_salary', NEW."monthly_salary_amount", 'Employees.monthly_salary_amount', NULL
-    );
-  END IF;
-
-  IF TG_OP = 'INSERT' OR OLD."leave_fixed_day_rate" IS DISTINCT FROM NEW."leave_fixed_day_rate" THEN
-    PERFORM public.record_rate_history_from_legacy_value(
-      NEW."org_id", NEW."id", NULL, 'leave_day', NEW."leave_fixed_day_rate", 'Employees.leave_fixed_day_rate', NULL
-    );
-  END IF;
-
-  RETURN NEW;
-END;
-$$;
-
-DO $$
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_trigger
-    WHERE tgname = 'trg_instructor_service_capabilities_mirror_rate_history'
-      AND tgrelid = 'public.instructor_service_capabilities'::regclass
-  ) THEN
-    CREATE TRIGGER trg_instructor_service_capabilities_mirror_rate_history
-      AFTER INSERT OR UPDATE ON public.instructor_service_capabilities
-      FOR EACH ROW
-      EXECUTE FUNCTION public.mirror_capability_rate_to_rate_history();
-  END IF;
-
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_trigger
-    WHERE tgname = 'trg_employees_mirror_rate_history'
-      AND tgrelid = 'public."Employees"'::regclass
-  ) THEN
-    CREATE TRIGGER trg_employees_mirror_rate_history
-      AFTER INSERT OR UPDATE ON public."Employees"
-      FOR EACH ROW
-      EXECUTE FUNCTION public.mirror_employee_rates_to_rate_history();
-  END IF;
-END $$;
-
--- -----------------------------------------------------------------
--- Patch 2026-09-23: lesson rates come only from RateHistory (phase A)
--- -----------------------------------------------------------------
--- instructor_service_capabilities.base_rate was written by converting a per-session amount into an
--- hourly one (amount x 60 / duration), and a trigger copied that converted number into RateHistory
--- as 'lesson_hourly'. Pay is then hourly x lesson length, so a lesson whose length changed paid an
--- amount nobody agreed to. What the office actually typed survives in
--- metadata.compensation_input, so each capability's rate is rebuilt from that, and the legacy
--- writer is removed. Columns are NOT dropped here: that is a separate step once the rebuilt rates
--- have been reviewed.
-
--- 1. Rebuild the rate from what was typed: an amount entered per session becomes a real
---    lesson_flat rate, an amount entered per hour stays lesson_hourly.
-INSERT INTO public."RateHistory" ("org_id", "employee_id", "service_id", "pay_basis", "rate", "effective_date", "metadata")
-SELECT
-  cap."org_id",
-  cap."employee_id",
-  cap."service_id",
-  CASE WHEN cap."metadata" -> 'compensation_input' ->> 'mode' = 'duration_based' THEN 'lesson_flat' ELSE 'lesson_hourly' END,
-  (cap."metadata" -> 'compensation_input' ->> 'amount_agorot')::integer,
-  COALESCE(emp."start_date", DATE '2000-01-01'),
-  jsonb_build_object(
-    'source', 'rebuild_2026_09',
-    'rebuilt_from', cap."metadata" -> 'compensation_input'
-  )
-FROM public.instructor_service_capabilities cap
-JOIN public."Employees" emp ON emp."id" = cap."employee_id"
-WHERE cap."metadata" ? 'compensation_input'
-  AND (cap."metadata" -> 'compensation_input' ->> 'amount_agorot') ~ '^[0-9]+$'
-  AND NOT EXISTS (
-    SELECT 1 FROM public."RateHistory" existing
-    WHERE existing."org_id" = cap."org_id"
-      AND existing."employee_id" = cap."employee_id"
-      AND existing."service_id" IS NOT DISTINCT FROM cap."service_id"
-      AND existing."pay_basis" IN ('lesson_hourly', 'lesson_flat')
-      AND existing."effective_date" = COALESCE(emp."start_date", DATE '2000-01-01')
-  );
-
--- 2. Drop the rows that were derived from the legacy column, wherever a real rate now exists for
---    the same employee and service. This also clears a converted row that was shadowing a
---    per-session rate entered in the rates screen.
-DELETE FROM public."RateHistory" derived
-WHERE derived."pay_basis" IN ('lesson_hourly', 'lesson_flat')
-  AND COALESCE(derived."metadata" ->> 'source', '') IN ('instructor_service_capabilities.base_rate', 'backfill_2026_09')
-  AND EXISTS (
-    SELECT 1 FROM public."RateHistory" kept
-    WHERE kept."org_id" = derived."org_id"
-      AND kept."employee_id" = derived."employee_id"
-      AND kept."service_id" IS NOT DISTINCT FROM derived."service_id"
-      AND kept."pay_basis" IN ('lesson_hourly', 'lesson_flat')
-      AND COALESCE(kept."metadata" ->> 'source', '') NOT IN ('instructor_service_capabilities.base_rate', 'backfill_2026_09')
-  );
-
--- 3. A capability that never recorded what the office typed keeps its number, read as hourly.
---    Mark those rows so the farm can be shown exactly which rates were assumed rather than known.
-UPDATE public."RateHistory"
-SET "metadata" = COALESCE("metadata", '{}'::jsonb) || jsonb_build_object('rate_unit_assumed', 'hourly')
-WHERE "pay_basis" = 'lesson_hourly'
-  AND COALESCE("metadata" ->> 'source', '') IN ('instructor_service_capabilities.base_rate', 'backfill_2026_09')
-  AND NOT ("metadata" ? 'rate_unit_assumed');
-
--- 4. Employees.current_rate was backfilled onto everyone who had one, including instructors, who
---    are not paid by the hour. Those rows pay nothing today and would pay something wrong later.
-DELETE FROM public."RateHistory" r
-USING public."Employees" emp
-WHERE emp."id" = r."employee_id"
-  AND r."pay_basis" = 'attendance_hourly'
-  AND COALESCE(r."metadata" ->> 'source', '') = 'backfill_2026_09'
-  AND COALESCE(emp."payroll_model", '') <> 'hourly';
-
--- 5. Remove the writer. The employee-level mirror stays: it copies current_rate,
---    monthly_salary_amount and leave_fixed_day_rate verbatim, with no arithmetic and no service.
-DROP TRIGGER IF EXISTS trg_instructor_service_capabilities_mirror_rate_history ON public.instructor_service_capabilities;
-DROP FUNCTION IF EXISTS public.mirror_capability_rate_to_rate_history();
 `;

@@ -118,7 +118,7 @@ export default async function (context, req) {
       .select('employee_id')
       .in('employee_id', instructorIds),
     withOrgScope(supabase, 'instructor_service_capabilities', orgId)
-      .select('employee_id, service_id, max_students, base_rate, availability_windows, metadata')
+      .select('employee_id, service_id, max_students, availability_windows, metadata')
       .in('employee_id', instructorIds),
   ]);
 
@@ -168,7 +168,6 @@ export default async function (context, req) {
     capabilitiesMap.get(cap.employee_id).push({
       service_id: cap.service_id,
       max_students: cap.max_students,
-      base_rate: cap.base_rate,
       availability_windows: Array.isArray(cap.availability_windows) ? cap.availability_windows : [],
       setup_incomplete: !hasConfiguredAvailability(cap.availability_windows),
       metadata: cap.metadata,

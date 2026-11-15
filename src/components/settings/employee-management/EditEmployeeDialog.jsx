@@ -15,7 +15,6 @@ import { Badge } from '@/components/ui/badge';
 import { Briefcase, Calendar, Mail, Trash2, UserRound } from 'lucide-react';
 import { toast } from '@/lib/toast.jsx';
 import { authenticatedFetch } from '@/lib/api-client';
-import { toShekel, toAgorot } from '@/lib/currency.js';
 
 const DAYS_OF_WEEK = [
   { value: 0, label: 'ראשון', short: 'א' },
@@ -39,11 +38,9 @@ function deriveEmployeeType(employee) {
 
 function buildInitialState(employee) {
   const employeeType = deriveEmployeeType(employee);
-  const payrollModel = employee?.payroll_model || (employeeType === 'instructor' ? 'lesson_based' : 'hourly');
   return {
     employeeId: employee?.employee_id || '',
     employeeType,
-    payrollModel,
     sourceType: employeeType,
     firstName: employee?.first_name || '',
     middleName: employee?.middle_name || '',
@@ -53,7 +50,6 @@ function buildInitialState(employee) {
     startDate: employee?.start_date || '',
     annualLeaveDays: employee?.annual_leave_days ?? '',
     leavePayMethod: employee?.leave_pay_method || '',
-    leaveFixedDayRate: employee?.leave_fixed_day_rate != null ? toShekel(employee.leave_fixed_day_rate) : '',
     employmentScope: employee?.employment_scope || '',
     notes: employee?.notes || '',
     officeWorkingDays: employeeType === 'office' && Array.isArray(employee?.working_days) ? employee.working_days : [],
@@ -245,7 +241,6 @@ export default function EditEmployeeDialog({
         instructor_id: employee.id,
         employee_id: form.employeeId,
         employee_type: form.employeeType,
-        payroll_model: form.payrollModel,
         first_name: form.firstName,
         middle_name: form.middleName || null,
         last_name: form.lastName || null,
@@ -254,7 +249,6 @@ export default function EditEmployeeDialog({
         start_date: form.startDate || null,
         annual_leave_days: form.annualLeaveDays === '' ? null : Number(form.annualLeaveDays),
         leave_pay_method: form.leavePayMethod || null,
-        leave_fixed_day_rate: form.leaveFixedDayRate === '' ? null : toAgorot(form.leaveFixedDayRate),
         employment_scope: form.employmentScope || null,
         notes: form.notes || null,
       };
@@ -307,7 +301,7 @@ export default function EditEmployeeDialog({
             icon={UserRound}
             description="שדות זהות, סוג העובד ותיעוד בסיסי"
           >
-            <div className="grid gap-4 md:grid-cols-4">
+            <div className="grid gap-4 md:grid-cols-3">
               <div className="space-y-2">
                 <Label htmlFor="employee_id" className="text-xs text-slate-600">מספר עובד / תעודה</Label>
                 <Input id="employee_id" value={form.employeeId} onChange={(e) => updateField('employeeId', e.target.value)} disabled={isSaving} />
@@ -316,14 +310,7 @@ export default function EditEmployeeDialog({
                 <Label className="text-xs text-slate-600">סוג עובד</Label>
                 <Select
                   value={form.employeeType}
-                  onValueChange={(value) => {
-                    updateField('employeeType', value);
-                    if (value === 'instructor') {
-                      updateField('payrollModel', 'lesson_based');
-                    } else if (form.payrollModel === 'lesson_based') {
-                      updateField('payrollModel', 'hourly');
-                    }
-                  }}
+                  onValueChange={(value) => updateField('employeeType', value)}
                 >
                   <SelectTrigger>
                     <SelectValue placeholder="בחר סוג עובד" />
@@ -331,28 +318,6 @@ export default function EditEmployeeDialog({
                   <SelectContent>
                     <SelectItem value="instructor">מדריך/ה</SelectItem>
                     <SelectItem value="office">עובד/ת משרד</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label className="text-xs text-slate-600">מודל שכר</Label>
-                <Select
-                  value={form.employeeType === 'instructor' ? 'lesson_based' : form.payrollModel}
-                  onValueChange={(value) => updateField('payrollModel', value)}
-                  disabled={isSaving || form.employeeType === 'instructor'}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="בחר מודל שכר" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {form.employeeType === 'instructor' ? (
-                      <SelectItem value="lesson_based">מבוסס שיעורים</SelectItem>
-                    ) : (
-                      <>
-                        <SelectItem value="hourly">שעתי</SelectItem>
-                        <SelectItem value="monthly_salary">שכר חודשי</SelectItem>
-                      </>
-                    )}
                   </SelectContent>
                 </Select>
               </div>
@@ -448,10 +413,14 @@ export default function EditEmployeeDialog({
                   </SelectContent>
                 </Select>
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="leave_fixed_day_rate" className="text-xs text-slate-600">ערך חופשה קבוע</Label>
-                <Input id="leave_fixed_day_rate" type="number" min="0" step="0.01" value={form.leaveFixedDayRate} onChange={(e) => updateField('leaveFixedDayRate', e.target.value)} disabled={isSaving} />
-              </div>
+              {form.leavePayMethod === 'fixed_rate' ? (
+                <div className="space-y-2">
+                  <span className="text-xs text-slate-600">ערך יום חופשה</span>
+                  <p className="rounded-md border border-dashed border-slate-200 px-3 py-2 text-xs text-slate-500">
+                    נקבע בלשונית פיננסים, עם התאריך שממנו הוא חל.
+                  </p>
+                </div>
+              ) : null}
             </div>
 
             {isOfficeEditing ? (
