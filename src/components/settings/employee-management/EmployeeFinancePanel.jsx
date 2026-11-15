@@ -16,6 +16,7 @@ import { toast } from '@/lib/toast.jsx';
 import { authenticatedFetch } from '@/lib/api-client.js';
 import { toAgorot, formatCurrency } from '@/lib/currency.js';
 import { LeaveDayRateEditor } from './EmployeeRatesPanel.jsx';
+import EmployeePaySummary from '@/features/finance/components/EmployeePaySummary.jsx';
 
 function startOfMonth(date) {
   return new Date(date.getFullYear(), date.getMonth(), 1);
@@ -25,19 +26,9 @@ function endOfMonth(date) {
   return new Date(date.getFullYear(), date.getMonth() + 1, 0);
 }
 
-function addMonths(date, delta) {
-  return new Date(date.getFullYear(), date.getMonth() + delta, 1);
-}
-
 function toLocalDateString(date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }
-
-function formatMonth(date) {
-  return new Intl.DateTimeFormat('he-IL', { month: 'long', year: 'numeric' }).format(date);
-}
-
-
 
 /**
  * How a paid leave day is valued. This is a method on the employee, not a rate for work, chosen
@@ -166,10 +157,10 @@ function LeavePayBox({ employee, orgId, session, policy, onSaved, onEmployeeChan
 
 export default function EmployeeFinancePanel({ employee, orgId, session, onEditEmployee, onEmployeeChanged }) {
   const [monthDate, setMonthDate] = useState(() => startOfMonth(new Date()));
-  const [preview, setPreview] = useState(null);
   const [leavePolicy, setLeavePolicy] = useState(null);
   const [adjustments, setAdjustments] = useState([]);
-  const [loading, setLoading] = useState(false);
+  // Bumped after a change here (a correction, a leave-day value) so the pay summary reads again.
+  const [summaryReloadKey, setSummaryReloadKey] = useState(0);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({
     correctionType: 'bonus',
@@ -190,39 +181,31 @@ export default function EmployeeFinancePanel({ employee, orgId, session, onEditE
 
   const loadData = useCallback(async () => {
     if (!employee?.id || !orgId) return;
-    setLoading(true);
     try {
-      const [payrollPayload, adjustmentsPayload] = await Promise.all([
-        authenticatedFetch('payroll', {
-          session,
-          params: {
-            org_id: orgId,
-            employee_id: employee.id,
-            start_date: monthStart,
-            end_date: monthEnd,
-          },
-        }),
-        authenticatedFetch('payroll-adjustments', {
-          session,
-          params: {
-            org_id: orgId,
-            employee_id: employee.id,
-            start_date: monthStart,
-            end_date: monthEnd,
-          },
-        }),
-      ]);
-
-      setPreview(Array.isArray(payrollPayload?.employees) ? payrollPayload.employees[0] || null : null);
-      setLeavePolicy(payrollPayload?.leave_pay_policy || null);
+      const adjustmentsPayload = await authenticatedFetch('payroll-adjustments', {
+        session,
+        params: {
+          org_id: orgId,
+          employee_id: employee.id,
+          start_date: monthStart,
+          end_date: monthEnd,
+        },
+      });
       setAdjustments(Array.isArray(adjustmentsPayload?.entries) ? adjustmentsPayload.entries : []);
     } catch (error) {
       console.error('Failed to load finance data', error);
       toast.error(error?.message || 'טעינת נתוני הפיננסים נכשלה.');
-    } finally {
-      setLoading(false);
     }
   }, [employee?.id, monthEnd, monthStart, orgId, session]);
+
+  const reloadAll = useCallback(async () => {
+    setSummaryReloadKey((value) => value + 1);
+    await loadData();
+  }, [loadData]);
+
+  const handleSummaryLoaded = useCallback((payload) => {
+    setLeavePolicy(payload?.leave_pay_policy || null);
+  }, []);
 
   useEffect(() => {
     void loadData();
@@ -254,7 +237,7 @@ export default function EmployeeFinancePanel({ employee, orgId, session, onEditE
         effectiveDate: monthStart,
         notes: '',
       });
-      await loadData();
+      await reloadAll();
       toast.success('התיקון הפיננסי נשמר.');
     } catch (error) {
       console.error('Failed to save finance correction', error);
@@ -276,7 +259,7 @@ export default function EmployeeFinancePanel({ employee, orgId, session, onEditE
         },
       });
       setAdjustments((current) => current.filter((entry) => entry.id !== id));
-      await loadData();
+      await reloadAll();
       toast.success('התיקון הוסר.');
     } catch (error) {
       console.error('Failed to delete finance correction', error);
@@ -293,73 +276,24 @@ export default function EmployeeFinancePanel({ employee, orgId, session, onEditE
       orgId={orgId}
       session={session}
       policy={leavePolicy}
-      onSaved={loadData}
+      onSaved={reloadAll}
       onEmployeeChanged={onEmployeeChanged}
     />
     <div className="grid gap-3 xl:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)] [font-family:inherit]">
-      <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm [font-family:inherit]">
-        <div className="mb-3 flex items-center justify-between gap-3">
-          <div>
-            <h3 className="text-sm font-bold text-slate-900">תצוגת שכר חיה</h3>
-            <p className="text-xs text-slate-500">מבוסס על נוכחות, שיעורים, חופשות ותיקונים פיננסיים.</p>
-          </div>
-          <div className="flex items-center gap-2">
-            <Button size="sm" variant="outline" onClick={() => setMonthDate(addMonths(monthDate, -1))}>הקודם</Button>
-            <div className="min-w-[120px] text-center text-sm font-semibold text-slate-700">{formatMonth(monthDate)}</div>
-            <Button size="sm" variant="outline" onClick={() => setMonthDate(addMonths(monthDate, 1))}>הבא</Button>
-          </div>
-        </div>
-
+      <div className="space-y-2">
         {onEditEmployee ? (
-          <div className="mb-4">
-            <Button size="sm" variant="outline" onClick={onEditEmployee}>עריכת כרטיס העובד</Button>
-          </div>
+          <Button size="sm" variant="outline" onClick={onEditEmployee}>עריכת כרטיס העובד</Button>
         ) : null}
-
-        {loading ? (
-          <div className="flex items-center gap-2 text-sm text-slate-500">
-            <Loader2 className="h-4 w-4 animate-spin" />
-            טוען תצוגת שכר...
-          </div>
-        ) : preview ? (
-          <div className="space-y-3">
-            <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
-              <div className="rounded-2xl border border-blue-200 bg-blue-50 px-3 py-3">
-                <div className="text-[11px] text-blue-700">בסיס</div>
-                <div className="mt-1 text-xl font-bold text-blue-950">{formatCurrency(preview.base_amount)}</div>
-              </div>
-              <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-3 py-3">
-                <div className="text-[11px] text-emerald-700">חופשה בתשלום</div>
-                <div className="mt-1 text-xl font-bold text-emerald-950">{formatCurrency(preview.paid_leave_amount)}</div>
-              </div>
-              <div className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-3">
-                <div className="text-[11px] text-amber-700">תיקונים</div>
-                <div className="mt-1 text-xl font-bold text-amber-950">{formatCurrency(preview.correction_amount)}</div>
-              </div>
-              <div className="rounded-2xl border border-slate-900 bg-slate-900 px-3 py-3 text-white">
-                <div className="text-[11px] text-slate-300">סה״כ</div>
-                <div className="mt-1 text-xl font-bold">{formatCurrency(preview.total_amount)}</div>
-              </div>
-            </div>
-
-            <div className="space-y-1 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-700">
-              {preview.lesson_count > 0 ? <div>{`מפגשים: ${preview.lesson_count}, ${formatCurrency(preview.lesson_amount)}`}</div> : null}
-              {preview.attendance_amount > 0 ? <div>{`שעות משרד: ${formatCurrency(preview.attendance_amount)}`}</div> : null}
-              {preview.monthly_salary_amount > 0 ? <div>{`שכר חודשי יחסי: ${formatCurrency(preview.monthly_salary_amount)}`}</div> : null}
-              {preview.unmarked_lesson_count > 0 ? (
-                <div className="text-amber-800">{`לא סומן אם הגיעו: ${preview.unmarked_lesson_count} מפגשים, ${formatCurrency(preview.unmarked_lesson_amount)}`}</div>
-              ) : null}
-              {preview.missing_rate_lesson_count > 0 ? (
-                <div className="text-red-700">{`חסר תעריף: ${preview.missing_rate_lesson_count} מפגשים`}</div>
-              ) : null}
-            </div>
-          </div>
-        ) : (
-          <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-3 py-6 text-center text-sm text-slate-500">
-            אין נתוני שכר להצגה בתקופה הזו.
-          </div>
-        )}
-      </section>
+        <EmployeePaySummary
+          orgId={orgId}
+          session={session}
+          employeeId={employee?.id}
+          monthDate={monthDate}
+          onMonthChange={setMonthDate}
+          reloadKey={summaryReloadKey}
+          onLoaded={handleSummaryLoaded}
+        />
+      </div>
 
       <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm [font-family:inherit]">
         <div className="mb-3">

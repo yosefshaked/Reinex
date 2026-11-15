@@ -10,7 +10,7 @@
  */
 import { normalizeString, withOrgScope } from './org-bff.js';
 import { coerceAgorot } from './currency.js';
-import { buildUtcBoundsForTimezoneDateRange } from './instructor-availability.js';
+import { buildUtcBoundsForTimezoneDateRange, extractScheduleSlotFromIso } from './instructor-availability.js';
 import {
   combinePayComponents,
   countWorkingDaysInRange,
@@ -113,6 +113,22 @@ export function applyCorrectionOverlay(instance, participants = [], correction =
 }
 
 /**
+ * How many participants of a lesson are in each state, as they were marked. A participant pay
+ * assumed to have attended is counted as `unmarked`, not as `attended`, so a summary never shows an
+ * assumption as a mark.
+ */
+export function summarizeParticipantStates(participants = [], unmarkedIds = new Set()) {
+  const states = {};
+  for (const participant of participants || []) {
+    const state = unmarkedIds.has(participant?.id)
+      ? 'unmarked'
+      : (normalizeString(participant?.participant_status).toLowerCase() || 'scheduled');
+    states[state] = (states[state] || 0) + 1;
+  }
+  return states;
+}
+
+/**
  * What one lesson pays its instructor, and why.
  *
  * `counted` says the lesson pays at all. `unmarked` says part of that rests on the assumption that
@@ -160,6 +176,8 @@ export function resolveCountedLesson({
     service_id: instance?.service_id || null,
     datetime_start: instance?.datetime_start || null,
     lesson_date: lessonDate,
+    start_time: extractScheduleSlotFromIso(instance?.datetime_start)?.startTime || null,
+    participant_states: summarizeParticipantStates(participants, unmarkedIds),
     duration_minutes: Number(instance?.duration_minutes) || 0,
     status: instance?.status || null,
     counted,

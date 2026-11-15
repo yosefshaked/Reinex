@@ -1,0 +1,578 @@
+{
+  "meta": {
+    "id": "pay-summary",
+    "name": "Monthly pay summary — finance tab and the \"כספים\" page",
+    "description": "Payroll stage 6. An instructor with a lesson rate teaches two lessons last month: one marked attended, one nobody marked. Pay counts the unmarked one as attended and flags it. The finance tab shows the month total, the \"לא סומן אם הגיעו · 1\" exception row, and the lessons row opens by service with count × amount; the unmarked row links to the lesson in the calendar, which opens it. The \"כספים\" page lists the employee with the total and the \"לא סומן: 1\" tag, the total row for everyone, and opens the employee's summary under the row. Nothing is stored: everything is read from GET /api/payroll.",
+    "version": "1.0.0",
+    "last_validated_at": "2026-11-15T12:00:00Z",
+    "author": "claude-ai",
+    "dependencies": {
+      "routes": [
+        "/employees",
+        "/financials",
+        "/calendar"
+      ],
+      "api_endpoints": [
+        "GET /api/services",
+        "POST /api/instructors",
+        "POST /api/employee-rates",
+        "POST /api/students-list",
+        "POST /api/lesson-instances",
+        "POST /api/calendar/attendance",
+        "GET /api/payroll",
+        "GET /api/employee-rates"
+      ]
+    }
+  },
+  "config": {
+    "timeout_ms": 25000,
+    "screenshot_on_failure": true,
+    "continue_on_step_failure": false,
+    "continue_on_workflow_failure": false
+  },
+  "workflows": [
+    {
+      "id": "login",
+      "name": "Login as Admin",
+      "steps": [
+        {
+          "id": "do-login",
+          "action": "login",
+          "role": "admin"
+        },
+        {
+          "id": "assert-dashboard",
+          "action": "assert",
+          "type": "url",
+          "pattern": "#/dashboard"
+        }
+      ]
+    },
+    {
+      "id": "api-setup",
+      "name": "API – An instructor with a rate and two lessons last month, one marked and one not",
+      "description": "Rate 100 ₪/hour; two 45-minute lessons pay 75 ₪ each, 150 ₪ for the month. The second lesson is never marked, so pay assumes the rider attended and flags it.",
+      "steps": [
+        {
+          "id": "get-service",
+          "action": "apiCall",
+          "method": "GET",
+          "endpoint": "/api/services?org_id={{TEST_ORG_ID}}",
+          "stores": [
+            {
+              "variable": "SERVICE_ID",
+              "field": "0.id"
+            },
+            {
+              "variable": "SERVICE_NAME",
+              "field": "0.name"
+            }
+          ]
+        },
+        {
+          "id": "create-instructor",
+          "action": "apiCall",
+          "method": "POST",
+          "endpoint": "/api/instructors",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "first_name": "סיכום",
+            "last_name": "שכר {{RUN_NUMERIC_ID}}",
+            "employee_id": "TEST-PAY-{{RUN_NUMERIC_ID}}",
+            "employee_type": "instructor"
+          },
+          "store": "PAY_INSTRUCTOR_ID",
+          "storeField": "id"
+        },
+        {
+          "id": "seed-rate",
+          "description": "100 ₪ per lesson hour for the service, from long ago",
+          "action": "apiCall",
+          "method": "POST",
+          "endpoint": "/api/employee-rates",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "employee_id": "{{PAY_INSTRUCTOR_ID}}",
+            "service_id": "{{SERVICE_ID}}",
+            "pay_basis": "lesson_hourly",
+            "rate": 10000,
+            "effective_date": "2000-01-01",
+            "replace_existing": true
+          }
+        },
+        {
+          "id": "create-rider",
+          "action": "apiCall",
+          "method": "POST",
+          "endpoint": "/api/students-list",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "first_name": "רוכב",
+            "last_name": "סיכום {{RUN_NUMERIC_ID}}",
+            "identity_number": "996{{RUN_NUMERIC_ID}}",
+            "phone": "0501234516"
+          },
+          "store": "PAY_RIDER_ID",
+          "storeField": "id"
+        },
+        {
+          "id": "create-marked-lesson",
+          "description": "The first lesson, on the first day of last month",
+          "action": "apiCall",
+          "method": "POST",
+          "endpoint": "/api/lesson-instances",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "datetime_start": "{{PREV_MONTH_START}}",
+            "duration_minutes": 45,
+            "instructor_employee_id": "{{PAY_INSTRUCTOR_ID}}",
+            "service_id": "{{SERVICE_ID}}",
+            "student_ids": [
+              "{{PAY_RIDER_ID}}"
+            ]
+          },
+          "stores": [
+            {
+              "variable": "MARKED_LESSON_ID",
+              "field": "id"
+            },
+            {
+              "variable": "MARKED_PARTICIPANT_ID",
+              "field": "participants.0.id"
+            }
+          ]
+        },
+        {
+          "id": "create-unmarked-lesson",
+          "description": "The second lesson, the next day, which nobody marks",
+          "action": "apiCall",
+          "method": "POST",
+          "endpoint": "/api/lesson-instances",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "datetime_start": "{{PREV_MONTH_SECOND_DAY_START}}",
+            "duration_minutes": 45,
+            "instructor_employee_id": "{{PAY_INSTRUCTOR_ID}}",
+            "service_id": "{{SERVICE_ID}}",
+            "student_ids": [
+              "{{PAY_RIDER_ID}}"
+            ]
+          },
+          "store": "UNMARKED_LESSON_ID",
+          "storeField": "id"
+        },
+        {
+          "id": "mark-attended",
+          "action": "apiCall",
+          "method": "POST",
+          "endpoint": "/api/calendar/attendance",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "instance_id": "{{MARKED_LESSON_ID}}",
+            "participant_id": "{{MARKED_PARTICIPANT_ID}}",
+            "participant_status": "attended"
+          }
+        }
+      ]
+    },
+    {
+      "id": "ui-finance-tab-summary",
+      "name": "UI – The finance tab shows the month total, the unmarked row, and the lessons by service",
+      "steps": [
+        {
+          "id": "navigate-employees",
+          "action": "navigate",
+          "url": "{{BASE_URL}}/#/employees"
+        },
+        {
+          "id": "wait-main",
+          "action": "waitForSelector",
+          "selector": "main, [role='main']"
+        },
+        {
+          "id": "open-employee",
+          "action": "click",
+          "selector": "button:has-text('שכר {{RUN_NUMERIC_ID}}')",
+          "first": true
+        },
+        {
+          "id": "open-finance-tab",
+          "action": "click",
+          "selector": "[role='tab']:has-text('פיננסים')"
+        },
+        {
+          "id": "wait-summary",
+          "action": "waitForSelector",
+          "selector": "[data-pay-summary] [data-pay-total]"
+        },
+        {
+          "id": "previous-month",
+          "action": "click",
+          "selector": "[data-pay-summary] button:has-text('הקודם')"
+        },
+        {
+          "id": "assert-total",
+          "description": "Two lessons of 45 minutes at 100 ₪/hour",
+          "action": "waitForSelector",
+          "selector": "[data-pay-summary] [data-pay-total]:has-text('₪150.00')"
+        },
+        {
+          "id": "assert-lessons-row",
+          "action": "waitForSelector",
+          "selector": "[data-pay-row='lessons']:has-text('מפגשים · 2'):has-text('₪150.00')"
+        },
+        {
+          "id": "assert-unmarked-row",
+          "description": "The unmarked lesson is flagged, with its amount and the words that it is included",
+          "action": "waitForSelector",
+          "selector": "[data-pay-row='unmarked']:has-text('לא סומן אם הגיעו · 1'):has-text('₪75.00'):has-text('נכלל בסכום')"
+        },
+        {
+          "id": "assert-no-missing-rate-row",
+          "action": "assert",
+          "type": "count",
+          "selector": "[data-pay-row='missing_rate']",
+          "value": "0"
+        },
+        {
+          "id": "assert-lessons-closed",
+          "description": "Overview first: the services show only on request",
+          "action": "assert",
+          "type": "count",
+          "selector": "[data-pay-row^='service-']",
+          "value": "0"
+        },
+        {
+          "id": "open-lessons",
+          "action": "click",
+          "selector": "[data-pay-row='lessons'] > button[aria-expanded='false']"
+        },
+        {
+          "id": "assert-service-line",
+          "description": "The lessons row opens by service: name · count × amount, and the total",
+          "action": "waitForSelector",
+          "selector": "[data-pay-row='service-{{SERVICE_ID}}']:has-text('{{SERVICE_NAME}}'):has-text('2 × ₪75.00'):has-text('₪150.00')"
+        },
+        {
+          "id": "open-service",
+          "action": "click",
+          "selector": "[data-pay-row='service-{{SERVICE_ID}}'] > button"
+        },
+        {
+          "id": "assert-lesson-states",
+          "description": "The service opens to its lessons, each with what happened",
+          "action": "waitForSelector",
+          "selector": "[data-pay-row='service-{{SERVICE_ID}}']:has-text('הגיע'):has-text('לא סומן'):has-text('45 דק')"
+        },
+        {
+          "id": "screenshot-finance-tab",
+          "action": "screenshot",
+          "name": "pay-summary-finance-tab"
+        },
+        {
+          "id": "open-unmarked",
+          "action": "click",
+          "selector": "[data-pay-row='unmarked'] > button"
+        },
+        {
+          "id": "follow-calendar-link",
+          "action": "click",
+          "selector": "[data-pay-row='unmarked'] a:has-text('למפגש ביומן')"
+        },
+        {
+          "id": "assert-lesson-opened",
+          "description": "The calendar opens on the lesson day with the lesson open",
+          "action": "waitForSelector",
+          "selector": "[role='dialog']"
+        },
+        {
+          "id": "assert-calendar-url",
+          "action": "assert",
+          "type": "url",
+          "pattern": "#/calendar"
+        },
+        {
+          "id": "screenshot-calendar-link",
+          "action": "screenshot",
+          "name": "pay-summary-calendar-link"
+        }
+      ]
+    },
+    {
+      "id": "ui-financials-page",
+      "name": "UI – The \"כספים\" page lists the employee with the tag and the total for everyone",
+      "steps": [
+        {
+          "id": "navigate-financials",
+          "action": "navigate",
+          "url": "{{BASE_URL}}/#/financials"
+        },
+        {
+          "id": "wait-table",
+          "action": "waitForSelector",
+          "selector": "[data-payroll-table]"
+        },
+        {
+          "id": "previous-month",
+          "action": "click",
+          "selector": "main button:has-text('הקודם')",
+          "first": true
+        },
+        {
+          "id": "assert-employee-row",
+          "action": "waitForSelector",
+          "selector": "[data-payroll-row='{{PAY_INSTRUCTOR_ID}}']:has-text('סיכום שכר {{RUN_NUMERIC_ID}}'):has-text('לא סומן: 1'):has-text('₪150.00')"
+        },
+        {
+          "id": "assert-no-missing-rate-tag",
+          "action": "assert",
+          "type": "count",
+          "selector": "[data-payroll-row='{{PAY_INSTRUCTOR_ID}}'] [data-payroll-tag='missing_rate']",
+          "value": "0"
+        },
+        {
+          "id": "assert-total-row",
+          "action": "waitForSelector",
+          "selector": "[data-payroll-total]:has-text('סה\"כ לכל העובדים'):has-text('₪')"
+        },
+        {
+          "id": "open-employee-row",
+          "action": "click",
+          "selector": "[data-payroll-row='{{PAY_INSTRUCTOR_ID}}'] > button"
+        },
+        {
+          "id": "assert-summary-under-row",
+          "description": "The employee's summary opens in place under the row, read for that employee only",
+          "action": "waitForSelector",
+          "selector": "[data-payroll-row='{{PAY_INSTRUCTOR_ID}}'] [data-pay-total]:has-text('₪150.00')"
+        },
+        {
+          "id": "assert-unmarked-in-place",
+          "action": "waitForSelector",
+          "selector": "[data-payroll-row='{{PAY_INSTRUCTOR_ID}}'] [data-pay-row='unmarked']:has-text('לא סומן אם הגיעו · 1')"
+        },
+        {
+          "id": "screenshot-financials",
+          "action": "screenshot",
+          "name": "pay-summary-financials"
+        }
+      ]
+    },
+    {
+      "id": "ui-missing-rate-from-summary",
+      "name": "UI – A lesson with no rate is flagged, and the rate is added from the summary",
+      "description": "A lesson whose service has no rate on its date counts but pays nothing: the summary shows \"חסר תעריף · 1\" (not included in the total). \"הוספת תעריף\" opens the rates dialog on that service and date; after saving, the summary reads again and the lesson is paid.",
+      "steps": [
+        {
+          "id": "get-other-service",
+          "action": "apiCall",
+          "method": "GET",
+          "endpoint": "/api/services?org_id={{TEST_ORG_ID}}",
+          "stores": [
+            {
+              "variable": "OTHER_SERVICE_ID",
+              "field": "1.id"
+            },
+            {
+              "variable": "OTHER_SERVICE_NAME",
+              "field": "1.name"
+            }
+          ]
+        },
+        {
+          "id": "seed-other-rate",
+          "description": "A rate for the second service, so the lesson can be added",
+          "action": "apiCall",
+          "method": "POST",
+          "endpoint": "/api/employee-rates",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "employee_id": "{{PAY_INSTRUCTOR_ID}}",
+            "service_id": "{{OTHER_SERVICE_ID}}",
+            "pay_basis": "lesson_hourly",
+            "rate": 10000,
+            "effective_date": "2000-01-01",
+            "replace_existing": true
+          }
+        },
+        {
+          "id": "create-other-lesson",
+          "description": "A 45-minute lesson of the second service on the third day of last month",
+          "action": "apiCall",
+          "method": "POST",
+          "endpoint": "/api/lesson-instances",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "datetime_start": "{{PREV_MONTH_THIRD_DAY_START}}",
+            "duration_minutes": 45,
+            "instructor_employee_id": "{{PAY_INSTRUCTOR_ID}}",
+            "service_id": "{{OTHER_SERVICE_ID}}",
+            "student_ids": [
+              "{{PAY_RIDER_ID}}"
+            ]
+          },
+          "stores": [
+            {
+              "variable": "OTHER_LESSON_ID",
+              "field": "id"
+            },
+            {
+              "variable": "OTHER_PARTICIPANT_ID",
+              "field": "participants.0.id"
+            }
+          ]
+        },
+        {
+          "id": "mark-other-attended",
+          "action": "apiCall",
+          "method": "POST",
+          "endpoint": "/api/calendar/attendance",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "instance_id": "{{OTHER_LESSON_ID}}",
+            "participant_id": "{{OTHER_PARTICIPANT_ID}}",
+            "participant_status": "attended"
+          }
+        },
+        {
+          "id": "rate-starts-later",
+          "description": "Move that rate to start after the lesson (direct Supabase PATCH), so the lesson has no rate on its date",
+          "action": "apiCall",
+          "method": "PATCH",
+          "endpoint": "{{SUPABASE_URL}}/rest/v1/RateHistory?employee_id=eq.{{PAY_INSTRUCTOR_ID}}&service_id=eq.{{OTHER_SERVICE_ID}}&org_id=eq.{{TEST_ORG_ID}}",
+          "headers": {
+            "apikey": "{{SERVICE_ROLE_KEY}}",
+            "Prefer": "return=minimal"
+          },
+          "body": {
+            "effective_date": "2099-01-01"
+          }
+        },
+        {
+          "id": "navigate-employees",
+          "action": "navigate",
+          "url": "{{BASE_URL}}/?missing_rate=1#/employees"
+        },
+        {
+          "id": "wait-main",
+          "action": "waitForSelector",
+          "selector": "main, [role='main']"
+        },
+        {
+          "id": "open-employee",
+          "action": "click",
+          "selector": "button:has-text('שכר {{RUN_NUMERIC_ID}}')",
+          "first": true
+        },
+        {
+          "id": "open-finance-tab",
+          "action": "click",
+          "selector": "[role='tab']:has-text('פיננסים')"
+        },
+        {
+          "id": "wait-summary",
+          "action": "waitForSelector",
+          "selector": "[data-pay-summary] [data-pay-total]"
+        },
+        {
+          "id": "previous-month",
+          "action": "click",
+          "selector": "[data-pay-summary] button:has-text('הקודם')"
+        },
+        {
+          "id": "assert-missing-row",
+          "description": "Flagged, and not in the total",
+          "action": "waitForSelector",
+          "selector": "[data-pay-row='missing_rate']:has-text('חסר תעריף · 1'):has-text('לא נכלל בסכום')"
+        },
+        {
+          "id": "assert-total-unchanged",
+          "action": "assert",
+          "type": "visible",
+          "selector": "[data-pay-summary] [data-pay-total]:has-text('₪150.00')"
+        },
+        {
+          "id": "open-missing-row",
+          "action": "click",
+          "selector": "[data-pay-row='missing_rate'] > button"
+        },
+        {
+          "id": "open-add-rate",
+          "action": "click",
+          "selector": "[data-pay-row='missing_rate'] button:has-text('הוספת תעריף')"
+        },
+        {
+          "id": "wait-rate-dialog",
+          "action": "waitForSelector",
+          "selector": "[role='dialog']:has-text('כל תעריף חל מהתאריך שנבחר')"
+        },
+        {
+          "id": "assert-rate-service",
+          "description": "The dialog opens on the lesson's service",
+          "action": "assert",
+          "type": "visible",
+          "selector": "[role='dialog']:has-text('כל תעריף חל מהתאריך שנבחר') [role='combobox']:has-text('{{OTHER_SERVICE_NAME}}')"
+        },
+        {
+          "id": "assert-rate-date",
+          "description": "... and on the lesson's date",
+          "action": "assert",
+          "type": "value",
+          "selector": "#rate-date-add-rate",
+          "value": "{{PREV_MONTH_THIRD_DAY}}"
+        },
+        {
+          "id": "fill-rate",
+          "action": "fill",
+          "selector": "#rate-amount-add-rate",
+          "value": "80"
+        },
+        {
+          "id": "save-rate",
+          "action": "click",
+          "selector": "[role='dialog']:has-text('כל תעריף חל מהתאריך שנבחר') button:has-text('שמירת תעריף')"
+        },
+        {
+          "id": "wait-rate-dialog-closed",
+          "action": "waitForSelector",
+          "selector": "[role='dialog']:has-text('כל תעריף חל מהתאריך שנבחר')",
+          "state": "hidden"
+        },
+        {
+          "id": "assert-total-with-lesson",
+          "description": "The summary reads again: 45 minutes at 80 ₪/hour is added",
+          "action": "waitForSelector",
+          "selector": "[data-pay-summary] [data-pay-total]:has-text('₪210.00')"
+        },
+        {
+          "id": "assert-missing-row-gone",
+          "action": "assert",
+          "type": "count",
+          "selector": "[data-pay-row='missing_rate']",
+          "value": "0"
+        },
+        {
+          "id": "screenshot-missing-rate",
+          "action": "screenshot",
+          "name": "pay-summary-missing-rate-added"
+        }
+      ]
+    },
+    {
+      "id": "logout",
+      "name": "Logout",
+      "steps": [
+        {
+          "id": "do-logout",
+          "action": "logout"
+        },
+        {
+          "id": "assert-login-page",
+          "action": "assert",
+          "type": "url",
+          "pattern": "#/login"
+        }
+      ]
+    }
+  ]
+}

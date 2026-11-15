@@ -44,6 +44,7 @@ import { isAdminOrOffice, isAdminRole, normalizeMembershipRole } from '@/feature
 import { toast } from '@/lib/toast.jsx';
 import { formatCurrency, toAgorot } from '@/lib/currency.js';
 import { getHmoClaimFeedback, getHmoClaimValidationFeedback } from '@/features/finance/lib/hmo-claim-feedback.js';
+import PayrollMonthTable from '@/features/finance/components/PayrollMonthTable.jsx';
 
 const DEFAULT_BILLING_POLICY = {
   attended: true,
@@ -1051,66 +1052,15 @@ export default function FinancialsPage() {
         </TabsList>
 
         <TabsContent value="payroll" className="space-y-4">
-          <div className="grid gap-3 md:grid-cols-4">
-            <div className="rounded-xl border border-slate-900 bg-slate-900 p-4 text-white">
-              <div className="text-xs text-slate-300">סה״כ שכר</div>
-              <div className="mt-1 text-xl font-bold">{formatCurrency(payroll?.totals?.total_amount)}</div>
-            </div>
-            <div className="rounded-xl border border-blue-200 bg-blue-50 p-4">
-              <div className="text-xs text-blue-700">בסיס</div>
-              <div className="mt-1 text-xl font-bold text-blue-950">{formatCurrency(payroll?.totals?.base_amount)}</div>
-            </div>
-            <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
-              <div className="text-xs text-emerald-700">חופשה בתשלום</div>
-              <div className="mt-1 text-xl font-bold text-emerald-950">{formatCurrency(payroll?.totals?.paid_leave_amount)}</div>
-            </div>
-            <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
-              <div className="text-xs text-amber-700">תיקונים</div>
-              <div className="mt-1 text-xl font-bold text-amber-950">{formatCurrency(payroll?.totals?.correction_amount)}</div>
-            </div>
-          </div>
-
           <Card className="rounded-2xl border border-border bg-surface p-lg shadow-sm">
-            {loadingPayroll ? (
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                טוען נתוני שכר...
-              </div>
-            ) : (
-              <div className="space-y-4">
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b border-border text-muted-foreground">
-                        <th className="pb-2 text-start font-medium">עובד</th>
-                        <th className="pb-2 text-start font-medium">בסיס</th>
-                        <th className="pb-2 text-start font-medium">חופשה</th>
-                        <th className="pb-2 text-start font-medium">תיקונים</th>
-                        <th className="pb-2 text-start font-medium">סה״כ</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {(payroll?.employees || []).map((row) => (
-                        <tr key={row.employee_id} className="border-b border-border/60">
-                          <td className="py-3 font-medium">{row.employee_name}</td>
-                          <td className="py-3">{formatCurrency(row.base_amount)}</td>
-                          <td className="py-3">{formatCurrency(row.paid_leave_amount)}</td>
-                          <td className="py-3">{formatCurrency(row.correction_amount)}</td>
-                          <td className="py-3 font-semibold">{formatCurrency(row.total_amount)}</td>
-                        </tr>
-                      ))}
-                      {(payroll?.employees || []).length === 0 ? (
-                        <tr>
-                          <td colSpan={5} className="py-6 text-center text-sm text-muted-foreground">
-                            אין נתוני שכר להצגה בטווח החודש הנבחר.
-                          </td>
-                        </tr>
-                      ) : null}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
+            <PayrollMonthTable
+              payroll={payroll}
+              loading={loadingPayroll}
+              orgId={activeOrgId}
+              session={session}
+              monthDate={monthDate}
+              onChanged={loadPayroll}
+            />
           </Card>
         </TabsContent>
 

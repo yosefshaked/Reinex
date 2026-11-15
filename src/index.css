@@ -180,3 +180,27 @@
 @media (prefers-reduced-motion: reduce) {
   * { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; scroll-behavior: auto !important; }
 }
+/* Pay summary print (src/features/finance/components/PaySummaryPrint.jsx): the print container is
+   hidden on screen; while it prints, everything else under <body> (the app's chrome) is hidden. */
+.pay-print-root { display: none; }
+@media print {
+  @page { margin: 14mm; }
+  body.pay-printing { background: #fff !important; overflow: visible !important; }
+  body.pay-printing > *:not(.pay-print-root) { display: none !important; }
+  body.pay-printing .pay-print-root { display: block; color: #000; font-size: 11pt; }
+  .pay-print-page { break-after: page; }
+  .pay-print-page:last-child { break-after: auto; }
+  .pay-print-header { margin-bottom: 8mm; }
+  .pay-print-org { font-size: 10pt; color: #444; }
+  .pay-print-header h1 { font-size: 15pt; font-weight: 700; margin: 0; }
+  .pay-print-header h2 { font-size: 13pt; font-weight: 600; margin: 2mm 0 0; }
+  .pay-print-table { width: 100%; border-collapse: collapse; }
+  .pay-print-table td { padding: 1.5mm 0; vertical-align: top; }
+  .pay-print-table td:last-child { text-align: left; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .pay-print-main td { border-top: 1px solid #ccc; font-weight: 600; }
+  .pay-print-sub td:first-child { padding-inline-start: 6mm; }
+  .pay-print-sub2 td { font-size: 9.5pt; color: #333; }
+  .pay-print-sub2 td:first-child { padding-inline-start: 12mm; }
+  .pay-print-total td { border-top: 2px solid #000; font-weight: 700; font-size: 12pt; }
+  .pay-print-exception td { font-style: italic; }
+}

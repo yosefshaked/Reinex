@@ -154,6 +154,17 @@ describe('one lesson', () => {
     assert.equal(result.payout_amount, 12000);
   });
 
+  it('lists each rider\'s state as marked, and an assumed attendance as unmarked', () => {
+    const result = counted(
+      lesson('l1', 'dana', '2026-10-05T08:00:00Z'),
+      [participant('p1', 'l1', 'attended'), participant('p2', 'l1', 'scheduled'), participant('p3', 'l1', 'no_show')],
+      { servicePaymentModel: 'per_student' },
+    );
+    assert.deepEqual(result.participant_states, { attended: 1, unmarked: 1, no_show: 1 });
+    // 08:00 UTC is 11:00 in Israel in October (summer time).
+    assert.equal(result.start_time, '11:00');
+  });
+
   it('a correction replaces the instructor and the outcome the lesson is paid by', () => {
     const original = lesson('l1', 'dana', '2026-10-05T08:00:00Z');
     const { instance, participants } = applyCorrectionOverlay(original, [participant('p1', 'l1', 'attended')], {
@@ -329,6 +340,14 @@ describe('the pay of a period', () => {
     assert.equal(pay.correction_amount, 5000);
     assert.equal(pay.total_amount, 36500);
     assert.equal(pay.details.lessons.length, 2);
+    // What the monthly summary lists per lesson: the farm's date and time and each rider's state.
+    const [marked, unmarked] = pay.details.lessons;
+    assert.equal(marked.lesson_date, '2026-10-05');
+    assert.equal(marked.start_time, '11:00');
+    assert.deepEqual(marked.participant_states, { attended: 1 });
+    assert.deepEqual(unmarked.participant_states, { unmarked: 1 });
+    assert.deepEqual(pay.details.attendance, [{ attendance_date: '2026-10-05', other_minutes: 90, rate_used: 5000, amount: 7500 }]);
+    assert.equal(pay.corrections.length, 1);
   });
 
   it('reassigning one lesson to another instructor moves its pay and its minutes to that instructor', async () => {
