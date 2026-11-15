@@ -40,18 +40,106 @@ function formatMonth(date) {
 
 
 /**
- * How a paid leave day is valued. This is a method on the employee, not a rate for work: the legal
- * average is the default, and a farm can override it per employee with a fixed day value, which is
- * a dated leave_day rate set right here.
+ * How a paid leave day is valued. This is a method on the employee, not a rate for work, chosen
+ * here for every employee type: the org default applies when none is set, and a farm can override it
+ * per employee with a fixed day value, which is a dated leave_day rate set in the same box.
  */
+const LEAVE_PAY_METHODS = [
+  { value: '', label: 'ברירת מחדל ארגונית', hint: 'לפי הגדרת הארגון לתשלום חופשה.' },
+  { value: 'legal', label: 'ממוצע חוקי' },
+  { value: 'avg_hourly_x_avg_day_hours', label: 'ממוצע היסטורי' },
+  { value: 'fixed_rate', label: 'ערך קבוע ליום', hint: 'סכום קבוע ליום חופשה, עם התאריך שממנו הוא חל.' },
+];
+
 function getLeavePayMethodLabel(method) {
-  if (method === 'fixed_rate') return 'ערך קבוע ליום';
-  if (method === 'legal') return 'ממוצע חוקי';
-  if (method === 'avg_hourly_x_avg_day_hours') return 'ממוצע היסטורי';
-  return 'ברירת מחדל ארגונית';
+  return (LEAVE_PAY_METHODS.find((option) => option.value === (method || '')) || LEAVE_PAY_METHODS[0]).label;
 }
 
-export default function EmployeeFinancePanel({ employee, orgId, session, onEditEmployee }) {
+/**
+ * The leave-pay box: the method as text with "שינוי", and for the fixed method the dated day value.
+ * The method is saved on the employee through PUT /api/instructors (the same field the card used).
+ */
+function LeavePayBox({ employee, orgId, session, onSaved, onEmployeeChanged }) {
+  const [method, setMethod] = useState(employee?.leave_pay_method || '');
+  const [choice, setChoice] = useState(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setMethod(employee?.leave_pay_method || '');
+    setChoice(null);
+  }, [employee?.id, employee?.leave_pay_method]);
+
+  async function handleSave() {
+    setSaving(true);
+    try {
+      await authenticatedFetch('instructors', {
+        session,
+        method: 'PUT',
+        body: { org_id: orgId, instructor_id: employee.id, leave_pay_method: choice || null },
+      });
+      setMethod(choice);
+      setChoice(null);
+      toast.success('שיטת תשלום החופשה נשמרה.');
+      onSaved?.();
+      await onEmployeeChanged?.();
+    } catch (error) {
+      console.error('Failed to save leave pay method', error);
+      toast.error(error?.message || 'שמירת שיטת תשלום החופשה נכשלה.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="mb-4 space-y-2 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3" data-leave-pay-box>
+      <div className="text-[11px] text-slate-500">תשלום חופשה</div>
+      <div className="grid grid-cols-[5rem_minmax(0,1fr)] items-center gap-2">
+        <span className="text-sm text-slate-600">שיטה</span>
+        <span className="flex items-center gap-2">
+          <span className="font-bold text-slate-900" title={LEAVE_PAY_METHODS.find((option) => option.value === method)?.hint}>{getLeavePayMethodLabel(method)}</span>
+          <Button type="button" size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => setChoice(choice === null ? method : null)} disabled={saving}>
+            שינוי
+          </Button>
+        </span>
+      </div>
+      {choice !== null ? (
+        <div className="space-y-2 rounded-xl border border-dashed border-slate-300 bg-white p-3">
+          <div className="grid gap-1" role="radiogroup" aria-label="שיטת תשלום חופשה">
+            {LEAVE_PAY_METHODS.map((option) => (
+              <button
+                key={option.value || 'default'}
+                type="button"
+                role="radio"
+                aria-checked={choice === option.value}
+                onClick={() => setChoice(option.value)}
+                disabled={saving}
+                title={option.hint}
+                className={`rounded-lg border px-3 py-1.5 text-start text-sm transition ${choice === option.value ? 'border-blue-500 bg-blue-50 font-semibold text-slate-900' : 'border-slate-200 text-slate-700 hover:bg-slate-50'}`}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button type="button" size="sm" onClick={handleSave} disabled={saving || choice === method}>
+              {saving ? <Loader2 className="me-2 h-4 w-4 animate-spin" /> : null}
+              שמירה
+            </Button>
+            <Button type="button" size="sm" variant="ghost" onClick={() => setChoice(null)} disabled={saving}>ביטול</Button>
+          </div>
+        </div>
+      ) : null}
+      {method === 'fixed_rate' ? (
+        <div className="grid grid-cols-[5rem_minmax(0,1fr)] items-start gap-2">
+          <span className="pt-1.5 text-sm text-slate-600">ערך ליום</span>
+          <LeaveDayRateEditor employeeId={employee?.id} orgId={orgId} session={session} onSaved={onSaved} />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+export default function EmployeeFinancePanel({ employee, orgId, session, onEditEmployee, onEmployeeChanged }) {
   const [monthDate, setMonthDate] = useState(() => startOfMonth(new Date()));
   const [preview, setPreview] = useState(null);
   const [adjustments, setAdjustments] = useState([]);
@@ -186,18 +274,13 @@ export default function EmployeeFinancePanel({ employee, orgId, session, onEditE
           </div>
         </div>
 
-        <div className="mb-4 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3">
-          <div className="text-[11px] text-slate-500">תשלום חופשה</div>
-          <div className="mt-1 text-lg font-bold text-slate-900">{getLeavePayMethodLabel(employee?.leave_pay_method)}</div>
-          {employee?.leave_pay_method === 'fixed_rate' ? (
-            <LeaveDayRateEditor
-              employeeId={employee?.id}
-              orgId={orgId}
-              session={session}
-              onSaved={loadData}
-            />
-          ) : null}
-        </div>
+        <LeavePayBox
+          employee={employee}
+          orgId={orgId}
+          session={session}
+          onSaved={loadData}
+          onEmployeeChanged={onEmployeeChanged}
+        />
 
         {onEditEmployee ? (
           <div className="mb-4">

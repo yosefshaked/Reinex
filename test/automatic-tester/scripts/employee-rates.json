@@ -2,9 +2,9 @@
   "meta": {
     "id": "employee-rates",
     "name": "Employee Pay Rates — dated rates screen",
-    "description": "Payroll phase 1b: the rates panel in an employee's finance tab. Creates an instructor with a service capability through the API (the DB trigger seeds its first rate), then in the UI schedules a future rate, checks the warnings for a back-dated rate and for a date that already has a rate, adds a rate for another service through the add-rate dialog, and adds an hourly rate — which switches the employee's pay model so the rate is actually read. Rates are never edited in place (PAY-A1, PAY-A2). A missing rate blocks adding a lesson (422 instructor_rate_not_configured) but never blocks marking attendance.",
-    "version": "1.11.0",
-    "last_validated_at": "2026-11-09T12:00:00Z",
+    "description": "Payroll phase 1b: the rates panel in an employee's finance tab. Creates an instructor with a service capability through the API (the DB trigger seeds its first rate), then in the UI schedules a future rate, checks the warnings for a back-dated rate and for a date that already has a rate, adds a rate for another service through the add-rate dialog, and adds an hourly rate — which switches the employee's pay model so the rate is actually read. Rates are never edited in place (PAY-A1, PAY-A2). A missing rate blocks adding a lesson (422 instructor_rate_not_configured) but never blocks marking attendance. Leave pay is a method chosen in the finance tab's leave-pay box (for any employee type), with the fixed day value beside it; leave itself is recorded from the attendance tab's day editor, which is the only leave screen.",
+    "version": "1.12.0",
+    "last_validated_at": "2026-11-15T12:00:00Z",
     "author": "claude-ai",
     "dependencies": {
       "routes": [
@@ -18,7 +18,11 @@
         "PUT /api/instructors",
         "POST /api/students-list",
         "POST /api/lesson-instances",
-        "POST /api/calendar/attendance"
+        "POST /api/calendar/attendance",
+        "GET /api/employee-attendance",
+        "GET /api/employee-leave",
+        "POST /api/employee-leave",
+        "DELETE /api/employee-leave"
       ]
     }
   },
@@ -783,21 +787,9 @@
     },
     {
       "id": "ui-leave-day-value",
-      "name": "UI – A fixed leave-day value is set with the leave pay in the finance tab",
-      "description": "The fixed value of a paid leave day is a dated leave_day rate, set in the finance tab's leave-pay box and saved through api/employee-rates. There is no leave-day column on the employee any more.",
+      "name": "UI – Leave pay is chosen in the finance tab, with the fixed day value beside it",
+      "description": "The leave-pay method is chosen in the finance tab's leave-pay box (read-first: the method as text, 'שינוי' opens the choice) and saved on the employee through PUT /api/instructors. When the method is a fixed day value, the same box sets the dated leave_day rate through api/employee-rates. The employee card dialog no longer has the choice.",
       "steps": [
-        {
-          "id": "set-fixed-leave-method",
-          "description": "The employee's leave is paid by a fixed day value",
-          "action": "apiCall",
-          "method": "PUT",
-          "endpoint": "/api/instructors",
-          "body": {
-            "org_id": "{{TEST_ORG_ID}}",
-            "instructor_id": "{{RATE_INSTRUCTOR_ID}}",
-            "leave_pay_method": "fixed_rate"
-          }
-        },
         {
           "id": "navigate-employees",
           "action": "navigate",
@@ -820,15 +812,60 @@
           "selector": "[role='tab']:has-text('פיננסים')"
         },
         {
-          "id": "assert-no-value-yet",
-          "description": "No leave-day value has been set yet",
+          "id": "assert-default-method",
+          "description": "The box reads first: the org default, as text, with no value row",
           "action": "waitForSelector",
-          "selector": "text=לא הוגדר ערך ליום"
+          "selector": "[data-leave-pay-box]:has-text('ברירת מחדל ארגונית')"
+        },
+        {
+          "id": "assert-no-value-row-yet",
+          "action": "assert",
+          "type": "count",
+          "selector": "[data-leave-pay-box]:has-text('ערך ליום')",
+          "value": "0"
+        },
+        {
+          "id": "open-method-choice",
+          "description": "'שינוי' opens the choice of method",
+          "action": "click",
+          "selector": "[data-leave-pay-box] button:has-text('שינוי')"
+        },
+        {
+          "id": "choose-fixed",
+          "action": "click",
+          "selector": "[data-leave-pay-box] [role='radio']:has-text('ערך קבוע ליום')"
+        },
+        {
+          "id": "save-method",
+          "action": "click",
+          "selector": "[data-leave-pay-box] button:text-is('שמירה')"
+        },
+        {
+          "id": "assert-no-value-yet",
+          "description": "The fixed method shows its value row: no leave-day value has been set yet",
+          "action": "waitForSelector",
+          "selector": "[data-leave-pay-box]:has-text('לא הוגדר ערך ליום')"
+        },
+        {
+          "id": "leave-tab",
+          "description": "Leave the tab and come back: the method comes from the saved employee",
+          "action": "click",
+          "selector": "[role='tab']:has-text('סקירה')"
+        },
+        {
+          "id": "return-tab",
+          "action": "click",
+          "selector": "[role='tab']:has-text('פיננסים')"
+        },
+        {
+          "id": "assert-method-saved",
+          "action": "waitForSelector",
+          "selector": "[data-leave-pay-box]:has-text('ערך קבוע ליום'):has-text('לא הוגדר ערך ליום')"
         },
         {
           "id": "open-leave-day-form",
           "action": "click",
-          "selector": "button:text-is('הגדרה')"
+          "selector": "[data-leave-pay-box] button:text-is('הגדרה')"
         },
         {
           "id": "fill-leave-day",
@@ -839,13 +876,13 @@
         {
           "id": "save-leave-day",
           "action": "click",
-          "selector": "button:text-is('שמירה')"
+          "selector": "[data-leave-pay-box] button:text-is('שמירה')"
         },
         {
           "id": "assert-leave-day-shown",
           "description": "The value is shown per day in the leave-pay box",
           "action": "waitForSelector",
-          "selector": "text=₪250.00 ליום"
+          "selector": "[data-leave-pay-box]:has-text('₪250.00 ליום')"
         },
         {
           "id": "assert-not-a-rate-card",
@@ -932,6 +969,118 @@
           "id": "screenshot-attendance",
           "action": "screenshot",
           "name": "attendance-other-work"
+        }
+      ]
+    },
+    {
+      "id": "ui-leave-from-attendance-day",
+      "name": "UI – Leave is recorded and removed from the attendance tab day editor",
+      "description": "There is no separate leave tab: the attendance tab is the month grid of hours and leave. Picking a day opens the day editor, where 'חופשה' records leave on that day (who carries it, full or half day, an end date for a range, a reason) through api/employee-leave. The grid then shows the day as leave, the balance line above the grid counts it, and the same day editor removes it.",
+      "steps": [
+        {
+          "id": "navigate-employees",
+          "action": "navigate",
+          "url": "{{BASE_URL}}/#/employees"
+        },
+        {
+          "id": "wait-main",
+          "action": "waitForSelector",
+          "selector": "main, [role='main']"
+        },
+        {
+          "id": "open-employee",
+          "action": "click",
+          "selector": "button:has-text('בדיקה {{RUN_NUMERIC_ID}}')",
+          "first": true
+        },
+        {
+          "id": "open-attendance-tab",
+          "action": "click",
+          "selector": "[role='tab']:has-text('נוכחות')"
+        },
+        {
+          "id": "assert-no-leave-tab",
+          "description": "The old 'חופשות' tab is gone",
+          "action": "assert",
+          "type": "count",
+          "selector": "[role='tab']:has-text('חופשות')",
+          "value": "0"
+        },
+        {
+          "id": "assert-balance-line",
+          "description": "The leave balance is one line above the grid",
+          "action": "waitForSelector",
+          "selector": "[data-leave-balance]:has-text('יתרת חופשה')"
+        },
+        {
+          "id": "pick-day",
+          "description": "Pick the 2nd of this month (the fixture has no hours or lessons that day)",
+          "action": "click",
+          "selector": "button[data-date$='-02']"
+        },
+        {
+          "id": "choose-leave",
+          "action": "click",
+          "selector": "[data-day-editor] [role='radio']:has-text('חופשה')"
+        },
+        {
+          "id": "assert-end-date-field",
+          "description": "A range can be given with an end date",
+          "action": "assert",
+          "type": "visible",
+          "selector": "#leave-end-date"
+        },
+        {
+          "id": "fill-reason",
+          "action": "fill",
+          "selector": "#leave-reason",
+          "value": "בדיקת חופשה {{RUN_NUMERIC_ID}}"
+        },
+        {
+          "id": "save-leave",
+          "action": "click",
+          "selector": "[data-day-editor] button:has-text('שמירת חופשה')"
+        },
+        {
+          "id": "assert-leave-in-grid",
+          "description": "The day shows as leave carried by the employee",
+          "action": "waitForSelector",
+          "selector": "button[data-date$='-02']:has-text('חופשה · על חשבון העובד')"
+        },
+        {
+          "id": "assert-day-editor-shows-leave",
+          "action": "assert",
+          "type": "visible",
+          "selector": "[data-day-leave]:has-text('בדיקת חופשה {{RUN_NUMERIC_ID}}')"
+        },
+        {
+          "id": "assert-balance-counts-it",
+          "description": "The day came off the balance",
+          "action": "assert",
+          "type": "visible",
+          "selector": "[data-leave-balance]:has-text('נוצלו 1')"
+        },
+        {
+          "id": "screenshot-leave-day",
+          "action": "screenshot",
+          "name": "05c-leave-from-attendance"
+        },
+        {
+          "id": "remove-leave",
+          "action": "click",
+          "selector": "[data-day-leave] button:has-text('הסרת החופשה')"
+        },
+        {
+          "id": "confirm-remove",
+          "action": "click",
+          "selector": "[role='alertdialog'] button:has-text('הסרה')"
+        },
+        {
+          "id": "assert-leave-removed",
+          "description": "The day is no longer leave",
+          "action": "waitForSelector",
+          "selector": "button[data-date$='-02']:has-text('חופשה')",
+          "state": "hidden"
         }
       ]
     },

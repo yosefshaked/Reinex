@@ -38,7 +38,6 @@ import EditServiceCapabilitiesDialog from './EditServiceCapabilitiesDialog.jsx';
 import ConfirmDialog from '@/components/ui/ConfirmDialog.jsx';
 import EmployeeFinancePanel from './EmployeeFinancePanel.jsx';
 import EmployeeRatesPanel from './EmployeeRatesPanel.jsx';
-import EmployeeLeavePanel from './EmployeeLeavePanel.jsx';
 import LinkEmployeeMemberDialog from './LinkEmployeeMemberDialog.jsx';
 import InstructorDocumentsSection from '../InstructorDocumentsSection.jsx';
 import { getAvailabilitySummary } from '@/lib/instructor-availability.js';
@@ -50,7 +49,6 @@ const TAB_KEYS = {
   schedule: 'schedule',
   attendance: 'attendance',
   finance: 'finance',
-  leaves: 'leaves',
   documents: 'documents',
   activity: 'activity',
 };
@@ -987,7 +985,6 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
                   <TabsTrigger value={TAB_KEYS.schedule} className="rounded-xl px-4 py-2 text-xs">לו״ז</TabsTrigger>
                   <TabsTrigger value={TAB_KEYS.attendance} className="rounded-xl px-4 py-2 text-xs">נוכחות</TabsTrigger>
                   <TabsTrigger value={TAB_KEYS.finance} className="rounded-xl px-4 py-2 text-xs">פיננסים</TabsTrigger>
-                  <TabsTrigger value={TAB_KEYS.leaves} className="rounded-xl px-4 py-2 text-xs">חופשות</TabsTrigger>
                   <TabsTrigger value={TAB_KEYS.documents} className="rounded-xl px-4 py-2 text-xs">מסמכים</TabsTrigger>
                   <TabsTrigger value={TAB_KEYS.activity} className="rounded-xl px-4 py-2 text-xs">פעילות</TabsTrigger>
                 </TabsList>
@@ -1306,14 +1303,7 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
                     orgId={orgId}
                     session={session}
                     onEditEmployee={() => openEmployeeEditor(currentEmployee)}
-                  />
-                </TabsContent>
-
-                <TabsContent value={TAB_KEYS.leaves} className="space-y-3">
-                  <EmployeeLeavePanel
-                    employee={currentEmployee}
-                    orgId={orgId}
-                    session={session}
+                    onEmployeeChanged={refetchInstructors}
                   />
                 </TabsContent>
 

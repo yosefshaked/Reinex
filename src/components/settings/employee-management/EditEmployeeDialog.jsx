@@ -49,7 +49,6 @@ function buildInitialState(employee) {
     phone: employee?.phone || '',
     startDate: employee?.start_date || '',
     annualLeaveDays: employee?.annual_leave_days ?? '',
-    leavePayMethod: employee?.leave_pay_method || '',
     employmentScope: employee?.employment_scope || '',
     notes: employee?.notes || '',
     officeWorkingDays: employeeType === 'office' && Array.isArray(employee?.working_days) ? employee.working_days : [],
@@ -248,7 +247,6 @@ export default function EditEmployeeDialog({
         phone: form.phone || null,
         start_date: form.startDate || null,
         annual_leave_days: form.annualLeaveDays === '' ? null : Number(form.annualLeaveDays),
-        leave_pay_method: form.leavePayMethod || null,
         employment_scope: form.employmentScope || null,
         notes: form.notes || null,
       };
@@ -400,27 +398,11 @@ export default function EditEmployeeDialog({
                 <Input id="annual_leave_days" type="number" min="0" step="0.5" value={form.annualLeaveDays} onChange={(e) => updateField('annualLeaveDays', e.target.value)} disabled={isSaving} />
               </div>
               <div className="space-y-2">
-                <Label className="text-xs text-slate-600">שיטת תשלום חופשה</Label>
-                <Select value={form.leavePayMethod || '__default__'} onValueChange={(value) => updateField('leavePayMethod', value === '__default__' ? '' : value)} disabled={isSaving}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="ברירת מחדל ארגונית" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__default__">ברירת מחדל ארגונית</SelectItem>
-                    <SelectItem value="legal">ממוצע חוקי</SelectItem>
-                    <SelectItem value="avg_hourly_x_avg_day_hours">ממוצע היסטורי</SelectItem>
-                    <SelectItem value="fixed_rate">ערך קבוע</SelectItem>
-                  </SelectContent>
-                </Select>
+                <span className="text-xs text-slate-600">תשלום חופשה</span>
+                <p className="rounded-md border border-dashed border-slate-200 px-3 py-2 text-xs text-slate-500">
+                  השיטה וערך היום נקבעים בלשונית פיננסים.
+                </p>
               </div>
-              {form.leavePayMethod === 'fixed_rate' ? (
-                <div className="space-y-2">
-                  <span className="text-xs text-slate-600">ערך יום חופשה</span>
-                  <p className="rounded-md border border-dashed border-slate-200 px-3 py-2 text-xs text-slate-500">
-                    נקבע בלשונית פיננסים, עם התאריך שממנו הוא חל.
-                  </p>
-                </div>
-              ) : null}
             </div>
 
             {isOfficeEditing ? (

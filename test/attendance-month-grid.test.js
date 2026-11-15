@@ -1,6 +1,17 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { attendanceTotals, buildMonthWeeks, formatMinutes } from '../src/components/settings/employee-management/attendance-month-grid.js';
+import {
+  attendanceTotals,
+  buildLeaveRequestBody,
+  buildMonthWeeks,
+  describeLeaveDay,
+  emptyLeaveForm,
+  formatMinutes,
+  leaveBalanceText,
+  leaveFormFromEntry,
+  leaveSaveErrorMessage,
+  leaveTypeLabel,
+} from '../src/components/settings/employee-management/attendance-month-grid.js';
 
 function monthDays(year, month, length) {
   return Array.from({ length }, (_, index) => ({
@@ -47,5 +58,76 @@ describe('attendance month grid', () => {
     assert.deepEqual(attendanceTotals([]), { lessonMinutes: 0, otherMinutes: 0, totalMinutes: 0 });
     const weeks = buildMonthWeeks(monthDays(2026, 8, 31).map((day, index) => ({ ...day, lessons: { lesson_minutes: index }, record: { other_minutes: 15 } })));
     assert.equal(weeks.reduce((sum, week) => sum + attendanceTotals(week).totalMinutes, 0), attendanceTotals(weeks.flat()).totalMinutes);
+  });
+
+  describe('leave from the day editor', () => {
+    const ids = { orgId: 'org-1', employeeId: 'emp-1' };
+
+    it('starts a new leave on the picked day, as a full day of that day only', () => {
+      assert.deepEqual(buildLeaveRequestBody(emptyLeaveForm('2026-11-10'), { ...ids, startDate: '2026-11-10' }), {
+        id: undefined,
+        org_id: 'org-1',
+        employee_id: 'emp-1',
+        leave_type: 'employee_paid',
+        duration_mode: 'full_day',
+        half_day_part: null,
+        start_date: '2026-11-10',
+        end_date: '2026-11-10',
+        reason: null,
+        notes: null,
+      });
+    });
+
+    it('keeps a range end, but never before the start, and a half day is always one date', () => {
+      const range = { ...emptyLeaveForm('2026-11-10'), endDate: '2026-11-12', reason: '  חופשה משפחתית ' };
+      const body = buildLeaveRequestBody(range, { ...ids, startDate: '2026-11-10' });
+      assert.equal(body.end_date, '2026-11-12');
+      assert.equal(body.reason, 'חופשה משפחתית');
+      assert.equal(buildLeaveRequestBody({ ...range, endDate: '2026-11-01' }, { ...ids, startDate: '2026-11-10' }).end_date, '2026-11-10');
+      const half = buildLeaveRequestBody({ ...range, portion: 'second_half', leaveType: 'unpaid' }, { ...ids, startDate: '2026-11-10' });
+      assert.equal(half.duration_mode, 'half_day');
+      assert.equal(half.half_day_part, 'second_half');
+      assert.equal(half.end_date, '2026-11-10');
+      assert.equal(half.leave_type, 'unpaid');
+    });
+
+    it('opens an existing entry for editing with its own id, type, part and end', () => {
+      const form = leaveFormFromEntry({ id: 'L1', leave_type: 'system_paid', duration_mode: 'full_day', start_date: '2026-11-01', end_date: '2026-11-03', reason: 'מילואים', notes: 'x' });
+      assert.deepEqual(form, { id: 'L1', leaveType: 'system_paid', portion: 'full_day', endDate: '2026-11-03', reason: 'מילואים', notes: 'x' });
+      const body = buildLeaveRequestBody(form, { ...ids, startDate: '2026-11-01' });
+      assert.equal(body.id, 'L1');
+      assert.equal(body.notes, 'x');
+    });
+
+    it('reads the older half_day type as half a day on the employee', () => {
+      const form = leaveFormFromEntry({ id: 'L2', leave_type: 'half_day', duration_mode: 'half_day', half_day_part: 'second_half', start_date: '2026-11-04', end_date: '2026-11-04' });
+      assert.equal(form.leaveType, 'employee_paid');
+      assert.equal(form.portion, 'second_half');
+      assert.equal(leaveTypeLabel('half_day'), 'חצי יום');
+      assert.equal(leaveTypeLabel('anything'), 'חופשה');
+    });
+
+    it('labels a grid day by who carries it, never by the raw code', () => {
+      assert.equal(describeLeaveDay(null), null);
+      assert.equal(describeLeaveDay({ leave_type: 'system_paid', day_portion: 'full_day', entry: { leave_type: 'system_paid' } }), 'חופשה · על חשבון המערכת');
+      assert.equal(describeLeaveDay({ leave_type: 'employee_paid', day_portion: 'first_half' }), 'חופשה · חצי יום · על חשבון העובד');
+      assert.equal(describeLeaveDay({ leave_type: 'half_day', day_portion: 'first_half' }), 'חופשה · חצי יום');
+    });
+
+    it('turns the save refusals into Hebrew guidance', () => {
+      assert.match(leaveSaveErrorMessage({ data: { message: 'leave_conflicts_with_attendance' } }), /שעות/);
+      assert.match(leaveSaveErrorMessage({ data: { message: 'leave_conflicts_with_lessons' } }), /שיעורים/);
+      assert.match(leaveSaveErrorMessage({ data: { message: 'leave_conflicts_with_existing_leave' } }), /כבר רשומה/);
+      assert.equal(leaveSaveErrorMessage({ message: 'boom' }), 'boom');
+      assert.equal(leaveSaveErrorMessage(null), 'שמירת החופשה נכשלה.');
+    });
+
+    it('shows the balance as one line with the figures behind it', () => {
+      assert.equal(leaveBalanceText(null), null);
+      const text = leaveBalanceText({ year: 2026, quota: 12, carryIn: 2, allocations: 0, adjustments: -1, used: 3.5, remaining: 9.5 });
+      assert.equal(text.line, 'יתרת חופשה 2026: 9.5 ימים · נוצלו 3.5');
+      assert.equal(text.details.length, 5);
+      assert.ok(text.details.includes('צבירה משנה קודמת: 2'));
+    });
   });
 });
