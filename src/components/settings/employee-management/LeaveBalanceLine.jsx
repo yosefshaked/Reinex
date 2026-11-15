@@ -18,15 +18,15 @@ import { authenticatedFetch } from '@/lib/api-client.js';
 import { leaveBalanceText } from './attendance-month-grid.js';
 
 const BALANCE_EVENT_TYPES = [
-  { value: 'allocation', label: 'הקצאה' },
-  { value: 'carryover', label: 'צבירה משנה קודמת' },
-  { value: 'adjustment', label: 'התאמה' },
-  { value: 'correction', label: 'תיקון' },
-  { value: 'reversal', label: 'היפוך' },
+  { value: 'allocation', label: 'הקצאה', effect: 'מוסיף ימים' },
+  { value: 'carryover', label: 'צבירה משנה קודמת', effect: 'מוסיף ימים' },
+  { value: 'adjustment', label: 'התאמה', effect: 'מוסיף, או מוריד במספר שלילי' },
+  { value: 'correction', label: 'תיקון', effect: 'מוסיף, או מוריד במספר שלילי' },
+  { value: 'reversal', label: 'היפוך', effect: 'מוסיף, או מוריד במספר שלילי' },
 ];
 
 function balanceEventLabel(value) {
-  return BALANCE_EVENT_TYPES.find((option) => option.value === value)?.label || value || 'תנועה';
+  return BALANCE_EVENT_TYPES.find((option) => option.value === value)?.label || value || 'שינוי';
 }
 
 // Usage rows are written by recording leave; only the office's own movements can be removed here.
@@ -67,11 +67,11 @@ export default function LeaveBalanceLine({ summary, balanceEvents, employeeId, o
         },
       });
       setForm({ eventType: 'carryover', quantityDays: '', effectiveDate: '', notes: '' });
-      toast.success('תנועת היתרה נשמרה.');
+      toast.success('שינוי היתרה נשמר.');
       await onChanged?.();
     } catch (error) {
       console.error('Failed to save leave balance event', error);
-      toast.error(error?.message || 'שמירת תנועת היתרה נכשלה.');
+      toast.error(error?.message || 'שמירת שינוי היתרה נכשלה.');
     } finally {
       setSaving(false);
     }
@@ -85,11 +85,11 @@ export default function LeaveBalanceLine({ summary, balanceEvents, employeeId, o
         method: 'DELETE',
         body: { entity_type: 'balance_event', org_id: orgId, id },
       });
-      toast.success('תנועת היתרה הוסרה.');
+      toast.success('שינוי היתרה הוסר.');
       await onChanged?.();
     } catch (error) {
       console.error('Failed to delete leave balance event', error);
-      toast.error(error?.message || 'מחיקת תנועת היתרה נכשלה.');
+      toast.error(error?.message || 'מחיקת שינוי היתרה נכשלה.');
     } finally {
       setSaving(false);
     }
@@ -107,11 +107,11 @@ export default function LeaveBalanceLine({ summary, balanceEvents, employeeId, o
       </Tooltip>
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
-          <Button type="button" size="sm" variant="ghost" className="h-7 px-2 text-xs">תנועת יתרה</Button>
+          <Button type="button" size="sm" variant="ghost" className="h-7 px-2 text-xs">שינוי יתרה</Button>
         </PopoverTrigger>
         <PopoverContent dir="rtl" align="start" className="w-80 space-y-3">
           <div>
-            <p className="text-sm font-bold text-slate-900">תנועות יתרה ידניות · {summary.year}</p>
+            <p className="text-sm font-bold text-slate-900">שינויי יתרה ידניים · {summary.year}</p>
             <p className="text-xs text-slate-500">הקצאה, צבירה או תיקון שלא באים מרישום חופשה.</p>
           </div>
           {manualEvents.length ? (
@@ -132,7 +132,11 @@ export default function LeaveBalanceLine({ summary, balanceEvents, employeeId, o
               <Select value={form.eventType} onValueChange={(value) => setForm((current) => ({ ...current, eventType: value }))} disabled={saving}>
                 <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {BALANCE_EVENT_TYPES.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
+                  {BALANCE_EVENT_TYPES.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label} <span className="text-[11px] text-slate-500">· {option.effect}</span>
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>

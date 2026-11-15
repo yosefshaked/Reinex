@@ -45,11 +45,30 @@ function formatMonth(date) {
  * per employee with a fixed day value, which is a dated leave_day rate set in the same box.
  */
 const LEAVE_PAY_METHODS = [
-  { value: '', label: 'ברירת מחדל ארגונית', hint: 'לפי הגדרת הארגון לתשלום חופשה.' },
+  { value: '', label: 'ברירת המחדל של הארגון' },
   { value: 'legal', label: 'ממוצע חוקי' },
   { value: 'avg_hourly_x_avg_day_hours', label: 'ממוצע היסטורי' },
-  { value: 'fixed_rate', label: 'ערך קבוע ליום', hint: 'סכום קבוע ליום חופשה, עם התאריך שממנו הוא חל.' },
+  { value: 'fixed_rate', label: 'ערך קבוע ליום' },
 ];
+
+/** What a leave day is worth under each method, in words, using the organisation's own settings. */
+function describeLeavePayMethod(method, policy) {
+  const months = Number(policy?.lookback_months) > 0 ? Number(policy.lookback_months) : 3;
+  const period = months === 1 ? 'בחודש האחרון' : `ב-${months} החודשים האחרונים`;
+  if (method === 'legal') {
+    return policy?.legal_allow_12m_if_better === false
+      ? `השכר היומי הממוצע בימים שעבד/ה ${period}.`
+      : `השכר היומי הממוצע בימים שעבד/ה ${period}, או ב-12 החודשים האחרונים אם שם הממוצע גבוה יותר.`;
+  }
+  if (method === 'avg_hourly_x_avg_day_hours') {
+    return `השכר היומי הממוצע בימים שעבד/ה ${period} בלבד, בלי השוואה ל-12 חודשים.`;
+  }
+  if (method === 'fixed_rate') {
+    return 'סכום קבוע ליום חופשה. הסכום והתאריך שממנו הוא חל נקבעים כאן.';
+  }
+  const orgDefault = LEAVE_PAY_METHODS.find((option) => option.value === policy?.default_method)?.label || 'ממוצע חוקי';
+  return `כמו שאר העובדים בארגון. כרגע: "${orgDefault}".`;
+}
 
 function getLeavePayMethodLabel(method) {
   return (LEAVE_PAY_METHODS.find((option) => option.value === (method || '')) || LEAVE_PAY_METHODS[0]).label;
@@ -59,7 +78,7 @@ function getLeavePayMethodLabel(method) {
  * The leave-pay box: the method as text with "שינוי", and for the fixed method the dated day value.
  * The method is saved on the employee through PUT /api/instructors (the same field the card used).
  */
-function LeavePayBox({ employee, orgId, session, onSaved, onEmployeeChanged }) {
+function LeavePayBox({ employee, orgId, session, policy, onSaved, onEmployeeChanged }) {
   const [method, setMethod] = useState(employee?.leave_pay_method || '');
   const [choice, setChoice] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -91,17 +110,23 @@ function LeavePayBox({ employee, orgId, session, onSaved, onEmployeeChanged }) {
   }
 
   return (
-    <div className="mb-4 space-y-2 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3" data-leave-pay-box>
-      <div className="text-[11px] text-slate-500">תשלום חופשה</div>
+    <section className="space-y-2 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm" data-leave-pay-box>
+      <div>
+        <h3 className="text-sm font-bold text-slate-900">תשלום חופשה</h3>
+        <p className="text-xs text-slate-500">כמה שווה יום חופשה בתשלום של העובד/ת.</p>
+      </div>
       <div className="grid grid-cols-[5rem_minmax(0,1fr)] items-center gap-2">
         <span className="text-sm text-slate-600">שיטה</span>
         <span className="flex items-center gap-2">
-          <span className="font-bold text-slate-900" title={LEAVE_PAY_METHODS.find((option) => option.value === method)?.hint}>{getLeavePayMethodLabel(method)}</span>
+          <span className="font-bold text-slate-900">{getLeavePayMethodLabel(method)}</span>
           <Button type="button" size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => setChoice(choice === null ? method : null)} disabled={saving}>
             שינוי
           </Button>
         </span>
       </div>
+      {choice === null ? (
+        <p className="text-xs text-slate-500" data-leave-pay-explain>{describeLeavePayMethod(method, policy)}</p>
+      ) : null}
       {choice !== null ? (
         <div className="space-y-2 rounded-xl border border-dashed border-slate-300 bg-white p-3">
           <div className="grid gap-1" role="radiogroup" aria-label="שיטת תשלום חופשה">
@@ -113,10 +138,10 @@ function LeavePayBox({ employee, orgId, session, onSaved, onEmployeeChanged }) {
                 aria-checked={choice === option.value}
                 onClick={() => setChoice(option.value)}
                 disabled={saving}
-                title={option.hint}
                 className={`rounded-lg border px-3 py-1.5 text-start text-sm transition ${choice === option.value ? 'border-blue-500 bg-blue-50 font-semibold text-slate-900' : 'border-slate-200 text-slate-700 hover:bg-slate-50'}`}
               >
-                {option.label}
+                <span className="block">{option.label}</span>
+                <span className="block text-xs font-normal text-slate-500">{describeLeavePayMethod(option.value, policy)}</span>
               </button>
             ))}
           </div>
@@ -135,13 +160,14 @@ function LeavePayBox({ employee, orgId, session, onSaved, onEmployeeChanged }) {
           <LeaveDayRateEditor employeeId={employee?.id} orgId={orgId} session={session} onSaved={onSaved} />
         </div>
       ) : null}
-    </div>
+    </section>
   );
 }
 
 export default function EmployeeFinancePanel({ employee, orgId, session, onEditEmployee, onEmployeeChanged }) {
   const [monthDate, setMonthDate] = useState(() => startOfMonth(new Date()));
   const [preview, setPreview] = useState(null);
+  const [leavePolicy, setLeavePolicy] = useState(null);
   const [adjustments, setAdjustments] = useState([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -188,6 +214,7 @@ export default function EmployeeFinancePanel({ employee, orgId, session, onEditE
       ]);
 
       setPreview(Array.isArray(payrollPayload?.employees) ? payrollPayload.employees[0] || null : null);
+      setLeavePolicy(payrollPayload?.leave_pay_policy || null);
       setAdjustments(Array.isArray(adjustmentsPayload?.entries) ? adjustmentsPayload.entries : []);
     } catch (error) {
       console.error('Failed to load finance data', error);
@@ -260,6 +287,15 @@ export default function EmployeeFinancePanel({ employee, orgId, session, onEditE
   }
 
   return (
+    <div className="space-y-3 [font-family:inherit]">
+    <LeavePayBox
+      employee={employee}
+      orgId={orgId}
+      session={session}
+      policy={leavePolicy}
+      onSaved={loadData}
+      onEmployeeChanged={onEmployeeChanged}
+    />
     <div className="grid gap-3 xl:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)] [font-family:inherit]">
       <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm [font-family:inherit]">
         <div className="mb-3 flex items-center justify-between gap-3">
@@ -273,14 +309,6 @@ export default function EmployeeFinancePanel({ employee, orgId, session, onEditE
             <Button size="sm" variant="outline" onClick={() => setMonthDate(addMonths(monthDate, 1))}>הבא</Button>
           </div>
         </div>
-
-        <LeavePayBox
-          employee={employee}
-          orgId={orgId}
-          session={session}
-          onSaved={loadData}
-          onEmployeeChanged={onEmployeeChanged}
-        />
 
         {onEditEmployee ? (
           <div className="mb-4">
@@ -413,6 +441,7 @@ export default function EmployeeFinancePanel({ employee, orgId, session, onEditE
           ? `${formatCurrency(pendingRemoval.amount)} בתאריך ${pendingRemoval.effective_date} יימחק, והשכר של החודש יחושב מחדש בלעדיו.`
           : ''}
       />
+    </div>
     </div>
   );
 }

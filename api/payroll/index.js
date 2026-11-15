@@ -150,6 +150,7 @@ export default async function (context, req) {
 
   return respond(context, 200, {
     period_start: resolvedStart,
+    leave_pay_policy: policies.leavePayPolicy,
     period_end: resolvedEnd,
     employees: previews,
     totals,
