@@ -7,6 +7,7 @@ import { useMemo, useState, useEffect } from 'react';
 import { useOrg } from '@/org/OrgContext';
 import { useCalendarInstructors } from '../../hooks/useCalendar';
 import { useTemplateMutations, useTemplateOverrides } from '../../hooks/useTemplates';
+import { useMissingRateForSelection } from '../../hooks/useMissingRateForSelection.js';
 import { Loader2, AlertCircle, Trash2, Pencil, X, RotateCcw, UserPlus } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { authenticatedFetch } from '@/lib/api-client.js';
@@ -87,7 +88,13 @@ export function TemplateEditDialog({ template, open, onClose, onUpdate, onFixAva
   const [newOverrideDate, setNewOverrideDate] = useState('');
 
   const [error, setError] = useState(null);
-  const [missingRate, setMissingRate] = useState(null);
+  // Cleared by itself when the instructor, service or start date changes (the refusal was for the old
+  // ones). Re-activation is checked on its own new start date.
+  const [missingRate, setMissingRate, clearMissingRate] = useMissingRateForSelection({
+    instructorId: formData.instructor_employee_id,
+    serviceId: formData.service_id,
+    date: isReactivating ? reactivationRange.valid_from : formData.valid_from,
+  });
 
   function formatDate(dateString) {
     if (!dateString) return '—';
@@ -126,9 +133,9 @@ export function TemplateEditDialog({ template, open, onClose, onUpdate, onFixAva
       });
       setNewOverrideDate('');
       setError(null);
-      setMissingRate(null);
+      clearMissingRate();
     }
-  }, [template, open]);
+  }, [template, open, clearMissingRate]);
 
   // Fetch services
   useEffect(() => {
@@ -274,7 +281,7 @@ export function TemplateEditDialog({ template, open, onClose, onUpdate, onFixAva
 
   async function handleSave() {
     setError(null);
-    setMissingRate(null);
+    clearMissingRate();
 
     if (missingCapability) {
       setError('לא ניתן לשמור בלי יכולת שירות פעילה למדריך/ה עבור השירות שנבחר.');
@@ -370,7 +377,7 @@ export function TemplateEditDialog({ template, open, onClose, onUpdate, onFixAva
 
   async function handleReactivate() {
     setError(null);
-    setMissingRate(null);
+    clearMissingRate();
 
     if (!reactivationRange.valid_from) {
       setError('כדי להפעיל מחדש יש לבחור טווח תוקף חדש (תוקף מ- הוא שדה חובה).');
@@ -787,7 +794,7 @@ export function TemplateEditDialog({ template, open, onClose, onUpdate, onFixAva
               </div>
             </div>
 
-            <MissingRateNotice missingRate={missingRate} onRateAdded={() => setMissingRate(null)} />
+            <MissingRateNotice missingRate={missingRate} onRateAdded={() => clearMissingRate()} />
 
             {error && (
               <Alert variant="destructive">
@@ -968,7 +975,7 @@ export function TemplateEditDialog({ template, open, onClose, onUpdate, onFixAva
               </div>
             </div>
 
-            <MissingRateNotice missingRate={missingRate} onRateAdded={() => setMissingRate(null)} />
+            <MissingRateNotice missingRate={missingRate} onRateAdded={() => clearMissingRate()} />
 
             {error && (
               <Alert variant="destructive">

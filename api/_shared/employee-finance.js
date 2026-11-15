@@ -3,7 +3,7 @@
 import { isAdminOrOffice, normalizeString, withOrgScope } from './org-bff.js';
 import { coerceAgorot } from './currency.js';
 import { shouldParticipantTriggerInstructorCompensation } from './calendar-workflow-decisions.js';
-import { buildUtcBoundsForTimezoneDateRange } from './instructor-availability.js';
+import { buildUtcBoundsForTimezoneDateRange, getCurrentDateInTimezone } from './instructor-availability.js';
 import {
   LESSON_PAY_BASES,
   PAY_BASIS,
@@ -955,6 +955,94 @@ export async function validateInstructorRateForLesson(
   }
 
   return null;
+}
+
+/**
+ * The rate check as an endpoint uses it: null when the lesson pays, otherwise what to answer.
+ * - a missing rate: { status: 422, body } with the body of validateInstructorRateForLesson;
+ * - a failed lookup: { status: 500, body: { message: 'failed_to_validate_instructor_rate' }, error },
+ *   which the endpoint sends through its own tracked error responder with `error`.
+ *
+ * @param {any} tenantClient
+ * @param {Parameters<typeof validateInstructorRateForLesson>[1]} params
+ * @param {{ log?: { error?: Function } } | null} [context]
+ * @returns {Promise<null | { status: 422, body: any } | { status: 500, body: { message: string }, error: any }>}
+ */
+export async function checkInstructorRateForLesson(tenantClient, params, context = null) {
+  try {
+    const body = await validateInstructorRateForLesson(tenantClient, params);
+    return body ? { status: 422, body } : null;
+  } catch (error) {
+    context?.log?.error?.('failed to check instructor rate for lesson', {
+      message: /** @type {any} */ (error)?.message,
+      instructor_employee_id: params?.instructorEmployeeId || null,
+      service_id: params?.serviceId || null,
+    });
+    return { status: 500, body: { message: 'failed_to_validate_instructor_rate' }, error };
+  }
+}
+
+/**
+ * Whether moving a lesson changes the day it is paid on. Pay is counted on the lesson's date in the
+ * scheduling timezone (toRateDateKey, as pay-calculation does), not on its UTC date: a lesson at
+ * 01:00 Israel time moved to 10:00 the day before keeps its UTC date but changes its pay date.
+ *
+ * @param {unknown} previousDatetimeStart
+ * @param {unknown} nextDatetimeStart
+ */
+export function hasLessonPayDateChanged(previousDatetimeStart, nextDatetimeStart) {
+  if (!nextDatetimeStart) return false;
+  return toRateDateKey(nextDatetimeStart) !== toRateDateKey(previousDatetimeStart);
+}
+
+/**
+ * The date a recurring template's rate is checked on: the first lesson it will make, which is its
+ * start date, or today when it started in the past (lessons already in the calendar are not made again).
+ *
+ * @param {string | null | undefined} validFrom 'YYYY-MM-DD'
+ * @param {string | null | undefined} today 'YYYY-MM-DD' in the scheduling timezone
+ */
+export function resolveTemplateRateCheckDate(validFrom, today) {
+  return validFrom && today && validFrom > today ? validFrom : (today || validFrom || null);
+}
+
+/**
+ * Whether a template edit is a person's choice of who teaches what from when, and so needs a rate:
+ * a new instructor, service or start date, or switching the template back on. Adding or removing
+ * riders, or changing only the time, is not.
+ *
+ * @param {{ instructor_employee_id?: any, service_id?: any, valid_from?: any, is_active?: any }} existingTemplate
+ * @param {{ instructor_employee_id?: any, service_id?: any, valid_from?: any, is_active?: any }} updates
+ */
+export function templateUpdateNeedsRateCheck(existingTemplate, updates) {
+  const existing = existingTemplate || {};
+  const next = updates || {};
+  const nextInstructorId = next.instructor_employee_id ?? existing.instructor_employee_id;
+  const nextServiceId = next.service_id ?? existing.service_id;
+  const nextValidFrom = next.valid_from ?? existing.valid_from;
+  return nextInstructorId !== existing.instructor_employee_id
+    || nextServiceId !== existing.service_id
+    || nextValidFrom !== existing.valid_from
+    || (next.is_active === true && !existing.is_active);
+}
+
+/**
+ * The rate check for a recurring template (see resolveTemplateRateCheckDate for the date), shaped
+ * like checkInstructorRateForLesson.
+ *
+ * @param {any} tenantClient
+ * @param {string} orgId
+ * @param {{ instructorEmployeeId: any, serviceId: any, validFrom: any, today?: string | null }} params `today` defaults to
+ *   today in the scheduling timezone.
+ * @param {{ log?: { error?: Function } } | null} [context]
+ */
+export function checkTemplateInstructorRate(tenantClient, orgId, { instructorEmployeeId, serviceId, validFrom, today }, context = null) {
+  return checkInstructorRateForLesson(tenantClient, {
+    orgId,
+    instructorEmployeeId,
+    serviceId,
+    lessonDate: resolveTemplateRateCheckDate(validFrom, today === undefined ? getCurrentDateInTimezone() : today),
+  }, context);
 }
 
 function formatHebrewDate(dateKey) {

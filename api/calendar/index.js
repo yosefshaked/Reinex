@@ -21,7 +21,12 @@ import {
   withOrgScope,
 } from '../_shared/org-bff.js';
 import { parseJsonBodyWithLimit } from '../_shared/validation.js';
-import { assertNoLeaveForLesson, toDateKey, validateInstructorRateForLesson } from '../_shared/employee-finance.js';
+import {
+  assertNoLeaveForLesson,
+  checkInstructorRateForLesson,
+  hasLessonPayDateChanged,
+  toDateKey,
+} from '../_shared/employee-finance.js';
 import BillingLedgerService from '../_shared/BillingLedgerService.js';
 import { logTenantAuditEvent, TENANT_AUDIT_RETENTION } from '../_shared/tenant-audit.js';
 import { syncLessonClosureState } from '../_shared/calendar-workflow.js';
@@ -992,21 +997,14 @@ async function handleCreateInstance(context, body, dbContext, supabase, authCont
 
   // A person choosing an instructor, service and date must choose one that pays. Lessons the
   // system makes (template generation, imports) are written elsewhere and never pass through here.
-  let rateError;
-  try {
-    rateError = await validateInstructorRateForLesson(client, {
-      orgId,
-      instructorEmployeeId: body.instructor_employee_id,
-      serviceId: body.service_id,
-      lessonDate: body.datetime_start,
-    });
-  } catch (rateCheckError) {
-    context.log?.error?.('calendar/instances failed to check instructor rate on create', { message: rateCheckError?.message });
-    return respondTracked(context, 500, { message: 'failed_to_validate_instructor_rate' }, undefined, { error: rateCheckError });
-  }
-  if (rateError) {
-    return respond(context, 422, rateError);
-  }
+  const rateCheck = await checkInstructorRateForLesson(client, {
+    orgId,
+    instructorEmployeeId: body.instructor_employee_id,
+    serviceId: body.service_id,
+    lessonDate: body.datetime_start,
+  }, context);
+  if (rateCheck?.error) return respondTracked(context, 500, rateCheck.body, undefined, { error: rateCheck.error });
+  if (rateCheck) return respond(context, 422, rateCheck.body);
 
   // Create lesson instance
   const instanceData = {
@@ -1377,31 +1375,23 @@ async function handleUpdateInstance(context, req, body, dbContext, supabase, aut
   // Moving a lesson to another instructor, service or day is a person's choice, so it must land on
   // a combination that pays. Marking the outcome or completing the lesson is never blocked.
   const instructorChanged = String(targetInstructorId || '') !== String(existingInstance.instructor_employee_id || '');
-  const lessonDateChanged = Boolean(body.datetime_start)
-    && targetDate !== toDateKey(existingInstance.datetime_start);
+  // Pay is counted on the lesson's date in Israel, so compare that date, not the UTC one.
+  const lessonDateChanged = hasLessonPayDateChanged(existingInstance.datetime_start, body.datetime_start);
   if (instructorChanged || serviceChanged || lessonDateChanged) {
-    let rateError;
-    try {
-      rateError = await validateInstructorRateForLesson(client, {
-        orgId,
-        instructorEmployeeId: targetInstructorId,
-        serviceId: targetServiceId,
-        lessonDate: body.datetime_start || existingInstance.datetime_start,
-      });
-    } catch (rateCheckError) {
-      context.log?.error?.('calendar/instances failed to check instructor rate on update', {
-        message: rateCheckError?.message,
-        instanceId: body.id,
-      });
+    const rateCheck = await checkInstructorRateForLesson(client, {
+      orgId,
+      instructorEmployeeId: targetInstructorId,
+      serviceId: targetServiceId,
+      lessonDate: body.datetime_start || existingInstance.datetime_start,
+    }, context);
+    if (rateCheck?.error) {
       return respondTrackedCalendarError({
-        message: 'failed_to_validate_instructor_rate',
-        error: rateCheckError,
+        message: rateCheck.body.message,
+        error: rateCheck.error,
         metadata: { instructor_employee_id: targetInstructorId, service_id: targetServiceId },
       });
     }
-    if (rateError) {
-      return respond(context, 422, rateError);
-    }
+    if (rateCheck) return respond(context, 422, rateCheck.body);
   }
 
   if (isPreviewUpdate) {

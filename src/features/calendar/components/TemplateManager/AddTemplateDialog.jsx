@@ -8,6 +8,7 @@ import { useOrg } from '@/org/OrgContext';
 import { useStudents } from '@/hooks/useOrgData';
 import { useCalendarInstructors } from '../../hooks/useCalendar';
 import { useTemplateMutations } from '../../hooks/useTemplates';
+import { useMissingRateForSelection } from '../../hooks/useMissingRateForSelection.js';
 import { Loader2, AlertCircle, UserPlus, X } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { authenticatedFetch } from '@/lib/api-client.js';
@@ -113,7 +114,12 @@ export function AddTemplateDialog({
   });
 
   const [error, setError] = useState(null);
-  const [missingRate, setMissingRate] = useState(null);
+  // Cleared by itself when the instructor, service or start date changes (the refusal was for the old ones).
+  const [missingRate, setMissingRate, clearMissingRate] = useMissingRateForSelection({
+    instructorId: formData.instructor_employee_id,
+    serviceId: formData.service_id,
+    date: formData.valid_from,
+  });
   const [requiredFormWarnings, setRequiredFormWarnings] = useState(null);
   const activeServices = useMemo(
     () => (services || []).filter((s) => s?.is_active === true),
@@ -208,10 +214,10 @@ export function AddTemplateDialog({
         valid_until: '',
       });
       setError(null);
-      setMissingRate(null);
+      clearMissingRate();
       setRequiredFormWarnings(null);
     }
-  }, [open, defaultInstructorId, defaultDayOfWeek, defaultClientProfileId, defaultStudentId, defaultServiceId, defaultTimeOfDay, defaultDurationMinutes]);
+  }, [open, defaultInstructorId, defaultDayOfWeek, defaultClientProfileId, defaultStudentId, defaultServiceId, defaultTimeOfDay, defaultDurationMinutes, clearMissingRate]);
 
   // Once students load, pre-populate defaultStudentId
   useEffect(() => {
@@ -381,7 +387,7 @@ export function AddTemplateDialog({
   async function handleSubmit(e, { acknowledgeRequiredFormWarnings = false } = {}) {
     e?.preventDefault();
     setError(null);
-    setMissingRate(null);
+    clearMissingRate();
 
     const hasStudents = selectedStudents.length > 0;
     const hasClientProfile = Boolean(formData.client_profile_id && !hasStudents);
@@ -885,7 +891,7 @@ export function AddTemplateDialog({
             </Alert>
           )}
 
-          <MissingRateNotice missingRate={missingRate} onRateAdded={() => setMissingRate(null)} />
+          <MissingRateNotice missingRate={missingRate} onRateAdded={() => clearMissingRate()} />
 
           {/* Error */}
           {error && (

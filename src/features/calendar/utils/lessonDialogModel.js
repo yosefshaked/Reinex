@@ -138,6 +138,26 @@ export function readMissingLessonRate(error) {
   };
 }
 
+/**
+ * The instructor, service and date a missing-rate notice is about, as one comparable key. The forms
+ * show a refusal only while the fields still hold that combination: once the user picks another
+ * instructor, service or date the notice (and its "הוספת תעריף") would be for the wrong one.
+ *
+ * @param {{ instructorId?: unknown, serviceId?: unknown, date?: unknown }} [selection]
+ */
+export function buildRateSelectionKey({ instructorId, serviceId, date } = {}) {
+  return [instructorId, serviceId, date].map((value) => String(value ?? '').trim()).join('|');
+}
+
+/**
+ * The notice to show for the current fields: the stored one when it was recorded for this same
+ * combination (`buildRateSelectionKey`), otherwise null.
+ */
+export function pickMissingRateForSelection(stored, selectionKey) {
+  if (!stored?.missingRate) return null;
+  return stored.selectionKey === selectionKey ? stored.missingRate : null;
+}
+
 export function resolveMutationError(error) {
   const supportMessage = resolveApiErrorMessage(error);
   if (extractSupportCode(supportMessage)) {

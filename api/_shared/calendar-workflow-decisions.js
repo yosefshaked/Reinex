@@ -53,8 +53,17 @@ export function readParticipantWorkflowMetadata(metadata) {
  * pays; a choice made in the absence form wins; otherwise the policy in force at the mark decides.
  * `instructorEarningsApplies` is that policy for the status (null when it was not read, which keeps
  * the old 'unknown' and with it the live policy).
+ *
+ * A re-mark that keeps the status (a notes edit, a re-confirm) and carries no explicit choice keeps
+ * the decision already stored (`previous.decision`), so a policy changed since the first mark does
+ * not rewrite what that lesson paid. A changed status is a new outcome and is decided afresh.
  */
-export function resolveMarkedInstructorCompensationDecision(participantStatus, requestedDecision, instructorEarningsApplies = null) {
+export function resolveMarkedInstructorCompensationDecision(
+  participantStatus,
+  requestedDecision,
+  instructorEarningsApplies = null,
+  previous = null,
+) {
   const status = normalizeString(participantStatus).toLowerCase();
   if (!RESOLVED_PARTICIPANT_STATUSES.has(status)) {
     return 'unknown';
@@ -66,10 +75,47 @@ export function resolveMarkedInstructorCompensationDecision(participantStatus, r
   if (requested === 'compensated' || requested === 'not_compensated') {
     return requested;
   }
+  const kept = readKeptInstructorCompensationDecision(status, previous);
+  if (kept) {
+    return kept;
+  }
   if (typeof instructorEarningsApplies === 'boolean') {
     return instructorEarningsApplies ? 'compensated' : 'not_compensated';
   }
   return 'unknown';
+}
+
+function readKeptInstructorCompensationDecision(status, previous) {
+  const previousStatus = normalizeString(previous?.status).toLowerCase();
+  const previousDecision = normalizeWorkflowDecision(previous?.decision, 'unknown');
+  if (previousStatus !== status) return null;
+  return previousDecision === 'compensated' || previousDecision === 'not_compensated' ? previousDecision : null;
+}
+
+/**
+ * Whether a mark leaves the stored pay decision as it is (see resolveMarkedInstructorCompensationDecision):
+ * same resolved non-attended status, no explicit choice in the request, and an explicit decision on file.
+ * The endpoint then also keeps when and by whom it was decided.
+ */
+export function isStoredInstructorCompensationDecisionKept(participantStatus, requestedDecision, previous = null) {
+  const status = normalizeString(participantStatus).toLowerCase();
+  if (!RESOLVED_PARTICIPANT_STATUSES.has(status) || status === 'attended') return false;
+  const requested = normalizeWorkflowDecision(requestedDecision, 'unknown');
+  if (requested === 'compensated' || requested === 'not_compensated') return false;
+  return Boolean(readKeptInstructorCompensationDecision(status, previous));
+}
+
+/**
+ * The previous status and pay decision of a participant row, in the shape the two functions above take.
+ */
+export function readPreviousInstructorCompensation(participant) {
+  const stored = readParticipantWorkflowMetadata(participant?.metadata).instructor_compensation;
+  return {
+    status: normalizeString(participant?.participant_status).toLowerCase() || null,
+    decision: stored.decision,
+    decided_at: stored.decided_at,
+    decided_by: stored.decided_by,
+  };
 }
 
 export function shouldParticipantTriggerInstructorCompensation(participant, policies) {

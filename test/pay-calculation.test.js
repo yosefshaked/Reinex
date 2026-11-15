@@ -1,11 +1,17 @@
 // Pay computed from the facts (api/_shared/pay-calculation.js): the rules for one lesson as pure
 // tests, and the loader and the period total against an in-memory database.
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { describe, it } from 'node:test';
 
 import {
   DEFAULT_INSTRUCTOR_EARNINGS_POLICY,
   DEFAULT_LEAVE_PAY_POLICY,
+  checkInstructorRateForLesson,
+  checkTemplateInstructorRate,
+  hasLessonPayDateChanged,
+  resolveTemplateRateCheckDate,
+  templateUpdateNeedsRateCheck,
   validateInstructorRateForLesson,
 } from '../api/_shared/employee-finance.js';
 import {
@@ -397,5 +403,101 @@ describe('the pay of a period', () => {
     assert.equal(before.missing_rate_lesson_count, 1);
     assert.equal(after.lesson_amount, 9000);
     assert.equal(after.missing_rate_lesson_count, 0);
+  });
+});
+
+describe('the missing-rate check as endpoints use it', () => {
+  const noa = { Employees: [{ id: 'noa', org_id: ORG, first_name: 'נועה', last_name: 'לוי' }] };
+
+  it('returns null when the instructor has a rate for the service on that date', async () => {
+    assert.equal(await checkInstructorRateForLesson(createFakeClient(baseTables()), {
+      orgId: ORG, instructorEmployeeId: 'dana', serviceId: 'riding', lessonDate: '2026-10-06T08:00:00Z',
+    }), null);
+  });
+
+  it('returns the 422 body when the rate is missing', async () => {
+    const result = await checkInstructorRateForLesson(createFakeClient(baseTables(noa)), {
+      orgId: ORG, instructorEmployeeId: 'noa', serviceId: 'riding', lessonDate: '2026-10-06T08:00:00Z',
+    });
+    assert.equal(result.status, 422);
+    assert.equal(result.body.code, 'instructor_rate_not_configured');
+    assert.equal(result.body.rate_date, '2026-10-06');
+    assert.equal(result.error, undefined);
+  });
+
+  it('returns a 500 with the error, for the endpoint tracked responder, when the lookup throws', async () => {
+    const failure = new Error('db down');
+    const logged = [];
+    const brokenClient = { from() { throw failure; } };
+    const result = await checkInstructorRateForLesson(brokenClient, {
+      orgId: ORG, instructorEmployeeId: 'dana', serviceId: 'riding', lessonDate: '2026-10-06T08:00:00Z',
+    }, { log: { error: (...args) => logged.push(args) } });
+    assert.equal(result.status, 500);
+    assert.deepEqual(result.body, { message: 'failed_to_validate_instructor_rate' });
+    assert.equal(result.error, failure);
+    assert.equal(logged.length, 1);
+  });
+
+  it('a template is checked on its first lesson: its start date, or today when it started earlier', async () => {
+    assert.equal(resolveTemplateRateCheckDate('2026-12-01', '2026-11-15'), '2026-12-01');
+    assert.equal(resolveTemplateRateCheckDate('2026-09-01', '2026-11-15'), '2026-11-15');
+    assert.equal(resolveTemplateRateCheckDate('', '2026-11-15'), '2026-11-15');
+
+    const result = await checkTemplateInstructorRate(createFakeClient(baseTables(noa)), ORG, {
+      instructorEmployeeId: 'noa', serviceId: 'riding', validFrom: '2026-09-01', today: '2026-11-15',
+    });
+    assert.equal(result.status, 422);
+    assert.equal(result.body.rate_date, '2026-11-15');
+  });
+});
+
+describe('when a lesson move changes its pay date', () => {
+  it('compares the Israel date, not the UTC date, near midnight', () => {
+    // 1.10 at 01:00 Israel time is 30.9 22:00 UTC. Moved to 30.9 at 10:00 Israel (07:00 UTC): the UTC
+    // date stays 30.9, but the pay date moves from 1.10 to 30.9.
+    assert.equal(hasLessonPayDateChanged('2026-09-30T22:00:00.000Z', '2026-09-30T07:00:00.000Z'), true);
+    // 30.9 at 23:30 Israel (20:30 UTC) moved to 1.10 at 00:30 Israel (21:30 UTC, still 30.9 in UTC).
+    assert.equal(hasLessonPayDateChanged('2026-09-30T20:30:00.000Z', '2026-09-30T21:30:00.000Z'), true);
+  });
+
+  it('a new time on the same Israel day is not a date change, even across the UTC midnight', () => {
+    // 1.10 at 01:00 Israel (30.9 UTC) moved to 1.10 at 09:00 Israel (1.10 UTC).
+    assert.equal(hasLessonPayDateChanged('2026-09-30T22:00:00.000Z', '2026-10-01T06:00:00.000Z'), false);
+  });
+
+  it('no new start time is no change', () => {
+    assert.equal(hasLessonPayDateChanged('2026-10-01T06:00:00.000Z', undefined), false);
+  });
+});
+
+describe('which template edits need a rate', () => {
+  const template = { instructor_employee_id: 'dana', service_id: 'riding', valid_from: '2026-10-01', is_active: true };
+
+  it('adding or removing riders, or changing only the time, is not checked', () => {
+    assert.equal(templateUpdateNeedsRateCheck(template, {}), false);
+    assert.equal(templateUpdateNeedsRateCheck(template, { time_of_day: '10:00', day_of_week: 'sun' }), false);
+    assert.equal(templateUpdateNeedsRateCheck(template, { instructor_employee_id: 'dana' }), false, 'the same instructor is no change');
+  });
+
+  it('a new instructor, service or start date is checked', () => {
+    assert.equal(templateUpdateNeedsRateCheck(template, { instructor_employee_id: 'omer' }), true);
+    assert.equal(templateUpdateNeedsRateCheck(template, { service_id: 'therapy' }), true);
+    assert.equal(templateUpdateNeedsRateCheck(template, { valid_from: '2026-11-01' }), true);
+  });
+
+  it('switching a template back on is checked', () => {
+    const inactive = { ...template, is_active: false };
+    assert.equal(templateUpdateNeedsRateCheck(inactive, { is_active: true, valid_from: inactive.valid_from }), true);
+    assert.equal(templateUpdateNeedsRateCheck(template, { is_active: true }), false, 'already on');
+  });
+});
+
+describe('marking attendance is never blocked by a missing rate', () => {
+  // There is no endpoint-level harness for api/calendar-attendance, so this guards the module:
+  // the mark path must not call the missing-rate check (a lesson without a rate counts and pays nothing).
+  it('the attendance endpoint does not use the rate check', () => {
+    const source = readFileSync(new URL('../api/calendar-attendance/index.js', import.meta.url), 'utf8');
+    assert.doesNotMatch(source, /validateInstructorRateForLesson|checkInstructorRateForLesson|checkTemplateInstructorRate/);
+    assert.doesNotMatch(source, /instructor_rate_not_configured/);
   });
 });

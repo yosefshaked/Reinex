@@ -13,7 +13,8 @@ import {
   resolveOrgId,
   withOrgScope,
 } from '../_shared/org-bff.js';
-import { validateInstructorRateForLesson } from '../_shared/employee-finance.js';
+import { checkInstructorRateForLesson } from '../_shared/employee-finance.js';
+import { respondTrackedError } from '../_shared/error-events.js';
 
 function normalizeUuid(value) {
   const normalized = normalizeString(value);
@@ -277,24 +278,18 @@ export default async function lessonTemplateOverrides(context, req) {
     // Giving one date of a template to another instructor or service is a person's choice, so it
     // must pay, like any other lesson someone adds or moves.
     if (overrideType === 'modify' && (newInstructorEmployeeId || newServiceId)) {
-      let rateError;
-      try {
-        rateError = await validateInstructorRateForLesson(supabase, {
-          orgId,
-          instructorEmployeeId: newInstructorEmployeeId || existingTemplate.instructor_employee_id,
-          serviceId: newServiceId || existingTemplate.service_id,
-          lessonDate: targetDate,
+      const rateCheck = await checkInstructorRateForLesson(supabase, {
+        orgId,
+        instructorEmployeeId: newInstructorEmployeeId || existingTemplate.instructor_employee_id,
+        serviceId: newServiceId || existingTemplate.service_id,
+        lessonDate: targetDate,
+      }, context);
+      if (rateCheck?.error) {
+        return respondTrackedError(context, req, supabase, {
+          status: 500, message: rateCheck.body.message, orgId, userId, error: rateCheck.error, metadata: { template_id: templateId },
         });
-      } catch (rateCheckError) {
-        context.log?.error?.('lesson-template-overrides failed to check instructor rate', {
-          message: rateCheckError?.message,
-          templateId,
-        });
-        return respond(context, 500, { message: 'failed_to_validate_instructor_rate' });
       }
-      if (rateError) {
-        return respond(context, 422, rateError);
-      }
+      if (rateCheck) return respond(context, 422, rateCheck.body);
     }
 
     const { data, error } = await withOrgScope(supabase, 'lesson_template_overrides', orgId)

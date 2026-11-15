@@ -300,6 +300,9 @@ export async function buildInstanceCorrectionPreview(tenantClient, options) {
   const effectiveParticipants = applyParticipantPatches(currentParticipants, participantPatches);
   effectiveInstance.status = normalizeLessonInstanceStatus(effectiveInstance.status);
   validateCorrectionEffectiveState(effectiveInstance, effectiveParticipants);
+  // Deliberately no missing-rate block here, although a correction can change the instructor or
+  // service: a correction records what actually happened, so refusing it would leave the record
+  // wrong. A missing rate is shown in the impact (proposed pay) and in the monthly summary instead.
 
   const orgId = context.instance?.org_id;
   const rateRows = await loadRateHistoryRows(tenantClient, orgId, {

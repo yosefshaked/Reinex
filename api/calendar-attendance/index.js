@@ -35,7 +35,12 @@ import { AUDIT_CATEGORIES, logAuditEvent } from '../_shared/audit-log.js';
 import { createDashboardTask } from '../_shared/dashboard-tasks.js';
 import { listDashboardTasks, resolveDashboardTask } from '../_shared/dashboard-tasks.js';
 import { mergeParticipantWorkflowMetadata, syncLessonClosureState } from '../_shared/calendar-workflow.js';
-import { normalizeWorkflowDecision, resolveMarkedInstructorCompensationDecision } from '../_shared/calendar-workflow-decisions.js';
+import {
+  isStoredInstructorCompensationDecisionKept,
+  normalizeWorkflowDecision,
+  readPreviousInstructorCompensation,
+  resolveMarkedInstructorCompensationDecision,
+} from '../_shared/calendar-workflow-decisions.js';
 import { normalizeLessonInstanceStatus } from '../_shared/lesson-instance-status.js';
 import { getDateKeyInTimezone } from '../_shared/instructor-availability.js';
 import { buildAttendanceTransitionAuditChanges } from '../_shared/attendance-audit.js';
@@ -175,7 +180,7 @@ async function recordGraceCancellationRequest(client, orgId, {
 function buildParticipantWorkflowDecisionState(
   participantStatus,
   requestedInstructorCompensationDecision,
-  { studentBillingApplies = null, instructorEarningsApplies = null } = {},
+  { studentBillingApplies = null, instructorEarningsApplies = null, previousInstructorCompensation = null } = {},
 ) {
   if (participantStatus === 'scheduled') {
     return {
@@ -205,6 +210,7 @@ function buildParticipantWorkflowDecisionState(
         participantStatus,
         requestedInstructorCompensationDecision,
         instructorEarningsApplies,
+        previousInstructorCompensation,
       ),
       reason: participantStatus,
     },
@@ -227,6 +233,12 @@ function buildParticipantWorkflowPatch(
     requestedInstructorCompensationDecision,
     options,
   );
+  const previous = options.previousInstructorCompensation || null;
+  const keepsInstructorCompensation = isStoredInstructorCompensationDecisionKept(
+    participantStatus,
+    requestedInstructorCompensationDecision,
+    previous,
+  );
   return {
     student_billing: {
       ...decisionState.student_billing,
@@ -237,8 +249,10 @@ function buildParticipantWorkflowPatch(
     instructor_compensation: {
       ...decisionState.instructor_compensation,
       decision: normalizeWorkflowDecision(decisionState.instructor_compensation?.decision, 'unknown'),
-      decided_at: decidedAt,
-      decided_by: userId,
+      // A kept decision keeps when and by whom it was made.
+      ...(keepsInstructorCompensation
+        ? { decided_at: previous.decided_at ?? decidedAt, decided_by: previous.decided_by ?? userId }
+        : { decided_at: decidedAt, decided_by: userId }),
     },
     hmo_claim: {
       ...decisionState.hmo_claim,
@@ -292,6 +306,7 @@ function projectParticipantsForStatusChange(
       {
         studentBillingApplies: statusRequirements?.student_billing_applies,
         instructorEarningsApplies: statusRequirements?.instructor_earnings_applies ?? null,
+        previousInstructorCompensation: readPreviousInstructorCompensation(row),
       },
     );
     return {
@@ -1095,10 +1110,23 @@ async function handleMarkAttendance(context, body, dbContext, userId, isAdmin, a
       'unknown',
     );
 
+    // What this participant was marked and paid before: a re-mark with the same status and no
+    // explicit choice keeps that decision instead of re-reading today's policy.
+    const previousInstructorCompensation = readPreviousInstructorCompensation(participant);
+    const keepsStoredInstructorCompensation = isStoredInstructorCompensationDecisionKept(
+      participantStatus,
+      requestedInstructorCompensationDecision,
+      previousInstructorCompensation,
+    );
+
     if (participantStatus !== 'scheduled' && participantStatus !== 'attended') {
       statusRequirements = await getAttendanceStatusRequirements(client, orgId, participantStatus);
 
-      if (statusRequirements.requires_instructor_compensation_decision && !['compensated', 'not_compensated'].includes(requestedInstructorCompensationDecision)) {
+      if (
+        statusRequirements.requires_instructor_compensation_decision
+        && !keepsStoredInstructorCompensation
+        && !['compensated', 'not_compensated'].includes(requestedInstructorCompensationDecision)
+      ) {
         return respond(context, 400, {
           message: 'missing_instructor_compensation_decision',
           code: 'missing_instructor_compensation_decision',
@@ -1164,6 +1192,7 @@ async function handleMarkAttendance(context, body, dbContext, userId, isAdmin, a
       {
         studentBillingApplies: statusRequirements?.student_billing_applies,
         instructorEarningsApplies: statusRequirements?.instructor_earnings_applies ?? null,
+        previousInstructorCompensation,
       },
     );
     const metadataBase = participantUpdate.metadata && typeof participantUpdate.metadata === 'object'

@@ -9,6 +9,7 @@ import {
   DEFAULT_BILLING_POLICY,
   DEFAULT_INSTRUCTOR_EARNINGS_POLICY,
   buildConflictLines,
+  buildRateSelectionKey,
   buildSchedulingOverrideMetadata,
   deriveDisplayWorkflowDecisions,
   formatAgorotPreview,
@@ -23,6 +24,7 @@ import {
   isResolvedParticipantStatus,
   normalizeInstanceStatus,
   parseIsoDateSafe,
+  pickMissingRateForSelection,
   readMissingLessonRate,
   resolveClosureStepState,
   resolveLatestWorkflowState,
@@ -406,6 +408,33 @@ describe('lessonDialogModel: readMissingLessonRate', () => {
     assert.equal(readMissingLessonRate(apiError({ message: 'capacity_exceeded' }, 422)), null);
     assert.equal(readMissingLessonRate(new Error('network')), null);
     assert.equal(readMissingLessonRate(apiError({ message: 'x', code: 'instructor_rate_not_configured' }, 422)), null);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The missing-rate notice follows the instructor, service and date it was refused for
+// ---------------------------------------------------------------------------
+describe('lessonDialogModel: missing-rate notice per selection', () => {
+  const missing = { instructorEmployeeId: 'dana', serviceId: 'riding', rateDate: '2026-11-20', message: 'אין תעריף' };
+  const refusedFor = buildRateSelectionKey({ instructorId: 'dana', serviceId: 'riding', date: '2026-11-20' });
+  const stored = { missingRate: missing, selectionKey: refusedFor };
+
+  it('shows while the form still holds the refused combination', () => {
+    assert.equal(pickMissingRateForSelection(stored, refusedFor), missing);
+  });
+
+  it('disappears once the instructor, service or date changes', () => {
+    for (const changed of [
+      { instructorId: 'omer', serviceId: 'riding', date: '2026-11-20' },
+      { instructorId: 'dana', serviceId: 'therapy', date: '2026-11-20' },
+      { instructorId: 'dana', serviceId: 'riding', date: '2026-11-21' },
+    ]) {
+      assert.equal(pickMissingRateForSelection(stored, buildRateSelectionKey(changed)), null, JSON.stringify(changed));
+    }
+  });
+
+  it('nothing stored shows nothing', () => {
+    assert.equal(pickMissingRateForSelection(null, refusedFor), null);
   });
 });
 

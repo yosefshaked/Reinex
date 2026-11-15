@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CalendarClock, CalendarDays, ChevronDown, Clock, GraduationCap, Loader2, Plus, TriangleAlert } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -638,12 +638,35 @@ function rateSavedMessage(effectiveDate, today) {
  * The same "add rate" dialog, opened from a lesson or template form that was refused because the
  * instructor has no rate for the service on the lesson's date. It comes prefilled with that service
  * and date; `onSaved` runs after the rate is stored so the form can be saved again as it was.
+ *
+ * It opens only once the employee's rates are loaded (they decide whether the save replaces a rate
+ * on that date); `onLoadingChange` lets the opener show that wait. If they cannot be loaded it shows
+ * an error and closes instead of opening without them.
  */
-export function AddLessonRateDialog({ open, onOpenChange, orgId, session, employeeId, serviceId, rateDate, onSaved }) {
+export function AddLessonRateDialog({
+  open,
+  onOpenChange,
+  onLoadingChange,
+  orgId,
+  session,
+  employeeId,
+  serviceId,
+  rateDate,
+  onSaved,
+}) {
   const { services } = useServices({ enabled: open && Boolean(orgId), orgId, session });
   const [rates, setRates] = useState(null);
   const [saving, setSaving] = useState(false);
   const today = todayKey();
+  const onOpenChangeRef = useRef(onOpenChange);
+  useEffect(() => {
+    onOpenChangeRef.current = onOpenChange;
+  }, [onOpenChange]);
+  const loading = Boolean(open && orgId && employeeId) && rates === null;
+
+  useEffect(() => {
+    onLoadingChange?.(loading);
+  }, [loading, onLoadingChange]);
 
   useEffect(() => {
     if (!open || !orgId || !employeeId) {
@@ -655,7 +678,9 @@ export function AddLessonRateDialog({ open, onOpenChange, orgId, session, employ
       .then((rows) => { if (!cancelled) setRates(rows); })
       .catch((error) => {
         console.error('Failed to load employee rates', error);
-        if (!cancelled) setRates([]);
+        if (cancelled) return;
+        toast.error(error?.message || 'טעינת התעריפים של העובד נכשלה. נסו שוב.');
+        onOpenChangeRef.current?.(false);
       });
     return () => { cancelled = true; };
   }, [open, orgId, employeeId, session]);

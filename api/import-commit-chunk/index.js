@@ -524,6 +524,9 @@ async function commitLessonParticipant(supabase, orgId, candidate) {
   const isFuture = new Date(lesson.datetime_start).getTime() > Date.now();
   if (isFuture && data.participant_status !== 'scheduled') throw new Error('future_participant_must_be_scheduled');
   const sourceParticipantStatus = data.participant_status;
+  // Written as 'scheduled' with the source status kept aside, so there is no outcome and no pay
+  // decision to store yet. Whatever later activates the source status must store the decision with
+  // resolveMarkedInstructorCompensationDecision (calendar-workflow-decisions.js), as a mark does.
   const liveParticipantStatus = 'scheduled';
   const { data: created, error: createError } = await withOrgScope(supabase, 'lesson_participants', orgId)
     .insert({

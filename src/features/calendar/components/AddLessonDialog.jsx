@@ -29,6 +29,7 @@ import {
 import { parseLocalDateString } from '../utils/localDate.js';
 import { toAgorot } from '@/lib/currency.js';
 import { readMissingLessonRate } from '../utils/lessonDialogModel.js';
+import { useMissingRateForSelection } from '../hooks/useMissingRateForSelection.js';
 import { MissingRateNotice } from './MissingRateNotice.jsx';
 
 function toLocalDateString(dateObj) {
@@ -171,7 +172,12 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
   const [isCheckingConflicts, setIsCheckingConflicts] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState(null);
-  const [missingRate, setMissingRate] = useState(null);
+  // Cleared by itself when the instructor, service or date changes (the refusal was for the old ones).
+  const [missingRate, setMissingRate, clearMissingRate] = useMissingRateForSelection({
+    instructorId: formData.instructor_employee_id,
+    serviceId: formData.service_id,
+    date: formData.date,
+  });
   const [studentDetails, setStudentDetails] = useState(null); // Cache first student details
   const [useSchedulingOverride, setUseSchedulingOverride] = useState(false);
   const [selectedOverrideReasonCode, setSelectedOverrideReasonCode] = useState('');
@@ -193,7 +199,7 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
     setFormData(buildInitialFormData(defaultDate, defaultSelection, defaultServiceId));
     setConflicts([]);
     setError(null);
-    setMissingRate(null);
+    clearMissingRate();
     setStudentDetails(null);
     setIsGroupSession(false);
     setUseSchedulingOverride(false);
@@ -201,7 +207,7 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
     setCustomOverrideReason('');
     setCreatedClientProfiles([]);
     setDirectClientChargeAmount('');
-  }, [open, defaultDate, defaultSelection, defaultServiceId]);
+  }, [open, defaultDate, defaultSelection, defaultServiceId, clearMissingRate]);
 
   useEffect(() => {
     if (!open || !activeOrgId || !session) return;
@@ -597,7 +603,7 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
     e.preventDefault();
     setIsSubmitting(true);
     setError(null);
-    setMissingRate(null);
+    clearMissingRate();
 
     try {
       const serviceIds = new Set(
@@ -1179,7 +1185,7 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
             </Alert>
           )}
 
-          <MissingRateNotice missingRate={missingRate} onRateAdded={() => setMissingRate(null)} />
+          <MissingRateNotice missingRate={missingRate} onRateAdded={() => clearMissingRate()} />
 
           {/* Error Message */}
           {error && (

@@ -815,7 +815,7 @@
           "id": "assert-default-method",
           "description": "The box reads first: the org default, as text, with no value row",
           "action": "waitForSelector",
-          "selector": "[data-leave-pay-box]:has-text('ברירת מחדל ארגונית')"
+          "selector": "[data-leave-pay-box]:has-text('ברירת המחדל של הארגון')"
         },
         {
           "id": "assert-no-value-row-yet",

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { AlertCircle, Plus } from 'lucide-react';
+import { AlertCircle, Loader2, Plus } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { useOrg } from '@/org/OrgContext';
@@ -20,6 +20,8 @@ export function MissingRateNotice({ missingRate, onRateAdded }) {
   const { currentOrg, activeOrg, activeOrgId } = useOrg();
   const { session } = useAuth();
   const [dialogOpen, setDialogOpen] = useState(false);
+  // True while the instructor's rates load before the dialog opens.
+  const [ratesLoading, setRatesLoading] = useState(false);
   const org = currentOrg ?? activeOrg;
   const orgId = org?.id || activeOrgId;
   const canManagePay = isAdminOrOffice(org?.membership?.role);
@@ -41,8 +43,12 @@ export function MissingRateNotice({ missingRate, onRateAdded }) {
               variant="outline"
               className="mt-2 gap-1"
               onClick={() => setDialogOpen(true)}
+              disabled={ratesLoading}
+              aria-busy={ratesLoading || undefined}
             >
-              <Plus className="h-3.5 w-3.5" />
+              {ratesLoading
+                ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                : <Plus className="h-3.5 w-3.5" />}
               הוספת תעריף
             </Button>
           ) : (
@@ -54,6 +60,7 @@ export function MissingRateNotice({ missingRate, onRateAdded }) {
         <AddLessonRateDialog
           open={dialogOpen}
           onOpenChange={setDialogOpen}
+          onLoadingChange={setRatesLoading}
           orgId={orgId}
           session={session}
           employeeId={missingRate.instructorEmployeeId}
