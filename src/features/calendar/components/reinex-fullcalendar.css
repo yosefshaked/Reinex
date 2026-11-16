@@ -293,37 +293,24 @@
   box-shadow: inset 0 2px 0 rgb(217 119 6 / 0.55);
 }
 
-/* The sentence is drawn once, in the first column of the band's row, and is as wide as all of that
-   day's columns together (it wraps to two lines when even that is too narrow). */
+/* Each column's band carries the whole sentence, wrapped inside the column (never an ellipsis);
+   if the band is too short, the text is cut only at the band's bottom edge. */
 .reinex-fullcalendar .fc .fc-bg-event.reinex-calendar-clock-change {
-  overflow: visible;
-  z-index: 2;
-}
-
-/* The harness that holds the label sits above the neighbouring columns' bands, so their fill
-   does not paint over the sentence. */
-.reinex-fullcalendar .fc .fc-timegrid-bg-harness:has(.reinex-calendar-clock-change__label) {
-  z-index: 3;
-}
-
-.reinex-calendar-clock-change__cell {
-  position: relative;
-  height: 100%;
+  overflow: hidden;
 }
 
 .reinex-calendar-clock-change__label {
-  position: absolute;
-  inset-block-start: 0;
-  inset-inline-start: 0;
-  inline-size: calc(100% * var(--clock-change-columns, 1));
   box-sizing: border-box;
-  padding: 0.1rem 0.35rem;
-  font-size: 0.68rem;
+  padding: 0.1rem 0.25rem;
+  font-size: 0.6875rem;
   font-weight: 600;
   line-height: 1.2;
   color: rgb(71 85 105);
+  text-align: start;
   white-space: normal;
+  overflow-wrap: anywhere;
   overflow: visible;
+  text-overflow: clip;
 }
 
 /* Break event styling */

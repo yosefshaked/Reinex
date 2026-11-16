@@ -289,35 +289,25 @@ function resolveViewerTimeZone() {
 // Background bands over the clock-change intervals of the visible days: across every resource,
 // not linked to a lesson, never clickable/draggable. Hours outside the visible range are simply
 // not drawn. Empty when the browser's zone does not share the org's change (see the module).
-// One band event per resource column, so the sentence can be drawn once: only the first column in
-// reading order (the first resource; rightmost in RTL) carries the label, which overflows over the
-// day's other columns (`columnCount` wide). Every column's band has the full sentence as its title.
-function buildClockChangeBandEvents(currentDate, viewMode, resourceIds = []) {
+function buildClockChangeBandEvents(currentDate, viewMode) {
   const viewDates = resolveViewDates(currentDate, viewMode);
   if (viewDates.length === 0) return [];
   const viewerTimeZone = resolveViewerTimeZone();
-  const columnIds = resourceIds.length > 0 ? resourceIds : [null];
   return buildClockChangeBands(
     viewDates[0].dateString,
     viewDates[viewDates.length - 1].dateString,
     viewerTimeZone ? { viewerTimeZone } : {},
-  ).flatMap((band) => columnIds.map((resourceId, index) => ({
-    id: resourceId == null ? band.id : `${band.id}-${resourceId}`,
+  ).map((band) => ({
+    id: band.id,
     start: band.start,
     end: band.end,
-    ...(resourceId == null ? {} : { resourceId: String(resourceId) }),
     display: 'background',
     editable: false,
     startEditable: false,
     durationEditable: false,
     classNames: ['reinex-calendar-clock-change', `reinex-calendar-clock-change--${band.kind}`],
-    extendedProps: {
-      isClockChange: true,
-      clockChangeLabel: band.label,
-      clockChangeShowLabel: index === 0,
-      clockChangeColumnCount: columnIds.length,
-    },
-  })));
+    extendedProps: { isClockChange: true, clockChangeLabel: band.label },
+  }));
 }
 
 // The local wall time a dragged lesson lands on, from its old local start plus FullCalendar's
@@ -535,18 +525,9 @@ function EventContent({ arg }) {
   }, []);
 
   if (arg.event.extendedProps?.isClockChange) {
-    const { clockChangeLabel, clockChangeShowLabel, clockChangeColumnCount } = arg.event.extendedProps;
+    const { clockChangeLabel } = arg.event.extendedProps;
     return (
-      <div className="reinex-calendar-clock-change__cell" title={clockChangeLabel}>
-        {clockChangeShowLabel ? (
-          <div
-            className="reinex-calendar-clock-change__label"
-            style={{ '--clock-change-columns': clockChangeColumnCount || 1 }}
-          >
-            {clockChangeLabel}
-          </div>
-        ) : null}
-      </div>
+      <div className="reinex-calendar-clock-change__label" title={clockChangeLabel}>{clockChangeLabel}</div>
     );
   }
 
@@ -797,13 +778,9 @@ export default function ReinexFullCalendar({
     [breaks],
   );
 
-  const clockChangeResourceIds = useMemo(
-    () => mapInstructorsToResources(availabilityPresentation.visibleInstructors).map((resource) => resource.id),
-    [availabilityPresentation.visibleInstructors],
-  );
   const clockChangeBandEvents = useMemo(
-    () => buildClockChangeBandEvents(currentDate, viewMode, clockChangeResourceIds),
-    [clockChangeResourceIds, currentDate, viewMode],
+    () => buildClockChangeBandEvents(currentDate, viewMode),
+    [currentDate, viewMode],
   );
 
   const mappedEvents = useMemo(
