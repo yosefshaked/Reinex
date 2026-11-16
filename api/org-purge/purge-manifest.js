@@ -268,6 +268,12 @@ export const PURGE_MANIFEST = [
     schemaQuoted: 'public.ledger_accounts',
     strategy: 'hard_delete', orgIdColumn: 'org_id',
   },
+  {
+    phase: 9, step: '9.4',
+    table: 'SettingsHistory',        pgName: 'SettingsHistory',
+    schemaQuoted: 'public."SettingsHistory"',
+    strategy: 'hard_delete', orgIdColumn: 'org_id',
+  },
 
   // ─── Phase 10: Instructor profiles & rate history ─────────────────────────
   // Capabilities and rate history must be gone before Employees and Services.

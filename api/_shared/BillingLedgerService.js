@@ -6,7 +6,7 @@ import { normalizeString } from './org-bff.js';
 import { loadHmoAuthorizations, resolveLessonCoverageDecision } from './hmo.js';
 import { createDashboardTask, resolveDashboardTask } from './dashboard-tasks.js';
 import { buildLessonCountBuckets, resolveEntitlementUsageDelta } from './commitment-behavior.js';
-import { endOfLocalDayUtc, localDateKey, startOfLocalDayUtc } from './local-time.js';
+import { endOfLocalDayUtc, localDateKey, startOfLocalDayUtc, todayKey } from './local-time.js';
 
 const RESOLVED_PARTICIPANT_STATUSES = new Set(['attended', 'no_show', 'cancelled_student', 'cancelled_clinic']);
 const HMO_NON_ATTENDANCE_STATUSES = new Set(['no_show', 'cancelled_student', 'cancelled_clinic']);
@@ -942,7 +942,9 @@ export default class BillingLedgerService {
     }
     const serviceMap = await loadServiceMap(this.tenantClient, effectiveOrgId, [instance.service_id]);
     const service = serviceMap.get(instance.service_id) || null;
-    const policies = await loadFinancePolicies(this.tenantClient, effectiveOrgId);
+    const policies = await loadFinancePolicies(this.tenantClient, effectiveOrgId, {
+      asOf: localDateKey(instance?.datetime_start) || todayKey(),
+    });
     const coverageDecision = participant.student_id
       ? await resolveLessonCoverageDecision(this.tenantClient, {
         orgId: effectiveOrgId,
@@ -1652,7 +1654,7 @@ export default class BillingLedgerService {
       : new Map();
     const service = serviceMap.get(instance?.service_id) || null;
     const policies = participant?.id
-      ? await loadFinancePolicies(this.tenantClient, this.orgId)
+      ? await loadFinancePolicies(this.tenantClient, this.orgId, { asOf: localDateKey(instance?.datetime_start) || todayKey() })
       : null;
     const coverageDecision = participant?.student_id
       ? await resolveLessonCoverageDecision(this.tenantClient, {

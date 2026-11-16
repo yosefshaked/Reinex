@@ -20,6 +20,8 @@
         "POST /api/lesson-instances",
         "POST /api/calendar/attendance",
         "GET /api/payroll",
+        "GET /api/settings",
+        "POST /api/settings",
         "GET /api/employee-rates"
       ]
     }
@@ -555,6 +557,174 @@
           "id": "screenshot-missing-rate",
           "action": "screenshot",
           "name": "pay-summary-missing-rate-added"
+        }
+      ]
+    },
+    {
+      "id": "api-earnings-policy-from-next-month",
+      "name": "API + UI – The earnings policy changes from next month; last month's pay is unchanged",
+      "description": "instructor_earnings_policy is a dated setting. A no-show last month pays the instructor under the policy in force then (no-shows paid). The policy is changed from the first day of next month to stop paying no-shows; last month's summary still shows the same total, because each lesson is paid by the policy on its own date. The no-show stores no pay decision (none was chosen), so only the policy decides. The run ends by restoring the paying policy on that date, so later runs and months are not affected.",
+      "steps": [
+        {
+          "id": "create-no-show-lesson",
+          "description": "A 45-minute lesson of the first service on the fourth day of last month",
+          "action": "apiCall",
+          "method": "POST",
+          "endpoint": "/api/lesson-instances",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "datetime_start": "{{PREV_MONTH_FOURTH_DAY_START}}",
+            "duration_minutes": 45,
+            "instructor_employee_id": "{{PAY_INSTRUCTOR_ID}}",
+            "service_id": "{{SERVICE_ID}}",
+            "student_ids": [
+              "{{PAY_RIDER_ID}}"
+            ]
+          },
+          "stores": [
+            { "variable": "NO_SHOW_LESSON_ID", "field": "id" },
+            { "variable": "NO_SHOW_PARTICIPANT_ID", "field": "participants.0.id" }
+          ]
+        },
+        {
+          "id": "mark-no-show",
+          "description": "Marked without a pay choice: the policy in force on the lesson's date decides",
+          "action": "apiCall",
+          "method": "POST",
+          "endpoint": "/api/calendar/attendance",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "instance_id": "{{NO_SHOW_LESSON_ID}}",
+            "participant_id": "{{NO_SHOW_PARTICIPANT_ID}}",
+            "participant_status": "no_show"
+          }
+        },
+        {
+          "id": "navigate-employees-before",
+          "action": "navigate",
+          "url": "{{BASE_URL}}/#/employees"
+        },
+        {
+          "id": "wait-main-before",
+          "action": "waitForSelector",
+          "selector": "main, [role='main']"
+        },
+        {
+          "id": "open-employee-before",
+          "action": "click",
+          "selector": "button:has-text('שכר {{RUN_NUMERIC_ID}}')",
+          "first": true
+        },
+        {
+          "id": "open-finance-tab-before",
+          "action": "click",
+          "selector": "[role='tab']:has-text('פיננסים')"
+        },
+        {
+          "id": "wait-summary-before",
+          "action": "waitForSelector",
+          "selector": "[data-pay-summary] [data-pay-total]"
+        },
+        {
+          "id": "previous-month-before",
+          "action": "click",
+          "selector": "[data-pay-summary] button:has-text('הקודם')"
+        },
+        {
+          "id": "assert-total-before",
+          "description": "The no-show is paid by the policy of last month: 45 minutes at 100 ₪/hour is added to 210 ₪",
+          "action": "waitForSelector",
+          "selector": "[data-pay-summary] [data-pay-total]:has-text('₪285.00')"
+        },
+        {
+          "id": "policy-from-next-month",
+          "description": "From the first day of next month no-shows do not pay the instructor",
+          "action": "apiCall",
+          "method": "POST",
+          "endpoint": "/api/settings",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "settings": {
+              "instructor_earnings_policy": {
+                "value": { "attended": true, "no_show": false, "cancelled_student": false, "cancelled_clinic": false },
+                "effective_date": "{{NEXT_MONTH_FIRST_DAY}}"
+              }
+            }
+          }
+        },
+        {
+          "id": "read-versions",
+          "description": "The history read with include_versions answers (the newest version is the one from next month)",
+          "action": "apiCall",
+          "method": "GET",
+          "endpoint": "/api/settings?org_id={{TEST_ORG_ID}}&keys=instructor_earnings_policy&include_versions=1",
+          "store": "EARNINGS_LATEST_VERSION_DATE",
+          "storeField": "versions.instructor_earnings_policy.0.effective_date"
+        },
+        {
+          "id": "leave-page",
+          "description": "Leave the employees page so the summary is read again",
+          "action": "navigate",
+          "url": "{{BASE_URL}}/#/dashboard"
+        },
+        { "id": "wait-dashboard", "action": "waitForURL", "pattern": "#/dashboard" },
+        {
+          "id": "navigate-employees-after",
+          "action": "navigate",
+          "url": "{{BASE_URL}}/#/employees"
+        },
+        {
+          "id": "wait-main-after",
+          "action": "waitForSelector",
+          "selector": "main, [role='main']"
+        },
+        {
+          "id": "open-employee-after",
+          "action": "click",
+          "selector": "button:has-text('שכר {{RUN_NUMERIC_ID}}')",
+          "first": true
+        },
+        {
+          "id": "open-finance-tab-after",
+          "action": "click",
+          "selector": "[role='tab']:has-text('פיננסים')"
+        },
+        {
+          "id": "wait-summary-after",
+          "action": "waitForSelector",
+          "selector": "[data-pay-summary] [data-pay-total]"
+        },
+        {
+          "id": "previous-month-after",
+          "action": "click",
+          "selector": "[data-pay-summary] button:has-text('הקודם')"
+        },
+        {
+          "id": "assert-total-after",
+          "description": "Last month is paid exactly as before",
+          "action": "waitForSelector",
+          "selector": "[data-pay-summary] [data-pay-total]:has-text('₪285.00')"
+        },
+        {
+          "id": "screenshot-policy-from-next-month",
+          "action": "screenshot",
+          "name": "pay-summary-policy-from-next-month"
+        },
+        {
+          "id": "restore-paying-policy",
+          "description": "Put the paying policy back on that date, so next month's runs start from it",
+          "action": "apiCall",
+          "method": "POST",
+          "endpoint": "/api/settings",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "settings": {
+              "instructor_earnings_policy": {
+                "value": { "attended": true, "no_show": true, "cancelled_student": false, "cancelled_clinic": false },
+                "effective_date": "{{NEXT_MONTH_FIRST_DAY}}"
+              }
+            }
+          }
         }
       ]
     },

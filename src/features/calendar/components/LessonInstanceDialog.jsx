@@ -50,9 +50,11 @@ import {
   getPreviewImpactClass,
   buildConflictLines,
   hasAttendanceMarkChanged,
+  absenceCompensationChoice,
   resolveEditClockChangeNotice,
 } from '../utils/lessonDialogModel.js';
 import { lessonLocalStartFields } from '@/lib/clock-change.js';
+import { localDateKey } from '@/lib/local-time.js';
 import {
   useAbsenceRequirements,
   useLessonFinancePolicies,
@@ -143,7 +145,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
     orgId: org?.id,
     instanceId: instance?.id,
   });
-  const { billingPolicy, instructorEarningsPolicy } = useLessonFinancePolicies(org?.id);
+  const { billingPolicy, instructorEarningsPolicy } = useLessonFinancePolicies(org?.id, localDateKey(instance?.datetime_start) || '');
   const {
     getCurrentInstanceVersion,
     getCurrentParticipantVersion,
@@ -808,7 +810,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
     // Every absence is previewed by the server (the one-line confirm strip) before it is saved.
     await openAttendancePreview(currentParticipant, absenceForm.status, {
       notes: absenceForm.notes,
-      instructorCompensationDecision: absenceForm.instructorCompensationDecision || null,
+      instructorCompensationDecision: absenceCompensationChoice(absenceForm),
       isExcused: applyGraceWaiver,
     });
   }
@@ -1227,17 +1229,18 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
   const hasUnsetParticipants =
     displayParticipants.length > 0 && scheduledParticipantsCount > 0;
 
-  // Prefill the instructor-pay decision from the org's earnings policy when the server says a decision
-  // is needed; the user can still change it (the form marks it "לפי הגדרות השכר").
+  // Show the instructor-pay choice preset to what the earnings policy in force on the lesson's date
+  // says (the server's answer), marked "לפי הגדרות השכר". Left as is, nothing is stored and the
+  // policy decides; a person's click is stored as their choice (see absenceCompensationChoice).
   useEffect(() => {
     if (!absenceForm || absenceForm.instructorCompensationDecision) return;
     if (!absenceRequirements?.requires_instructor_compensation_decision) return;
-    const policyValue = instructorEarningsPolicy?.[absenceForm.status];
+    const policyValue = absenceRequirements.instructor_earnings_applies;
     if (typeof policyValue !== 'boolean') return;
     setAbsenceForm((prev) => (prev && !prev.instructorCompensationDecision
       ? { ...prev, instructorCompensationDecision: policyValue ? 'compensated' : 'not_compensated', compensationFromPolicy: true }
       : prev));
-  }, [absenceForm, absenceRequirements, instructorEarningsPolicy]);
+  }, [absenceForm, absenceRequirements]);
 
   const editBaseline = useMemo(() => {
     if (!displayInstance?.datetime_start) return null;

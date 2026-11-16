@@ -1,5 +1,5 @@
 /* eslint-env node */
-import { todayKey } from '../_shared/local-time.js';
+import { localDateKey, todayKey } from '../_shared/local-time.js';
 import { Buffer } from 'node:buffer';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { resolveBearerAuthorization } from '../_shared/http.js';
@@ -170,7 +170,7 @@ async function inspectHmoChargeContext({
     }
     : selectedParticipant;
 
-  const policies = await loadFinancePolicies(client, orgId);
+  const policies = await loadFinancePolicies(client, orgId, { asOf: localDateKey(instance.datetime_start) || todayKey() });
   const chargeDecision = buildDesiredChargeDescriptors({
     participant: effectiveParticipant,
     service,

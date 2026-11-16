@@ -2,6 +2,7 @@
 /* eslint-env node */
 import BillingLedgerService, { buildDesiredChargeDescriptors, resolveHmoSplitAmounts } from './BillingLedgerService.js';
 import { loadFinancePolicies } from './employee-finance.js';
+import { todayKey } from './local-time.js';
 import { normalizeString, withOrgScope } from './org-bff.js';
 import { loadHmoAuthorizations, resolveLessonCoverageDecision } from './hmo.js';
 
@@ -361,7 +362,8 @@ export async function fetchBillingSnapshot(tenantClient, {
     });
   }
 
-  const policies = await loadFinancePolicies(tenantClient, orgId);
+  // Only the student-billing policies are returned; they have one value (not dated).
+  const policies = await loadFinancePolicies(tenantClient, orgId, { asOf: todayKey() });
   const { data: students, error } = await withOrgScope(tenantClient, 'students', orgId)
     .select(`
       id,
@@ -400,7 +402,6 @@ export async function fetchBillingSnapshot(tenantClient, {
     policies: {
       billing_consumption_policy: policies.billingConsumptionPolicy,
       hmo_non_attendance_billing_policy: policies.hmoNonAttendanceBillingPolicy,
-      instructor_earnings_policy: policies.instructorEarningsPolicy,
     },
     student_summaries: studentSummaries,
   };

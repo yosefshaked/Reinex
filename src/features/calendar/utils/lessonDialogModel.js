@@ -198,9 +198,6 @@ export function resolveMutationError(error) {
   if (error?.message === 'failed_to_load_service') {
     return 'לא ניתן היה לטעון את פרטי השירות כרגע. נסו שוב.';
   }
-  if (error?.data?.code === 'missing_instructor_compensation_decision') {
-    return 'יש לבחור אם המדריך אמור לקבל פיצוי לפני שמאשרים אי-הגעה מחויבת.';
-  }
   if (error?.message === 'failed_to_build_status_change_preview') {
     return 'לא ניתן היה לבנות תצוגה מקדימה לשינוי הסטטוס.';
   }
@@ -231,6 +228,19 @@ export function resolveMutationError(error) {
 export const ATTENDANCE_MARK_UNCHANGED_REASON = 'אין שינוי לשמור';
 
 /**
+ * The instructor-pay choice the absence form sends: what a person clicked ("לשלם" / "לא לשלם"), or
+ * null while the form still shows the earnings policy's preset ("לפי הגדרות השכר"). Null stores no
+ * decision, so the policy in force on the lesson's date decides, now and after a dated change.
+ *
+ * @param {{ instructorCompensationDecision?: string|null, compensationFromPolicy?: boolean } | null} form
+ */
+export function absenceCompensationChoice(form) {
+  if (!form || form.compensationFromPolicy) return null;
+  const decision = String(form.instructorCompensationDecision || '').trim().toLowerCase();
+  return decision === 'compensated' || decision === 'not_compensated' ? decision : null;
+}
+
+/**
  * The attendance mark stored on a participant row, in the shape the save sends: status, notes, the
  * instructor pay decision and whether the fee was waived.
  */
@@ -247,11 +257,11 @@ export function readStoredAttendanceMark(participant) {
 
 /**
  * Whether saving `draft` would change the attendance mark stored on `participant`. A save with no
- * change is not offered (the server still keeps the stored decisions on an unchanged re-mark).
+ * change is not offered.
  * - status: any difference.
  * - notes: compared trimmed, only when the draft sends notes (a string).
- * - instructor pay: only an explicit "compensated"/"not_compensated" that differs; no choice keeps
- *   the stored one.
+ * - instructor pay: only an explicit "compensated"/"not_compensated" that differs (pass
+ *   absenceCompensationChoice(form): the policy's preset is no choice).
  * - fee waiver: the draft's choice against the stored one.
  *
  * @param {object} participant the stored participant row

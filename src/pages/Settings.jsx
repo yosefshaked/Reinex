@@ -20,6 +20,7 @@ import BillingSettingsWorkspace from '@/features/finance/components/BillingSetti
 import LeavePayDefaultSettings from '@/features/finance/components/LeavePayDefaultSettings.jsx';
 import { fetchSettingsValue } from '@/features/settings/api/settings.js';
 import { upsertSetting } from '@/features/settings/api/settings.js';
+import { useInstructorEarningsPolicy } from '@/features/finance/hooks/useInstructorEarningsPolicy.js';
 import { OnboardingCard } from '@/features/onboarding/components/OnboardingCard.jsx';
 import { useOrg } from '@/org/OrgContext.jsx';
 import { useSupabase } from '@/context/SupabaseContext.jsx';
@@ -28,13 +29,6 @@ import PageLayout from '@/components/ui/PageLayout.jsx';
 const DEFAULT_BILLING_POLICY = {
   attended: true,
   no_show: false,
-  cancelled_student: false,
-  cancelled_clinic: false,
-};
-
-const DEFAULT_INSTRUCTOR_EARNINGS_POLICY = {
-  attended: true,
-  no_show: true,
   cancelled_student: false,
   cancelled_clinic: false,
 };
@@ -56,8 +50,13 @@ export default function Settings() {
   const [refreshingPermissions, setRefreshingPermissions] = useState(false);
   const [isInstructor, setIsInstructor] = useState(false);
   const [billingPolicy, setBillingPolicy] = useState(DEFAULT_BILLING_POLICY);
-  const [instructorEarningsPolicy, setInstructorEarningsPolicy] = useState(DEFAULT_INSTRUCTOR_EARNINGS_POLICY);
   const [savingBillingPolicy, setSavingBillingPolicy] = useState(false);
+  // A dated setting: read and saved as versions from a date (dated-settings.js on the server).
+  const instructorEarnings = useInstructorEarningsPolicy({
+    session,
+    orgId: activeOrgId,
+    enabled: canManageSessionForm,
+  });
 
   // Fetch organization feature permissions and initialize if empty using the proper RPC function.
   useEffect(() => {
@@ -290,42 +289,27 @@ export default function Settings() {
   useEffect(() => {
     if (!session || !activeOrgId || !canManageSessionForm) {
       setBillingPolicy(DEFAULT_BILLING_POLICY);
-      setInstructorEarningsPolicy(DEFAULT_INSTRUCTOR_EARNINGS_POLICY);
       return;
     }
 
     let cancelled = false;
     const loadBillingPolicy = async () => {
       try {
-        const [billingResponse, instructorResponse] = await Promise.all([
-          fetchSettingsValue({
-            session,
-            orgId: activeOrgId,
-            key: 'billing_consumption_policy',
-          }),
-          fetchSettingsValue({
-            session,
-            orgId: activeOrgId,
-            key: 'instructor_earnings_policy',
-          }),
-        ]);
+        const billingResponse = await fetchSettingsValue({
+          session,
+          orgId: activeOrgId,
+          key: 'billing_consumption_policy',
+        });
         if (!cancelled) {
           setBillingPolicy({
             ...DEFAULT_BILLING_POLICY,
             ...(billingResponse?.value && typeof billingResponse.value === 'object' ? billingResponse.value : {}),
-          });
-          setInstructorEarningsPolicy({
-            ...DEFAULT_INSTRUCTOR_EARNINGS_POLICY,
-            ...(instructorResponse?.value && typeof instructorResponse.value === 'object'
-              ? instructorResponse.value
-              : {}),
           });
         }
       } catch (error) {
         console.error('Failed to load billing policy in settings', error);
         if (!cancelled) {
           setBillingPolicy(DEFAULT_BILLING_POLICY);
-          setInstructorEarningsPolicy(DEFAULT_INSTRUCTOR_EARNINGS_POLICY);
         }
       }
     };
@@ -430,12 +414,7 @@ export default function Settings() {
         key: 'billing_consumption_policy',
         value: billingPolicy,
       });
-      await upsertSetting({
-        session,
-        orgId: activeOrgId,
-        key: 'instructor_earnings_policy',
-        value: instructorEarningsPolicy,
-      });
+      await instructorEarnings.save();
       toast.success('מדיניות החיוב נשמרה.');
     } catch (error) {
       console.error('Failed to save billing policy from settings', error);
@@ -1008,10 +987,12 @@ export default function Settings() {
                   <BillingSettingsWorkspace
                     billingPolicy={billingPolicy}
                     setBillingPolicy={setBillingPolicy}
-                    instructorPolicy={instructorEarningsPolicy}
-                    setInstructorPolicy={setInstructorEarningsPolicy}
+                    instructorPolicy={instructorEarnings.policy}
+                    setInstructorPolicy={instructorEarnings.setPolicy}
+                    instructorPolicyDates={instructorEarnings}
                     canMutateBillingPolicy={canManageSessionForm}
                     savingPolicy={savingBillingPolicy}
+                    loadingPolicy={instructorEarnings.loading}
                     onSaveBillingPolicy={handleSaveBillingPolicy}
                   />
                 )}

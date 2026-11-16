@@ -7,7 +7,7 @@ import { buildBillingDecision, buildDirectClientBillingDecision } from './studen
 import { normalizeLessonInstanceStatus } from './lesson-instance-status.js';
 import { coerceAgorot } from './currency.js';
 import { LESSON_PAY_BASES, loadRateHistoryRows } from './rate-history.js';
-import { localDateKey } from './local-time.js';
+import { localDateKey, todayKey } from './local-time.js';
 
 const LESSON_BILLING_USAGE_TYPES = ['lesson_charge', 'reversal', 'manual_adjustment', 'manual_payment'];
 const PARTICIPANT_STATUSES = new Set(['scheduled', 'attended', 'no_show', 'cancelled_student', 'cancelled_clinic']);
@@ -292,7 +292,9 @@ export async function buildInstanceCorrectionPreview(tenantClient, options) {
   const correctionMode = normalizeCorrectionMode(options?.correctionMode);
   const instancePatch = normalizePatchObject(options?.instancePatch);
   const participantPatches = asArray(options?.participantPatches).map((patch) => normalizePatchObject(patch));
-  const policies = await loadFinancePolicies(tenantClient, context.instance?.org_id || context.originalInstance?.org_id);
+  const policies = await loadFinancePolicies(tenantClient, context.instance?.org_id || context.originalInstance?.org_id, {
+    asOf: localDateKey(context.instance?.datetime_start || context.originalInstance?.datetime_start) || todayKey(),
+  });
   const currentInstance = context.latestCorrection?.effective_state?.instance || context.instance;
   const currentParticipants = asArray(context.latestCorrection?.effective_state?.participants).length > 0
     ? context.latestCorrection.effective_state.participants

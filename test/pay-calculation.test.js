@@ -10,6 +10,7 @@ import {
   checkInstructorRateForLesson,
   checkTemplateInstructorRate,
   hasLessonPayDateChanged,
+  loadFinancePolicies,
   resolveTemplateRateCheckDate,
   templateUpdateNeedsRateCheck,
   validateInstructorRateForLesson,
@@ -449,6 +450,92 @@ describe('the pay of a period', () => {
     assert.equal(before.missing_rate_lesson_count, 1);
     assert.equal(after.lesson_amount, 9000);
     assert.equal(after.missing_rate_lesson_count, 0);
+  });
+});
+
+describe('policies read as of the date they apply to (dated settings)', () => {
+  // No-shows pay the instructor until 30.11 and not from 1.12. Pay is read in mid-December.
+  const LATER = new Date('2026-12-20T12:00:00Z');
+  const earnings = (id, effectiveDate, noShow) => ({
+    id, org_id: ORG, key: 'instructor_earnings_policy', effective_date: effectiveDate,
+    settings_value: { ...DEFAULT_INSTRUCTOR_EARNINGS_POLICY, no_show: noShow },
+  });
+  const FROM_DECEMBER = [earnings('v-start', '2000-01-01', true), earnings('v-dec', '2026-12-01', false)];
+  const noShowTables = (versions, decision = null) => baseTables({
+    SettingsHistory: versions,
+    lesson_instances: [
+      lesson('nov', 'dana', '2026-11-10T08:00:00Z'),
+      lesson('dec', 'dana', '2026-12-08T08:00:00Z'),
+    ],
+    lesson_participants: [
+      participant('p-nov', 'nov', 'no_show', decision),
+      participant('p-dec', 'dec', 'no_show'),
+    ],
+  });
+  const payFor = (tables, startDate, endDate, extra = {}) => computeEmployeePay(createFakeClient(tables), ORG, {
+    employee: { id: 'dana' }, startDate, endDate, rateRows: RATES, now: LATER, ...extra,
+  });
+
+  it('a change effective 1 December does not change a November lesson', async () => {
+    const tables = noShowTables(FROM_DECEMBER);
+    const november = await payFor(tables, '2026-11-01', '2026-11-30');
+    const december = await payFor(tables, '2026-12-01', '2026-12-31');
+    assert.equal(november.lesson_amount, 12000, 'the November no-show is paid by the policy of November');
+    assert.equal(december.lesson_amount, 0, 'the December no-show is not');
+
+    // Read with today's policies (as a caller meaning "now" does), November still resolves by its own date.
+    const today = await loadFinancePolicies(createFakeClient(tables), ORG, { asOf: '2026-12-20' });
+    assert.equal(today.instructorEarningsPolicy.no_show, false);
+    const withToday = await payFor(tables, '2026-11-01', '2026-11-30', { policies: today });
+    assert.equal(withToday.lesson_amount, 12000);
+  });
+
+  it('a back-dated change does change the months it reaches', async () => {
+    const tables = noShowTables([...FROM_DECEMBER, earnings('v-nov', '2026-11-01', false)]);
+    const november = await payFor(tables, '2026-11-01', '2026-11-30');
+    assert.equal(november.lesson_amount, 0);
+  });
+
+  it('a choice made in the absence form overrides the policy for that participant', async () => {
+    const paidAnyway = await payFor(
+      noShowTables([...FROM_DECEMBER, earnings('v-nov', '2026-11-01', false)], 'compensated'),
+      '2026-11-01',
+      '2026-11-30',
+    );
+    assert.equal(paidAnyway.lesson_amount, 12000);
+    const notPaid = await payFor(noShowTables(FROM_DECEMBER, 'not_compensated'), '2026-11-01', '2026-11-30');
+    assert.equal(notPaid.lesson_amount, 0, 'even though November pays no-shows');
+  });
+
+  it('a leave day is valued by the leave-pay policy in force on that day', async () => {
+    // Until 14.11 the org default is a fixed 300 ₪ a day; from 15.11 the legal average.
+    const leavePolicy = (id, effectiveDate, value) => ({
+      id, org_id: ORG, key: 'leave_pay_policy', effective_date: effectiveDate, settings_value: value,
+    });
+    const leaveDay = (id, date) => ({
+      id, org_id: ORG, leave_entry_id: `entry-${id}`, employee_id: 'dana', leave_date: date,
+      day_portion: 'full_day', leave_type: 'employee_paid', balance_days_delta: -1, pay_fraction: 1,
+    });
+    const tables = baseTables({
+      SettingsHistory: [
+        leavePolicy('l-start', '2000-01-01', { default_method: 'fixed_rate', lookback_months: 3, legal_allow_12m_if_better: true, fixed_rate_default: 30000 }),
+        leavePolicy('l-nov', '2026-11-15', { default_method: 'legal', lookback_months: 3, legal_allow_12m_if_better: true, fixed_rate_default: 0 }),
+      ],
+      // One worked day in the months before: 20.10, one hour at 120 ₪.
+      lesson_instances: [lesson('oct', 'dana', '2026-10-20T08:00:00Z')],
+      lesson_participants: [participant('p-oct', 'oct', 'attended')],
+      employee_leave_days: [leaveDay('before', '2026-11-10'), leaveDay('after', '2026-11-20')],
+      employee_leave_entries: [
+        { id: 'entry-before', org_id: ORG, employee_id: 'dana', status: 'approved' },
+        { id: 'entry-after', org_id: ORG, employee_id: 'dana', status: 'approved' },
+      ],
+    });
+
+    const november = await payFor(tables, '2026-11-01', '2026-11-30', { includeDetails: true });
+    const byDate = Object.fromEntries(november.details.leave.map((row) => [row.leave_date, row.amount]));
+    assert.equal(byDate['2026-11-10'], 30000, 'the fixed value in force on 10.11');
+    assert.equal(byDate['2026-11-20'], 12000, 'the legal average in force on 20.11');
+    assert.equal(november.paid_leave_amount, 42000);
   });
 });
 

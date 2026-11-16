@@ -22,6 +22,7 @@ import {
   getParticipantStatusLabel,
   groupPreviewImpacts,
   hasAttendanceMarkChanged,
+  absenceCompensationChoice,
   readStoredAttendanceMark,
   isCancellationStatus,
   isResolvedParticipantStatus,
@@ -490,14 +491,6 @@ describe('lessonDialogModel: resolveMutationError', () => {
   it('409 means someone else updated the lesson', () => {
     const error = apiError({ message: 'version_conflict', code: 'version_conflict' }, 409);
     assert.equal(resolveMutationError(error), GENERIC_409_MESSAGE);
-  });
-
-  it('missing_instructor_compensation_decision (data.code, 400) asks for a compensation decision', () => {
-    const error = apiError(
-      { message: 'missing_instructor_compensation_decision', code: 'missing_instructor_compensation_decision', participant_status: 'no_show' },
-      400,
-    );
-    assert.equal(resolveMutationError(error), 'יש לבחור אם המדריך אמור לקבל פיצוי לפני שמאשרים אי-הגעה מחויבת.');
   });
 
   it('instance_cancelled_has_attended_participants lists attended names when not a 409', () => {
@@ -1029,7 +1022,19 @@ describe('hasAttendanceMarkChanged', () => {
     assert.equal(hasAttendanceMarkChanged(storedAbsence, { ...sameDraft, notes: undefined }), false);
   });
 
-  it('treats no pay choice as keeping the stored one', () => {
+  it('sends a pay choice only when a person made it, not the policy preset', () => {
+    assert.equal(absenceCompensationChoice({ instructorCompensationDecision: 'not_compensated', compensationFromPolicy: true }), null);
+    assert.equal(absenceCompensationChoice({ instructorCompensationDecision: 'compensated', compensationFromPolicy: false }), 'compensated');
+    assert.equal(absenceCompensationChoice({ instructorCompensationDecision: 'not_compensated' }), 'not_compensated', 'a stored choice reopened in the form');
+    assert.equal(absenceCompensationChoice({ instructorCompensationDecision: '' }), null);
+    assert.equal(absenceCompensationChoice(null), null);
+    // An untouched preset is not a change to a participant with no stored choice.
+    const unmarkedChoice = { participant_status: 'no_show', metadata: {} };
+    const preset = { instructorCompensationDecision: 'compensated', compensationFromPolicy: true };
+    assert.equal(hasAttendanceMarkChanged(unmarkedChoice, { status: 'no_show', instructorCompensationDecision: absenceCompensationChoice(preset) }), false);
+  });
+
+  it('treats no pay choice as no change', () => {
     assert.equal(hasAttendanceMarkChanged(storedAbsence, { ...sameDraft, instructorCompensationDecision: '' }), false);
     assert.equal(hasAttendanceMarkChanged(storedAbsence, { ...sameDraft, instructorCompensationDecision: null }), false);
   });

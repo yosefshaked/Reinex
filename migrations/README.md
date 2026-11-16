@@ -18,3 +18,12 @@ replacing a constraint) is a numbered file here. Each file:
 
 The files are applied by hand for now, the same way `setup-sql.js` is. Applying them from CI
 on deploy is planned and not built yet.
+
+## Files
+
+- `0001_live_pay_remove_stored_copies.sql` - stored pay copies removed; pay is computed live.
+- `0002_remove_legacy_rate_columns.sql` - every rate lives only in `RateHistory`.
+- `0003_dated_settings.sql` - the settings that affect instructor pay (`instructor_earnings_policy`,
+  `leave_pay_policy`) move from `Settings` to `SettingsHistory` as a first version from 2000-01-01;
+  pay decisions the system stored by itself on attended participants and on whole-lesson
+  cancellations are cleared so the policy in force on the lesson's date decides.

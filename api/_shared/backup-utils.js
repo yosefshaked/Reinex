@@ -95,6 +95,7 @@ export async function decryptBackup(encryptedData, env = process.env ?? {}) {
  */
 export const EXPORT_TABLES = [
   'Settings',
+  'SettingsHistory',
   'Services',
   'Employees',
   'hmo_providers',

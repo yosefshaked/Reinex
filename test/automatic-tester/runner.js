@@ -28,8 +28,10 @@ import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import {
   addDays,
+  addMonths,
   dateKeyFromUtcCalendarDate,
   findClockChanges,
+  firstDayOfMonth,
   localDateTimeToUtc,
   todayKey,
 } from '../../api/_shared/local-time.js';
@@ -200,7 +202,12 @@ function buildDynamicVars() {
     PREV_MONTH_SECOND_DAY_START: new Date(Date.UTC(y, m - 1, 2, 8, 0, 0)).toISOString(),
     PREV_MONTH_THIRD_DAY_START: new Date(Date.UTC(y, m - 1, 3, 8, 0, 0)).toISOString(),
     PREV_MONTH_THIRD_DAY: dateKeyFromUtcCalendarDate(new Date(Date.UTC(y, m - 1, 3))),
+    PREV_MONTH_FOURTH_DAY_START: new Date(Date.UTC(y, m - 1, 4, 8, 0, 0)).toISOString(),
     CURRENT_MONTH_FIRST_DAY: `${y}-${String(m + 1).padStart(2, '0')}-01`,
+    // Today and the first day of next month in the org's zone, as date keys (dated settings).
+    TODAY: todayKey(),
+    TODAY_DISPLAY: todayKey().split('-').reverse().join('.'),
+    NEXT_MONTH_FIRST_DAY: addMonths(firstDayOfMonth(todayKey()), 1),
     RUN_ID:              `run-${runNumericId}`,
     RUN_NUMERIC_ID:      runNumericId,
     ...buildClockChangeVars(),

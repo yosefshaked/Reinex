@@ -61,6 +61,11 @@ Reinex serves Israeli organisations; stored instants stay UTC for data integrity
 - **Frontend month/day ranges** are sent to the API as date keys (`start_date` / `end_date`); the API turns them into UTC ranges through the module. Do not send browser-zone instants as range bounds.
 - **Lint:** `no-restricted-syntax` in [`../eslint.config.js`](../eslint.config.js) fails on those cut patterns and on the `'Asia/Jerusalem'` literal outside the module and its test. A per-line disable needs a reason comment and should be rare. Tests: [`../api/_shared/local-time.test.js`](../api/_shared/local-time.test.js) (in `npm run test:finance-calendar`).
 
+## Dated settings (money-affecting policy)
+- A setting that affects how money is computed is read **as of the date it applies to** (a lesson's local date, a leave day), never "the current value": changing it from a date must not change months before that date. These keys live only in `SettingsHistory` and are listed in `DATED_SETTING_KEYS` in [`../api/_shared/dated-settings.js`](../api/_shared/dated-settings.js).
+- Read them only through the one resolver: `loadFinancePolicies(client, orgId, { asOf })` (with `financePoliciesOnDate` / `policies.onDate(date)` per lesson or day) or `resolveSettingOnDate`. Pass `todayKey()` explicitly when you mean "now". Never read a dated key from `Settings` (`loadSettingsMap` throws) and never store a copy of a policy's answer on a record "to freeze it".
+- Write them only through `api/settings` with an `effective_date`; edit them in the UI with `DatedSettingFields`. Details in [`80-finance-billing-payroll.md`](80-finance-billing-payroll.md).
+
 ## Required validation after edits
 
 | Files changed | Command |

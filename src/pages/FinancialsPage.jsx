@@ -37,6 +37,7 @@ import { useOrg } from '@/org/OrgContext.jsx';
 import { authenticatedFetch } from '@/lib/api-client.js';
 import { useStudents } from '@/hooks/useOrgData.js';
 import { upsertSetting } from '@/features/settings/api/settings.js';
+import { useInstructorEarningsPolicy } from '@/features/finance/hooks/useInstructorEarningsPolicy.js';
 import StudentBillingWorkspace from '@/features/students/components/StudentBillingWorkspace.jsx';
 import BillingSettingsWorkspace from '@/features/finance/components/BillingSettingsWorkspace.jsx';
 import HmoProviderBillingWorkspace from '@/features/finance/components/HmoProviderBillingWorkspace.jsx';
@@ -50,13 +51,6 @@ import { calendarDateFromDateKey, dateKeyFromCalendarDate, firstDayOfMonth, toda
 const DEFAULT_BILLING_POLICY = {
   attended: true,
   no_show: false,
-  cancelled_student: false,
-  cancelled_clinic: false,
-};
-
-const DEFAULT_INSTRUCTOR_EARNINGS_POLICY = {
-  attended: true,
-  no_show: true,
   cancelled_student: false,
   cancelled_clinic: false,
 };
@@ -301,7 +295,12 @@ export default function FinancialsPage() {
   const deferredStudentSearch = useDeferredValue(studentSearch);
   const [selectedStudentId, setSelectedStudentId] = useState('');
   const [billingPolicy, setBillingPolicy] = useState(DEFAULT_BILLING_POLICY);
-  const [instructorEarningsPolicy, setInstructorEarningsPolicy] = useState(DEFAULT_INSTRUCTOR_EARNINGS_POLICY);
+  // A dated setting: read and saved as versions from a date (dated-settings.js on the server).
+  const instructorEarnings = useInstructorEarningsPolicy({
+    session,
+    orgId: activeOrgId,
+    enabled: Boolean(canViewFinancials),
+  });
   const [hmoNonAttendanceBillingPolicy, setHmoNonAttendanceBillingPolicy] = useState(DEFAULT_HMO_NON_ATTENDANCE_BILLING_POLICY);
   const [savingPolicy, setSavingPolicy] = useState(false);
   const [processingClaimBatch, setProcessingClaimBatch] = useState(false);
@@ -360,7 +359,6 @@ export default function FinancialsPage() {
     if (!activeOrgId || !canViewFinancials) {
       setBillingSnapshot(null);
       setBillingPolicy(DEFAULT_BILLING_POLICY);
-      setInstructorEarningsPolicy(DEFAULT_INSTRUCTOR_EARNINGS_POLICY);
       setHmoNonAttendanceBillingPolicy(DEFAULT_HMO_NON_ATTENDANCE_BILLING_POLICY);
       return;
     }
@@ -376,10 +374,6 @@ export default function FinancialsPage() {
         ...DEFAULT_BILLING_POLICY,
         ...(payload?.policies?.billing_consumption_policy || {}),
       });
-      setInstructorEarningsPolicy({
-        ...DEFAULT_INSTRUCTOR_EARNINGS_POLICY,
-        ...(payload?.policies?.instructor_earnings_policy || {}),
-      });
       setHmoNonAttendanceBillingPolicy(
         payload?.policies?.hmo_non_attendance_billing_policy || DEFAULT_HMO_NON_ATTENDANCE_BILLING_POLICY,
       );
@@ -388,7 +382,6 @@ export default function FinancialsPage() {
       toast.error(error?.message || 'טעינת נתוני החיובים נכשלה.');
       setBillingSnapshot(null);
       setBillingPolicy(DEFAULT_BILLING_POLICY);
-      setInstructorEarningsPolicy(DEFAULT_INSTRUCTOR_EARNINGS_POLICY);
       setHmoNonAttendanceBillingPolicy(DEFAULT_HMO_NON_ATTENDANCE_BILLING_POLICY);
     } finally {
       setLoadingBilling(false);
@@ -573,12 +566,7 @@ export default function FinancialsPage() {
         key: 'billing_consumption_policy',
         value: billingPolicy,
       });
-      await upsertSetting({
-        session,
-        orgId: activeOrgId,
-        key: 'instructor_earnings_policy',
-        value: instructorEarningsPolicy,
-      });
+      await instructorEarnings.save();
       await upsertSetting({
         session,
         orgId: activeOrgId,
@@ -1649,13 +1637,14 @@ export default function FinancialsPage() {
             <BillingSettingsWorkspace
               billingPolicy={billingPolicy}
               setBillingPolicy={setBillingPolicy}
-              instructorPolicy={instructorEarningsPolicy}
-              setInstructorPolicy={setInstructorEarningsPolicy}
+              instructorPolicy={instructorEarnings.policy}
+              setInstructorPolicy={instructorEarnings.setPolicy}
+              instructorPolicyDates={instructorEarnings}
               hmoNonAttendanceBillingPolicy={hmoNonAttendanceBillingPolicy}
               setHmoNonAttendanceBillingPolicy={setHmoNonAttendanceBillingPolicy}
               canMutateBillingPolicy={canMutateBillingPolicy}
               savingPolicy={savingPolicy}
-              loadingPolicy={loadingBilling}
+              loadingPolicy={loadingBilling || instructorEarnings.loading}
               onSaveBillingPolicy={() => setConfirmPolicySave(true)}
               onChanged={loadBillingOverview}
             />

@@ -25,6 +25,7 @@ import {
   combinePayComponents,
   countWorkingDaysInRange,
   fetchApprovedLeaveDays,
+  financePoliciesOnDate,
   fetchAttendanceRecords,
   listFinanceCorrections,
   loadFinancePolicies,
@@ -154,8 +155,10 @@ export function resolveCountedLesson({
   const employeeId = normalizeString(instance?.instructor_employee_id);
   const lessonDate = localDateKey(instance?.datetime_start);
   const { participants: participantsForPay, unmarkedIds } = resolveParticipantsForPay(instance, participants, now);
+  // The earnings policy in force on the lesson's own date, not today's.
+  const lessonPolicies = financePoliciesOnDate(policies, lessonDate);
   const paidParticipants = employeeId
-    ? resolveCompensationEligibleParticipants(participantsForPay, policies, graceParticipantIds)
+    ? resolveCompensationEligibleParticipants(participantsForPay, lessonPolicies, graceParticipantIds)
     : [];
   const markedPaidParticipants = paidParticipants.filter((participant) => !unmarkedIds.has(participant?.id));
   const counted = paidParticipants.length > 0;
@@ -334,7 +337,7 @@ export async function loadCountedLessons(client, orgId, {
   const [serviceRows, resolvedRateRows, resolvedPolicies] = await Promise.all([
     loadRowsByIds(client, orgId, 'Services', 'id, name, payment_model', 'id', serviceIds),
     rateRows || loadRateHistoryRows(client, orgId, { employeeIds: instructorIds, payBases: [...LESSON_PAY_BASES] }),
-    policies || loadFinancePolicies(client, orgId),
+    policies || loadFinancePolicies(client, orgId, { asOf: endKey }),
   ]);
   const servicesById = new Map(serviceRows.map((row) => [row.id, row]));
 
@@ -383,7 +386,7 @@ export async function computeEmployeePay(client, orgId, {
 } = {}) {
   const employeeId = employee?.id;
   const [resolvedPolicies, resolvedRateRows, leaveDays, corrections] = await Promise.all([
-    policies || loadFinancePolicies(client, orgId),
+    policies || loadFinancePolicies(client, orgId, { asOf: localDateKey(endDate) }),
     rateRows || loadRateHistoryRows(client, orgId, { employeeIds: [employeeId] }),
     fetchApprovedLeaveDays(client, { employeeId, startDate, endDate }),
     listFinanceCorrections(client, { employeeId, startDate, endDate }),
@@ -415,7 +418,8 @@ export async function computeEmployeePay(client, orgId, {
       targetDate: leaveDay.leave_date,
       lessonHistory,
       attendanceRecords: attendanceHistory,
-      leavePayPolicy: resolvedPolicies.leavePayPolicy,
+      // The leave-pay policy in force on the leave day.
+      leavePayPolicy: financePoliciesOnDate(resolvedPolicies, leaveDay.leave_date).leavePayPolicy,
       rateRows: resolvedRateRows,
     }) * Number(leaveDay.pay_fraction || 0)),
   }));

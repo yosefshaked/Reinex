@@ -5,6 +5,8 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select.jsx';
 import HmoSetupWorkspace from '@/features/finance/components/HmoSetupWorkspace.jsx';
+import DatedSettingFields from '@/features/settings/components/DatedSettingFields.jsx';
+import { describeInstructorEarningsVersion } from '@/features/finance/hooks/useInstructorEarningsPolicy.js';
 
 const BILLING_POLICY_FIELDS = [
   {
@@ -29,11 +31,22 @@ const BILLING_POLICY_FIELDS = [
   },
 ];
 
+const STATUS_LABELS = Object.fromEntries(BILLING_POLICY_FIELDS.map((field) => [field.key, field.label]));
+
+function describeInstructorVersion(version) {
+  return describeInstructorEarningsVersion(version, STATUS_LABELS);
+}
+
+/**
+ * `instructorPolicyDates` ({ effectiveDate, setEffectiveDate, versions }) is the date part of the
+ * instructor earnings policy, which is a dated setting: a change applies to lessons from that date.
+ */
 export default function BillingSettingsWorkspace({
   billingPolicy,
   setBillingPolicy,
   instructorPolicy,
   setInstructorPolicy,
+  instructorPolicyDates = null,
   hmoNonAttendanceBillingPolicy = 'student_private_rate',
   setHmoNonAttendanceBillingPolicy,
   canMutateBillingPolicy,
@@ -101,6 +114,21 @@ export default function BillingSettingsWorkspace({
             </div>
           ))}
         </div>
+
+        {instructorPolicyDates ? (
+          <div className="mt-4 rounded-xl border border-border bg-slate-50 p-4">
+            <div className="mb-2 text-sm font-semibold text-zinc-900">שכר מדריך</div>
+            <DatedSettingFields
+              idPrefix="instructor-earnings-policy"
+              effectiveDate={instructorPolicyDates.effectiveDate}
+              onEffectiveDateChange={instructorPolicyDates.setEffectiveDate}
+              versions={instructorPolicyDates.versions}
+              describeVersion={describeInstructorVersion}
+              changed={instructorPolicyDates.changed}
+              disabled={!canMutateBillingPolicy || savingPolicy || loadingPolicy}
+            />
+          </div>
+        ) : null}
       </section>
 
       <section className="rounded-xl border border-border bg-white p-5 shadow-sm">

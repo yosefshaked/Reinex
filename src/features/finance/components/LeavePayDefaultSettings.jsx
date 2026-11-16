@@ -4,7 +4,10 @@ import { toast } from '@/lib/toast.jsx';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { fetchSettingsValue, upsertSetting } from '@/features/settings/api/settings.js';
+import { fetchDatedSetting, saveDatedSetting } from '@/features/settings/api/settings.js';
+import DatedSettingFields from '@/features/settings/components/DatedSettingFields.jsx';
+import { versionInForce } from '@/features/settings/lib/dated-setting.js';
+import { todayKey } from '@/lib/local-time.js';
 import {
   LEAVE_PAY_DEFAULT_METHODS,
   LEAVE_PAY_POLICY_KEY,
@@ -13,18 +16,29 @@ import {
   buildLeavePayDraft,
   buildLeavePayPolicyPayload,
   describeLeavePayMethod,
+  getEffectiveDefaultMethod,
+  getLeavePayMethodLabel,
   isLeavePayDraftChanged,
   readLeavePayPolicy,
   validateLeavePayDraft,
 } from '@/features/finance/lib/leave-pay-policy.js';
 
+/** One stored version in a few words, for the history list. */
+function describeLeavePayVersion(version) {
+  const policy = readLeavePayPolicy(version?.settings_value);
+  return `${getLeavePayMethodLabel(getEffectiveDefaultMethod(policy))} · ${policy.lookback_months} חודשים`;
+}
+
 /**
  * Body of the "תשלום חופשה" dialog in Settings: the organisation's default leave-pay method
- * (Settings "leave_pay_policy"). Opens straight in the form with the current values; the settings
- * API checks the value on save.
+ * ("leave_pay_policy", a dated setting: a leave day is valued by the version in force on that day).
+ * Opens straight in the form with today's values; saving adds a version from the chosen date
+ * (default today). The settings API checks the value on save.
  */
 export default function LeavePayDefaultSettings({ session, orgId, canEdit, onClose }) {
   const [stored, setStored] = useState(null);
+  const [versions, setVersions] = useState([]);
+  const [effectiveDate, setEffectiveDate] = useState(() => todayKey());
   const [loadState, setLoadState] = useState('loading');
   const [draft, setDraft] = useState(null);
   const [formError, setFormError] = useState('');
@@ -34,10 +48,12 @@ export default function LeavePayDefaultSettings({ session, orgId, canEdit, onClo
     if (!session || !orgId) return;
     setLoadState('loading');
     try {
-      const response = await fetchSettingsValue({ session, orgId, key: LEAVE_PAY_POLICY_KEY, signal });
+      const response = await fetchDatedSetting({ session, orgId, key: LEAVE_PAY_POLICY_KEY, signal });
       if (signal?.aborted) return;
       const value = response?.value ?? null;
       setStored(value);
+      setVersions(response?.versions || []);
+      setEffectiveDate(todayKey());
       setDraft(buildLeavePayDraft(value));
       setLoadState('ready');
     } catch (error) {
@@ -53,6 +69,9 @@ export default function LeavePayDefaultSettings({ session, orgId, canEdit, onClo
     return () => controller.abort();
   }, [load]);
 
+  // What is in force on the chosen date: saving is allowed only when the draft differs from it.
+  const baseline = versionInForce(versions, effectiveDate)?.settings_value ?? (versions.length ? null : stored);
+
   const handleSave = async () => {
     const problem = validateLeavePayDraft(draft);
     if (problem) {
@@ -61,10 +80,9 @@ export default function LeavePayDefaultSettings({ session, orgId, canEdit, onClo
     }
     setSaving(true);
     setFormError('');
-    const value = buildLeavePayPolicyPayload(stored, draft);
+    const value = buildLeavePayPolicyPayload(baseline, draft);
     try {
-      await upsertSetting({ session, orgId, key: LEAVE_PAY_POLICY_KEY, value });
-      setStored(value);
+      await saveDatedSetting({ session, orgId, key: LEAVE_PAY_POLICY_KEY, value, effectiveDate });
       toast.success('ברירת המחדל לתשלום חופשה נשמרה.');
       onClose?.();
     } catch (error) {
@@ -93,8 +111,8 @@ export default function LeavePayDefaultSettings({ session, orgId, canEdit, onClo
   }
 
   const draftProblem = validateLeavePayDraft(draft);
-  const draftChanged = isLeavePayDraftChanged(stored, draft);
-  const draftMonths = Number(draft.lookbackMonths) > 0 ? Number(draft.lookbackMonths) : readLeavePayPolicy(stored).lookback_months;
+  const draftChanged = isLeavePayDraftChanged(baseline, draft);
+  const draftMonths = Number(draft.lookbackMonths) > 0 ? Number(draft.lookbackMonths) : readLeavePayPolicy(baseline).lookback_months;
 
   return (
     <div className="space-y-4" data-settings-block="leave-pay-default">
@@ -150,6 +168,16 @@ export default function LeavePayDefaultSettings({ session, orgId, canEdit, onClo
         />
       </div>
 
+      <DatedSettingFields
+        idPrefix="leave-pay-default"
+        effectiveDate={effectiveDate}
+        onEffectiveDateChange={setEffectiveDate}
+        versions={versions}
+        describeVersion={describeLeavePayVersion}
+        changed={draftChanged}
+        disabled={saving || !canEdit}
+      />
+
       {formError || (draftProblem && draft.method) ? (
         <p className="text-sm font-medium text-red-700" role="alert">{formError || draftProblem}</p>
       ) : null}
@@ -159,7 +187,7 @@ export default function LeavePayDefaultSettings({ session, orgId, canEdit, onClo
           type="button"
           size="sm"
           onClick={() => void handleSave()}
-          disabled={!canEdit || saving || Boolean(draftProblem) || !draftChanged}
+          disabled={!canEdit || saving || Boolean(draftProblem) || !draftChanged || !effectiveDate}
         >
           {saving ? <Loader2 className="me-2 h-4 w-4 animate-spin" /> : null}
           שמירה

@@ -22,6 +22,7 @@ import {
   resolveLessonRateOnDate,
   resolveRateOnDate,
 } from './rate-history.js';
+import { isDatedSettingKey, loadDatedSettingRows, resolveSettingOnDate } from './dated-settings.js';
 
 export const DEFAULT_LEAVE_POLICY = Object.freeze({
   carryover_enabled: false,
@@ -181,8 +182,36 @@ export function validateLeavePayPolicyInput(raw) {
   return { value: normalizeLeavePayPolicy({ ...DEFAULT_LEAVE_PAY_POLICY, ...parsed }) };
 }
 
+const INSTRUCTOR_EARNINGS_STATUSES = Object.keys(DEFAULT_INSTRUCTOR_EARNINGS_POLICY);
+
+/**
+ * Checks an instructor_earnings_policy written through the settings API: an object whose four
+ * statuses are booleans. A missing status takes the default; anything else is refused.
+ * Returns { value } (normalized) or { error }.
+ */
+export function validateInstructorEarningsPolicyInput(raw) {
+  const parsed = parseJsonValue(raw, null);
+  if (!isPlainObject(parsed)) {
+    return { error: 'invalid_instructor_earnings_policy' };
+  }
+  for (const status of INSTRUCTOR_EARNINGS_STATUSES) {
+    if (parsed[status] !== undefined && typeof parsed[status] !== 'boolean') {
+      return { error: 'invalid_instructor_earnings_policy' };
+    }
+  }
+  return { value: normalizeBooleanPolicy({ ...DEFAULT_INSTRUCTOR_EARNINGS_POLICY, ...parsed }, DEFAULT_INSTRUCTOR_EARNINGS_POLICY) };
+}
+
+/**
+ * Plain (undated) settings of one organisation as { key: value }. A dated setting is refused: it
+ * has no value in "Settings" and is read as of a date through dated-settings.js.
+ */
 export async function loadSettingsMap(tenantClient, orgId, keys = []) {
   const normalizedKeys = Array.from(new Set((keys || []).map((key) => normalizeString(key)).filter(Boolean)));
+  const datedKeys = normalizedKeys.filter(isDatedSettingKey);
+  if (datedKeys.length > 0) {
+    throw new Error(`loadSettingsMap cannot read dated settings (${datedKeys.join(', ')}); use loadFinancePolicies or dated-settings.js`);
+  }
   if (normalizedKeys.length === 0) {
     return {};
   }
@@ -209,22 +238,74 @@ export async function loadSettingsMap(tenantClient, orgId, keys = []) {
   return map;
 }
 
-export async function loadFinancePolicies(tenantClient, orgId) {
-  const settingsMap = await loadSettingsMap(tenantClient, orgId, [
-    'leave_policy',
-    'leave_pay_policy',
-    'billing_consumption_policy',
-    'hmo_non_attendance_billing_policy',
-    'instructor_earnings_policy',
+/**
+ * The organisation's finance policies as they stand on a date.
+ *
+ * The plain settings (leave balance rules, student billing) have one value. The dated ones
+ * (`instructorEarningsPolicy`, `leavePayPolicy`) are the versions in force on the date
+ * (dated-settings.js). Every policies object also has `asOfDate` and `onDate(dateKey)`, which
+ * returns the same policies as they stand on another date without reading the database again, so
+ * pay code resolves each lesson and each leave day by its own local date (`financePoliciesOnDate`).
+ *
+ * `asOf` is required: a caller that means "now" passes today's org-local date (`todayKey()`).
+ *
+ * @param {any} tenantClient
+ * @param {string} orgId
+ * @param {{ asOf: string }} options
+ */
+export async function loadFinancePolicies(tenantClient, orgId, { asOf } = /** @type {any} */ ({})) {
+  const asOfDate = normalizeString(asOf);
+  if (!isYmdDate(asOfDate)) {
+    throw new Error('loadFinancePolicies needs an as-of date key (YYYY-MM-DD)');
+  }
+  const [settingsMap, datedRows] = await Promise.all([
+    loadSettingsMap(tenantClient, orgId, [
+      'leave_policy',
+      'billing_consumption_policy',
+      'hmo_non_attendance_billing_policy',
+    ]),
+    loadDatedSettingRows(tenantClient, orgId),
   ]);
+  return buildFinancePolicies({ settingsMap, datedRows, asOf: asOfDate });
+}
 
-  return {
+/**
+ * The policies object of loadFinancePolicies from rows already read (pure; tests build it directly).
+ *
+ * @param {{ settingsMap?: Record<string, any>, datedRows?: any[], asOf: string }} params
+ */
+export function buildFinancePolicies({ settingsMap = {}, datedRows = [], asOf }) {
+  const undated = {
     leavePolicy: normalizeLeavePolicy(settingsMap.leave_policy),
-    leavePayPolicy: normalizeLeavePayPolicy(settingsMap.leave_pay_policy),
     billingConsumptionPolicy: normalizeBooleanPolicy(settingsMap.billing_consumption_policy, DEFAULT_BILLING_CONSUMPTION_POLICY),
     hmoNonAttendanceBillingPolicy: normalizeHmoNonAttendanceBillingPolicy(settingsMap.hmo_non_attendance_billing_policy),
-    instructorEarningsPolicy: normalizeBooleanPolicy(settingsMap.instructor_earnings_policy, DEFAULT_INSTRUCTOR_EARNINGS_POLICY),
   };
+  const byDate = new Map();
+  const onDate = (dateKey) => {
+    const date = localDateKey(dateKey) || asOf;
+    if (!byDate.has(date)) {
+      byDate.set(date, Object.freeze({
+        ...undated,
+        leavePayPolicy: normalizeLeavePayPolicy(resolveSettingOnDate(datedRows, 'leave_pay_policy', date)?.settings_value),
+        instructorEarningsPolicy: normalizeBooleanPolicy(
+          resolveSettingOnDate(datedRows, 'instructor_earnings_policy', date)?.settings_value,
+          DEFAULT_INSTRUCTOR_EARNINGS_POLICY,
+        ),
+        asOfDate: date,
+        onDate,
+      }));
+    }
+    return byDate.get(date);
+  };
+  return onDate(asOf);
+}
+
+/**
+ * The policies as they stand on `dateKey`. Accepts a policies object from loadFinancePolicies, or a
+ * plain object with the same fields (then it is the policy on every date).
+ */
+export function financePoliciesOnDate(policies, dateKey) {
+  return policies && typeof policies.onDate === 'function' && dateKey ? policies.onDate(dateKey) : policies;
 }
 
 export async function resolveEmployeeRecord(tenantClient, { employeeId, userId, canManageAll = false }) {

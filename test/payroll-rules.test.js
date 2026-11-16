@@ -8,6 +8,7 @@ import { describe, it } from 'node:test';
 
 import {
   DEFAULT_INSTRUCTOR_EARNINGS_POLICY,
+  buildFinancePolicies,
   buildLeaveDayRows,
   combinePayComponents,
   describeMissingLessonRate,
@@ -16,9 +17,7 @@ import {
   resolveLessonInstructorPayout,
 } from '../api/_shared/employee-finance.js';
 import {
-  isStoredInstructorCompensationDecisionKept,
-  readPreviousInstructorCompensation,
-  resolveMarkedInstructorCompensationDecision,
+  resolveExplicitInstructorCompensationDecision,
   shouldParticipantTriggerInstructorCompensation,
 } from '../api/_shared/calendar-workflow-decisions.js';
 import { PAY_BASIS, hasRateKind, resolveLessonRateOnDate, resolveRateOnDate } from '../api/_shared/rate-history.js';
@@ -177,58 +176,27 @@ describe('PAY-B instructor pay per participant outcome', () => {
     assert.equal(paysInstructor(participant('p1', 'scheduled', 'compensated')), false);
   });
 
-  it('PAY-B8 the mark stores the paid / not paid decision, so a later policy change leaves past months alone', () => {
-    // Marked under a policy that pays no-shows: stored as paid.
-    const marked = participant('p1', 'no_show', resolveMarkedInstructorCompensationDecision('no_show', 'unknown', true));
-    const strictPolicy = { instructorEarningsPolicy: { ...POLICIES.instructorEarningsPolicy, no_show: false } };
-    assert.equal(shouldParticipantTriggerInstructorCompensation(marked, strictPolicy), true, 'the new policy does not reach back');
-
-    assert.equal(resolveMarkedInstructorCompensationDecision('cancelled_student', 'unknown', false), 'not_compensated');
-    assert.equal(resolveMarkedInstructorCompensationDecision('cancelled_student', 'compensated', false), 'compensated', 'the absence form wins');
-    assert.equal(resolveMarkedInstructorCompensationDecision('attended', 'unknown', null), 'compensated');
-    assert.equal(resolveMarkedInstructorCompensationDecision('scheduled', 'compensated', true), 'unknown', 'restoring clears the decision');
-    assert.equal(resolveMarkedInstructorCompensationDecision('no_show', 'unknown', null), 'unknown', 'no policy read, nothing invented');
-  });
-
-  it('PAY-B8 a re-mark with the same status and no explicit choice keeps the stored decision', () => {
-    // October: a no-show marked while no-shows paid → stored compensated. November: the policy
-    // stops paying no-shows, and someone re-saves the participant (notes edit / re-confirm).
-    const october = { status: 'no_show', decision: 'compensated' };
-    assert.equal(resolveMarkedInstructorCompensationDecision('no_show', 'unknown', false, october), 'compensated');
-    assert.equal(isStoredInstructorCompensationDecisionKept('no_show', 'unknown', october), true);
-
-    // A choice made in the absence form survives a re-mark without the field.
-    const chosen = { status: 'cancelled_student', decision: 'not_compensated' };
-    assert.equal(resolveMarkedInstructorCompensationDecision('cancelled_student', undefined, true, chosen), 'not_compensated');
-  });
-
-  it('PAY-B8 a changed status is decided afresh, and an explicit choice always wins', () => {
-    const october = { status: 'no_show', decision: 'compensated' };
-    assert.equal(
-      resolveMarkedInstructorCompensationDecision('cancelled_student', 'unknown', false, october),
-      'not_compensated',
-      'a new outcome follows the policy in force now',
-    );
-    assert.equal(isStoredInstructorCompensationDecisionKept('cancelled_student', 'unknown', october), false);
-
-    assert.equal(resolveMarkedInstructorCompensationDecision('no_show', 'not_compensated', true, october), 'not_compensated');
-    assert.equal(isStoredInstructorCompensationDecisionKept('no_show', 'not_compensated', october), false);
-
-    // Nothing explicit on file (rows marked before the rule): the policy decides.
-    const legacy = { status: 'no_show', decision: 'unknown' };
-    assert.equal(resolveMarkedInstructorCompensationDecision('no_show', 'unknown', true, legacy), 'compensated');
-    assert.equal(isStoredInstructorCompensationDecisionKept('no_show', 'unknown', legacy), false);
-  });
-
-  it('PAY-B8 the previous decision is read from the participant row as stored', () => {
-    const row = {
-      participant_status: 'no_show',
-      metadata: { workflow: { instructor_compensation: { decision: 'compensated', decided_at: '2026-10-05T10:00:00Z', decided_by: 'u1' } } },
-    };
-    assert.deepEqual(readPreviousInstructorCompensation(row), {
-      status: 'no_show', decision: 'compensated', decided_at: '2026-10-05T10:00:00Z', decided_by: 'u1',
+  it('PAY-B8 the earnings policy is read as of the lesson date, so a change from a date leaves earlier months alone', () => {
+    // No-shows paid until 30.11; from 1.12 they are not.
+    const policies = buildFinancePolicies({
+      asOf: '2026-12-15',
+      datedRows: [
+        { key: 'instructor_earnings_policy', effective_date: '2000-01-01', settings_value: { ...DEFAULT_INSTRUCTOR_EARNINGS_POLICY, no_show: true } },
+        { key: 'instructor_earnings_policy', effective_date: '2026-12-01', settings_value: { ...DEFAULT_INSTRUCTOR_EARNINGS_POLICY, no_show: false } },
+      ],
     });
-    assert.equal(readPreviousInstructorCompensation({}).decision, 'unknown');
+    const noShow = participant('p1', 'no_show');
+    assert.equal(shouldParticipantTriggerInstructorCompensation(noShow, policies.onDate('2026-11-20')), true, 'November keeps the old policy');
+    assert.equal(shouldParticipantTriggerInstructorCompensation(noShow, policies.onDate('2026-12-01')), false, 'from 1.12 the new one');
+  });
+
+  it('PAY-B8 only a choice made in the absence form is stored; everything else is left to the policy', () => {
+    assert.equal(resolveExplicitInstructorCompensationDecision('no_show', 'unknown'), 'unknown');
+    assert.equal(resolveExplicitInstructorCompensationDecision('no_show', undefined), 'unknown');
+    assert.equal(resolveExplicitInstructorCompensationDecision('cancelled_student', 'compensated'), 'compensated', 'the absence form choice');
+    assert.equal(resolveExplicitInstructorCompensationDecision('cancelled_clinic', 'not_compensated'), 'not_compensated');
+    assert.equal(resolveExplicitInstructorCompensationDecision('attended', 'compensated'), 'unknown', 'attendance pays by the policy');
+    assert.equal(resolveExplicitInstructorCompensationDecision('scheduled', 'compensated'), 'unknown', 'restoring clears the decision');
   });
 
   it.todo('PAY-B3 the cancellation cutoff is when the day\'s list was sent to the instructor (recorded per instructor and day)');

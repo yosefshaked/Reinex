@@ -2,9 +2,9 @@
   "meta": {
     "id": "leave-pay-default",
     "name": "Settings — the organisation's default leave-pay method",
-    "description": "The \"תשלום חופשה\" tile in the settings page. The policy is first reset to the seeded default (\"ממוצע מומלץ\", 3 months) through POST /api/settings. The tile button opens the shared dialog with the form and \"שמירה\" disabled while nothing changed; choosing \"ממוצע היסטורי\" and saving closes the dialog and shows it when reopened after a reload; then \"ממוצע מומלץ\" is restored the same way. A write with 13 months is refused by the server (400 invalid_leave_pay_lookback_months).",
-    "version": "1.0.0",
-    "last_validated_at": "2026-11-16T09:00:00Z",
+    "description": "The \"תשלום חופשה\" tile in the settings page. leave_pay_policy is a dated setting: every save is a version from a date. The policy is first reset to the seeded default (\"ממוצע מומלץ\", 3 months) from today through POST /api/settings; a write without effective_date is refused (400 missing_effective_date). The tile button opens the shared dialog with the form and \"שמירה\" disabled while nothing changed; the \"בתוקף מ-\" date starts at today; choosing \"ממוצע היסטורי\" and saving closes the dialog and shows it when reopened after a reload, with today's version in the \"היסטוריה (N)\" list; then \"ממוצע מומלץ\" is restored the same way. A write with 13 months is refused by the server (400 invalid_leave_pay_lookback_months).",
+    "version": "1.1.0",
+    "last_validated_at": "2026-11-16T12:00:00Z",
     "author": "claude-ai",
     "dependencies": {
       "routes": [
@@ -38,14 +38,31 @@
       "steps": [
         {
           "id": "reset-policy",
-          "description": "Store the seeded default so the run starts from \"ממוצע מומלץ\"",
+          "description": "Store the seeded default from today (replacing today's version of an earlier run), so the run starts from \"ממוצע מומלץ\"",
           "action": "apiCall",
           "method": "POST",
           "endpoint": "/api/settings",
           "body": {
             "org_id": "{{TEST_ORG_ID}}",
             "settings": {
-              "leave_pay_policy": { "default_method": "legal", "lookback_months": 3, "legal_allow_12m_if_better": true, "fixed_rate_default": 0 }
+              "leave_pay_policy": {
+                "value": { "default_method": "legal", "lookback_months": 3, "legal_allow_12m_if_better": true, "fixed_rate_default": 0 },
+                "effective_date": "{{TODAY}}"
+              }
+            }
+          }
+        },
+        {
+          "id": "refuse-without-date",
+          "description": "A dated setting needs effective_date (400 missing_effective_date)",
+          "action": "apiCall",
+          "method": "POST",
+          "endpoint": "/api/settings",
+          "ignoreStatus": [400],
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "settings": {
+              "leave_pay_policy": { "default_method": "avg_hourly_x_avg_day_hours", "lookback_months": 3, "legal_allow_12m_if_better": true }
             }
           }
         },
@@ -59,7 +76,10 @@
           "body": {
             "org_id": "{{TEST_ORG_ID}}",
             "settings": {
-              "leave_pay_policy": { "default_method": "legal", "lookback_months": 13, "legal_allow_12m_if_better": true }
+              "leave_pay_policy": {
+                "value": { "default_method": "legal", "lookback_months": 13, "legal_allow_12m_if_better": true },
+                "effective_date": "{{TODAY}}"
+              }
             }
           }
         }
@@ -87,6 +107,14 @@
           "id": "assert-months-3",
           "action": "waitForSelector",
           "selector": "[role='dialog'] [data-settings-block='leave-pay-default'] #leave-pay-lookback-months[value='3']"
+        },
+        {
+          "id": "assert-effective-today",
+          "description": "\"בתוקף מ-\" starts at today",
+          "action": "assert",
+          "type": "value",
+          "selector": "[role='dialog'] [data-dated-setting='leave-pay-default'] #leave-pay-default-effective-date",
+          "value": "{{TODAY}}"
         },
         {
           "id": "assert-save-disabled",
@@ -129,6 +157,24 @@
           "description": "After leaving and coming back the stored value is \"ממוצע היסטורי\"",
           "action": "waitForSelector",
           "selector": "[role='dialog'] [data-settings-block='leave-pay-default'] #leave-pay-method-avg_hourly_x_avg_day_hours:checked"
+        },
+        {
+          "id": "open-history",
+          "description": "The versions list opens from \"היסטוריה (N)\"",
+          "action": "click",
+          "selector": "[role='dialog'] [data-dated-setting='leave-pay-default'] button:has-text('היסטוריה')"
+        },
+        {
+          "id": "assert-today-in-history",
+          "description": "Today's version is listed with its date and the method saved",
+          "action": "waitForSelector",
+          "selector": "[role='dialog'] [data-dated-setting='leave-pay-default'] li:has-text('מ-{{TODAY_DISPLAY}}'):has-text('ממוצע היסטורי')"
+        },
+        {
+          "id": "assert-first-version-in-history",
+          "description": "The version carried over from before dated settings is shown as \"מאז ההתחלה\"",
+          "action": "waitForSelector",
+          "selector": "[role='dialog'] [data-dated-setting='leave-pay-default'] li:has-text('מאז ההתחלה')"
         },
         { "id": "screenshot-historic", "action": "screenshot", "name": "01-leave-pay-default-historic" }
       ]

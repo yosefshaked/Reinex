@@ -1,4 +1,4 @@
-// The organisation's default leave-pay method (Settings key "leave_pay_policy"), for the settings block.
+// The organisation's default leave-pay method (dated setting "leave_pay_policy"), for the settings block.
 // The server reads it with normalizeLeavePayPolicy and checks writes with validateLeavePayPolicyInput
 // (api/_shared/employee-finance.js); this module mirrors those rules for display and the edit form.
 // Keep it free of React and '@/...' path aliases so node:test can import it directly.

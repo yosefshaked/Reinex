@@ -2809,11 +2809,56 @@ FROM public.organizations org
 CROSS JOIN (
   VALUES
     ('leave_policy', '{"carryover_enabled":false,"carryover_cap_days":null,"holiday_rules":[]}'::jsonb),
-    ('leave_pay_policy', '{"default_method":"legal","lookback_months":3,"legal_allow_12m_if_better":true,"fixed_rate_default":0}'::jsonb),
-    ('billing_consumption_policy', '{"attended":true,"no_show":false,"cancelled_student":false,"cancelled_clinic":false}'::jsonb),
-    ('instructor_earnings_policy', '{"attended":true,"no_show":true,"cancelled_student":false,"cancelled_clinic":false}'::jsonb)
+    ('billing_consumption_policy', '{"attended":true,"no_show":false,"cancelled_student":false,"cancelled_clinic":false}'::jsonb)
 ) AS seed(key, settings_value)
 ON CONFLICT ("org_id", "key") DO NOTHING;
+
+-- -----------------------------------------------------------------
+-- public."SettingsHistory" (dated settings: a version of a setting from a date)
+-- -----------------------------------------------------------------
+-- A setting that changes how money is computed is read as of the date it applies to, like a rate:
+-- the version in force for a lesson is the latest one whose effective_date is on or before the
+-- lesson's local date (api/_shared/dated-settings.js). Such a key lives only here, never in
+-- "Settings". Written only by api/settings; one version per org, key and date.
+
+CREATE TABLE IF NOT EXISTS public."SettingsHistory" (
+  "id" uuid NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
+  "org_id" uuid NOT NULL REFERENCES public.organizations(id),
+  "key" text NOT NULL,
+  "effective_date" date NOT NULL,
+  "settings_value" jsonb NOT NULL,
+  "notes" text,
+  "created_by" uuid NULL,
+  "created_at" timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS settings_history_org_key_effective_date_uidx
+  ON public."SettingsHistory" ("org_id", "key", "effective_date");
+
+-- A first version "since the beginning" (2000-01-01, as rates carried over from before rate
+-- history) for each organisation that has no version of the key yet.
+INSERT INTO public."SettingsHistory" ("org_id", "key", "effective_date", "settings_value", "notes")
+SELECT
+  org.id,
+  seed.key,
+  DATE '2000-01-01',
+  -- A value still in "Settings" (migrations/0003 not applied yet) is the organisation's, not the default.
+  COALESCE(
+    (SELECT current."settings_value" FROM public."Settings" current
+     WHERE current."org_id" = org.id AND current."key" = seed.key LIMIT 1),
+    seed.settings_value
+  ),
+  NULL
+FROM public.organizations org
+CROSS JOIN (
+  VALUES
+    ('leave_pay_policy', '{"default_method":"legal","lookback_months":3,"legal_allow_12m_if_better":true,"fixed_rate_default":0}'::jsonb),
+    ('instructor_earnings_policy', '{"attended":true,"no_show":true,"cancelled_student":false,"cancelled_clinic":false}'::jsonb)
+) AS seed(key, settings_value)
+WHERE NOT EXISTS (
+  SELECT 1 FROM public."SettingsHistory" existing
+  WHERE existing."org_id" = org.id AND existing."key" = seed.key
+);
 
 -- -----------------------------------------------------------------
 -- public."Documents" (polymorphic file metadata)
@@ -3016,7 +3061,6 @@ DECLARE
   v_cancelled_participant_ids uuid[] := ARRAY[]::uuid[];
   v_cancelled_participant_audit_rows jsonb := '[]'::jsonb;
   v_billing_policy jsonb := '{"attended":true,"no_show":false,"cancelled_student":false,"cancelled_clinic":false}'::jsonb;
-  v_instructor_policy jsonb := '{"attended":true,"no_show":true,"cancelled_student":false,"cancelled_clinic":false}'::jsonb;
   v_instance_before_state jsonb := NULL;
   v_instance_after_state jsonb := NULL;
 BEGIN
@@ -3152,16 +3196,6 @@ BEGIN
     v_billing_policy := '{"attended":true,"no_show":false,"cancelled_student":false,"cancelled_clinic":false}'::jsonb;
   END IF;
 
-  SELECT settings_value
-  INTO v_instructor_policy
-  FROM public."Settings"
-  WHERE "org_id" = p_org_id
-    AND key = 'instructor_earnings_policy'
-  LIMIT 1;
-
-  IF v_instructor_policy IS NULL THEN
-    v_instructor_policy := '{"attended":true,"no_show":true,"cancelled_student":false,"cancelled_clinic":false}'::jsonb;
-  END IF;
 
   WITH participants_before AS (
     SELECT
@@ -3196,7 +3230,8 @@ BEGIN
               'instructor_compensation',
               COALESCE(COALESCE(participant.metadata, '{}'::jsonb)->'workflow'->'instructor_compensation', '{}'::jsonb)
                 || jsonb_build_object(
-                  'decision', 'not_compensated',
+                  -- No stored decision: the earnings policy in force on the lesson's date decides.
+                  'decision', 'unknown',
                   'decided_at', v_now,
                   'decided_by', p_actor_user_id,
                   'reason', 'instance_cancelled'
@@ -3222,9 +3257,7 @@ BEGIN
         jsonb_build_object(
           'evaluated_at', v_now,
           'participant_status', 'cancelled_clinic',
-          'billing_consumption_policy', v_billing_policy,
-          'instructor_earnings_policy', v_instructor_policy,
-          'instructor_compensation_decision', 'not_compensated'
+          'billing_consumption_policy', v_billing_policy
         )
       ),
       '{}'::jsonb
@@ -3295,7 +3328,6 @@ DECLARE
   v_promoted_participant_ids uuid[] := ARRAY[]::uuid[];
   v_promoted_participant_audit_rows jsonb := '[]'::jsonb;
   v_billing_policy jsonb := '{"attended":true,"no_show":false,"cancelled_student":false,"cancelled_clinic":false}'::jsonb;
-  v_instructor_policy jsonb := '{"attended":true,"no_show":true,"cancelled_student":false,"cancelled_clinic":false}'::jsonb;
   v_instance_before_state jsonb := NULL;
   v_instance_after_state jsonb := NULL;
 BEGIN
@@ -3380,15 +3412,6 @@ BEGIN
     v_billing_policy := '{"attended":true,"no_show":false,"cancelled_student":false,"cancelled_clinic":false}'::jsonb;
   END IF;
 
-  SELECT settings_value
-  INTO v_instructor_policy
-  FROM public."Settings"
-  WHERE "org_id" = p_org_id AND key = 'instructor_earnings_policy'
-  LIMIT 1;
-
-  IF v_instructor_policy IS NULL THEN
-    v_instructor_policy := '{"attended":true,"no_show":true,"cancelled_student":false,"cancelled_clinic":false}'::jsonb;
-  END IF;
 
   WITH participants_before AS (
     SELECT
@@ -3423,7 +3446,8 @@ BEGIN
               'instructor_compensation',
               COALESCE(COALESCE(participant.metadata, '{}'::jsonb)->'workflow'->'instructor_compensation', '{}'::jsonb)
                 || jsonb_build_object(
-                  'decision', 'compensated',
+                  -- No stored decision: the earnings policy in force on the lesson's date decides.
+                  'decision', 'unknown',
                   'decided_at', v_now,
                   'decided_by', p_actor_user_id,
                   'reason', 'attended'
@@ -3449,9 +3473,7 @@ BEGIN
         jsonb_build_object(
           'evaluated_at', v_now,
           'participant_status', 'attended',
-          'billing_consumption_policy', v_billing_policy,
-          'instructor_earnings_policy', v_instructor_policy,
-          'instructor_compensation_decision', 'compensated'
+          'billing_consumption_policy', v_billing_policy
         )
       ),
       '{}'::jsonb
@@ -3523,7 +3545,6 @@ DECLARE
   v_cancelled_participant_audit_rows jsonb := '[]'::jsonb;
   v_blocking_participants jsonb := '[]'::jsonb;
   v_billing_policy jsonb := '{"attended":true,"no_show":false,"cancelled_student":false,"cancelled_clinic":false}'::jsonb;
-  v_instructor_policy jsonb := '{"attended":true,"no_show":true,"cancelled_student":false,"cancelled_clinic":false}'::jsonb;
   v_has_scheduled boolean := false;
   v_has_attended boolean := false;
   v_next_status text := 'scheduled';
@@ -3651,15 +3672,6 @@ BEGIN
     v_billing_policy := '{"attended":true,"no_show":false,"cancelled_student":false,"cancelled_clinic":false}'::jsonb;
   END IF;
 
-  SELECT settings_value
-  INTO v_instructor_policy
-  FROM public."Settings"
-  WHERE "org_id" = p_org_id AND key = 'instructor_earnings_policy'
-  LIMIT 1;
-
-  IF v_instructor_policy IS NULL THEN
-    v_instructor_policy := '{"attended":true,"no_show":true,"cancelled_student":false,"cancelled_clinic":false}'::jsonb;
-  END IF;
 
   WITH participants_before AS (
     SELECT
@@ -3722,7 +3734,6 @@ BEGIN
           'evaluated_at', v_now,
           'participant_status', 'cancelled_student',
           'billing_consumption_policy', v_billing_policy,
-          'instructor_earnings_policy', v_instructor_policy,
           'instructor_compensation_decision', 'not_compensated'
         )
       ),
@@ -4438,6 +4449,7 @@ ALTER TABLE public.form_submissions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.otp_challenges ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.waiting_list_entries ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public."Settings" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public."SettingsHistory" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public."Documents" ENABLE ROW LEVEL SECURITY;
 
 DO $$
@@ -4487,6 +4499,7 @@ BEGIN
     'otp_challenges',
     'waiting_list_entries',
     'Settings',
+    'SettingsHistory',
     'Documents'
   ]
   LOOP
@@ -4585,6 +4598,7 @@ GRANT ALL ON TABLE public.form_submissions TO app_user;
 GRANT ALL ON TABLE public.otp_challenges TO app_user;
 GRANT ALL ON TABLE public.waiting_list_entries TO app_user;
 GRANT ALL ON TABLE public."Settings" TO app_user;
+GRANT ALL ON TABLE public."SettingsHistory" TO app_user;
 GRANT ALL ON TABLE public."Documents" TO app_user;
 
 GRANT app_user TO postgres, authenticated, anon;
@@ -4857,6 +4871,7 @@ DECLARE
     'otp_challenges',
     'waiting_list_entries',
     'Settings',
+    'SettingsHistory',
     'Documents'
   ];
   table_name text;

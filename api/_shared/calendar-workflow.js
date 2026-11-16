@@ -4,6 +4,7 @@ import { listDashboardTasks } from './dashboard-tasks.js';
 import { normalizeString, withOrgScope } from './org-bff.js';
 import { isPlainObject, readParticipantWorkflowMetadata, shouldParticipantTriggerInstructorCompensation } from './calendar-workflow-decisions.js';
 import { coerceAgorot } from './currency.js';
+import { localDateKey, todayKey } from './local-time.js';
 
 const RESOLVED_PARTICIPANT_STATUSES = new Set(['attended', 'no_show', 'cancelled_student', 'cancelled_clinic']);
 const LESSON_BILLING_USAGE_TYPES = ['lesson_charge', 'reversal'];
@@ -136,7 +137,7 @@ export async function loadLessonWorkflowState(tenantClient, lessonInstanceId) {
     { data: ledgerRows, error: ledgerRowsError },
     openTaskGroups,
   ] = await Promise.all([
-    loadFinancePolicies(tenantClient, instance.org_id),
+    loadFinancePolicies(tenantClient, instance.org_id, { asOf: localDateKey(instance.datetime_start) || todayKey() }),
     tenantClient
       .from('instance_locks')
       .select('id, lesson_instance_id, lock_source_type, lock_source_id, metadata')

@@ -36,13 +36,11 @@ import { createDashboardTask } from '../_shared/dashboard-tasks.js';
 import { listDashboardTasks, resolveDashboardTask } from '../_shared/dashboard-tasks.js';
 import { mergeParticipantWorkflowMetadata, syncLessonClosureState } from '../_shared/calendar-workflow.js';
 import {
-  isStoredInstructorCompensationDecisionKept,
   normalizeWorkflowDecision,
-  readPreviousInstructorCompensation,
-  resolveMarkedInstructorCompensationDecision,
+  resolveExplicitInstructorCompensationDecision,
 } from '../_shared/calendar-workflow-decisions.js';
 import { normalizeLessonInstanceStatus } from '../_shared/lesson-instance-status.js';
-import { localDateKey } from '../_shared/local-time.js';
+import { localDateKey, todayKey } from '../_shared/local-time.js';
 import { buildAttendanceTransitionAuditChanges } from '../_shared/attendance-audit.js';
 import { attachErrorTracking, respondTracked } from '../_shared/error-events.js';
 import { findBlockingReportParticipantIds } from '../_shared/session-reports-guards.js';
@@ -180,7 +178,7 @@ async function recordGraceCancellationRequest(client, orgId, {
 function buildParticipantWorkflowDecisionState(
   participantStatus,
   requestedInstructorCompensationDecision,
-  { studentBillingApplies = null, instructorEarningsApplies = null, previousInstructorCompensation = null } = {},
+  { studentBillingApplies = null } = {},
 ) {
   if (participantStatus === 'scheduled') {
     return {
@@ -206,11 +204,11 @@ function buildParticipantWorkflowDecisionState(
       reason: participantStatus,
     },
     instructor_compensation: {
-      decision: resolveMarkedInstructorCompensationDecision(
+      // Only a person's choice in the absence form is stored; otherwise the earnings policy in force
+      // on the lesson's date decides when pay is read.
+      decision: resolveExplicitInstructorCompensationDecision(
         participantStatus,
         requestedInstructorCompensationDecision,
-        instructorEarningsApplies,
-        previousInstructorCompensation,
       ),
       reason: participantStatus,
     },
@@ -233,12 +231,6 @@ function buildParticipantWorkflowPatch(
     requestedInstructorCompensationDecision,
     options,
   );
-  const previous = options.previousInstructorCompensation || null;
-  const keepsInstructorCompensation = isStoredInstructorCompensationDecisionKept(
-    participantStatus,
-    requestedInstructorCompensationDecision,
-    previous,
-  );
   return {
     student_billing: {
       ...decisionState.student_billing,
@@ -249,10 +241,8 @@ function buildParticipantWorkflowPatch(
     instructor_compensation: {
       ...decisionState.instructor_compensation,
       decision: normalizeWorkflowDecision(decisionState.instructor_compensation?.decision, 'unknown'),
-      // A kept decision keeps when and by whom it was made.
-      ...(keepsInstructorCompensation
-        ? { decided_at: previous.decided_at ?? decidedAt, decided_by: previous.decided_by ?? userId }
-        : { decided_at: decidedAt, decided_by: userId }),
+      decided_at: decidedAt,
+      decided_by: userId,
     },
     hmo_claim: {
       ...decisionState.hmo_claim,
@@ -263,11 +253,15 @@ function buildParticipantWorkflowPatch(
   };
 }
 
-async function getAttendanceStatusRequirements(client, orgId, participantStatus) {
+/**
+ * What marking a participant with this status needs, by the policies in force on the lesson's date
+ * (`lessonDate`, an instant or a date key; today when the lesson is unknown).
+ */
+async function getAttendanceStatusRequirements(client, orgId, participantStatus, lessonDate = null) {
   const normalizedStatus = typeof participantStatus === 'string'
     ? participantStatus.trim().toLowerCase()
     : '';
-  const policies = await loadFinancePolicies(client, orgId);
+  const policies = await loadFinancePolicies(client, orgId, { asOf: localDateKey(lessonDate) || todayKey() });
   const studentBillingApplies = Boolean(policies?.billingConsumptionPolicy?.[normalizedStatus]);
   const requiresInstructorCompensationDecision = studentBillingApplies
     && (normalizedStatus === 'no_show' || normalizedStatus === 'cancelled_student' || normalizedStatus === 'cancelled_clinic');
@@ -276,8 +270,8 @@ async function getAttendanceStatusRequirements(client, orgId, participantStatus)
     participant_status: normalizedStatus,
     student_billing_applies: studentBillingApplies,
     requires_instructor_compensation_decision: requiresInstructorCompensationDecision,
-    // The policy in force now, stored on the participant at the mark so a later policy change
-    // does not alter months already paid.
+    // What the earnings policy in force on the lesson's date says for this status: the absence form
+    // shows it as the default choice ("לפי הגדרות השכר"). It is not stored; a person's change is.
     instructor_earnings_applies: Boolean(policies?.instructorEarningsPolicy?.[normalizedStatus]),
   };
 }
@@ -305,8 +299,6 @@ function projectParticipantsForStatusChange(
       null,
       {
         studentBillingApplies: statusRequirements?.student_billing_applies,
-        instructorEarningsApplies: statusRequirements?.instructor_earnings_applies ?? null,
-        previousInstructorCompensation: readPreviousInstructorCompensation(row),
       },
     );
     return {
@@ -555,7 +547,7 @@ async function buildParticipantStatusPreview(client, orgId, body, {
 
   const statusRequirements = resolvedTargetStatus === 'attended' || resolvedTargetStatus === 'scheduled'
     ? null
-    : await getAttendanceStatusRequirements(client, orgId, resolvedTargetStatus);
+    : await getAttendanceStatusRequirements(client, orgId, resolvedTargetStatus, instance.datetime_start);
 
   const [{ data: instanceDetail, error: instanceDetailError }, { data: allParticipants, error: participantsError }, { data: participantLedgerRows, error: ledgerError }, dashboardTasks] = await Promise.all([
     withOrgScope(client, 'lesson_instances', orgId)
@@ -604,7 +596,7 @@ async function buildParticipantStatusPreview(client, orgId, body, {
   let billingArtifactRows = Array.isArray(participantLedgerRows) ? [...participantLedgerRows] : [];
 
   const lessonDateKey = localDateKey(instanceDetail.datetime_start || Date.now());
-  const policiesPromise = loadFinancePolicies(client, orgId);
+  const policiesPromise = loadFinancePolicies(client, orgId, { asOf: lessonDateKey });
   const [{ data: employeeRow, error: employeeError }, { data: studentRow, error: studentError }, { data: clientProfileRow, error: clientProfileError }, { data: serviceRow, error: serviceError }, { data: rateRows, error: rateRowsError }, policies] = await Promise.all([
     withOrgScope(client, 'Employees', orgId)
       .select('id, first_name, middle_name, last_name')
@@ -896,7 +888,18 @@ async function handleMarkAttendance(context, body, dbContext, userId, isAdmin, a
       return respond(context, 400, { message: 'missing_participant_status' });
     }
     try {
-      const requirements = await getAttendanceStatusRequirements(client, orgId, requestedStatus);
+      // The policies on the lesson's date, when the request names the lesson.
+      let lessonDate = null;
+      const requirementsInstanceId = typeof body.instance_id === 'string' ? body.instance_id.trim() : '';
+      if (requirementsInstanceId) {
+        const { data: requirementsInstance, error: requirementsInstanceError } = await withOrgScope(client, 'lesson_instances', orgId)
+          .select('datetime_start')
+          .eq('id', requirementsInstanceId)
+          .maybeSingle();
+        if (requirementsInstanceError) throw requirementsInstanceError;
+        lessonDate = requirementsInstance?.datetime_start || null;
+      }
+      const requirements = await getAttendanceStatusRequirements(client, orgId, requestedStatus, lessonDate);
       return respond(context, 200, requirements);
     } catch (error) {
       context.log?.error?.('calendar/attendance failed to load status requirements', {
@@ -1110,29 +1113,9 @@ async function handleMarkAttendance(context, body, dbContext, userId, isAdmin, a
       'unknown',
     );
 
-    // What this participant was marked and paid before: a re-mark with the same status and no
-    // explicit choice keeps that decision instead of re-reading today's policy.
-    const previousInstructorCompensation = readPreviousInstructorCompensation(participant);
-    const keepsStoredInstructorCompensation = isStoredInstructorCompensationDecisionKept(
-      participantStatus,
-      requestedInstructorCompensationDecision,
-      previousInstructorCompensation,
-    );
-
+    // No choice in the request means the earnings policy in force on the lesson's date decides.
     if (participantStatus !== 'scheduled' && participantStatus !== 'attended') {
-      statusRequirements = await getAttendanceStatusRequirements(client, orgId, participantStatus);
-
-      if (
-        statusRequirements.requires_instructor_compensation_decision
-        && !keepsStoredInstructorCompensation
-        && !['compensated', 'not_compensated'].includes(requestedInstructorCompensationDecision)
-      ) {
-        return respond(context, 400, {
-          message: 'missing_instructor_compensation_decision',
-          code: 'missing_instructor_compensation_decision',
-          participant_status: participantStatus,
-        });
-      }
+      statusRequirements = await getAttendanceStatusRequirements(client, orgId, participantStatus, instance.datetime_start);
     }
 
     if (participantStatus === 'scheduled') {
@@ -1191,8 +1174,6 @@ async function handleMarkAttendance(context, body, dbContext, userId, isAdmin, a
       new Date().toISOString(),
       {
         studentBillingApplies: statusRequirements?.student_billing_applies,
-        instructorEarningsApplies: statusRequirements?.instructor_earnings_applies ?? null,
-        previousInstructorCompensation,
       },
     );
     const metadataBase = participantUpdate.metadata && typeof participantUpdate.metadata === 'object'
@@ -1303,7 +1284,9 @@ async function handleMarkAttendance(context, body, dbContext, userId, isAdmin, a
 
   if (participantUpdate.participant_status) {
     try {
-      const policies = await loadFinancePolicies(client, orgId);
+      const policies = await loadFinancePolicies(client, orgId, {
+        asOf: localDateKey(mutationState.instance?.datetime_start) || todayKey(),
+      });
       const currentMetadata = mutationState.instance?.metadata && typeof mutationState.instance.metadata === 'object'
         ? mutationState.instance.metadata
         : {};

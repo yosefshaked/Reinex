@@ -12,6 +12,7 @@ const EXPORTABLE_TABLES = [
   { name: 'Employees', clearColumns: ['user_id'] },
   { name: 'Services' },
   { name: 'Settings' },
+  { name: 'SettingsHistory' },
   { name: 'RateHistory', references: { employee_id: 'Employees', service_id: 'Services' } },
   { name: 'employee_attendance_records', references: { employee_id: 'Employees' } },
   { name: 'employee_leave_entries', references: { employee_id: 'Employees' } },

@@ -77,7 +77,9 @@ export default async function (context, req) {
   const defaultDate = todayKey();
   const resolvedStart = isYmdDate(startDate) ? startDate : firstDayOfMonth(defaultDate);
   const resolvedEnd = isYmdDate(endDate) ? endDate : lastDayOfMonth(resolvedStart);
-  const policies = await loadFinancePolicies(supabase, orgId);
+  // Each lesson and leave day is valued by the policies on its own date (policies.onDate); the
+  // leave_pay_policy echoed in the response is the one in force at the end of the period.
+  const policies = await loadFinancePolicies(supabase, orgId, { asOf: resolvedEnd });
 
   let employees = [];
   if (canManageAll) {

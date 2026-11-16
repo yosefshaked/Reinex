@@ -33,6 +33,7 @@ import {
 import { getParticipantDisplayName } from '../utils/participantDisplay.js';
 import {
   ATTENDANCE_MARK_UNCHANGED_REASON,
+  absenceCompensationChoice,
   getParticipantCardHref,
   getParticipantStatusDisplay,
   hasAttendanceMarkChanged,
@@ -236,7 +237,7 @@ function AbsenceForm({
   const unchanged = !hasAttendanceMarkChanged(participant, {
     status: absenceForm.status,
     notes: absenceForm.notes,
-    instructorCompensationDecision: absenceForm.instructorCompensationDecision,
+    instructorCompensationDecision: absenceCompensationChoice(absenceForm),
     isExcused: waiverEligible && absenceForm.waiveFee === true,
   });
   const unchangedHintId = `absence-unchanged-${participant.id}`;

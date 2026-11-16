@@ -11,6 +11,7 @@ const JS_FILE_PATTERN = /\.js$/i;
 
 const EXPECTED_CONFLICTS_BY_TABLE = {
   Settings: ['org_id,key'],
+  SettingsHistory: ['org_id,key,effective_date'],
   grace_cancellation_requests: ['org_id,lesson_participant_id'],
   instructor_service_capabilities: ['org_id,employee_id,service_id'],
   instructor_profiles: ['employee_id'],
