@@ -9,6 +9,7 @@ import {
   buildLeavePayDraft,
   buildLeavePayPolicyPayload,
   describeLeavePayMethod,
+  getEffectiveDefaultMethod,
   getLeavePayMethodLabel,
   isLeavePayDraftChanged,
   readLeavePayPolicy,
@@ -39,14 +40,14 @@ describe('readLeavePayPolicy', () => {
 });
 
 describe('describeLeavePayMethod', () => {
-  it('describes the legal average with and without the 12-month comparison', () => {
+  it('describes the legal average with the 12-month comparison', () => {
     assert.equal(
-      describeLeavePayMethod('legal', { lookbackMonths: 3, compareTwelveMonths: true }),
+      describeLeavePayMethod('legal', { lookbackMonths: 3 }),
       'השכר היומי הממוצע בימים שעבד/ה ב-3 החודשים האחרונים, או ב-12 החודשים האחרונים אם שם הממוצע גבוה יותר.',
     );
     assert.equal(
-      describeLeavePayMethod('legal', { lookbackMonths: 1, compareTwelveMonths: false }),
-      'השכר היומי הממוצע בימים שעבד/ה בחודש האחרון.',
+      describeLeavePayMethod('legal', { lookbackMonths: 1 }),
+      'השכר היומי הממוצע בימים שעבד/ה בחודש האחרון, או ב-12 החודשים האחרונים אם שם הממוצע גבוה יותר.',
     );
   });
 
@@ -66,7 +67,17 @@ describe('describeLeavePayMethod', () => {
 
 describe('the edit draft', () => {
   it('starts from the stored values', () => {
-    assert.deepEqual(buildLeavePayDraft(SEEDED), { method: 'legal', lookbackMonths: '3', compareTwelveMonths: true });
+    assert.deepEqual(buildLeavePayDraft(SEEDED), { method: 'legal', lookbackMonths: '3' });
+  });
+
+  it('shows legal with the 12-month comparison off as the historic average', () => {
+    const old = { ...SEEDED, legal_allow_12m_if_better: false };
+    assert.equal(getEffectiveDefaultMethod(old), 'avg_hourly_x_avg_day_hours');
+    assert.equal(getEffectiveDefaultMethod(SEEDED), 'legal');
+    const draft = buildLeavePayDraft(old);
+    assert.equal(draft.method, 'avg_hourly_x_avg_day_hours');
+    assert.equal(isLeavePayDraftChanged(old, draft), false);
+    assert.equal(isLeavePayDraftChanged(old, { ...draft, method: 'legal' }), true);
   });
 
   it('starts with no method when the stored default is a fixed value', () => {
@@ -76,7 +87,7 @@ describe('the edit draft', () => {
   });
 
   it('accepts whole months from 1 to 12 only', () => {
-    const base = { method: 'legal', compareTwelveMonths: true };
+    const base = { method: 'legal' };
     assert.equal(validateLeavePayDraft({ ...base, lookbackMonths: '1' }), '');
     assert.equal(validateLeavePayDraft({ ...base, lookbackMonths: '12' }), '');
     for (const bad of ['0', '13', '2.5', '', 'abc']) {
@@ -89,21 +100,21 @@ describe('the edit draft', () => {
     assert.equal(isLeavePayDraftChanged(SEEDED, draft), false);
     assert.equal(isLeavePayDraftChanged(SEEDED, { ...draft, method: 'avg_hourly_x_avg_day_hours' }), true);
     assert.equal(isLeavePayDraftChanged(SEEDED, { ...draft, lookbackMonths: '4' }), true);
-    assert.equal(isLeavePayDraftChanged(SEEDED, { ...draft, compareTwelveMonths: false }), true);
   });
 
-  it('builds the stored value and keeps the fields it does not edit', () => {
-    const stored = { ...SEEDED, fixed_rate_default: 30000 };
+  it('builds the stored value, always with the 12-month flag on, and keeps the fields it does not edit', () => {
+    const stored = { ...SEEDED, legal_allow_12m_if_better: false, fixed_rate_default: 30000 };
     assert.deepEqual(
-      buildLeavePayPolicyPayload(stored, { method: 'avg_hourly_x_avg_day_hours', lookbackMonths: ' 6 ', compareTwelveMonths: false }),
-      { default_method: 'avg_hourly_x_avg_day_hours', lookback_months: 6, legal_allow_12m_if_better: false, fixed_rate_default: 30000 },
+      buildLeavePayPolicyPayload(stored, { method: 'avg_hourly_x_avg_day_hours', lookbackMonths: ' 6 ' }),
+      { default_method: 'avg_hourly_x_avg_day_hours', lookback_months: 6, legal_allow_12m_if_better: true, fixed_rate_default: 30000 },
     );
+    assert.equal(buildLeavePayPolicyPayload(stored, { method: 'legal', lookbackMonths: '3' }).legal_allow_12m_if_better, true);
   });
 });
 
 describe('validateLeavePayPolicyInput (server, settings write)', () => {
   it('accepts what the settings block sends', () => {
-    const payload = buildLeavePayPolicyPayload(SEEDED, { method: 'avg_hourly_x_avg_day_hours', lookbackMonths: '12', compareTwelveMonths: false });
+    const payload = buildLeavePayPolicyPayload(SEEDED, { method: 'avg_hourly_x_avg_day_hours', lookbackMonths: '12' });
     assert.deepEqual(validateLeavePayPolicyInput(payload), { value: payload });
   });
 

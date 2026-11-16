@@ -59,16 +59,21 @@ function describePeriod(months) {
 }
 
 /**
- * What a leave day is worth under a method, in words, for the number of months given.
- * "legal" mentions the 12-month comparison only when it is on.
+ * The method the screen shows for a stored policy. "legal" with the 12-month comparison off
+ * (old data) calculates exactly like the historic average, so it is shown as that.
  */
-export function describeLeavePayMethod(method, { lookbackMonths, compareTwelveMonths = true } = {}) {
+export function getEffectiveDefaultMethod(policy) {
+  const current = readLeavePayPolicy(policy);
+  if (current.default_method === 'legal' && !current.legal_allow_12m_if_better) return 'avg_hourly_x_avg_day_hours';
+  return current.default_method;
+}
+
+/** What a leave day is worth under a method, in words, for the number of months given. */
+export function describeLeavePayMethod(method, { lookbackMonths } = {}) {
   const months = Number(lookbackMonths) > 0 ? Math.round(Number(lookbackMonths)) : LEAVE_PAY_POLICY_DEFAULTS.lookback_months;
   const period = describePeriod(months);
   if (method === 'legal') {
-    return compareTwelveMonths
-      ? `השכר היומי הממוצע בימים שעבד/ה ${period}, או ב-12 החודשים האחרונים אם שם הממוצע גבוה יותר.`
-      : `השכר היומי הממוצע בימים שעבד/ה ${period}.`;
+    return `השכר היומי הממוצע בימים שעבד/ה ${period}, או ב-12 החודשים האחרונים אם שם הממוצע גבוה יותר.`;
   }
   if (method === 'avg_hourly_x_avg_day_hours') {
     return `השכר היומי הממוצע בימים שעבד/ה ${period} בלבד.`;
@@ -82,10 +87,10 @@ export function describeLeavePayMethod(method, { lookbackMonths, compareTwelveMo
 /** The edit form's starting values. A stored "fixed_rate" default starts with no method chosen. */
 export function buildLeavePayDraft(policy) {
   const current = readLeavePayPolicy(policy);
+  const method = getEffectiveDefaultMethod(current);
   return {
-    method: LEAVE_PAY_DEFAULT_METHODS.some((option) => option.value === current.default_method) ? current.default_method : '',
+    method: LEAVE_PAY_DEFAULT_METHODS.some((option) => option.value === method) ? method : '',
     lookbackMonths: String(current.lookback_months),
-    compareTwelveMonths: current.legal_allow_12m_if_better,
   };
 }
 
@@ -103,8 +108,9 @@ export function validateLeavePayDraft(draft) {
 }
 
 /**
- * The value to store: the stored policy with the draft's method, months and switch. Fields this
- * block does not edit (fixed_rate_default) are kept as they are.
+ * The value to store: the stored policy with the draft's method and months. The 12-month
+ * comparison is always saved on ("legal" is the legal average, the historic method ignores it).
+ * Fields this block does not edit (fixed_rate_default) are kept as they are.
  */
 export function buildLeavePayPolicyPayload(stored, draft) {
   const current = readLeavePayPolicy(stored);
@@ -112,14 +118,13 @@ export function buildLeavePayPolicyPayload(stored, draft) {
     ...current,
     default_method: draft.method,
     lookback_months: Number(String(draft.lookbackMonths).trim()),
-    legal_allow_12m_if_better: draft.compareTwelveMonths === true,
+    legal_allow_12m_if_better: true,
   };
 }
 
-/** Whether saving the draft would change the stored policy. */
+/** Whether saving the draft would change what the screen shows for the stored policy. */
 export function isLeavePayDraftChanged(stored, draft) {
   const current = readLeavePayPolicy(stored);
-  if (draft?.method !== current.default_method) return true;
-  if (Number(String(draft?.lookbackMonths ?? '').trim()) !== current.lookback_months) return true;
-  return (draft?.compareTwelveMonths === true) !== current.legal_allow_12m_if_better;
+  if (draft?.method !== getEffectiveDefaultMethod(current)) return true;
+  return Number(String(draft?.lookbackMonths ?? '').trim()) !== current.lookback_months;
 }

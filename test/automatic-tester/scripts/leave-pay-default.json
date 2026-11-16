@@ -2,7 +2,7 @@
   "meta": {
     "id": "leave-pay-default",
     "name": "Settings — the organisation's default leave-pay method",
-    "description": "The \"תשלום חופשה - ברירת המחדל של הארגון\" block in the settings page. The policy is first reset to the seeded default (\"ממוצע חוקי\", 3 months, 12-month comparison on) through POST /api/settings. The block shows it as text; \"שינוי\" opens the form with \"שמירה\" disabled while nothing changed; choosing \"ממוצע היסטורי\" and saving shows it after a reload; then \"ממוצע חוקי\" is restored the same way. A write with 13 months is refused by the server (400 invalid_leave_pay_lookback_months).",
+    "description": "The \"תשלום חופשה\" tile in the settings page. The policy is first reset to the seeded default (\"ממוצע חוקי\", 3 months) through POST /api/settings. The tile button opens the shared dialog with the form and \"שמירה\" disabled while nothing changed; choosing \"ממוצע היסטורי\" and saving closes the dialog and shows it when reopened after a reload; then \"ממוצע חוקי\" is restored the same way. A write with 13 months is refused by the server (400 invalid_leave_pay_lookback_months).",
     "version": "1.0.0",
     "last_validated_at": "2026-11-16T09:00:00Z",
     "author": "claude-ai",
@@ -68,69 +68,67 @@
 
     {
       "id": "change-to-historic",
-      "name": "UI – Change the default to \"ממוצע היסטורי\", save, reload, see it",
+      "name": "UI – Open the tile's dialog, change the default to \"ממוצע היסטורי\", save, reopen, see it",
       "steps": [
         { "id": "navigate", "action": "navigate", "url": "{{BASE_URL}}/#/Settings" },
         {
-          "id": "wait-block-legal",
-          "description": "The block shows the current method as text: \"ממוצע חוקי\" with its meaning, 3 months",
+          "id": "open-dialog",
+          "description": "The \"תשלום חופשה\" tile opens the shared settings dialog",
+          "action": "click",
+          "selector": "button:has-text('פתיחת הגדרות תשלום חופשה')"
+        },
+        {
+          "id": "wait-legal-selected",
+          "description": "The form opens directly with the current values: \"ממוצע חוקי\" chosen, 3 months (the 13-month write was refused)",
           "action": "waitForSelector",
-          "selector": "[data-settings-block='leave-pay-default'] [data-leave-pay-current-method='legal']:has-text('ממוצע חוקי'):has-text('או ב-12 החודשים האחרונים')"
+          "selector": "[role='dialog'] [data-settings-block='leave-pay-default'] #leave-pay-method-legal:checked"
         },
         {
           "id": "assert-months-3",
-          "description": "The 13-month write was refused: still 3 months",
-          "action": "assert",
-          "type": "text",
-          "selector": "[data-settings-block='leave-pay-default'] dl",
-          "value": "מספר חודשים לממוצע3"
-        },
-        {
-          "id": "open-edit",
-          "action": "click",
-          "selector": "[data-settings-block='leave-pay-default'] button:has-text('שינוי')"
+          "action": "waitForSelector",
+          "selector": "[role='dialog'] [data-settings-block='leave-pay-default'] #leave-pay-lookback-months[value='3']"
         },
         {
           "id": "assert-save-disabled",
           "description": "Nothing changed yet: \"שמירה\" is disabled",
           "action": "waitForSelector",
-          "selector": "[data-settings-block='leave-pay-default'] button:has-text('שמירה')[disabled]"
+          "selector": "[role='dialog'] [data-settings-block='leave-pay-default'] button:has-text('שמירה')[disabled]"
         },
         {
           "id": "assert-meanings-visible",
           "description": "Both methods show their meaning in words",
           "action": "waitForSelector",
-          "selector": "[data-settings-block='leave-pay-default'] label[for='leave-pay-method-avg_hourly_x_avg_day_hours']:has-text('ב-3 החודשים האחרונים בלבד')"
+          "selector": "[role='dialog'] [data-settings-block='leave-pay-default'] label[for='leave-pay-method-avg_hourly_x_avg_day_hours']:has-text('ב-3 החודשים האחרונים בלבד')"
         },
         {
           "id": "choose-historic",
           "action": "click",
-          "selector": "[data-settings-block='leave-pay-default'] label[for='leave-pay-method-avg_hourly_x_avg_day_hours']"
-        },
-        {
-          "id": "assert-switch-disabled",
-          "description": "The 12-month switch only applies to \"ממוצע חוקי\"",
-          "action": "waitForSelector",
-          "selector": "#leave-pay-compare-12m[disabled]"
+          "selector": "[role='dialog'] [data-settings-block='leave-pay-default'] label[for='leave-pay-method-avg_hourly_x_avg_day_hours']"
         },
         {
           "id": "save",
           "action": "click",
-          "selector": "[data-settings-block='leave-pay-default'] button:has-text('שמירה'):not([disabled])"
+          "selector": "[role='dialog'] [data-settings-block='leave-pay-default'] button:has-text('שמירה'):not([disabled])"
         },
         {
-          "id": "wait-saved-text",
-          "action": "waitForSelector",
-          "selector": "[data-settings-block='leave-pay-default'] [data-leave-pay-current-method='avg_hourly_x_avg_day_hours']"
+          "id": "wait-dialog-closed",
+          "action": "assert",
+          "type": "hidden",
+          "selector": "[role='dialog'] [data-settings-block='leave-pay-default']"
         },
         { "id": "reload", "action": "navigate", "url": "{{BASE_URL}}/#/dashboard" },
         { "id": "wait-dashboard", "action": "waitForURL", "pattern": "#/dashboard" },
         { "id": "back-to-settings", "action": "navigate", "url": "{{BASE_URL}}/#/Settings" },
         {
+          "id": "reopen-dialog",
+          "action": "click",
+          "selector": "button:has-text('פתיחת הגדרות תשלום חופשה')"
+        },
+        {
           "id": "wait-historic-after-reload",
           "description": "After leaving and coming back the stored value is \"ממוצע היסטורי\"",
           "action": "waitForSelector",
-          "selector": "[data-settings-block='leave-pay-default'] [data-leave-pay-current-method='avg_hourly_x_avg_day_hours']:has-text('ממוצע היסטורי')"
+          "selector": "[role='dialog'] [data-settings-block='leave-pay-default'] #leave-pay-method-avg_hourly_x_avg_day_hours:checked"
         },
         { "id": "screenshot-historic", "action": "screenshot", "name": "01-leave-pay-default-historic" }
       ]
@@ -141,32 +139,33 @@
       "name": "UI – Restore \"ממוצע חוקי\"",
       "steps": [
         {
-          "id": "open-edit",
-          "action": "click",
-          "selector": "[data-settings-block='leave-pay-default'] button:has-text('שינוי')"
-        },
-        {
           "id": "choose-legal",
           "action": "click",
-          "selector": "[data-settings-block='leave-pay-default'] label[for='leave-pay-method-legal']"
+          "selector": "[role='dialog'] [data-settings-block='leave-pay-default'] label[for='leave-pay-method-legal']"
         },
         {
           "id": "save",
           "action": "click",
-          "selector": "[data-settings-block='leave-pay-default'] button:has-text('שמירה'):not([disabled])"
+          "selector": "[role='dialog'] [data-settings-block='leave-pay-default'] button:has-text('שמירה'):not([disabled])"
         },
         {
-          "id": "wait-legal",
-          "action": "waitForSelector",
-          "selector": "[data-settings-block='leave-pay-default'] [data-leave-pay-current-method='legal']"
+          "id": "wait-dialog-closed",
+          "action": "assert",
+          "type": "hidden",
+          "selector": "[role='dialog'] [data-settings-block='leave-pay-default']"
         },
         { "id": "reload", "action": "navigate", "url": "{{BASE_URL}}/#/dashboard" },
         { "id": "wait-dashboard", "action": "waitForURL", "pattern": "#/dashboard" },
         { "id": "back-to-settings", "action": "navigate", "url": "{{BASE_URL}}/#/Settings" },
         {
+          "id": "reopen-dialog",
+          "action": "click",
+          "selector": "button:has-text('פתיחת הגדרות תשלום חופשה')"
+        },
+        {
           "id": "wait-legal-after-reload",
           "action": "waitForSelector",
-          "selector": "[data-settings-block='leave-pay-default'] [data-leave-pay-current-method='legal']:has-text('ממוצע חוקי')"
+          "selector": "[role='dialog'] [data-settings-block='leave-pay-default'] #leave-pay-method-legal:checked"
         },
         { "id": "screenshot-legal", "action": "screenshot", "name": "02-leave-pay-default-legal" }
       ]
