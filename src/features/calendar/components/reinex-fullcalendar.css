@@ -272,7 +272,8 @@
    a thin informational band. Background events, so never clickable or draggable. */
 .reinex-fullcalendar .fc .fc-bg-event.reinex-calendar-clock-change {
   opacity: 1;
-  pointer-events: none;
+  /* Receives hover only (for the title); mouse presses still reach the slot underneath. */
+  pointer-events: auto;
 }
 
 .reinex-fullcalendar .fc .fc-bg-event.reinex-calendar-clock-change--skipped {
@@ -292,14 +293,37 @@
   box-shadow: inset 0 2px 0 rgb(217 119 6 / 0.55);
 }
 
+/* The sentence is drawn once, in the first column of the band's row, and is as wide as all of that
+   day's columns together (it wraps to two lines when even that is too narrow). */
+.reinex-fullcalendar .fc .fc-bg-event.reinex-calendar-clock-change {
+  overflow: visible;
+  z-index: 2;
+}
+
+/* The harness that holds the label sits above the neighbouring columns' bands, so their fill
+   does not paint over the sentence. */
+.reinex-fullcalendar .fc .fc-timegrid-bg-harness:has(.reinex-calendar-clock-change__label) {
+  z-index: 3;
+}
+
+.reinex-calendar-clock-change__cell {
+  position: relative;
+  height: 100%;
+}
+
 .reinex-calendar-clock-change__label {
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline-start: 0;
+  inline-size: calc(100% * var(--clock-change-columns, 1));
+  box-sizing: border-box;
   padding: 0.1rem 0.35rem;
   font-size: 0.68rem;
   font-weight: 600;
+  line-height: 1.2;
   color: rgb(71 85 105);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: normal;
+  overflow: visible;
 }
 
 /* Break event styling */
