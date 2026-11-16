@@ -42,6 +42,7 @@ import LinkEmployeeMemberDialog from './LinkEmployeeMemberDialog.jsx';
 import InstructorDocumentsSection from '../InstructorDocumentsSection.jsx';
 import { getAvailabilitySummary } from '@/lib/instructor-availability.js';
 import { getServiceCompensationBasisLabel } from '@/lib/instructor-compensation.js';
+import { calendarDateFromDateKey, dateKeyFromCalendarDate, firstDayOfMonth, todayKey } from '@/lib/local-time.js';
 
 const REQUEST = { idle: 'idle', loading: 'loading' };
 const TAB_KEYS = {
@@ -67,15 +68,10 @@ const FILTERS = [
 
 const DAY_LABELS = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת'];
 
-function toLocalDateString(date) {
-  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return '';
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-}
-
 function shiftDate(dateString, deltaDays) {
   const date = new Date(`${dateString}T00:00:00`);
   date.setDate(date.getDate() + deltaDays);
-  return toLocalDateString(date);
+  return dateKeyFromCalendarDate(date);
 }
 
 function startOfMonth(date) {
@@ -446,7 +442,7 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
   const fetchOverviewInstances = useCallback(async () => {
     if (!canLoad || !orgId) return;
     try {
-      const today = toLocalDateString(new Date());
+      const today = todayKey();
       const endDate = shiftDate(today, 6);
       const payload = await authenticatedFetch(`calendar/instances?org_id=${orgId}&start_date=${today}&end_date=${endDate}`, { session: authSession });
       setOverviewInstances(Array.isArray(payload) ? payload : []);
@@ -503,9 +499,9 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
     const load = async () => {
       setInstancesLoading(true);
       try {
-        const today = new Date();
-        const startDate = toLocalDateString(startOfMonth(addMonths(today, -5)));
-        const endDate = toLocalDateString(endOfMonth(addMonths(today, 2)));
+        const today = calendarDateFromDateKey(firstDayOfMonth(todayKey()));
+        const startDate = dateKeyFromCalendarDate(startOfMonth(addMonths(today, -5)));
+        const endDate = dateKeyFromCalendarDate(endOfMonth(addMonths(today, 2)));
         const payload = await authenticatedFetch(
           `calendar/instances?org_id=${orgId}&start_date=${startDate}&end_date=${endDate}&instructor_id=${currentEmployee.id}`,
           { session: authSession },

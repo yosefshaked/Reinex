@@ -1,4 +1,5 @@
 /* eslint-env node */
+import { todayKey } from '../_shared/local-time.js';
 import { Buffer } from 'node:buffer';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { resolveBearerAuthorization } from '../_shared/http.js';
@@ -41,7 +42,7 @@ function safePasswordEquals(candidate, expected) {
 
 async function lockLessonForPaidClaim({ client, orgId, lessonInstanceId, userId }) {
   const now = new Date();
-  const periodStart = now.toISOString().slice(0, 10);
+  const periodStart = todayKey(undefined, now);
 
   const { data: claimBatch, error: claimBatchError } = await withOrgScope(client, 'claim_batches', orgId)
     .insert({

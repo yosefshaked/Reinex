@@ -18,6 +18,7 @@ import {
   readGenerationReview,
   writeGenerationReview,
 } from '../utils/generationReviewStorage.js';
+import { localDateKey, localTime } from '@/lib/local-time.js';
 
 function buildRequestKey({ orgId, startDate, endDate, requestMode, retryItems }) {
   return JSON.stringify({
@@ -44,9 +45,8 @@ function formatIssueWhen(issue) {
     return `${formatHebrewDate(date)} ${time}`;
   }
   if (issue?.datetime_start) {
-    const raw = String(issue.datetime_start);
-    const datePart = raw.slice(0, 10);
-    const timePart = raw.slice(11, 16);
+    const datePart = localDateKey(issue.datetime_start);
+    const timePart = localTime(issue.datetime_start);
     return [formatHebrewDate(datePart), timePart].filter(Boolean).join(' ');
   }
   return formatHebrewDate(date);

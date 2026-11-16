@@ -24,18 +24,14 @@ import { attachErrorTracking, respondTracked } from '../_shared/error-events.js'
 import {
   buildRateChangeWarnings,
   loadRateHistoryRows,
-  toRateDateKey,
   validateRateInput,
 } from '../_shared/rate-history.js';
+import { todayKey } from '../_shared/local-time.js';
 
 const MAX_BODY_BYTES = 16 * 1024;
 
 function respondRatesError(context, status, message, error, metadata = {}) {
   return respondTracked(context, status, { message }, undefined, { error, metadata });
-}
-
-function todayDateKey() {
-  return toRateDateKey(new Date().toISOString());
 }
 
 export default async function employeeRates(context, req) {
@@ -98,7 +94,7 @@ export default async function employeeRates(context, req) {
   if (method === 'GET') {
     try {
       const rates = await loadRateHistoryRows(supabase, orgId, { employeeIds: [employeeId] });
-      return respond(context, 200, { rates, today: todayDateKey() });
+      return respond(context, 200, { rates, today: todayKey() });
     } catch (loadError) {
       context.log?.error?.('employee-rates failed to load rates', { message: loadError?.message, employeeId });
       return respondRatesError(context, 500, 'failed_to_load_rates', loadError, { action: 'load_rates', employee_id: employeeId });
@@ -138,7 +134,7 @@ export default async function employeeRates(context, req) {
     }
 
     const existingRows = await loadRateHistoryRows(supabase, orgId, { employeeIds: [input.employeeId] });
-    const { warnings, existingOnDate } = buildRateChangeWarnings(existingRows, input, todayDateKey());
+    const { warnings, existingOnDate } = buildRateChangeWarnings(existingRows, input, todayKey());
 
     if (existingOnDate && body?.replace_existing !== true) {
       return respond(context, 409, {
@@ -191,7 +187,7 @@ export default async function employeeRates(context, req) {
     return respond(context, 200, {
       rate: saved,
       warnings,
-      today: todayDateKey(),
+      today: todayKey(),
     });
   } catch (saveError) {
     context.log?.error?.('employee-rates failed to save the rate', { message: saveError?.message, employeeId });

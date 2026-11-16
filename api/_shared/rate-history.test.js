@@ -7,9 +7,9 @@ import {
   normalizeRateRow,
   resolveLessonRateOnDate,
   resolveRateOnDate,
-  toRateDateKey,
   validateRateInput,
 } from './rate-history.js';
+import { localDateKey } from './local-time.js';
 
 const DANA = 'employee-dana';
 const OMER = 'employee-omer';
@@ -72,10 +72,10 @@ test('the lesson rate is hourly or flat, whichever lesson row is in effect for t
 });
 
 test('lesson timestamps map to their Israel calendar date', () => {
-  assert.equal(toRateDateKey('2026-10-01'), '2026-10-01');
-  assert.equal(toRateDateKey('2026-09-30T21:30:00.000Z'), '2026-10-01', '00:30 in Israel on 1.10');
-  assert.equal(toRateDateKey('2026-10-01T09:00:00.000Z'), '2026-10-01');
-  assert.equal(toRateDateKey(null), '');
+  assert.equal(localDateKey('2026-10-01'), '2026-10-01');
+  assert.equal(localDateKey('2026-09-30T21:30:00.000Z'), '2026-10-01', '00:30 in Israel on 1.10');
+  assert.equal(localDateKey('2026-10-01T09:00:00.000Z'), '2026-10-01');
+  assert.equal(localDateKey(null), '');
 });
 
 test('a new rate is validated before it is saved', () => {

@@ -42,16 +42,8 @@ import {
 import { getParticipantDisplayName } from '../utils/participantDisplay.js';
 import { readMissingLessonRate } from '../utils/lessonDialogModel.js';
 import { MissingRateNotice } from './MissingRateNotice.jsx';
-import { addLocalDays, CALENDAR_WEEK_START, getWeekStartDate, parseLocalDateString, toLocalDateString as toCalendarLocalDateString } from '../utils/localDate.js';
+import { addLocalDays, CALENDAR_WEEK_START, getWeekStartDate, parseLocalDateString, toLocalDateString } from '../utils/localDate.js';
 import './reinex-fullcalendar.css';
-
-function toLocalDateString(dateObj) {
-  if (!(dateObj instanceof Date) || Number.isNaN(dateObj.getTime())) return null;
-  const year = dateObj.getFullYear();
-  const month = String(dateObj.getMonth() + 1).padStart(2, '0');
-  const day = String(dateObj.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-}
 
 function resolveViewDates(currentDate, viewMode) {
   const baseDate = parseLocalDateString(currentDate || '');
@@ -63,7 +55,7 @@ function resolveViewDates(currentDate, viewMode) {
     const weekStart = getWeekStartDate(baseDate, CALENDAR_WEEK_START);
     return Array.from({ length: 7 }, (_, index) => {
       const date = addLocalDays(weekStart, index);
-      const dateString = toCalendarLocalDateString(date);
+      const dateString = toLocalDateString(date);
       return {
         dateString,
         dayToken: dayTokenForJsDay(date?.getDay?.()),
@@ -878,7 +870,7 @@ export default function ReinexFullCalendar({
     }
 
     if (action === 'today') {
-      onDateChange(toCalendarLocalDateString(new Date()));
+      onDateChange(toLocalDateString(new Date()));
       return;
     }
 

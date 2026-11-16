@@ -30,6 +30,7 @@ import ConfirmDialog from '@/components/ui/ConfirmDialog.jsx';
 import { formatDateKey } from '@/lib/date-key-format.js';
 import { toast } from '@/lib/toast.jsx';
 import { authenticatedFetch } from '@/lib/api-client.js';
+import { calendarDateFromDateKey, dateKeyFromCalendarDate, firstDayOfMonth, todayKey } from '@/lib/local-time.js';
 
 function startOfMonth(date) {
   return new Date(date.getFullYear(), date.getMonth(), 1);
@@ -41,10 +42,6 @@ function endOfMonth(date) {
 
 function addMonths(date, delta) {
   return new Date(date.getFullYear(), date.getMonth() + delta, 1);
-}
-
-function toLocalDateString(date) {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }
 
 function formatMonth(date) {
@@ -71,8 +68,8 @@ const DAY_MODES = [
 
 export default function EmployeeAttendancePanel({ employee, orgId, session }) {
   const editorRef = useRef(null);
-  const [monthDate, setMonthDate] = useState(() => startOfMonth(new Date()));
-  const [selectedDate, setSelectedDate] = useState(() => toLocalDateString(new Date()));
+  const [monthDate, setMonthDate] = useState(() => calendarDateFromDateKey(firstDayOfMonth(todayKey())));
+  const [selectedDate, setSelectedDate] = useState(() => todayKey());
   const [records, setRecords] = useState([]);
   const [lessonDays, setLessonDays] = useState([]);
   const [leaveDays, setLeaveDays] = useState([]);
@@ -82,7 +79,7 @@ export default function EmployeeAttendancePanel({ employee, orgId, session }) {
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({ status: 'present', workedMinutes: '', notes: '' });
   const [dayMode, setDayMode] = useState('work');
-  const [leaveForm, setLeaveForm] = useState(() => emptyLeaveForm(toLocalDateString(new Date())));
+  const [leaveForm, setLeaveForm] = useState(() => emptyLeaveForm(todayKey()));
   const [editingLeave, setEditingLeave] = useState(false);
   const [confirmRemoveOpen, setConfirmRemoveOpen] = useState(false);
   const [confirmRemoveLeaveOpen, setConfirmRemoveLeaveOpen] = useState(false);
@@ -103,8 +100,8 @@ export default function EmployeeAttendancePanel({ employee, orgId, session }) {
     return () => { active = false; };
   }, [employee?.id, orgId, session]);
 
-  const monthStart = useMemo(() => toLocalDateString(startOfMonth(monthDate)), [monthDate]);
-  const monthEnd = useMemo(() => toLocalDateString(endOfMonth(monthDate)), [monthDate]);
+  const monthStart = useMemo(() => dateKeyFromCalendarDate(startOfMonth(monthDate)), [monthDate]);
+  const monthEnd = useMemo(() => dateKeyFromCalendarDate(endOfMonth(monthDate)), [monthDate]);
 
   const fetchMonth = useCallback(async () => {
     const params = { org_id: orgId, employee_id: employee.id, start_date: monthStart, end_date: monthEnd };
@@ -180,7 +177,7 @@ export default function EmployeeAttendancePanel({ employee, orgId, session }) {
     const end = endOfMonth(monthDate);
     const items = [];
     for (let current = new Date(start); current <= end; current.setDate(current.getDate() + 1)) {
-      const dateKey = toLocalDateString(current);
+      const dateKey = dateKeyFromCalendarDate(current);
       items.push({
         date: dateKey,
         record: recordsByDate.get(dateKey) || null,

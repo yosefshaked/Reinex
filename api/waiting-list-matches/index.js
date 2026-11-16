@@ -1,4 +1,5 @@
 /* eslint-env node */
+import { todayKey } from '../_shared/local-time.js';
 import { resolveBearerAuthorization } from '../_shared/http.js';
 import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../_shared/supabase-admin.js';
 import {
@@ -19,7 +20,6 @@ import {
   buildWaitingListEntrySelect,
   isTemplateValidOn,
   normalizeMatchMode,
-  parseIsoDateInTimezone,
 } from '../_shared/waiting-list-matching.js';
 import { attachErrorTracking, respondTracked } from '../_shared/error-events.js';
 
@@ -210,7 +210,7 @@ export default async function waitingListMatches(context, req) {
     });
   }
 
-  const today = parseIsoDateInTimezone();
+  const today = todayKey();
   const instructorMap = buildInstructorMap(instructorRows || []);
   const capabilityMap = buildCapabilityMap(capabilityResult.data || [], serviceDurationMap);
   const validTemplates = (templateResult.data || []).filter((template) => isTemplateValidOn(template, today));

@@ -24,9 +24,9 @@ import {
   isYmdDate,
   loadFinancePolicies,
   resolveEmployeeRecord,
-  toDateKey,
   upsertLeaveBalanceUsage,
 } from '../_shared/employee-finance.js';
+import { todayKey } from '../_shared/local-time.js';
 import { attachErrorTracking, respondTracked } from '../_shared/error-events.js';
 
 const MAX_BODY_BYTES = 64 * 1024;
@@ -77,7 +77,7 @@ function computeRecordedBalances(summary) {
   return [{
     leave_type: 'employee_paid',
     recorded_balance: summary.remaining,
-    effective_date: toDateKey(new Date()),
+    effective_date: todayKey(),
     source: 'employee_leave_balance_events',
   }];
 }

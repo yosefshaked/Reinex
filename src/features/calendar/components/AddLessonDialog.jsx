@@ -26,19 +26,11 @@ import {
   hasValidSchedulingOverrideReason,
   SCHEDULING_OVERRIDE_REASON_OPTIONS,
 } from '../utils/schedulingOverride.js';
-import { parseLocalDateString } from '../utils/localDate.js';
+import { parseLocalDateString, toLocalDateString } from '../utils/localDate.js';
 import { toAgorot } from '@/lib/currency.js';
 import { readMissingLessonRate } from '../utils/lessonDialogModel.js';
 import { useMissingRateForSelection } from '../hooks/useMissingRateForSelection.js';
 import { MissingRateNotice } from './MissingRateNotice.jsx';
-
-function toLocalDateString(dateObj) {
-  if (!(dateObj instanceof Date) || Number.isNaN(dateObj.getTime())) return null;
-  const year = dateObj.getFullYear();
-  const month = String(dateObj.getMonth() + 1).padStart(2, '0');
-  const day = String(dateObj.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-}
 
 function toLocalTimeString(dateObj) {
   if (!(dateObj instanceof Date) || Number.isNaN(dateObj.getTime())) return null;

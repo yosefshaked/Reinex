@@ -4,6 +4,7 @@
  * amount the server returned, or a sum of such amounts for a group of lessons or office days.
  */
 import { formatCurrency } from '../../../lib/currency.js';
+import { dateKeyFromCalendarDate } from '../../../lib/local-time.js';
 
 const PARTICIPANT_STATE_LABELS = {
   attended: 'הגיע',
@@ -300,15 +301,11 @@ export function buildLessonCalendarPath(line) {
   return `/calendar?${params.toString()}`;
 }
 
-function toLocalDateString(date) {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-}
-
 /** The first and last day of the month a date is in, as "YYYY-MM-DD". */
 export function monthBounds(monthDate) {
   return {
-    start: toLocalDateString(new Date(monthDate.getFullYear(), monthDate.getMonth(), 1)),
-    end: toLocalDateString(new Date(monthDate.getFullYear(), monthDate.getMonth() + 1, 0)),
+    start: dateKeyFromCalendarDate(new Date(monthDate.getFullYear(), monthDate.getMonth(), 1)),
+    end: dateKeyFromCalendarDate(new Date(monthDate.getFullYear(), monthDate.getMonth() + 1, 0)),
   };
 }
 

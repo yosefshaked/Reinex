@@ -29,6 +29,9 @@
 - Upserts must always specify `onConflict` explicitly
 - New Azure Functions need a `function.json` sibling
 
+### Dates and time zones
+- Instants stay UTC (`timestamptz`); calendar dates are `YYYY-MM-DD` keys. Every local day/month/time decision goes through `api/_shared/local-time.js` (frontend: `src/lib/local-time.js`) in the org's zone — never `.toISOString().slice(0, 10)` / `.split('T')[0]`, never the `'Asia/Jerusalem'` literal (ESLint enforces both). See "Dates and time zones" in `agents-docs/00-core-rules.md`.
+
 ### Frontend (src/**)
 - Currency values are stored in **agorot** (integers). Use `toAgorot()` / `toShekel()` from `src/lib/currency.js`
 - API calls go through `authenticatedFetch()` from `src/lib/api-client.js`

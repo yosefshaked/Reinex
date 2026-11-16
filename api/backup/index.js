@@ -1,4 +1,5 @@
 /* eslint-env node */
+import { utcDateKey } from '../_shared/local-time.js';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { Buffer } from 'node:buffer';
 import { createSingleClient, readEnv, respond } from '../_shared/org-bff.js';
@@ -22,7 +23,7 @@ function getHeaderValue(req, name) {
 }
 
 function buildBackupFilename(orgId, date = new Date()) {
-  return `backups/${orgId}/${date.toISOString().slice(0, 10)}.enc`;
+  return `backups/${orgId}/${utcDateKey(date)}.enc`;
 }
 
 function extractBackupDate(key) {
@@ -148,7 +149,7 @@ export default async function backupRun(context, req) {
     }
 
     try {
-      const cutoffDate = new Date(Date.now() - RETENTION_DAYS * DAY_MS).toISOString().slice(0, 10);
+      const cutoffDate = utcDateKey(new Date(Date.now() - RETENTION_DAYS * DAY_MS));
       const files = await storageDriver.listByPrefix('backups/');
       const staleFiles = files.filter((file) => {
         const fileDate = extractBackupDate(file.key);

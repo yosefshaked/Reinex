@@ -45,6 +45,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import { localDateKey } from '@/lib/local-time.js';
 
 const REQUEST_STATE = {
   idle: 'idle',
@@ -1162,7 +1163,7 @@ function DocumentCard({ document: doc, expired, canManage, deleteState, onEdit, 
             <div className="flex flex-wrap gap-x-2 sm:gap-x-3 gap-y-1 text-xs">
               <span dir="ltr" className="shrink-0">{formatFileSize(doc.size)}</span>
               <span className="hidden sm:inline">הועלה: {formatDateTime(doc.uploaded_at)}</span>
-              <span className="sm:hidden">{formatFileDate(doc.uploaded_at.split('T')[0])}</span>
+              <span className="sm:hidden">{formatFileDate(localDateKey(doc.uploaded_at))}</span>
             </div>
 
             {doc.relevant_date && (

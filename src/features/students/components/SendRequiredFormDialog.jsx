@@ -20,18 +20,14 @@ import { authenticatedFetch } from '@/lib/api-client.js';
 import { resolveApiErrorMessage } from '@/lib/error-support.js';
 import { normalizeFormDeliveryPhone, resolveSubjectFormDeliveryContact } from '@/features/forms/lib/delivery-contact.js';
 import { buildRequiredFormInviteWhatsAppMessage } from '@/lib/whatsapp-message-templates.js';
+import { formatInstant } from '@/lib/local-time.js';
 
 function formatDateTime(value) {
   if (!value) return '—';
-  try {
-    return new Intl.DateTimeFormat('he-IL', {
-      timeZone: 'Asia/Jerusalem',
-      dateStyle: 'short',
-      timeStyle: 'short',
-    }).format(new Date(value));
-  } catch {
-    return String(value);
-  }
+  return formatInstant(value, {
+    dateStyle: 'short',
+    timeStyle: 'short',
+  }) || String(value);
 }
 
 function buildWhatsAppInviteLink(phone, inviteUrl, formLabel, organizationName) {

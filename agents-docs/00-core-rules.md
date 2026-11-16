@@ -42,6 +42,20 @@
 - Dashboard task helpers are single-DB org-scoped primitives: always pass `orgId` to `createDashboardTask`, `listDashboardTasks`, and `resolveDashboardTask`. Do not call them without org scope.
 - Dashboard inbox UI should summarize open tasks by task kind/count rather than rendering long flat lists one row per task when volumes grow. Task rows remain the source data, but the default dashboard presentation should aggregate them.
 
+## Dates and time zones
+Reinex serves Israeli organisations; stored instants stay UTC for data integrity, and every "which local day / month / time is this" decision is made in the organisation's time zone by one module.
+- **Storage (unchanged):** an instant (`lesson_instances.datetime_start`, `created_at`, `effective_at`, ...) is `timestamptz` in UTC and travels as an ISO string. A calendar date with no time (attendance day, leave day, rate `effective_date`, `valid_from`, ...) is a `date` / `'YYYY-MM-DD'` key and is never converted through a time zone.
+- **One module:** [`../api/_shared/local-time.js`](../api/_shared/local-time.js) (isomorphic; the frontend imports it through the re-export [`../src/lib/local-time.js`](../src/lib/local-time.js) — never copy it). Read its header for the rules and the DST decisions.
+  - Instant -> local: `localDateKey`, `localMonthKey`, `localTime`, `localWeekday`, `todayKey`, `currentMonthKey`. A value that is already a date key passes through `localDateKey` unchanged.
+  - Local -> UTC for queries and writes: `localDateTimeToUtc(dateKey, 'HH:mm')`, `startOfLocalDayUtc`, `endOfLocalDayUtc` (exclusive), `localDateRangeUtc(start, end)` / `localMonthRangeUtc(month)` -> `{ startIso, endExclusiveIso }` for `.gte(...).lt(...)`. They resolve the real offset on that date (23-hour spring day, 25-hour autumn day). Non-existent local time (spring forward) shifts forward; a repeated local time (autumn) takes the first occurrence.
+  - Date-only arithmetic (no zone): `addDays`, `addMonths`, `diffDays`, `compareDateKeys`, `enumerateDateKeys`, `firstDayOfMonth`, `lastDayOfMonth`, `weekdayOfDateKey`, `normalizeDateKey`. A day picked in a browser date picker: `dateKeyFromCalendarDate` (local getters); a spreadsheet/Excel calendar date: `dateKeyFromUtcCalendarDate`.
+  - Display: `formatInstant(value, options)`, `formatLocalDateTime`.
+  - Technical UTC stamps only (file names, support codes, retention cut-offs): `utcDateKey`, `utcFileStamp`.
+- **One zone per organisation:** there is no per-org setting yet; `resolveOrgTimeZone()` returns `DEFAULT_ORG_TIME_ZONE` (`Asia/Jerusalem`). Adding a setting is a change to that function only. Never write the zone literal elsewhere.
+- **Never cut a date out of a timestamp** (`.toISOString().slice(0, 10)`, `.split('T')[0]`, `.substring(0, 10)`): that is the UTC date, so a lesson at 00:30 Israel time lands on the previous day — and on the 1st, in the previous month's pay.
+- **Frontend month/day ranges** are sent to the API as date keys (`start_date` / `end_date`); the API turns them into UTC ranges through the module. Do not send browser-zone instants as range bounds.
+- **Lint:** `no-restricted-syntax` in [`../eslint.config.js`](../eslint.config.js) fails on those cut patterns and on the `'Asia/Jerusalem'` literal outside the module and its test. A per-line disable needs a reason comment and should be rare. Tests: [`../api/_shared/local-time.test.js`](../api/_shared/local-time.test.js) (in `npm run test:finance-calendar`).
+
 ## Required validation after edits
 
 | Files changed | Command |

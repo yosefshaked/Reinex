@@ -45,6 +45,7 @@ import { toast } from '@/lib/toast.jsx';
 import { formatCurrency, toAgorot } from '@/lib/currency.js';
 import { getHmoClaimFeedback, getHmoClaimValidationFeedback } from '@/features/finance/lib/hmo-claim-feedback.js';
 import PayrollMonthTable from '@/features/finance/components/PayrollMonthTable.jsx';
+import { calendarDateFromDateKey, dateKeyFromCalendarDate, firstDayOfMonth, todayKey } from '@/lib/local-time.js';
 
 const DEFAULT_BILLING_POLICY = {
   attended: true,
@@ -72,10 +73,6 @@ function endOfMonth(date) {
 
 function addMonths(date, delta) {
   return new Date(date.getFullYear(), date.getMonth() + delta, 1);
-}
-
-function toLocalDateString(date) {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }
 
 function formatMonth(date) {
@@ -293,7 +290,7 @@ export default function FinancialsPage() {
   const canViewFinancials = isAdminOrOffice(membershipRole);
   const canMutateBillingPolicy = isAdminRole(membershipRole);
 
-  const [monthDate, setMonthDate] = useState(() => startOfMonth(new Date()));
+  const [monthDate, setMonthDate] = useState(() => calendarDateFromDateKey(firstDayOfMonth(todayKey())));
   const [loadingPayroll, setLoadingPayroll] = useState(false);
   const [loadingBilling, setLoadingBilling] = useState(false);
   const [loadingClaims, setLoadingClaims] = useState(false);
@@ -325,8 +322,8 @@ export default function FinancialsPage() {
   const [expandedBatchIds, setExpandedBatchIds] = useState(() => new Set());
   const [providerSettingsDialogId, setProviderSettingsDialogId] = useState('');
 
-  const monthStart = useMemo(() => toLocalDateString(startOfMonth(monthDate)), [monthDate]);
-  const monthEnd = useMemo(() => toLocalDateString(endOfMonth(monthDate)), [monthDate]);
+  const monthStart = useMemo(() => dateKeyFromCalendarDate(startOfMonth(monthDate)), [monthDate]);
+  const monthEnd = useMemo(() => dateKeyFromCalendarDate(endOfMonth(monthDate)), [monthDate]);
 
   const canMutateClaims = canMutateBillingPolicy;
 

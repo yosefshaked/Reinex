@@ -6,6 +6,7 @@ import { normalizeString } from './org-bff.js';
 import { loadHmoAuthorizations, resolveLessonCoverageDecision } from './hmo.js';
 import { createDashboardTask, resolveDashboardTask } from './dashboard-tasks.js';
 import { buildLessonCountBuckets, resolveEntitlementUsageDelta } from './commitment-behavior.js';
+import { endOfLocalDayUtc, localDateKey, startOfLocalDayUtc } from './local-time.js';
 
 const RESOLVED_PARTICIPANT_STATUSES = new Set(['attended', 'no_show', 'cancelled_student', 'cancelled_clinic']);
 const HMO_NON_ATTENDANCE_STATUSES = new Set(['no_show', 'cancelled_student', 'cancelled_clinic']);
@@ -136,24 +137,12 @@ function effectiveLedgerEntries(entries) {
   return list.filter((e) => !e.reverses_transaction_id && !reversedIds.has(e.id));
 }
 
-function toDateKey(value) {
-  const normalized = normalizeString(value);
-  if (/^\d{4}-\d{2}-\d{2}$/.test(normalized)) {
-    return normalized;
-  }
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) {
-    return '';
-  }
-  return parsed.toISOString().slice(0, 10);
-}
-
-function dateKeyToUtcBoundary(value, boundary) {
-  const normalized = toDateKey(value);
-  if (!normalized) return '';
-  return boundary === 'end'
-    ? `${normalized}T23:59:59.999Z`
-    : `${normalized}T00:00:00.000Z`;
+// The UTC instant where a local period day starts, or where it ends (exclusive: the next local
+// midnight), so a lesson charge at 00:30 Israel time on the 1st belongs to that month's period.
+function localPeriodBoundaryUtc(value, boundary) {
+  const dateKey = localDateKey(value);
+  if (!dateKey) return '';
+  return (boundary === 'end' ? endOfLocalDayUtc(dateKey) : startOfLocalDayUtc(dateKey)) || '';
 }
 
 function signedAmount(direction, amount) {
@@ -667,7 +656,7 @@ function buildLessonChargeMetadata({
     actor_user_id: actorUserId || null,
     participant_status: normalizeString(participant?.participant_status).toLowerCase() || null,
     lesson_status: normalizeString(instance?.status).toLowerCase() || null,
-    lesson_date: toDateKey(instance?.datetime_start) || null,
+    lesson_date: localDateKey(instance?.datetime_start) || null,
     service_name: service?.service_name || service?.name || null,
     billing_reason: detail?.billingReason || null,
     coverage_status: coverageDecision?.status || null,
@@ -2139,11 +2128,13 @@ export default class BillingLedgerService {
         .eq('hmo_provider_id', normalizedProviderId)
         .order('effective_at', { ascending: true });
 
-      if (dateKeyToUtcBoundary(periodStart, 'start')) {
-        query = query.gte('effective_at', dateKeyToUtcBoundary(periodStart, 'start'));
+      const periodStartUtc = localPeriodBoundaryUtc(periodStart, 'start');
+      if (periodStartUtc) {
+        query = query.gte('effective_at', periodStartUtc);
       }
-      if (dateKeyToUtcBoundary(periodEnd, 'end')) {
-        query = query.lte('effective_at', dateKeyToUtcBoundary(periodEnd, 'end'));
+      const periodEndExclusiveUtc = localPeriodBoundaryUtc(periodEnd, 'end');
+      if (periodEndExclusiveUtc) {
+        query = query.lt('effective_at', periodEndExclusiveUtc);
       }
 
       const { data, error } = await query;
@@ -2272,8 +2263,8 @@ export default class BillingLedgerService {
       .insert({
         org_id: this.orgId,
         hmo_provider_id: normalizedProviderId,
-        period_start: toDateKey(periodStart) || null,
-        period_end: toDateKey(periodEnd) || null,
+        period_start: localDateKey(periodStart) || null,
+        period_end: localDateKey(periodEnd) || null,
         status: 'draft',
         total_amount: totalAmount,
         paid_amount: 0,
@@ -3165,7 +3156,7 @@ export default class BillingLedgerService {
     }
 
     const lessonHistory = lessonHistoryRows.filter((row) => {
-      const lessonDate = toDateKey(row?.lesson_instance?.datetime_start);
+      const lessonDate = localDateKey(row?.lesson_instance?.datetime_start);
       if (normalizeString(startDate) && lessonDate && lessonDate < startDate) {
         return false;
       }
@@ -3317,7 +3308,7 @@ export default class BillingLedgerService {
         billing_status: billedAmount > 0 ? 'charged' : 'not_chargeable',
       };
     }).filter((row) => {
-      const lessonDate = toDateKey(row?.lesson_instance?.datetime_start);
+      const lessonDate = localDateKey(row?.lesson_instance?.datetime_start);
       if (normalizeString(startDate) && lessonDate && lessonDate < startDate) {
         return false;
       }

@@ -1,4 +1,5 @@
 /* eslint-env node */
+import { localDateKey } from '../_shared/local-time.js';
 
 function normalizeString(value) {
   if (typeof value !== 'string') {
@@ -7,12 +8,9 @@ function normalizeString(value) {
   return value.trim();
 }
 
+// The lesson's local date in the org's zone (datetime_start is a UTC instant).
 function extractDatePart(dateTimeValue) {
-  const raw = String(dateTimeValue || '');
-  if (raw.length >= 10) {
-    return raw.slice(0, 10);
-  }
-  return '';
+  return localDateKey(dateTimeValue);
 }
 
 function isAuthorizationDateCovered(row, dateString) {

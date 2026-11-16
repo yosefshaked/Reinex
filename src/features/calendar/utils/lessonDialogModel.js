@@ -4,6 +4,7 @@ import { formatDateDisplay, formatTimeDisplay } from './timeGrid.js';
 import { buildSchedulingOverrideReasonDetails } from './schedulingOverride.js';
 import { getParticipantDisplayName } from './participantDisplay.js';
 import { extractSupportCode, resolveApiErrorMessage } from '../../../lib/error-support.js';
+import { dateKeyFromCalendarDate } from '../../../lib/local-time.js';
 
 export const DEFAULT_BILLING_POLICY = {
   attended: true,
@@ -28,11 +29,7 @@ export function normalizeInstanceStatus(status) {
 }
 
 export function toLocalDateString(dateObj) {
-  if (!(dateObj instanceof Date) || Number.isNaN(dateObj.getTime())) return '';
-  const year = dateObj.getFullYear();
-  const month = String(dateObj.getMonth() + 1).padStart(2, '0');
-  const day = String(dateObj.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
+  return dateKeyFromCalendarDate(dateObj);
 }
 
 export function toUtcIsoString(dateString, timeString) {

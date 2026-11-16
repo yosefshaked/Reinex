@@ -304,6 +304,33 @@ describe('the lessons of a period', () => {
 });
 
 describe('the pay of a period', () => {
+  it('a lesson at 00:30 Israel time on the 1st is paid in that month and its lesson-day is the 1st', async () => {
+    // 00:30 on 1.11.2026 (winter time, UTC+2) is 22:30Z on 31.10: its UTC date is the previous month.
+    const tables = baseTables({
+      lesson_instances: [lesson('after-midnight', 'dana', '2026-10-31T22:30:00Z')],
+      lesson_participants: [participant('p1', 'after-midnight', 'attended')],
+    });
+    const later = new Date('2026-11-20T12:00:00Z');
+    const payFor = (startDate, endDate) => computeEmployeePay(createFakeClient(tables), ORG, {
+      employee: { id: 'dana' }, startDate, endDate, policies: POLICIES, rateRows: RATES, now: later, includeDetails: true,
+    });
+
+    const november = await payFor('2026-11-01', '2026-11-30');
+    const october = await payFor('2026-10-01', '2026-10-31');
+
+    assert.equal(november.lesson_count, 1);
+    assert.equal(november.lesson_amount, 12000);
+    assert.equal(november.details.lessons[0].lesson_date, '2026-11-01');
+    assert.equal(november.details.lessons[0].start_time, '00:30');
+    assert.equal(october.lesson_count, 0);
+    assert.equal(october.lesson_amount, 0);
+
+    const byDate = summarizeLessonsByDate(await loadCountedLessons(createFakeClient(tables), ORG, {
+      employeeId: 'dana', startDate: '2026-11-01', endDate: '2026-11-30', policies: POLICIES, now: later,
+    }));
+    assert.deepEqual([...byDate.keys()], ['2026-11-01'], 'the attendance lesson-day is the local day');
+  });
+
   it('adds lessons, office hours and hand-entered corrections, and reports what is unmarked', async () => {
     const client = createFakeClient(baseTables({
       lesson_instances: [

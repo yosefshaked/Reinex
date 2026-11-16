@@ -1,4 +1,5 @@
 /* eslint-env node */
+import { todayKey } from '../_shared/local-time.js';
 import { resolveBearerAuthorization } from '../_shared/http.js';
 import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../_shared/supabase-admin.js';
 import {
@@ -131,7 +132,7 @@ async function fetchPaymentSourceByStudentId(client, orgId, studentIds) {
     return { data: result, error: null };
   }
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayKey();
   const { data: authorizations, error } = await withOrgScope(client, 'hmo_authorizations', orgId)
     .select('id, student_id, provider_id, valid_from, expires_at, status')
     .in('student_id', ids)

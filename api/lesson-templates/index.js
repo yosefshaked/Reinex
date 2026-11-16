@@ -1,4 +1,5 @@
 /* eslint-env node */
+import { todayKey } from '../_shared/local-time.js';
 import { resolveBearerAuthorization } from '../_shared/http.js';
 import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../_shared/supabase-admin.js';
 import { logAuditEvent, AUDIT_ACTIONS, AUDIT_CATEGORIES } from '../_shared/audit-log.js';
@@ -1800,7 +1801,7 @@ export default async function lessonTemplates(context, req) {
       return respond(context, 400, { message: 'invalid_template_id' });
     }
 
-    const today = new Date().toISOString().split('T')[0];
+    const today = todayKey();
 
     const { data: existingTemplate, error: loadTemplateError } = await withOrgScope(supabase, 'lesson_templates', orgId)
       .select('id, student_id, instructor_employee_id, day_of_week, time_of_day, valid_from, valid_until, is_active')

@@ -1,4 +1,5 @@
 /* eslint-env node */
+import { todayKey } from '../_shared/local-time.js'
 import { resolveBearerAuthorization } from '../_shared/http.js'
 import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../_shared/supabase-admin.js'
 import {
@@ -171,7 +172,7 @@ export default async function (context, req) {
     return respond(context, 400, { message: 'invalid_date' })
   }
 
-  const todayIso = formatUtcDate(startOfUtcDay(new Date()))
+  const todayIso = todayKey()
   const isoDate = formatUtcDate(targetDay)
   const jsDayIndex = targetDay.getUTCDay()
   const dayOfWeek = jsDayIndex + 1 // Convert to 1-7 with Sunday=1

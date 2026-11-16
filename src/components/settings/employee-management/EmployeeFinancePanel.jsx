@@ -17,6 +17,7 @@ import { authenticatedFetch } from '@/lib/api-client.js';
 import { toAgorot, formatCurrency } from '@/lib/currency.js';
 import { LeaveDayRateEditor } from './EmployeeRatesPanel.jsx';
 import EmployeePaySummary from '@/features/finance/components/EmployeePaySummary.jsx';
+import { calendarDateFromDateKey, dateKeyFromCalendarDate, firstDayOfMonth, todayKey } from '@/lib/local-time.js';
 
 function startOfMonth(date) {
   return new Date(date.getFullYear(), date.getMonth(), 1);
@@ -24,10 +25,6 @@ function startOfMonth(date) {
 
 function endOfMonth(date) {
   return new Date(date.getFullYear(), date.getMonth() + 1, 0);
-}
-
-function toLocalDateString(date) {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }
 
 /**
@@ -156,7 +153,7 @@ function LeavePayBox({ employee, orgId, session, policy, onSaved, onEmployeeChan
 }
 
 export default function EmployeeFinancePanel({ employee, orgId, session, onEditEmployee, onEmployeeChanged }) {
-  const [monthDate, setMonthDate] = useState(() => startOfMonth(new Date()));
+  const [monthDate, setMonthDate] = useState(() => calendarDateFromDateKey(firstDayOfMonth(todayKey())));
   const [leavePolicy, setLeavePolicy] = useState(null);
   const [adjustments, setAdjustments] = useState([]);
   // Bumped after a change here (a correction, a leave-day value) so the pay summary reads again.
@@ -165,13 +162,13 @@ export default function EmployeeFinancePanel({ employee, orgId, session, onEditE
   const [form, setForm] = useState({
     correctionType: 'bonus',
     amount: '',
-    effectiveDate: toLocalDateString(startOfMonth(new Date())),
+    effectiveDate: firstDayOfMonth(todayKey()),
     notes: '',
   });
   const [pendingRemoval, setPendingRemoval] = useState(null);
 
-  const monthStart = useMemo(() => toLocalDateString(startOfMonth(monthDate)), [monthDate]);
-  const monthEnd = useMemo(() => toLocalDateString(endOfMonth(monthDate)), [monthDate]);
+  const monthStart = useMemo(() => dateKeyFromCalendarDate(startOfMonth(monthDate)), [monthDate]);
+  const monthEnd = useMemo(() => dateKeyFromCalendarDate(endOfMonth(monthDate)), [monthDate]);
 
   // A correction belongs to the month on screen. Defaulting to today put a fix for last month into
   // this one whenever the office was looking back.

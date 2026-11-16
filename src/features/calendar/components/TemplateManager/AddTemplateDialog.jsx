@@ -24,6 +24,7 @@ import {
 } from '@/lib/instructor-availability.js';
 import { ceilClockTimeToGrid } from '@/lib/time-grid.js';
 import { MissingRateNotice } from '../MissingRateNotice.jsx';
+import { todayKey } from '@/lib/local-time.js';
 
 function formatTemplateTime(timeString) {
   if (!timeString) return '—';
@@ -109,7 +110,7 @@ export function AddTemplateDialog({
     day_of_week: normalizeDayToken(defaultDayOfWeek) || '',
     time_of_day: ceilClockTimeToGrid(defaultTimeOfDay) || '09:00',
     duration_minutes: Number(defaultDurationMinutes) || 60,
-    valid_from: new Date().toISOString().split('T')[0],
+    valid_from: todayKey(),
     valid_until: '',
   });
 
@@ -210,7 +211,7 @@ export function AddTemplateDialog({
         day_of_week: normalizeDayToken(defaultDayOfWeek) || '',
         time_of_day: ceilClockTimeToGrid(defaultTimeOfDay) || '09:00',
         duration_minutes: Number(defaultDurationMinutes) || 60,
-        valid_from: new Date().toISOString().split('T')[0],
+        valid_from: todayKey(),
         valid_until: '',
       });
       setError(null);

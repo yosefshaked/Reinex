@@ -13,6 +13,7 @@
 - [`../src/features/settings/api/storage.js`](../src/features/settings/api/storage.js)
 - [`../src/lib/currency.js`](../src/lib/currency.js)
 - [`../src/lib/date.js`](../src/lib/date.js)
+- [`../src/lib/local-time.js`](../src/lib/local-time.js)
 - [`../src/lib/day-of-week.js`](../src/lib/day-of-week.js)
 - [`../src/lib/format-name.js`](../src/lib/format-name.js)
 - [`../src/lib/instructor-availability.js`](../src/lib/instructor-availability.js)
@@ -33,6 +34,7 @@
 - Password reset requests should use [`../src/api/password-reset.js`](../src/api/password-reset.js) instead of calling `supabase.auth.resetPasswordForEmail(...)` directly from UI/auth context
 - `toAgorot`, `toShekel`, `coerceAgorot`, `formatCurrency`
 - `parseDateStrict`, `toISODateString`, `isValidRange`, `isFullMonthRange`
+- Dates and time zones: `todayKey`, `localDateKey`, `localTime`, `dateKeyFromCalendarDate`, `addDays`, `firstDayOfMonth`, `formatInstant` and the rest of [`../src/lib/local-time.js`](../src/lib/local-time.js) (re-export of the API module; rules in `00-core-rules.md` "Dates and time zones")
 - `normalizeDayToken`, `dayLabel`, `daySortValue`
 - `formatStudentName`, `formatInstructorName`, `formatName`
 - `formatUserAccountName`

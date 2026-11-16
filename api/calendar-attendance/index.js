@@ -42,7 +42,7 @@ import {
   resolveMarkedInstructorCompensationDecision,
 } from '../_shared/calendar-workflow-decisions.js';
 import { normalizeLessonInstanceStatus } from '../_shared/lesson-instance-status.js';
-import { getDateKeyInTimezone } from '../_shared/instructor-availability.js';
+import { localDateKey } from '../_shared/local-time.js';
 import { buildAttendanceTransitionAuditChanges } from '../_shared/attendance-audit.js';
 import { attachErrorTracking, respondTracked } from '../_shared/error-events.js';
 import { findBlockingReportParticipantIds } from '../_shared/session-reports-guards.js';
@@ -603,7 +603,7 @@ async function buildParticipantStatusPreview(client, orgId, body, {
   const normalizedParticipantClientProfileId = normalizeNullableId(participant?.client_profile_id);
   let billingArtifactRows = Array.isArray(participantLedgerRows) ? [...participantLedgerRows] : [];
 
-  const lessonDateKey = getDateKeyInTimezone(instanceDetail.datetime_start || Date.now());
+  const lessonDateKey = localDateKey(instanceDetail.datetime_start || Date.now());
   const policiesPromise = loadFinancePolicies(client, orgId);
   const [{ data: employeeRow, error: employeeError }, { data: studentRow, error: studentError }, { data: clientProfileRow, error: clientProfileError }, { data: serviceRow, error: serviceError }, { data: rateRows, error: rateRowsError }, policies] = await Promise.all([
     withOrgScope(client, 'Employees', orgId)

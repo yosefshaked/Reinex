@@ -1,4 +1,5 @@
 /* eslint-env node */
+import { todayKey } from '../_shared/local-time.js';
 import { resolveBearerAuthorization } from '../_shared/http.js';
 import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../_shared/supabase-admin.js';
 import {
@@ -98,9 +99,7 @@ export default async function (context, req) {
   try {
     // Query Documents table for all expired documents
     // This is a single optimized query instead of N queries
-    const today = new Date();
-    today.setHours(0, 0, 0, 0); // Start of today
-    const todayString = today.toISOString().split('T')[0]; // YYYY-MM-DD format
+    const todayString = todayKey(); // YYYY-MM-DD, today in the org's zone
     
     context.log?.('students-compliance-summary query details', {
       orgId,

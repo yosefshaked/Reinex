@@ -55,6 +55,9 @@ export default defineConfig({
       '/api': {
         target: 'http://127.0.0.1:7071',
         changeOrigin: true,
+        // Isomorphic modules the frontend imports from api/_shared (src/lib/local-time.js re-exports
+        // api/_shared/local-time.js) are source files, not endpoints: let Vite serve them.
+        bypass: (req) => (req.url?.startsWith('/api/_shared/') ? req.url : undefined),
       },
     },
   },

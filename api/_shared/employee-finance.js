@@ -3,7 +3,17 @@
 import { isAdminOrOffice, normalizeString, withOrgScope } from './org-bff.js';
 import { coerceAgorot } from './currency.js';
 import { shouldParticipantTriggerInstructorCompensation } from './calendar-workflow-decisions.js';
-import { buildUtcBoundsForTimezoneDateRange, getCurrentDateInTimezone } from './instructor-availability.js';
+import {
+  dateKeyFromParts,
+  enumerateDateKeys,
+  firstDayOfMonth,
+  lastDayOfMonth,
+  localDateKey,
+  localDateRangeUtc,
+  parseDateKey,
+  todayKey,
+  weekdayOfDateKey,
+} from './local-time.js';
 import {
   LESSON_PAY_BASES,
   PAY_BASIS,
@@ -11,7 +21,6 @@ import {
   loadRateHistoryRows,
   resolveLessonRateOnDate,
   resolveRateOnDate,
-  toRateDateKey,
 } from './rate-history.js';
 
 export const DEFAULT_LEAVE_POLICY = Object.freeze({
@@ -64,59 +73,13 @@ function isPlainObject(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
+/** Every local date key from start to end (each a date key or an instant, read in the org's zone). */
+function enumerateLocalDateRange(startDate, endDate) {
+  return enumerateDateKeys(localDateKey(startDate), localDateKey(endDate));
+}
+
 export function isYmdDate(value) {
   return /^\d{4}-\d{2}-\d{2}$/.test(normalizeString(value));
-}
-
-export function toDateKey(value) {
-  if (!value) return '';
-  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value.trim())) {
-    return value.trim();
-  }
-
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return '';
-  }
-  return date.toISOString().slice(0, 10);
-}
-
-export function addDays(dateKey, offsetDays) {
-  const base = new Date(`${dateKey}T00:00:00Z`);
-  if (Number.isNaN(base.getTime())) return '';
-  base.setUTCDate(base.getUTCDate() + offsetDays);
-  return base.toISOString().slice(0, 10);
-}
-
-export function enumerateDateRange(startDate, endDate) {
-  const startKey = toDateKey(startDate);
-  const endKey = toDateKey(endDate);
-  if (!startKey || !endKey || startKey > endKey) {
-    return [];
-  }
-
-  const dates = [];
-  let cursor = startKey;
-  while (cursor <= endKey) {
-    dates.push(cursor);
-    cursor = addDays(cursor, 1);
-  }
-  return dates;
-}
-
-export function startOfMonthKey(input) {
-  const dateKey = toDateKey(input);
-  if (!dateKey) return '';
-  return `${dateKey.slice(0, 7)}-01`;
-}
-
-export function endOfMonthKey(input) {
-  const dateKey = toDateKey(input);
-  if (!dateKey) return '';
-  const date = new Date(`${dateKey.slice(0, 7)}-01T00:00:00Z`);
-  date.setUTCMonth(date.getUTCMonth() + 1);
-  date.setUTCDate(0);
-  return date.toISOString().slice(0, 10);
 }
 
 function parseJsonValue(value, fallback) {
@@ -335,8 +298,8 @@ export function resolveEmployeeWorkingDays(employee) {
 
 export function countWorkingDaysInRange(workingDays, startDate, endDate) {
   const daySet = new Set(normalizeWorkingDays(workingDays).length > 0 ? normalizeWorkingDays(workingDays) : DEFAULT_WORKING_DAYS);
-  return enumerateDateRange(startDate, endDate).reduce((count, dateKey) => {
-    const dayOfWeek = new Date(`${dateKey}T00:00:00Z`).getUTCDay();
+  return enumerateLocalDateRange(startDate, endDate).reduce((count, dateKey) => {
+    const dayOfWeek = weekdayOfDateKey(dateKey);
     return daySet.has(dayOfWeek) ? count + 1 : count;
   }, 0);
 }
@@ -345,10 +308,11 @@ export function canManageEmployeeOps(role) {
   return isAdminOrOffice(role);
 }
 
+// Same calendar day `months` earlier; a day the earlier month lacks rolls over (31.05 - 3 -> 03.03).
 function startOfLookbackRange(targetDate, months) {
-  const target = new Date(`${toDateKey(targetDate)}T00:00:00Z`);
-  target.setUTCMonth(target.getUTCMonth() - months);
-  return target.toISOString().slice(0, 10);
+  const target = parseDateKey(localDateKey(targetDate));
+  if (!target) return '';
+  return dateKeyFromParts(target.year, target.month - months, target.day);
 }
 
 
@@ -432,7 +396,7 @@ export function computeLessonInstructorPayoutAmount(instance, rateUsed, options 
 function groupRecordsByDate(records = []) {
   const grouped = new Map();
   for (const record of records) {
-    const dateKey = toDateKey(record?.date || record?.effective_date || record?.attendance_date || record?.lesson_date);
+    const dateKey = localDateKey(record?.date || record?.effective_date || record?.attendance_date || record?.lesson_date);
     if (!dateKey) continue;
     if (!grouped.has(dateKey)) {
       grouped.set(dateKey, { amount: 0, hours: 0 });
@@ -445,13 +409,13 @@ function groupRecordsByDate(records = []) {
 }
 
 function computeAverageDayValue(records, targetDate, months) {
-  const targetKey = toDateKey(targetDate);
+  const targetKey = localDateKey(targetDate);
   if (!targetKey) {
     return 0;
   }
   const rangeStart = startOfLookbackRange(targetKey, months);
   const grouped = groupRecordsByDate(records.filter((record) => {
-    const dateKey = toDateKey(record?.date || record?.effective_date || record?.attendance_date || record?.lesson_date);
+    const dateKey = localDateKey(record?.date || record?.effective_date || record?.attendance_date || record?.lesson_date);
     return Boolean(dateKey) && dateKey < targetKey && dateKey >= rangeStart;
   }));
 
@@ -481,7 +445,7 @@ export function resolveLeaveDayValue({
   rateRows = [],
 }) {
   const method = resolveLeavePayMethod(employee, leavePayPolicy);
-  const targetKey = toDateKey(targetDate);
+  const targetKey = localDateKey(targetDate);
   const employeeId = employee?.id || null;
 
   if (method === 'fixed_rate') {
@@ -496,8 +460,8 @@ export function resolveLeaveDayValue({
   // A salaried employee's leave day is worth a day of salary. This follows the rate, not the label
   // on the employee, so someone who is salaried and also teaches is still valued as salaried here.
   if (hasRateKind(rateRows, { employeeId, payBasis: PAY_BASIS.MONTHLY_SALARY, onOrBefore: targetKey })) {
-    const monthStart = startOfMonthKey(targetDate);
-    const monthEnd = endOfMonthKey(targetDate);
+    const monthStart = firstDayOfMonth(localDateKey(targetDate));
+    const monthEnd = lastDayOfMonth(localDateKey(targetDate));
     const workingDays = countWorkingDaysInRange(resolveEmployeeWorkingDays(employee), monthStart, monthEnd);
     const monthlySalary = resolveRateOnDate(rateRows, { employeeId, payBasis: PAY_BASIS.MONTHLY_SALARY, date: targetKey })?.rate ?? 0;
     if (monthlySalary > 0 && workingDays > 0) {
@@ -518,7 +482,7 @@ export function resolveLeaveDayValue({
       const hourlyRate = resolveRateOnDate(rateRows, {
         employeeId,
         payBasis: PAY_BASIS.ATTENDANCE_HOURLY,
-        date: toDateKey(row.attendance_date),
+        date: localDateKey(row.attendance_date),
       });
       const otherMinutes = Math.max(0, Number(row?.other_minutes) || 0);
       return {
@@ -579,7 +543,7 @@ export function buildLeaveDayRows({
   }
 
   const isHalfDay = leaveType === 'half_day' || durationMode === 'half_day';
-  const dates = enumerateDateRange(startDate, endDate);
+  const dates = enumerateLocalDateRange(startDate, endDate);
   if (isHalfDay) {
     const onlyDate = dates[0];
     if (!onlyDate) return [];
@@ -608,8 +572,8 @@ export function buildLeaveDayRows({
 }
 
 export async function fetchApprovedLeaveDays(tenantClient, { employeeId, startDate, endDate, excludeEntryId = '' }) {
-  const startKey = toDateKey(startDate);
-  const endKey = toDateKey(endDate);
+  const startKey = localDateKey(startDate);
+  const endKey = localDateKey(endDate);
   if (!employeeId || !startKey || !endKey) {
     return [];
   }
@@ -653,8 +617,8 @@ export async function fetchApprovedLeaveDays(tenantClient, { employeeId, startDa
 }
 
 export async function fetchAttendanceRecords(tenantClient, { employeeId, startDate, endDate }) {
-  const startKey = toDateKey(startDate);
-  const endKey = toDateKey(endDate);
+  const startKey = localDateKey(startDate);
+  const endKey = localDateKey(endDate);
   if (!employeeId || !startKey || !endKey) {
     return [];
   }
@@ -678,13 +642,13 @@ export async function fetchAttendanceRecords(tenantClient, { employeeId, startDa
 }
 
 export async function fetchLessonConflicts(tenantClient, { employeeId, startDate, endDate, excludeInstanceId = '' }) {
-  const startKey = toDateKey(startDate);
-  const endKey = toDateKey(endDate);
+  const startKey = localDateKey(startDate);
+  const endKey = localDateKey(endDate);
   if (!employeeId || !startKey || !endKey) {
     return [];
   }
 
-  const rangeBounds = buildUtcBoundsForTimezoneDateRange(startKey, endKey);
+  const rangeBounds = localDateRangeUtc(startKey, endKey);
   if (!rangeBounds?.startIso || !rangeBounds?.endExclusiveIso) {
     return [];
   }
@@ -827,13 +791,13 @@ export async function deleteLeaveArtifacts(tenantClient, orgId, leaveEntryId) {
 }
 
 export function computeLeaveSummary({ employee, balanceEvents = [], targetDate, leavePolicy = DEFAULT_LEAVE_POLICY }) {
-  const year = Number(String(toDateKey(targetDate) || new Date().toISOString().slice(0, 10)).slice(0, 4));
+  const year = Number((localDateKey(targetDate) || todayKey()).slice(0, 4));
   const yearStart = `${year}-01-01`;
   const yearEnd = `${year}-12-31`;
 
   const annualLeaveDays = Number(employee?.annual_leave_days || 0);
   let quota = annualLeaveDays;
-  const startDate = toDateKey(employee?.start_date);
+  const startDate = localDateKey(employee?.start_date);
   if (startDate && startDate > yearStart && startDate <= yearEnd) {
     const totalDaysInYear = ((year % 4 === 0 && year % 100 !== 0) || year % 400 === 0) ? 366 : 365;
     const start = new Date(`${startDate}T00:00:00Z`);
@@ -848,7 +812,7 @@ export function computeLeaveSummary({ employee, balanceEvents = [], targetDate, 
   let used = 0;
 
   for (const entry of balanceEvents || []) {
-    const effectiveDate = toDateKey(entry?.effective_date);
+    const effectiveDate = localDateKey(entry?.effective_date);
     if (!effectiveDate || effectiveDate < yearStart || effectiveDate > yearEnd) {
       continue;
     }
@@ -958,7 +922,7 @@ export async function validateInstructorRateForLesson(
     resolvedOrgId = employee?.org_id || null;
   }
 
-  const rateDate = toRateDateKey(resolvedLessonDate || new Date().toISOString());
+  const rateDate = localDateKey(resolvedLessonDate || new Date());
   const rateRows = resolvedOrgId
     ? await loadRateHistoryRows(tenantClient, resolvedOrgId, {
       employeeIds: [resolvedInstructorId],
@@ -1028,7 +992,7 @@ export async function checkInstructorRateForLesson(tenantClient, params, context
 
 /**
  * Whether moving a lesson changes the day it is paid on. Pay is counted on the lesson's date in the
- * scheduling timezone (toRateDateKey, as pay-calculation does), not on its UTC date: a lesson at
+ * org's time zone (localDateKey, as pay-calculation does), not on its UTC date: a lesson at
  * 01:00 Israel time moved to 10:00 the day before keeps its UTC date but changes its pay date.
  *
  * @param {unknown} previousDatetimeStart
@@ -1036,7 +1000,7 @@ export async function checkInstructorRateForLesson(tenantClient, params, context
  */
 export function hasLessonPayDateChanged(previousDatetimeStart, nextDatetimeStart) {
   if (!nextDatetimeStart) return false;
-  return toRateDateKey(nextDatetimeStart) !== toRateDateKey(previousDatetimeStart);
+  return localDateKey(nextDatetimeStart) !== localDateKey(previousDatetimeStart);
 }
 
 /**
@@ -1085,7 +1049,7 @@ export function checkTemplateInstructorRate(tenantClient, orgId, { instructorEmp
     orgId,
     instructorEmployeeId,
     serviceId,
-    lessonDate: resolveTemplateRateCheckDate(validFrom, today === undefined ? getCurrentDateInTimezone() : today),
+    lessonDate: resolveTemplateRateCheckDate(validFrom, today === undefined ? todayKey() : today),
   }, context);
 }
 

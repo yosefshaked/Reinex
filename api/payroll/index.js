@@ -11,13 +11,11 @@ import {
 } from '../_shared/org-bff.js';
 import {
   canManageEmployeeOps,
-  endOfMonthKey,
   isYmdDate,
   loadFinancePolicies,
   resolveEmployeeRecord,
-  startOfMonthKey,
-  toDateKey,
 } from '../_shared/employee-finance.js';
+import { firstDayOfMonth, lastDayOfMonth, todayKey } from '../_shared/local-time.js';
 import { coerceAgorot } from '../_shared/currency.js';
 import { computeEmployeePay } from '../_shared/pay-calculation.js';
 import { loadRateHistoryRows } from '../_shared/rate-history.js';
@@ -76,9 +74,9 @@ export default async function (context, req) {
   const employeeId = normalizeString(req?.query?.employee_id);
   const startDate = normalizeString(req?.query?.start_date);
   const endDate = normalizeString(req?.query?.end_date);
-  const defaultDate = toDateKey(new Date());
-  const resolvedStart = isYmdDate(startDate) ? startDate : startOfMonthKey(defaultDate);
-  const resolvedEnd = isYmdDate(endDate) ? endDate : endOfMonthKey(resolvedStart);
+  const defaultDate = todayKey();
+  const resolvedStart = isYmdDate(startDate) ? startDate : firstDayOfMonth(defaultDate);
+  const resolvedEnd = isYmdDate(endDate) ? endDate : lastDayOfMonth(resolvedStart);
   const policies = await loadFinancePolicies(supabase, orgId);
 
   let employees = [];

@@ -6,7 +6,8 @@ import { normalizeString } from './org-bff.js';
 import { buildBillingDecision, buildDirectClientBillingDecision } from './student-billing.js';
 import { normalizeLessonInstanceStatus } from './lesson-instance-status.js';
 import { coerceAgorot } from './currency.js';
-import { LESSON_PAY_BASES, loadRateHistoryRows, toRateDateKey } from './rate-history.js';
+import { LESSON_PAY_BASES, loadRateHistoryRows } from './rate-history.js';
+import { localDateKey } from './local-time.js';
 
 const LESSON_BILLING_USAGE_TYPES = ['lesson_charge', 'reversal', 'manual_adjustment', 'manual_payment'];
 const PARTICIPANT_STATUSES = new Set(['scheduled', 'attended', 'no_show', 'cancelled_student', 'cancelled_clinic']);
@@ -411,7 +412,7 @@ export async function buildInstanceCorrectionPreview(tenantClient, options) {
         delta_amount: roundCurrency(proposedPayout - currentPayout),
       },
       operational: {
-        attendance_date: toRateDateKey(currentInstance.datetime_start),
+        attendance_date: localDateKey(currentInstance.datetime_start),
         current_worked_minutes: currentWorkedMinutes,
         proposed_worked_minutes: proposedWorkedMinutes,
         delta_minutes: proposedWorkedMinutes - currentWorkedMinutes,

@@ -28,7 +28,7 @@ import {
 } from '../_shared/org-bff.js';
 import BillingLedgerService from '../_shared/BillingLedgerService.js';
 import { syncLessonClosureState } from '../_shared/calendar-workflow.js';
-import { buildUtcBoundsForTimezoneDateRange } from '../_shared/instructor-availability.js';
+import { localDateRangeUtc } from '../_shared/local-time.js';
 import {
   ACTIVE_LESSON_INSTANCE_STATUSES,
   cancelLessonInstanceWithParticipants,
@@ -54,7 +54,7 @@ function isIsoDate(value) {
 }
 
 function buildUtcRange(dateString) {
-  const range = buildUtcBoundsForTimezoneDateRange(dateString, dateString);
+  const range = localDateRangeUtc(dateString, dateString);
   if (!range?.startIso || !range?.endExclusiveIso) {
     return null;
   }
@@ -1439,7 +1439,7 @@ export default async function lessonInstances(context, req) {
       return respond(context, 400, { message: 'invalid_from_date' });
     }
 
-    const fromBounds = buildUtcBoundsForTimezoneDateRange(fromDate, fromDate);
+    const fromBounds = localDateRangeUtc(fromDate, fromDate);
     if (!fromBounds?.startIso) {
       return respond(context, 400, { message: 'invalid_from_date' });
     }

@@ -16,12 +16,10 @@ import {
   canManageEmployeeOps,
   fetchApprovedLeaveDays,
   fetchAttendanceRecords,
-  endOfMonthKey,
   isYmdDate,
   resolveEmployeeRecord,
-  startOfMonthKey,
-  toDateKey,
 } from '../_shared/employee-finance.js';
+import { firstDayOfMonth, lastDayOfMonth, todayKey } from '../_shared/local-time.js';
 import { loadCountedLessons, summarizeLessonsByDate } from '../_shared/pay-calculation.js';
 
 const MAX_BODY_BYTES = 64 * 1024;
@@ -110,9 +108,9 @@ export default async function (context, req) {
     const employeeId = normalizeString(req?.query?.employee_id);
     const startDate = normalizeString(req?.query?.start_date);
     const endDate = normalizeString(req?.query?.end_date);
-    const defaultMonthDate = toDateKey(new Date());
-    const resolvedStart = isYmdDate(startDate) ? startDate : startOfMonthKey(defaultMonthDate);
-    const resolvedEnd = isYmdDate(endDate) ? endDate : endOfMonthKey(resolvedStart);
+    const defaultMonthDate = todayKey();
+    const resolvedStart = isYmdDate(startDate) ? startDate : firstDayOfMonth(defaultMonthDate);
+    const resolvedEnd = isYmdDate(endDate) ? endDate : lastDayOfMonth(resolvedStart);
 
     const employeeResult = await resolveEmployeeRecord(supabase, {
       employeeId,

@@ -19,6 +19,7 @@ import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { authenticatedFetch } from '@/lib/api-client.js';
 import { resolveApiErrorMessage } from '@/lib/error-support.js';
 import { buildFormAccessWhatsAppMessage } from '@/lib/whatsapp-message-templates.js';
+import { formatInstant } from '@/lib/local-time.js';
 
 function normalizeWaPhone(value) {
   const digits = String(value || '').replace(/[^\d]/g, '');
@@ -45,15 +46,10 @@ function buildSubmissionLink({ accessIdentifier = '', otp = '' } = {}) {
 
 function formatDateTime(value) {
   if (!value) return '—';
-  try {
-    return new Intl.DateTimeFormat('he-IL', {
-      timeZone: 'Asia/Jerusalem',
-      dateStyle: 'short',
-      timeStyle: 'short',
-    }).format(new Date(value));
-  } catch {
-    return String(value);
-  }
+  return formatInstant(value, {
+    dateStyle: 'short',
+    timeStyle: 'short',
+  }) || String(value);
 }
 
 function buildWhatsAppLink(phone, otp, submitLink, accessIdentifier, formName, expiresAt, organizationName) {

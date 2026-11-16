@@ -36,6 +36,11 @@ describe('buildHmoCoverageWarning — target_date fallback from datetime_start',
     assert.ok(warning);
     assert.equal(warning.target_date, '2026-04-20');
   });
+
+  it('reads the date of a UTC instant in Israel time (00:30 on 20.04 is 21:30Z on 19.04)', () => {
+    const candidate = { student_id: 'st-1', service_id: 'svc-1', datetime_start: '2026-04-19T21:30:00.000Z' };
+    assert.equal(buildHmoCoverageWarning(candidate, []).target_date, '2026-04-20');
+  });
 });
 
 describe('buildHmoCoverageWarning — no authorization found', () => {

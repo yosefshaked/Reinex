@@ -26,6 +26,7 @@ import { buildCapabilitiesPayload } from '@/lib/instructor-capabilities.js';
 import { formatDateKey } from '@/lib/date-key-format.js';
 import { formatCurrency, toAgorot } from '@/lib/currency.js';
 import { useServices } from '@/hooks/useOrgData.js';
+import { todayKey } from '@/lib/local-time.js';
 
 const LESSON_BASES = ['lesson_hourly', 'lesson_flat'];
 
@@ -55,11 +56,6 @@ const BASIS_SUFFIX = {
   monthly_salary: 'לחודש',
   leave_day: 'ליום',
 };
-
-function todayKey() {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-}
 
 const formatDate = formatDateKey;
 

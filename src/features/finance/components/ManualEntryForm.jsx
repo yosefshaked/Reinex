@@ -7,12 +7,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import CurrencyInput from '@/components/ui/CurrencyInput.jsx';
 import { coerceAgorot, formatCurrency, isValidCurrencyInput } from '@/lib/currency.js';
 import { clearSheetDraft, readSheetDraft, writeSheetDraft } from '@/features/finance/utils/sheetDraftStorage.js';
+import { todayKey } from '@/lib/local-time.js';
 
 function buildEntryForm() {
   return {
     mode: 'payment',
     amount: '',
-    effectiveAt: new Date().toISOString().slice(0, 10),
+    effectiveAt: todayKey(),
     notes: '',
     externalReference: '',
     calculatorServiceId: '',

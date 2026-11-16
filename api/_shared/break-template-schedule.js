@@ -33,7 +33,7 @@ export function breakTemplateMatchesDate(template, date) {
 
 /**
  * Normalises a postgres `time` value ("HH:MM:SS" or "HH:MM") to the
- * "HH:MM" string expected by buildUtcIsoForTimezoneDateTime.
+ * "HH:MM" string expected by localDateTimeToUtc (local-time.js).
  *
  * @param {string|null|undefined} timeValue
  * @returns {string}  "HH:MM" or empty string on invalid input

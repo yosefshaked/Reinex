@@ -1,4 +1,5 @@
 /* eslint-env node */
+import { dateKeyFromCalendarDate, dateKeyFromUtcCalendarDate } from '../_shared/local-time.js';
 import { Buffer } from 'node:buffer';
 import { resolveBearerAuthorization } from '../_shared/http.js';
 import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../_shared/supabase-admin.js';
@@ -94,7 +95,7 @@ function buildIsoDate(year, month, day) {
     return null;
   }
 
-  return date.toISOString().slice(0, 10);
+  return dateKeyFromUtcCalendarDate(date);
 }
 
 function parseExcelSerial(value) {
@@ -111,7 +112,7 @@ function parseExcelSerial(value) {
     return null;
   }
 
-  return date.toISOString().slice(0, 10);
+  return dateKeyFromUtcCalendarDate(date);
 }
 
 function normalizeDate(value) {
@@ -142,7 +143,7 @@ function normalizeDate(value) {
 
   const parsed = new Date(trimmed);
   if (!Number.isNaN(parsed.getTime())) {
-    return parsed.toISOString().slice(0, 10);
+    return dateKeyFromCalendarDate(parsed);
   }
 
   return null;

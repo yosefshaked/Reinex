@@ -19,6 +19,7 @@ import { toast } from '@/lib/toast.jsx';
 import { formatStudentName } from '@/features/students/utils/name-utils.js';
 import { authenticatedFetch } from '@/lib/api-client.js';
 import { updateStudentFromForm, updateStudentStatus } from '@/features/students/api/students.js';
+import { dateKeyFromCalendarDate, todayKey } from '@/lib/local-time.js';
 
 /**
  * Suspend Student Dialog with two modes:
@@ -44,9 +45,9 @@ export default function SuspendStudentDialog({
     if (!orgId || isProcessing) return;
 
     const fromDate = mode === 'immediate'
-      ? new Date().toISOString().split('T')[0]
+      ? todayKey()
       : selectedDate
-        ? selectedDate.toISOString().split('T')[0]
+        ? dateKeyFromCalendarDate(selectedDate) // the day picked, not its UTC date
         : null;
 
     if (!fromDate) {

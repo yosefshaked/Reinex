@@ -10,12 +10,20 @@
  */
 import { normalizeString, withOrgScope } from './org-bff.js';
 import { coerceAgorot } from './currency.js';
-import { buildUtcBoundsForTimezoneDateRange, extractScheduleSlotFromIso } from './instructor-availability.js';
+import { extractScheduleSlotFromIso } from './instructor-availability.js';
+import {
+  dateKeyFromParts,
+  enumerateDateKeys,
+  firstDayOfMonth,
+  lastDayOfMonth,
+  localDateKey,
+  localDateRangeUtc,
+  parseDateKey,
+  weekdayOfDateKey,
+} from './local-time.js';
 import {
   combinePayComponents,
   countWorkingDaysInRange,
-  endOfMonthKey,
-  enumerateDateRange,
   fetchApprovedLeaveDays,
   fetchAttendanceRecords,
   listFinanceCorrections,
@@ -25,8 +33,6 @@ import {
   resolveEmployeeWorkingDays,
   resolveLeaveDayValue,
   resolveLessonInstructorPayout,
-  startOfMonthKey,
-  toDateKey,
 } from './employee-finance.js';
 import {
   LESSON_PAY_BASES,
@@ -35,7 +41,6 @@ import {
   loadRateHistoryRows,
   resolveLessonRateOnDate,
   resolveRateOnDate,
-  toRateDateKey,
 } from './rate-history.js';
 
 const PAGE_SIZE = 1000;
@@ -65,10 +70,11 @@ async function fetchAllRows(buildQuery, { ignoreMissingTable = false } = {}) {
   }
 }
 
+// Same calendar day `deltaMonths` away; a day the target month lacks rolls over, as before.
 function shiftMonths(dateKey, deltaMonths) {
-  const date = new Date(`${dateKey}T00:00:00Z`);
-  date.setUTCMonth(date.getUTCMonth() + deltaMonths);
-  return date.toISOString().slice(0, 10);
+  const parsed = parseDateKey(localDateKey(dateKey));
+  if (!parsed) return '';
+  return dateKeyFromParts(parsed.year, parsed.month + deltaMonths, parsed.day);
 }
 
 /** A lesson has ended once its start time plus its length is behind us. */
@@ -146,7 +152,7 @@ export function resolveCountedLesson({
   now = new Date(),
 } = {}) {
   const employeeId = normalizeString(instance?.instructor_employee_id);
-  const lessonDate = toRateDateKey(instance?.datetime_start);
+  const lessonDate = localDateKey(instance?.datetime_start);
   const { participants: participantsForPay, unmarkedIds } = resolveParticipantsForPay(instance, participants, now);
   const paidParticipants = employeeId
     ? resolveCompensationEligibleParticipants(participantsForPay, policies, graceParticipantIds)
@@ -265,9 +271,9 @@ export async function loadCountedLessons(client, orgId, {
   rateRows = null,
   now = new Date(),
 } = {}) {
-  const startKey = toDateKey(startDate);
-  const endKey = toDateKey(endDate);
-  const bounds = startKey && endKey && startKey <= endKey ? buildUtcBoundsForTimezoneDateRange(startKey, endKey) : null;
+  const startKey = localDateKey(startDate);
+  const endKey = localDateKey(endDate);
+  const bounds = startKey && endKey && startKey <= endKey ? localDateRangeUtc(startKey, endKey) : null;
   if (!normalizeString(orgId) || !bounds) return [];
   const targetEmployeeId = normalizeString(employeeId);
 
@@ -295,7 +301,7 @@ export async function loadCountedLessons(client, orgId, {
   }
 
   const inScope = (instance) => {
-    const dateKey = toRateDateKey(instance?.datetime_start);
+    const dateKey = localDateKey(instance?.datetime_start);
     return Boolean(dateKey) && dateKey >= startKey && dateKey <= endKey
       && (!targetEmployeeId || normalizeString(instance?.instructor_employee_id) === targetEmployeeId);
   };
@@ -399,7 +405,7 @@ export async function computeEmployeePay(client, orgId, {
   ]);
 
   const lessons = lessonHistory.filter((lesson) => inRange(lesson.lesson_date, startDate, endDate));
-  const attendance = attendanceHistory.filter((row) => inRange(toDateKey(row?.attendance_date), startDate, endDate));
+  const attendance = attendanceHistory.filter((row) => inRange(localDateKey(row?.attendance_date), startDate, endDate));
   const lessonTotals = summarizeLessons(lessons);
 
   const leaveAmounts = leaveDays.map((leaveDay) => ({
@@ -423,7 +429,7 @@ export async function computeEmployeePay(client, orgId, {
   });
 
   const attendanceRows = attendance.map((row) => {
-    const dateKey = toDateKey(row?.attendance_date);
+    const dateKey = localDateKey(row?.attendance_date);
     const rate = resolveRateOnDate(resolvedRateRows, {
       employeeId,
       payBasis: PAY_BASIS.ATTENDANCE_HOURLY,
@@ -443,10 +449,10 @@ export async function computeEmployeePay(client, orgId, {
   const workingDaySet = new Set(workingDays);
   const leaveByDate = new Map(leaveAmounts.map((row) => [row.leave_date, row]));
   const monthlySalaryAmount = paysMonthlySalary
-    ? coerceAgorot(enumerateDateRange(startDate, endDate)
-      .filter((dateKey) => workingDaySet.has(new Date(`${dateKey}T00:00:00Z`).getUTCDay()))
+    ? coerceAgorot(enumerateDateKeys(localDateKey(startDate), localDateKey(endDate))
+      .filter((dateKey) => workingDaySet.has(weekdayOfDateKey(dateKey)))
       .reduce((sum, dateKey) => {
-        const monthWorkingDays = Math.max(1, countWorkingDaysInRange(workingDays, startOfMonthKey(dateKey), endOfMonthKey(dateKey)));
+        const monthWorkingDays = Math.max(1, countWorkingDaysInRange(workingDays, firstDayOfMonth(dateKey), lastDayOfMonth(dateKey)));
         const monthlySalary = resolveRateOnDate(resolvedRateRows, {
           employeeId,
           payBasis: PAY_BASIS.MONTHLY_SALARY,

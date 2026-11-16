@@ -1,4 +1,5 @@
 /* eslint-env node */
+import { todayKey } from '../_shared/local-time.js';
 import { resolveBearerAuthorization } from '../_shared/http.js';
 import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../_shared/supabase-admin.js';
 import {
@@ -22,7 +23,6 @@ import {
   formatWaitingListPersonName,
   isTemplateValidOn,
   normalizeMatchMode,
-  parseIsoDateInTimezone,
 } from '../_shared/waiting-list-matching.js';
 import { attachErrorTracking, respondTracked } from '../_shared/error-events.js';
 
@@ -135,7 +135,7 @@ export default async function waitingListSuggestions(context, req) {
     return respond(context, 400, { message: 'waiting_list_entry_missing_service' });
   }
 
-  const today = parseIsoDateInTimezone();
+  const today = todayKey();
 
   const { data: instructorRows, error: instructorError } = await withOrgScope(supabase, 'Employees', orgId)
     .select('id, first_name, middle_name, last_name, is_active')

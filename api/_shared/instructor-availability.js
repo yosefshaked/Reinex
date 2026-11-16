@@ -1,62 +1,6 @@
-import { daySortValue, normalizeDayToken } from './day-of-week.js';
+import { dayTokenForJsDay, daySortValue, normalizeDayToken } from './day-of-week.js';
 import { normalizeString } from './org-bff.js';
-
-export const DEFAULT_SCHEDULING_TIMEZONE = 'Asia/Jerusalem';
-
-function getTimeZonePartMap(date, timeZone = DEFAULT_SCHEDULING_TIMEZONE) {
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
-  }).formatToParts(date);
-
-  return Object.fromEntries(parts.map((part) => [part.type, part.value]));
-}
-
-function getTimeZoneOffsetMinutes(date, timeZone = DEFAULT_SCHEDULING_TIMEZONE) {
-  const partMap = getTimeZonePartMap(date, timeZone);
-  const utcTimestampForTimeZoneClock = Date.UTC(
-    Number(partMap.year),
-    Number(partMap.month) - 1,
-    Number(partMap.day),
-    Number(partMap.hour),
-    Number(partMap.minute),
-    Number(partMap.second),
-    0,
-  );
-
-  return Math.round((utcTimestampForTimeZoneClock - date.getTime()) / 60000);
-}
-
-function parseYmdDateString(dateString) {
-  const normalized = normalizeString(dateString);
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(normalized);
-  if (!match) {
-    return null;
-  }
-
-  const year = Number(match[1]);
-  const month = Number(match[2]);
-  const day = Number(match[3]);
-  if (
-    !Number.isInteger(year)
-    || !Number.isInteger(month)
-    || !Number.isInteger(day)
-    || month < 1
-    || month > 12
-    || day < 1
-    || day > 31
-  ) {
-    return null;
-  }
-
-  return { year, month, day };
-}
+import { localTime, localWeekday, resolveOrgTimeZone } from './local-time.js';
 
 export function normalizeClockTime(value) {
   const normalized = normalizeString(value);
@@ -156,103 +100,16 @@ export function getAvailabilityWindowsForDay(availabilityWindows, day) {
     .filter((window) => window.start && window.end);
 }
 
-export function extractScheduleSlotFromIso(datetimeValue, timeZone = DEFAULT_SCHEDULING_TIMEZONE) {
-  const date = new Date(datetimeValue);
-  if (Number.isNaN(date.getTime())) {
-    return null;
-  }
-
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone,
-    weekday: 'long',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  }).formatToParts(date);
-
-  const partMap = Object.fromEntries(parts.map((part) => [part.type, part.value]));
-  const day = normalizeDayToken(partMap.weekday);
-  const startTime = normalizeClockTime(`${partMap.hour || ''}:${partMap.minute || ''}`);
-
+/**
+ * The weekly schedule slot (day token + 'HH:MM') a lesson instant falls on, in the org's zone.
+ * Domain wrapper over local-time.js.
+ */
+export function extractScheduleSlotFromIso(datetimeValue, timeZone = resolveOrgTimeZone()) {
+  const weekday = localWeekday(datetimeValue, timeZone);
+  const day = weekday == null ? null : dayTokenForJsDay(weekday);
+  const startTime = normalizeClockTime(localTime(datetimeValue, timeZone));
   if (!day || !startTime) {
     return null;
   }
-
   return { day, startTime };
-}
-
-export function getCurrentDateInTimezone(timeZone = DEFAULT_SCHEDULING_TIMEZONE) {
-  const partMap = getTimeZonePartMap(new Date(), timeZone);
-  const year = partMap.year;
-  const month = partMap.month;
-  const day = partMap.day;
-  if (!year || !month || !day) {
-    return null;
-  }
-  return `${year}-${month}-${day}`;
-}
-
-export function getDateKeyInTimezone(datetimeValue, timeZone = DEFAULT_SCHEDULING_TIMEZONE) {
-  const date = new Date(datetimeValue);
-  if (Number.isNaN(date.getTime())) {
-    return null;
-  }
-
-  const partMap = getTimeZonePartMap(date, timeZone);
-  const year = partMap.year;
-  const month = partMap.month;
-  const day = partMap.day;
-  if (!year || !month || !day) {
-    return null;
-  }
-
-  return `${year}-${month}-${day}`;
-}
-
-export function buildUtcIsoForTimezoneDateTime(dateString, timeString, timeZone = DEFAULT_SCHEDULING_TIMEZONE) {
-  const parsedDate = parseYmdDateString(dateString);
-  const normalizedTime = normalizeClockTime(timeString);
-  if (!parsedDate || !normalizedTime) {
-    return null;
-  }
-
-  const [hours, minutes] = normalizedTime.split(':').map(Number);
-  const naiveUtcTimestamp = Date.UTC(
-    parsedDate.year,
-    parsedDate.month - 1,
-    parsedDate.day,
-    hours,
-    minutes,
-    0,
-    0,
-  );
-  const offsetMinutes = getTimeZoneOffsetMinutes(new Date(naiveUtcTimestamp), timeZone);
-  return new Date(naiveUtcTimestamp - (offsetMinutes * 60 * 1000)).toISOString();
-}
-
-export function buildUtcBoundsForTimezoneDateRange(startDateString, endDateString, timeZone = DEFAULT_SCHEDULING_TIMEZONE) {
-  const rangeStartIso = buildUtcIsoForTimezoneDateTime(startDateString, '00:00', timeZone);
-  const parsedEndDate = parseYmdDateString(endDateString);
-  if (!rangeStartIso || !parsedEndDate) {
-    return null;
-  }
-
-  const nextDayUtc = new Date(Date.UTC(parsedEndDate.year, parsedEndDate.month - 1, parsedEndDate.day, 0, 0, 0, 0));
-  nextDayUtc.setUTCDate(nextDayUtc.getUTCDate() + 1);
-  const nextDayParts = getTimeZonePartMap(nextDayUtc, 'UTC');
-  const rangeEndExclusiveIso = buildUtcIsoForTimezoneDateTime(
-    `${nextDayParts.year}-${nextDayParts.month}-${nextDayParts.day}`,
-    '00:00',
-    timeZone,
-  );
-
-  if (!rangeEndExclusiveIso) {
-    return null;
-  }
-
-  return {
-    startIso: rangeStartIso,
-    endIso: rangeEndExclusiveIso,
-    endExclusiveIso: rangeEndExclusiveIso,
-  };
 }

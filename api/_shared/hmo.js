@@ -2,6 +2,7 @@
 /* eslint-env node */
 import { normalizeString } from './org-bff.js';
 import { coerceAgorot } from './currency.js';
+import { localDateKey } from './local-time.js';
 
 export const HMO_PAYMENT_MODES = new Set([
   'fully_paid_by_hmo',
@@ -34,19 +35,6 @@ function normalizeAuthorizationStatus(value) {
 function normalizePostCoveragePolicy(value, fallback = 'manual_block') {
   const normalized = normalizeString(value).toLowerCase();
   return HMO_POST_COVERAGE_POLICIES.has(normalized) ? normalized : fallback;
-}
-
-function toDateKey(value) {
-  if (value == null) return '';
-  const normalized = normalizeString(value);
-  if (/^\d{4}-\d{2}-\d{2}$/.test(normalized)) {
-    return normalized;
-  }
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) {
-    return '';
-  }
-  return parsed.toISOString().slice(0, 10);
 }
 
 function normalizeTrackRow(row) {
@@ -259,12 +247,12 @@ export async function loadHmoAuthorizations(tenantClient, {
 }
 
 export function isAuthorizationDateCovered(row, lessonDate = '') {
-  const targetDate = toDateKey(lessonDate);
+  const targetDate = localDateKey(lessonDate);
   if (!targetDate) {
     return true;
   }
-  const validFrom = toDateKey(row?.valid_from);
-  const expiresAt = toDateKey(row?.expires_at);
+  const validFrom = localDateKey(row?.valid_from);
+  const expiresAt = localDateKey(row?.expires_at);
   if (validFrom && validFrom > targetDate) {
     return false;
   }

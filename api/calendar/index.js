@@ -25,15 +25,13 @@ import {
   assertNoLeaveForLesson,
   checkInstructorRateForLesson,
   hasLessonPayDateChanged,
-  toDateKey,
 } from '../_shared/employee-finance.js';
+import { localDateKey, localDateRangeUtc, todayKey } from '../_shared/local-time.js';
 import BillingLedgerService from '../_shared/BillingLedgerService.js';
 import { logTenantAuditEvent, TENANT_AUDIT_RETENTION } from '../_shared/tenant-audit.js';
 import { syncLessonClosureState } from '../_shared/calendar-workflow.js';
 import { enrichLessonInstancesWithHmoCoverage } from '../_shared/calendar-hmo-coverage.js';
 import {
-  buildUtcBoundsForTimezoneDateRange,
-  getCurrentDateInTimezone,
   extractScheduleSlotFromIso,
   hasConfiguredAvailability,
   isWithinAvailabilityWindows,
@@ -483,7 +481,7 @@ async function handleGetInstances(context, req, dbContext, userId, canManageAll)
     endDate = dateParam;
   } else {
     // Default to today
-    const today = getCurrentDateInTimezone();
+    const today = todayKey();
     startDate = today;
     endDate = today;
   }
@@ -494,7 +492,7 @@ async function handleGetInstances(context, req, dbContext, userId, canManageAll)
     return respond(context, 400, { message: 'invalid_date_format_use_yyyy_mm_dd' });
   }
 
-  const utcBounds = buildUtcBoundsForTimezoneDateRange(startDate, endDate);
+  const utcBounds = localDateRangeUtc(startDate, endDate);
   if (!utcBounds) {
     return respond(context, 400, { message: 'invalid_date_range' });
   }
@@ -967,7 +965,7 @@ async function handleCreateInstance(context, body, dbContext, supabase, authCont
 
   const leaveConflict = await assertNoLeaveForLesson(client, {
     employeeId: body.instructor_employee_id,
-    date: toDateKey(body.datetime_start),
+    date: localDateKey(body.datetime_start),
   });
 
   if (leaveConflict) {
@@ -1280,7 +1278,7 @@ async function handleUpdateInstance(context, req, body, dbContext, supabase, aut
   }
 
   const targetInstructorId = body.instructor_employee_id || existingInstance.instructor_employee_id;
-  const targetDate = toDateKey(body.datetime_start || existingInstance.datetime_start);
+  const targetDate = localDateKey(body.datetime_start || existingInstance.datetime_start);
   const hasServiceUpdate = Object.prototype.hasOwnProperty.call(body, 'service_id');
   const requestedServiceId = hasServiceUpdate ? body.service_id : undefined;
   const targetServiceId = requestedServiceId || existingInstance.service_id;

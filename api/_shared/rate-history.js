@@ -12,11 +12,13 @@
  * - leave_day          (no service)       fixed value of a paid leave day
  *
  * Each calculation asks for exactly one kind; there is no fallback between kinds. Dates are
- * 'YYYY-MM-DD' keys produced by the caller (the same keys used for lesson_date elsewhere).
+ * 'YYYY-MM-DD' keys produced by the caller (the same keys used for lesson_date elsewhere): a lesson's
+ * date is localDateKey(datetime_start) from local-time.js, so a rate "from 1.10" applies to a lesson
+ * at 00:30 on 1.10 Israel time.
  */
 import { normalizeString, withOrgScope } from './org-bff.js';
 import { coerceAgorot } from './currency.js';
-import { getDateKeyInTimezone } from './instructor-availability.js';
+import { isDateKey, normalizeDateKey } from './local-time.js';
 
 export const PAY_BASIS = Object.freeze({
   LESSON_HOURLY: 'lesson_hourly',
@@ -42,25 +44,6 @@ export function hasRateKind(rows, { employeeId, payBasis, onOrBefore = null } = 
 }
 
 const RATE_HISTORY_COLUMNS = 'id, employee_id, service_id, pay_basis, rate, effective_date, created_at, notes, metadata';
-const DATE_KEY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
-
-function isDateKey(value) {
-  return typeof value === 'string' && DATE_KEY_PATTERN.test(value);
-}
-
-/**
- * The date a rate is looked up for: a 'YYYY-MM-DD' key is used as is; a timestamp (for example a
- * lesson's datetime_start) becomes its calendar date in the scheduling timezone (Asia/Jerusalem),
- * so a rate "from 1.10" applies to a lesson at 00:30 on 1.10.
- */
-export function toRateDateKey(value) {
-  if (typeof value === 'string' && DATE_KEY_PATTERN.test(value.trim())) {
-    return value.trim();
-  }
-  if (value == null || value === '') return '';
-  return getDateKeyInTimezone(value) || '';
-}
-
 function sameService(rowServiceId, serviceId) {
   return normalizeString(rowServiceId) === normalizeString(serviceId);
 }
@@ -85,7 +68,7 @@ function pickLatest(candidates) {
 export function normalizeRateRow(row) {
   if (!row || typeof row !== 'object') return null;
   const payBasis = normalizeString(row.pay_basis).toLowerCase();
-  const effectiveDate = normalizeString(row.effective_date).slice(0, 10);
+  const effectiveDate = normalizeDateKey(row.effective_date);
   if (!PAY_BASES.has(payBasis) || !isDateKey(effectiveDate)) return null;
   return {
     id: row.id || null,
