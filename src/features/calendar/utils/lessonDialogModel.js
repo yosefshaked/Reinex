@@ -220,6 +220,48 @@ export function resolveMutationError(error) {
   return error?.message || 'הפעולה נכשלה.';
 }
 
+export const ATTENDANCE_MARK_UNCHANGED_REASON = 'אין שינוי לשמור';
+
+/**
+ * The attendance mark stored on a participant row, in the shape the save sends: status, notes, the
+ * instructor pay decision and whether the fee was waived.
+ */
+export function readStoredAttendanceMark(participant) {
+  const metadata = participant?.metadata && typeof participant.metadata === 'object' ? participant.metadata : {};
+  const workflow = metadata.workflow && typeof metadata.workflow === 'object' ? metadata.workflow : {};
+  return {
+    status: String(participant?.participant_status || '').trim().toLowerCase() || 'scheduled',
+    notes: typeof metadata.notes === 'string' ? metadata.notes : '',
+    instructorCompensationDecision: String(workflow.instructor_compensation?.decision || '').trim().toLowerCase(),
+    isExcused: workflow.is_excused === true,
+  };
+}
+
+/**
+ * Whether saving `draft` would change the attendance mark stored on `participant`. A save with no
+ * change is not offered (the server still keeps the stored decisions on an unchanged re-mark).
+ * - status: any difference.
+ * - notes: compared trimmed, only when the draft sends notes (a string).
+ * - instructor pay: only an explicit "compensated"/"not_compensated" that differs; no choice keeps
+ *   the stored one.
+ * - fee waiver: the draft's choice against the stored one.
+ *
+ * @param {object} participant the stored participant row
+ * @param {{ status?: string, notes?: string, instructorCompensationDecision?: string|null, isExcused?: boolean }} draft
+ */
+export function hasAttendanceMarkChanged(participant, draft) {
+  if (!participant || !draft) return true;
+  const stored = readStoredAttendanceMark(participant);
+  const status = String(draft.status || '').trim().toLowerCase();
+  if (!status || status !== stored.status) return true;
+  if (typeof draft.notes === 'string' && draft.notes.trim() !== stored.notes.trim()) return true;
+  const decision = String(draft.instructorCompensationDecision || '').trim().toLowerCase();
+  if ((decision === 'compensated' || decision === 'not_compensated') && decision !== stored.instructorCompensationDecision) {
+    return true;
+  }
+  return (draft.isExcused === true) !== stored.isExcused;
+}
+
 export function getParticipantStatusLabel(status) {
   if (status === 'attended') return 'נכח';
   if (status === 'no_show') return 'לא הגיע';

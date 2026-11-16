@@ -877,6 +877,98 @@
     },
 
     {
+      "id": "a4-unchanged-mark-not-saveable",
+      "name": "A4 – An unchanged attendance mark cannot be saved",
+      "description": "Marks the single lesson's participant 'ביטול ע\"י המכון' through the absence form, then reopens it with 'שינוי סיבת ההיעדרות': with nothing changed 'המשך' is disabled with the reason 'אין שינוי לשמור'; typing a note enables it. The form is then closed without saving.",
+      "steps": [
+        { "id": "reset-dialogs", "action": "pressKey", "key": "Escape" },
+        { "id": "wait-no-dialog", "action": "waitForSelector", "selector": "[role='dialog']", "state": "hidden" },
+        {
+          "id": "open-single-lesson",
+          "action": "click",
+          "selector": ".reinex-calendar-event:has-text('יחיד {{RUN_NUMERIC_ID}}')",
+          "first": true
+        },
+        {
+          "id": "open-absence",
+          "description": "Click 'לא הגיע/ה או ביטול' in the participant's row",
+          "action": "click",
+          "selector": "[role='dialog'] [data-participant-row]:has-text('יחיד {{RUN_NUMERIC_ID}}') button[aria-label='לא הגיע/ה או ביטול']"
+        },
+        {
+          "id": "choose-cancelled-clinic",
+          "action": "click",
+          "selector": "[role='dialog'] [role='group'][aria-label^='סימון היעדרות'] [role='radio']:has-text('ביטול ע\"י המכון')"
+        },
+        {
+          "id": "continue",
+          "description": "A new status is a change: 'המשך' is enabled",
+          "action": "click",
+          "selector": "[role='dialog'] [role='group'][aria-label^='סימון היעדרות'] button:has-text('המשך'):not([disabled])"
+        },
+        {
+          "id": "confirm",
+          "action": "click",
+          "selector": "[role='dialog'] [role='group'][aria-label='אישור שינוי סטטוס'] button:has-text('אישור'):not([disabled])"
+        },
+        {
+          "id": "wait-confirm-gone",
+          "action": "waitForSelector",
+          "selector": "[role='dialog'] [role='group'][aria-label='אישור שינוי סטטוס']",
+          "state": "hidden"
+        },
+        {
+          "id": "wait-status-pill",
+          "action": "waitForSelector",
+          "selector": "[role='dialog'] [data-participant-row]:has-text('יחיד {{RUN_NUMERIC_ID}}') span:text-is('ביטול ע\"י המכון')"
+        },
+        {
+          "id": "open-row-menu",
+          "action": "click",
+          "selector": "[role='dialog'] [data-participant-row]:has-text('יחיד {{RUN_NUMERIC_ID}}') button[aria-label='פעולות נוספות']:not([disabled])"
+        },
+        {
+          "id": "reopen-absence",
+          "action": "click",
+          "selector": "[role='menuitem']:has-text('שינוי סיבת ההיעדרות')"
+        },
+        {
+          "id": "assert-continue-disabled",
+          "description": "Nothing changed: 'המשך' is disabled",
+          "action": "waitForSelector",
+          "selector": "[role='dialog'] [role='group'][aria-label^='סימון היעדרות'] button:has-text('המשך')[disabled][aria-describedby]"
+        },
+        {
+          "id": "assert-reason",
+          "description": "The disabled button carries the reason 'אין שינוי לשמור'",
+          "action": "assert",
+          "type": "exists",
+          "selector": "[role='dialog'] [role='group'][aria-label^='סימון היעדרות'] span[title='אין שינוי לשמור']"
+        },
+        { "id": "screenshot-unchanged", "action": "screenshot", "name": "08-a4-unchanged-mark-disabled" },
+        {
+          "id": "type-note",
+          "action": "fill",
+          "selector": "[role='dialog'] [role='group'][aria-label^='סימון היעדרות'] textarea",
+          "value": "בדיקה"
+        },
+        {
+          "id": "assert-continue-enabled",
+          "description": "A note is a change: 'המשך' is enabled again",
+          "action": "waitForSelector",
+          "selector": "[role='dialog'] [role='group'][aria-label^='סימון היעדרות'] button:has-text('המשך'):not([disabled])"
+        },
+        {
+          "id": "close-form",
+          "action": "click",
+          "selector": "[role='dialog'] [role='group'][aria-label^='סימון היעדרות'] button:text-is('ביטול')"
+        },
+        { "id": "close-dialog", "action": "pressKey", "key": "Escape" },
+        { "id": "wait-dialog-closed", "action": "waitForSelector", "selector": "[role='dialog']", "state": "hidden" }
+      ]
+    },
+
+    {
       "id": "logout",
       "name": "Logout",
       "steps": [

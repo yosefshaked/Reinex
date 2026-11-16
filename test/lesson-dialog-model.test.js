@@ -20,6 +20,8 @@ import {
   getOpenActionTab,
   getParticipantStatusLabel,
   groupPreviewImpacts,
+  hasAttendanceMarkChanged,
+  readStoredAttendanceMark,
   isCancellationStatus,
   isResolvedParticipantStatus,
   normalizeInstanceStatus,
@@ -988,5 +990,69 @@ describe('lessonDialogModel: buildConflictLines', () => {
       'דנה כהן מסומן כרגע כ-"נכח".',
       'הערת המשתתף עודכנה ל-"עודכן".',
     ]);
+  });
+});
+
+describe('hasAttendanceMarkChanged', () => {
+  const storedAbsence = {
+    id: 'p1',
+    participant_status: 'no_show',
+    metadata: {
+      notes: 'חולה',
+      workflow: { instructor_compensation: { decision: 'not_compensated' }, is_excused: true },
+    },
+  };
+  const sameDraft = { status: 'no_show', notes: 'חולה', instructorCompensationDecision: 'not_compensated', isExcused: true };
+
+  it('reads the stored mark in the shape the save sends', () => {
+    assert.deepEqual(readStoredAttendanceMark(storedAbsence), {
+      status: 'no_show',
+      notes: 'חולה',
+      instructorCompensationDecision: 'not_compensated',
+      isExcused: true,
+    });
+    assert.deepEqual(readStoredAttendanceMark({}), {
+      status: 'scheduled',
+      notes: '',
+      instructorCompensationDecision: '',
+      isExcused: false,
+    });
+  });
+
+  it('is unchanged when the draft repeats the stored mark', () => {
+    assert.equal(hasAttendanceMarkChanged(storedAbsence, sameDraft), false);
+  });
+
+  it('ignores surrounding spaces in notes and a missing notes field', () => {
+    assert.equal(hasAttendanceMarkChanged(storedAbsence, { ...sameDraft, notes: '  חולה ' }), false);
+    assert.equal(hasAttendanceMarkChanged(storedAbsence, { ...sameDraft, notes: undefined }), false);
+  });
+
+  it('treats no pay choice as keeping the stored one', () => {
+    assert.equal(hasAttendanceMarkChanged(storedAbsence, { ...sameDraft, instructorCompensationDecision: '' }), false);
+    assert.equal(hasAttendanceMarkChanged(storedAbsence, { ...sameDraft, instructorCompensationDecision: null }), false);
+  });
+
+  it('is changed by the status, the notes, the pay choice or the fee waiver', () => {
+    assert.equal(hasAttendanceMarkChanged(storedAbsence, { ...sameDraft, status: 'cancelled_student' }), true);
+    assert.equal(hasAttendanceMarkChanged(storedAbsence, { ...sameDraft, notes: 'חולה מאוד' }), true);
+    assert.equal(hasAttendanceMarkChanged(storedAbsence, { ...sameDraft, notes: '' }), true);
+    assert.equal(hasAttendanceMarkChanged(storedAbsence, { ...sameDraft, instructorCompensationDecision: 'compensated' }), true);
+    assert.equal(hasAttendanceMarkChanged(storedAbsence, { ...sameDraft, isExcused: false }), true);
+  });
+
+  it('treats a stored note of null like an empty note', () => {
+    const stored = { participant_status: 'attended', metadata: { notes: null } };
+    assert.equal(hasAttendanceMarkChanged(stored, { status: 'attended', notes: '' }), false);
+    assert.equal(hasAttendanceMarkChanged(stored, { status: 'no_show', notes: '' }), true);
+  });
+
+  it('a scheduled participant marked attended is a change', () => {
+    assert.equal(hasAttendanceMarkChanged({ participant_status: 'scheduled' }, { status: 'attended', notes: '' }), true);
+  });
+
+  it('counts a missing participant or draft as changed (nothing to compare with)', () => {
+    assert.equal(hasAttendanceMarkChanged(null, sameDraft), true);
+    assert.equal(hasAttendanceMarkChanged(storedAbsence, null), true);
   });
 });

@@ -48,6 +48,7 @@ import {
   resolveLatestWorkflowState,
   getPreviewImpactClass,
   buildConflictLines,
+  hasAttendanceMarkChanged,
 } from '../utils/lessonDialogModel.js';
 import {
   useAbsenceRequirements,
@@ -744,7 +745,8 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
       participantId,
       status: nextStatus,
       notes: existingNotes,
-      waiveFee: false,
+      // Start from what is stored, so an untouched form compares as unchanged.
+      waiveFee: participant?.metadata?.workflow?.is_excused === true,
       instructorCompensationDecision:
         existingCompensationDecision === 'compensated' || existingCompensationDecision === 'not_compensated'
           ? existingCompensationDecision
@@ -1261,10 +1263,23 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
     setRestorePreviewLoading(false);
   }
 
+  // A pending mark that would save exactly what is stored: its confirm is disabled.
+  function isPendingMarkUnchanged(pending) {
+    if (!pending) return false;
+    const participant = displayParticipants.find((entry) => entry.id === pending.participantId);
+    return !hasAttendanceMarkChanged(participant, {
+      status: pending.targetStatus,
+      notes: pending.notes || '',
+      instructorCompensationDecision: pending.instructorCompensationDecision,
+      isExcused: pending.isExcused === true,
+    });
+  }
+
   async function confirmStatusStrip() {
     const target = attendancePreviewTarget;
     const pending = restorePreview;
     if (!target || !pending || pending.participantId !== target.participantId) return;
+    if (isPendingMarkUnchanged(pending)) return;
     const result = await handleMarkAttendance(target.participantId, pending.targetStatus, pending.notes || '', {
       instructorCompensationDecision: pending.instructorCompensationDecision || null,
       isExcused: pending.isExcused === true,
@@ -1397,6 +1412,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
       pendingPreview?.instructorCompensationDecision === 'compensated' ? 'המדריך/ה יקבל/תקבל שכר' : '',
       pendingPreview?.instructorCompensationDecision === 'not_compensated' ? 'ללא שכר למדריך/ה' : '',
     ].filter(Boolean).join(' · '),
+    unchanged: isPendingMarkUnchanged(pendingPreview),
   } : null;
 
   // Footer: one quiet line that says what is still open (details on hover).

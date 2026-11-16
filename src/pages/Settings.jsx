@@ -17,6 +17,7 @@ import MyInstructorDocuments from '@/components/settings/MyInstructorDocuments.j
 import OrgDocumentsManager from '@/components/settings/OrgDocumentsManager.jsx';
 import AuditLogViewer from '@/components/settings/AuditLogViewer.jsx';
 import BillingSettingsWorkspace from '@/features/finance/components/BillingSettingsWorkspace.jsx';
+import LeavePayDefaultCard from '@/features/finance/components/LeavePayDefaultCard.jsx';
 import { fetchSettingsValue } from '@/features/settings/api/settings.js';
 import { upsertSetting } from '@/features/settings/api/settings.js';
 import { OnboardingCard } from '@/features/onboarding/components/OnboardingCard.jsx';
@@ -584,6 +585,8 @@ export default function Settings() {
               </Button>
             </CardContent>
           </Card>
+
+          <LeavePayDefaultCard session={session} orgId={activeOrgId} canEdit={canManageSessionForm && orgReady} />
 
           {/* Local Export & Import Card */}
           <Card className={`group relative w-full overflow-hidden border-0 shadow-md transition-all duration-200 flex flex-col ${

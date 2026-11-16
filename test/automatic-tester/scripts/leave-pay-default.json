@@ -1,0 +1,184 @@
+{
+  "meta": {
+    "id": "leave-pay-default",
+    "name": "Settings — the organisation's default leave-pay method",
+    "description": "The \"תשלום חופשה - ברירת המחדל של הארגון\" block in the settings page. The policy is first reset to the seeded default (\"ממוצע חוקי\", 3 months, 12-month comparison on) through POST /api/settings. The block shows it as text; \"שינוי\" opens the form with \"שמירה\" disabled while nothing changed; choosing \"ממוצע היסטורי\" and saving shows it after a reload; then \"ממוצע חוקי\" is restored the same way. A write with 13 months is refused by the server (400 invalid_leave_pay_lookback_months).",
+    "version": "1.0.0",
+    "last_validated_at": "2026-11-16T09:00:00Z",
+    "author": "claude-ai",
+    "dependencies": {
+      "routes": [
+        "/Settings"
+      ],
+      "api_endpoints": [
+        "GET /api/settings",
+        "POST /api/settings"
+      ]
+    }
+  },
+  "config": {
+    "timeout_ms": 25000,
+    "screenshot_on_failure": true,
+    "continue_on_step_failure": false,
+    "continue_on_workflow_failure": false
+  },
+  "workflows": [
+    {
+      "id": "login",
+      "name": "Login as Admin",
+      "steps": [
+        { "id": "do-login", "action": "login", "role": "admin" },
+        { "id": "assert-dashboard", "action": "assert", "type": "url", "pattern": "#/dashboard" }
+      ]
+    },
+
+    {
+      "id": "api-reset-policy",
+      "name": "API – Reset the policy to the seeded default and check the server refuses bad months",
+      "steps": [
+        {
+          "id": "reset-policy",
+          "description": "Store the seeded default so the run starts from \"ממוצע חוקי\"",
+          "action": "apiCall",
+          "method": "POST",
+          "endpoint": "/api/settings",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "settings": {
+              "leave_pay_policy": { "default_method": "legal", "lookback_months": 3, "legal_allow_12m_if_better": true, "fixed_rate_default": 0 }
+            }
+          }
+        },
+        {
+          "id": "refuse-13-months",
+          "description": "13 months is refused (400) — ignoreStatus only lets a 400 through; a 2xx would also pass, so the next workflow re-checks the stored value is still 3 months",
+          "action": "apiCall",
+          "method": "POST",
+          "endpoint": "/api/settings",
+          "ignoreStatus": [400],
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "settings": {
+              "leave_pay_policy": { "default_method": "legal", "lookback_months": 13, "legal_allow_12m_if_better": true }
+            }
+          }
+        }
+      ]
+    },
+
+    {
+      "id": "change-to-historic",
+      "name": "UI – Change the default to \"ממוצע היסטורי\", save, reload, see it",
+      "steps": [
+        { "id": "navigate", "action": "navigate", "url": "{{BASE_URL}}/#/Settings" },
+        {
+          "id": "wait-block-legal",
+          "description": "The block shows the current method as text: \"ממוצע חוקי\" with its meaning, 3 months",
+          "action": "waitForSelector",
+          "selector": "[data-settings-block='leave-pay-default'] [data-leave-pay-current-method='legal']:has-text('ממוצע חוקי'):has-text('או ב-12 החודשים האחרונים')"
+        },
+        {
+          "id": "assert-months-3",
+          "description": "The 13-month write was refused: still 3 months",
+          "action": "assert",
+          "type": "text",
+          "selector": "[data-settings-block='leave-pay-default'] dl",
+          "value": "מספר חודשים לממוצע3"
+        },
+        {
+          "id": "open-edit",
+          "action": "click",
+          "selector": "[data-settings-block='leave-pay-default'] button:has-text('שינוי')"
+        },
+        {
+          "id": "assert-save-disabled",
+          "description": "Nothing changed yet: \"שמירה\" is disabled",
+          "action": "waitForSelector",
+          "selector": "[data-settings-block='leave-pay-default'] button:has-text('שמירה')[disabled]"
+        },
+        {
+          "id": "assert-meanings-visible",
+          "description": "Both methods show their meaning in words",
+          "action": "waitForSelector",
+          "selector": "[data-settings-block='leave-pay-default'] label[for='leave-pay-method-avg_hourly_x_avg_day_hours']:has-text('ב-3 החודשים האחרונים בלבד')"
+        },
+        {
+          "id": "choose-historic",
+          "action": "click",
+          "selector": "[data-settings-block='leave-pay-default'] label[for='leave-pay-method-avg_hourly_x_avg_day_hours']"
+        },
+        {
+          "id": "assert-switch-disabled",
+          "description": "The 12-month switch only applies to \"ממוצע חוקי\"",
+          "action": "waitForSelector",
+          "selector": "#leave-pay-compare-12m[disabled]"
+        },
+        {
+          "id": "save",
+          "action": "click",
+          "selector": "[data-settings-block='leave-pay-default'] button:has-text('שמירה'):not([disabled])"
+        },
+        {
+          "id": "wait-saved-text",
+          "action": "waitForSelector",
+          "selector": "[data-settings-block='leave-pay-default'] [data-leave-pay-current-method='avg_hourly_x_avg_day_hours']"
+        },
+        { "id": "reload", "action": "navigate", "url": "{{BASE_URL}}/#/dashboard" },
+        { "id": "wait-dashboard", "action": "waitForURL", "pattern": "#/dashboard" },
+        { "id": "back-to-settings", "action": "navigate", "url": "{{BASE_URL}}/#/Settings" },
+        {
+          "id": "wait-historic-after-reload",
+          "description": "After leaving and coming back the stored value is \"ממוצע היסטורי\"",
+          "action": "waitForSelector",
+          "selector": "[data-settings-block='leave-pay-default'] [data-leave-pay-current-method='avg_hourly_x_avg_day_hours']:has-text('ממוצע היסטורי')"
+        },
+        { "id": "screenshot-historic", "action": "screenshot", "name": "01-leave-pay-default-historic" }
+      ]
+    },
+
+    {
+      "id": "restore-legal",
+      "name": "UI – Restore \"ממוצע חוקי\"",
+      "steps": [
+        {
+          "id": "open-edit",
+          "action": "click",
+          "selector": "[data-settings-block='leave-pay-default'] button:has-text('שינוי')"
+        },
+        {
+          "id": "choose-legal",
+          "action": "click",
+          "selector": "[data-settings-block='leave-pay-default'] label[for='leave-pay-method-legal']"
+        },
+        {
+          "id": "save",
+          "action": "click",
+          "selector": "[data-settings-block='leave-pay-default'] button:has-text('שמירה'):not([disabled])"
+        },
+        {
+          "id": "wait-legal",
+          "action": "waitForSelector",
+          "selector": "[data-settings-block='leave-pay-default'] [data-leave-pay-current-method='legal']"
+        },
+        { "id": "reload", "action": "navigate", "url": "{{BASE_URL}}/#/dashboard" },
+        { "id": "wait-dashboard", "action": "waitForURL", "pattern": "#/dashboard" },
+        { "id": "back-to-settings", "action": "navigate", "url": "{{BASE_URL}}/#/Settings" },
+        {
+          "id": "wait-legal-after-reload",
+          "action": "waitForSelector",
+          "selector": "[data-settings-block='leave-pay-default'] [data-leave-pay-current-method='legal']:has-text('ממוצע חוקי')"
+        },
+        { "id": "screenshot-legal", "action": "screenshot", "name": "02-leave-pay-default-legal" }
+      ]
+    },
+
+    {
+      "id": "logout",
+      "name": "Logout",
+      "steps": [
+        { "id": "do-logout", "action": "logout" },
+        { "id": "assert-login-page", "action": "assert", "type": "url", "pattern": "#/login" }
+      ]
+    }
+  ]
+}

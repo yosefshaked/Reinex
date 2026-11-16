@@ -14,6 +14,24 @@ import { normalizeSessionFormConfigValue } from '../_shared/settings-utils.js';
 import { ensureOrgPermissions } from '../_shared/permissions-utils.js';
 import { parseJsonBodyWithLimit } from '../_shared/validation.js';
 import { logAuditEvent, AUDIT_ACTIONS, AUDIT_CATEGORIES } from '../_shared/audit-log.js';
+import { validateLeavePayPolicyInput } from '../_shared/employee-finance.js';
+
+/**
+ * Settings whose value is checked before it is stored. Each entry is replaced by its normalized
+ * value; the first invalid one is returned as { error } (the payload is then not written at all).
+ */
+function validateTypedSettings(entries) {
+  for (const entry of entries) {
+    if (entry.key === 'leave_pay_policy') {
+      const result = validateLeavePayPolicyInput(entry.settings_value);
+      if (result.error) {
+        return { error: result.error };
+      }
+      entry.settings_value = result.value;
+    }
+  }
+  return {};
+}
 
 const SETTINGS_DIAGNOSTIC_CHECKS = new Set([
   'Table "Settings" exists',
@@ -427,6 +445,11 @@ export default async function (context, req) {
       return respond(context, 400, { message: 'invalid_settings_payload' });
     }
 
+    const typedValidation = validateTypedSettings(payload);
+    if (typedValidation.error) {
+      return respond(context, 400, { message: typedValidation.error });
+    }
+
     const sessionFormResult = await applySessionFormVersioning(supabase, orgId, payload);
     if (sessionFormResult.error) {
       if (sessionFormResult.error === 'failed_to_load_session_form_config' && sessionFormResult.supabaseError) {
@@ -536,6 +559,11 @@ export default async function (context, req) {
     let payload = normalizeSettingsObject(body);
     if (!payload) {
       return respond(context, 400, { message: 'invalid_settings_payload' });
+    }
+
+    const typedValidation = validateTypedSettings(payload);
+    if (typedValidation.error) {
+      return respond(context, 400, { message: typedValidation.error });
     }
 
     const keys = payload.map((entry) => entry.key);

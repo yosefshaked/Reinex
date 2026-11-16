@@ -174,6 +174,50 @@ function normalizeLeavePayPolicy(raw) {
   };
 }
 
+export const LEAVE_PAY_LOOKBACK_MONTHS_MIN = 1;
+export const LEAVE_PAY_LOOKBACK_MONTHS_MAX = 12;
+
+/**
+ * Checks a leave_pay_policy written through the settings API. Unlike the lenient read-side
+ * normalizer, a bad value is refused instead of silently replaced: an unknown method, a number of
+ * months that is not a whole number from 1 to 12, a non-boolean 12-month switch or a negative fixed
+ * default. Fields left out take the defaults. Returns { value } (normalized) or { error }.
+ */
+export function validateLeavePayPolicyInput(raw) {
+  const parsed = parseJsonValue(raw, null);
+  if (!isPlainObject(parsed)) {
+    return { error: 'invalid_leave_pay_policy' };
+  }
+  if (parsed.default_method !== undefined) {
+    const method = normalizeString(parsed.default_method).toLowerCase();
+    if (!LEAVE_PAY_METHODS.has(method)) {
+      return { error: 'invalid_leave_pay_method' };
+    }
+  }
+  if (parsed.lookback_months !== undefined) {
+    const months = Number(parsed.lookback_months);
+    if (
+      parsed.lookback_months === null
+      || parsed.lookback_months === ''
+      || !Number.isInteger(months)
+      || months < LEAVE_PAY_LOOKBACK_MONTHS_MIN
+      || months > LEAVE_PAY_LOOKBACK_MONTHS_MAX
+    ) {
+      return { error: 'invalid_leave_pay_lookback_months' };
+    }
+  }
+  if (parsed.legal_allow_12m_if_better !== undefined && typeof parsed.legal_allow_12m_if_better !== 'boolean') {
+    return { error: 'invalid_leave_pay_12m_flag' };
+  }
+  if (parsed.fixed_rate_default !== undefined) {
+    const fixed = Number(parsed.fixed_rate_default);
+    if (parsed.fixed_rate_default === null || !Number.isFinite(fixed) || fixed < 0) {
+      return { error: 'invalid_leave_pay_fixed_rate_default' };
+    }
+  }
+  return { value: normalizeLeavePayPolicy({ ...DEFAULT_LEAVE_PAY_POLICY, ...parsed }) };
+}
+
 export async function loadSettingsMap(tenantClient, orgId, keys = []) {
   const normalizedKeys = Array.from(new Set((keys || []).map((key) => normalizeString(key)).filter(Boolean)));
   if (normalizedKeys.length === 0) {
