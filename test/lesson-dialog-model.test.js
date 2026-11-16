@@ -11,6 +11,7 @@ import {
   buildConflictLines,
   buildRateSelectionKey,
   buildSchedulingOverrideMetadata,
+  resolveEditClockChangeNotice,
   deriveDisplayWorkflowDecisions,
   formatAgorotPreview,
   getCancellationStatusLabel,
@@ -1054,5 +1055,20 @@ describe('hasAttendanceMarkChanged', () => {
   it('counts a missing participant or draft as changed (nothing to compare with)', () => {
     assert.equal(hasAttendanceMarkChanged(null, sameDraft), true);
     assert.equal(hasAttendanceMarkChanged(storedAbsence, null), true);
+  });
+});
+
+describe('resolveEditClockChangeNotice', () => {
+  it('blocks a new start in the skipped hour and warns for a repeated one', () => {
+    const baseline = { date: '2026-03-26', time: '10:00' };
+    assert.equal(resolveEditClockChangeNotice({ date: '2026-03-27', time: '02:30' }, baseline)?.blocking, true);
+    assert.equal(resolveEditClockChangeNotice({ date: '2026-10-25', time: '01:30' }, baseline)?.kind, 'repeated');
+    assert.equal(resolveEditClockChangeNotice({ date: '2026-03-27', time: '03:30' }, baseline), null);
+  });
+
+  it('stays quiet when the date and time were not changed', () => {
+    const baseline = { date: '2026-10-25', time: '01:30' };
+    assert.equal(resolveEditClockChangeNotice({ date: '2026-10-25', time: '01:30' }, baseline), null);
+    assert.equal(resolveEditClockChangeNotice({ date: '', time: '' }, null), null);
   });
 });

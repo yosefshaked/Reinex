@@ -21,6 +21,7 @@ import { LessonParticipantRoster } from './LessonParticipantRoster.jsx';
 import { LessonDialogHeader } from './LessonDialogHeader.jsx';
 import { LessonHistoryTab } from './LessonHistoryTab.jsx';
 import { MissingRateNotice } from './MissingRateNotice.jsx';
+import { ClockChangeNotice } from './ClockChangeNotice.jsx';
 import { useVersionConflictResolver } from './useVersionConflictResolver';
 import { dayTokenForJsDay } from '@/lib/day-of-week.js';
 import { hasConfiguredAvailability, isWithinAvailabilityWindows } from '@/lib/instructor-availability.js';
@@ -49,7 +50,9 @@ import {
   getPreviewImpactClass,
   buildConflictLines,
   hasAttendanceMarkChanged,
+  resolveEditClockChangeNotice,
 } from '../utils/lessonDialogModel.js';
+import { lessonLocalStartFields } from '@/lib/clock-change.js';
 import {
   useAbsenceRequirements,
   useLessonFinancePolicies,
@@ -450,6 +453,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
           id: latestValue.id,
           org_id: org.id,
           datetime_start,
+          ...lessonLocalStartFields(payload.formData.date, payload.formData.time),
           duration_minutes: payload.formData.duration_minutes,
           instructor_employee_id: payload.formData.instructor_employee_id,
           service_id: payload.formData.service_id,
@@ -538,6 +542,9 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
       throw new Error('יש למלא סיבת חריגה לפני שמירת שיבוץ מחוץ לזמינות.');
     }
 
+    if (editClockChangeNotice?.blocking) {
+      throw new Error(editClockChangeNotice.message);
+    }
     const datetime_start = toUtcIsoString(formData.date, formData.time);
     if (!datetime_start) {
       throw new Error('תאריך או שעה אינם תקינים.');
@@ -547,6 +554,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
       id: instance.id,
       org_id: org.id,
       datetime_start,
+      ...lessonLocalStartFields(formData.date, formData.time),
       duration_minutes: formData.duration_minutes,
       instructor_employee_id: formData.instructor_employee_id,
       service_id: formData.service_id,
@@ -1245,6 +1253,11 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
       customOverrideReason: overrideState.customReason,
     };
   }, [displayInstance]);
+  // Spring forward: a new time may not exist (blocked); autumn: it may happen twice (notice).
+  const editClockChangeNotice = useMemo(
+    () => resolveEditClockChangeNotice(formData, editBaseline),
+    [editBaseline, formData],
+  );
   const isEditDirty = Boolean(isEditMode && editBaseline && (
     formData.instructor_employee_id !== editBaseline.instructor_employee_id
     || formData.service_id !== editBaseline.service_id
@@ -1744,6 +1757,11 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
             required
           />
         </div>
+        {editClockChangeNotice ? (
+          <div className="sm:col-span-2">
+            <ClockChangeNotice notice={editClockChangeNotice} />
+          </div>
+        ) : null}
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="lesson-edit-service" className={fieldLabelClass}>שירות</Label>
           <Select

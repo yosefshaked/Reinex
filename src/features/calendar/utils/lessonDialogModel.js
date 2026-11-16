@@ -5,6 +5,7 @@ import { buildSchedulingOverrideReasonDetails } from './schedulingOverride.js';
 import { getParticipantDisplayName } from './participantDisplay.js';
 import { extractSupportCode, resolveApiErrorMessage } from '../../../lib/error-support.js';
 import { dateKeyFromCalendarDate } from '../../../lib/local-time.js';
+import { describeLessonStartClockChange } from '../../../lib/clock-change.js';
 
 export const DEFAULT_BILLING_POLICY = {
   attended: true,
@@ -46,6 +47,16 @@ export function toUtcIsoString(dateString, timeString) {
   }
 
   return localDate.toISOString();
+}
+
+/**
+ * The clock-change notice for the edit form: only when the date or time was changed, so an
+ * existing lesson at a repeated hour does not nag when another field is edited.
+ */
+export function resolveEditClockChangeNotice(formData, baseline) {
+  if (!formData?.date || !formData?.time) return null;
+  if (baseline && formData.date === baseline.date && formData.time === baseline.time) return null;
+  return describeLessonStartClockChange(formData.date, formData.time);
 }
 
 export function buildSchedulingOverrideMetadata(baseMetadata, { enabled, selectedReasonCode, customReason }) {

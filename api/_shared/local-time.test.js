@@ -5,6 +5,7 @@ import {
   DEFAULT_ORG_TIME_ZONE,
   addDays,
   addMonths,
+  classifyLocalTime,
   compareDateKeys,
   currentMonthKey,
   dateKeyFromCalendarDate,
@@ -12,6 +13,8 @@ import {
   diffDays,
   endOfLocalDayUtc,
   enumerateDateKeys,
+  findClockChangeAt,
+  findClockChanges,
   firstDayOfMonth,
   formatInstant,
   formatLocalDateTime,
@@ -199,4 +202,76 @@ test('display formatters use the zone', () => {
   );
   assert.equal(formatInstant(null), '');
   assert.equal(utcFileStamp('2026-09-30T21:30:05.000Z'), '2026-09-30-21-30-05');
+});
+
+// --- Clock changes: derived from the zone, nothing hard-coded --------------------------------
+
+test('findClockChanges: the org zone in 2026 skips 02:00-03:00 on 27.03 and repeats 01:00-02:00 on 25.10', () => {
+  assert.deepEqual(findClockChanges('2026-01-01', '2026-12-31', DEFAULT_ORG_TIME_ZONE), [
+    { dateKey: '2026-03-27', kind: 'skipped', startTime: '02:00', endTime: '03:00', offsetBeforeMinutes: 120, offsetAfterMinutes: 180 },
+    { dateKey: '2026-10-25', kind: 'repeated', startTime: '01:00', endTime: '02:00', offsetBeforeMinutes: 180, offsetAfterMinutes: 120 },
+  ]);
+  // The default zone is the org's.
+  assert.equal(findClockChanges('2026-03-27', '2026-03-27').length, 1);
+});
+
+test('findClockChanges: a 30-minute shift (Australia/Lord_Howe) is located to the minute', () => {
+  assert.deepEqual(findClockChanges('2026-01-01', '2026-12-31', 'Australia/Lord_Howe'), [
+    { dateKey: '2026-04-05', kind: 'repeated', startTime: '01:30', endTime: '02:00', offsetBeforeMinutes: 660, offsetAfterMinutes: 630 },
+    { dateKey: '2026-10-04', kind: 'skipped', startTime: '02:00', endTime: '02:30', offsetBeforeMinutes: 630, offsetAfterMinutes: 660 },
+  ]);
+  assert.equal(classifyLocalTime('2026-10-04', '02:15', 'Australia/Lord_Howe'), 'skipped');
+  assert.equal(classifyLocalTime('2026-10-04', '02:30', 'Australia/Lord_Howe'), 'normal');
+  assert.equal(classifyLocalTime('2026-04-05', '01:45', 'Australia/Lord_Howe'), 'repeated');
+});
+
+test('findClockChanges: changes at local midnight (Asia/Beirut), including a repeated hour before midnight', () => {
+  assert.deepEqual(findClockChanges('2026-01-01', '2026-12-31', 'Asia/Beirut'), [
+    { dateKey: '2026-03-29', kind: 'skipped', startTime: '00:00', endTime: '01:00', offsetBeforeMinutes: 120, offsetAfterMinutes: 180 },
+    { dateKey: '2026-10-24', kind: 'repeated', startTime: '23:00', endTime: '00:00', offsetBeforeMinutes: 180, offsetAfterMinutes: 120 },
+  ]);
+  assert.equal(classifyLocalTime('2026-03-29', '00:30', 'Asia/Beirut'), 'skipped');
+  assert.equal(classifyLocalTime('2026-10-24', '23:30', 'Asia/Beirut'), 'repeated');
+  assert.equal(classifyLocalTime('2026-10-25', '00:00', 'Asia/Beirut'), 'normal');
+});
+
+test('findClockChanges: a zone without changes (Asia/Dubai) and a range without a change return none', () => {
+  assert.deepEqual(findClockChanges('2026-01-01', '2026-12-31', 'Asia/Dubai'), []);
+  assert.deepEqual(findClockChanges('2026-05-01', '2026-09-30', DEFAULT_ORG_TIME_ZONE), []);
+  assert.deepEqual(findClockChanges('2026-12-31', '2026-01-01', DEFAULT_ORG_TIME_ZONE), []);
+  assert.deepEqual(findClockChanges('not-a-date', '2026-01-01', DEFAULT_ORG_TIME_ZONE), []);
+  assert.equal(classifyLocalTime('2026-03-27', '02:30', 'Asia/Dubai'), 'normal');
+});
+
+test('findClockChanges: the range is by the local date of the change, both ends included', () => {
+  assert.equal(findClockChanges('2026-03-27', '2026-03-27', DEFAULT_ORG_TIME_ZONE).length, 1);
+  assert.equal(findClockChanges('2026-03-26', '2026-03-26', DEFAULT_ORG_TIME_ZONE).length, 0);
+  assert.equal(findClockChanges('2026-03-28', '2026-10-24', DEFAULT_ORG_TIME_ZONE).length, 0);
+});
+
+test('classifyLocalTime: the org zone around both 2026 changes', () => {
+  assert.equal(classifyLocalTime('2026-03-27', '01:59', DEFAULT_ORG_TIME_ZONE), 'normal');
+  assert.equal(classifyLocalTime('2026-03-27', '02:00', DEFAULT_ORG_TIME_ZONE), 'skipped');
+  assert.equal(classifyLocalTime('2026-03-27', '02:30', DEFAULT_ORG_TIME_ZONE), 'skipped');
+  assert.equal(classifyLocalTime('2026-03-27', '03:00', DEFAULT_ORG_TIME_ZONE), 'normal');
+  assert.equal(classifyLocalTime('2026-10-25', '00:59', DEFAULT_ORG_TIME_ZONE), 'normal');
+  assert.equal(classifyLocalTime('2026-10-25', '01:00', DEFAULT_ORG_TIME_ZONE), 'repeated');
+  assert.equal(classifyLocalTime('2026-10-25', '01:59', DEFAULT_ORG_TIME_ZONE), 'repeated');
+  assert.equal(classifyLocalTime('2026-10-25', '02:00', DEFAULT_ORG_TIME_ZONE), 'normal');
+  assert.equal(classifyLocalTime('2026-03-26', '02:30', DEFAULT_ORG_TIME_ZONE), 'normal');
+  assert.equal(classifyLocalTime('2026-03-27', 'bad', DEFAULT_ORG_TIME_ZONE), 'normal');
+});
+
+test('a lesson interval that only partly overlaps the skipped hour: only its start decides', () => {
+  // 01:30 for 60 minutes runs into the skipped hour (it ends at 03:30 on the wall clock), but its
+  // start exists, so it is allowed; the change it overlaps is still found for that night.
+  assert.equal(classifyLocalTime('2026-03-27', '01:30', DEFAULT_ORG_TIME_ZONE), 'normal');
+  assert.equal(findClockChangeAt('2026-03-27', '01:30', DEFAULT_ORG_TIME_ZONE), null);
+  const startInstant = localDateTimeToUtc('2026-03-27', '01:30', DEFAULT_ORG_TIME_ZONE);
+  const endInstant = new Date(Date.parse(startInstant) + (60 * 60000));
+  assert.equal(localTime(endInstant, DEFAULT_ORG_TIME_ZONE), '03:30');
+  const [change] = findClockChanges('2026-03-27', '2026-03-27', DEFAULT_ORG_TIME_ZONE);
+  assert.ok(change.startTime > '01:30' && change.startTime < localTime(endInstant, DEFAULT_ORG_TIME_ZONE));
+  // A start inside the hour is refused.
+  assert.equal(findClockChangeAt('2026-03-27', '02:45', DEFAULT_ORG_TIME_ZONE)?.kind, 'skipped');
 });

@@ -3,8 +3,8 @@
     "id": "lesson-dialog-regressions",
     "name": "Lesson Dialog — Regression Checks",
     "description": "Regression checks for LessonInstanceDialog: (A3) edit mode has no status field, (A1) reopening the dialog or opening another lesson always starts in view mode on the first tab, (A2) marking two group participants attended back-to-back (✓ + one-line confirm strip) does not raise a false version-conflict panel, (P3) the history tab loads typed events from GET lesson-instances/{id}?view=history. Fixtures (service price, two dedicated instructors, three students, one single + one group lesson on the first of the current month) are created through the API first, following the hmo-claiming conventions.",
-    "version": "1.1.0",
-    "last_validated_at": "2026-09-17T08:26:00Z",
+    "version": "1.2.0",
+    "last_validated_at": "2026-11-16T10:53:00Z",
     "author": "claude-ai",
     "dependencies": {
       "routes": [
@@ -290,6 +290,67 @@
             "student_ids": ["{{GROUP_STUDENT_A_UUID}}", "{{GROUP_STUDENT_B_UUID}}"]
           },
           "store": "GROUP_INSTANCE_ID",
+          "storeField": "id"
+        }
+      ]
+    },
+
+    {
+      "id": "api-clock-change-skipped-hour",
+      "name": "API – A lesson may not start in the hour the clock skips",
+      "description": "On the next night the org's clock skips forward (CLOCK_SKIPPED_DATE, computed in runner.js from the zone), a lesson whose chosen local start (start_local_date/start_local_time, sent by the calendar next to datetime_start) is inside the skipped interval is refused with 422 lesson_time_skipped_by_clock_change; the same lesson after the interval is accepted.",
+      "steps": [
+        {
+          "id": "create-lesson-in-skipped-hour",
+          "description": "Create a lesson at {{CLOCK_SKIPPED_TIME}} local on {{CLOCK_SKIPPED_DATE}} — refused with 422",
+          "action": "apiCall",
+          "method": "POST",
+          "endpoint": "/api/lesson-instances",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "datetime_start": "{{CLOCK_SKIPPED_INSTANT}}",
+            "start_local_date": "{{CLOCK_SKIPPED_DATE}}",
+            "start_local_time": "{{CLOCK_SKIPPED_TIME}}",
+            "duration_minutes": 45,
+            "instructor_employee_id": "{{SINGLE_INSTRUCTOR_ID}}",
+            "service_id": "{{SERVICE_ID}}",
+            "student_ids": ["{{SINGLE_STUDENT_UUID}}"]
+          },
+          "ignoreStatus": [422],
+          "stores": [
+            { "variable": "CLOCK_REFUSAL_CODE", "field": "code" },
+            { "variable": "CLOCK_REFUSAL_DATE", "field": "clock_change.date" }
+          ]
+        },
+        {
+          "id": "probe-clock-refusal-code",
+          "description": "Puts the refusal code in the address (before the hash) so it can be asserted; a lesson created instead would leave no code there",
+          "action": "navigate",
+          "url": "{{BASE_URL}}/?clock_refusal={{CLOCK_REFUSAL_CODE}}&date={{CLOCK_REFUSAL_DATE}}#/calendar"
+        },
+        {
+          "id": "assert-clock-refusal-code",
+          "action": "assert",
+          "type": "url",
+          "pattern": "clock_refusal=lesson_time_skipped_by_clock_change&date={{CLOCK_SKIPPED_DATE}}"
+        },
+        {
+          "id": "create-lesson-after-skipped-hour",
+          "description": "The same lesson at {{CLOCK_AFTER_SKIPPED_TIME}} local that day is accepted",
+          "action": "apiCall",
+          "method": "POST",
+          "endpoint": "/api/lesson-instances",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "datetime_start": "{{CLOCK_AFTER_SKIPPED_INSTANT}}",
+            "start_local_date": "{{CLOCK_SKIPPED_DATE}}",
+            "start_local_time": "{{CLOCK_AFTER_SKIPPED_TIME}}",
+            "duration_minutes": 45,
+            "instructor_employee_id": "{{SINGLE_INSTRUCTOR_ID}}",
+            "service_id": "{{SERVICE_ID}}",
+            "student_ids": ["{{SINGLE_STUDENT_UUID}}"]
+          },
+          "store": "CLOCK_ACCEPTED_INSTANCE_ID",
           "storeField": "id"
         }
       ]

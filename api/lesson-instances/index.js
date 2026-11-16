@@ -29,6 +29,7 @@ import {
 import BillingLedgerService from '../_shared/BillingLedgerService.js';
 import { syncLessonClosureState } from '../_shared/calendar-workflow.js';
 import { localDateRangeUtc } from '../_shared/local-time.js';
+import { checkRequestedLessonStart } from '../_shared/clock-change-rules.js';
 import {
   ACTIVE_LESSON_INSTANCE_STATUSES,
   cancelLessonInstanceWithParticipants,
@@ -544,6 +545,10 @@ export default async function lessonInstances(context, req) {
     if (!datetimeStart || Number.isNaN(Date.parse(datetimeStart))) {
       return respond(context, 400, { message: 'invalid_datetime_start' });
     }
+
+    // A start inside the hour the clock skips (spring forward) does not exist.
+    const clockChangeRefusal = checkRequestedLessonStart(body);
+    if (clockChangeRefusal) return respond(context, 422, clockChangeRefusal);
 
     if (!Number.isFinite(durationMinutes) || durationMinutes <= 0) {
       return respond(context, 400, { message: 'invalid_duration_minutes' });

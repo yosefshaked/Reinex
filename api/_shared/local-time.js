@@ -31,6 +31,17 @@
  *   occurrence is used (the earlier instant, still on summer time), so 01:30 becomes 22:30Z on
  *   24.10, not 23:30Z.
  *
+ * Clock changes (`findClockChanges`, `classifyLocalTime`)
+ * - Derived only from the IANA zone through `Intl`: the offset is compared across each day and the
+ *   change located to the minute. Nothing is hard-coded to a country, a date or a 60-minute shift;
+ *   a zone without changes returns none.
+ * - 'skipped': a wall-clock interval that does not exist (offset increases). A person may not
+ *   schedule a lesson that STARTS in it (422 `lesson_time_skipped_by_clock_change`); template
+ *   generation skips that single occurrence and reports it.
+ * - 'repeated': a wall-clock interval that happens twice (offset decreases). Allowed; the lesson
+ *   is saved at the first occurrence and the form warns before saving.
+ * - "Summer time" / "winter time" wording follows the direction of the shift, never the month.
+ *
  * One time zone per organisation. There is no per-org time-zone setting today; every org resolves
  * to DEFAULT_ORG_TIME_ZONE through `resolveOrgTimeZone`. Adding a per-org setting later means
  * changing `resolveOrgTimeZone` only (and passing the org to it where it is known).
@@ -384,6 +395,112 @@ export function localDateTimeToUtc(dateKey, clock, timeZone = resolveOrgTimeZone
   // Non-existent wall time: read it with the offset in force before the gap, which lands the same
   // distance after the gap (02:30 in a 02:00 -> 03:00 jump becomes 03:30).
   return new Date(wallAsUtc - (offsetBefore * 60000)).toISOString();
+}
+
+// ---------------------------------------------------------------------------------------------
+// Clock changes (daylight saving and any other offset change), derived from the zone.
+// ---------------------------------------------------------------------------------------------
+
+const MINUTE_MS = 60000;
+
+function wallKeyAndClock(wallAsUtcMs) {
+  const date = new Date(wallAsUtcMs);
+  return {
+    dateKey: dateKeyFromUtcCalendarDate(date),
+    clock: `${pad2(date.getUTCHours())}:${pad2(date.getUTCMinutes())}`,
+  };
+}
+
+/**
+ * Every offset change of the zone whose local date falls in `fromDateKey`..`toDateKey` (both
+ * included), oldest first. Found by comparing the offset across each day and locating the change
+ * to the minute, so shifts that are not 60 minutes and changes at local midnight are handled.
+ * - 'skipped' (offset increases): wall times `startTime` (incl.) .. `endTime` (excl.) do not exist.
+ * - 'repeated' (offset decreases): wall times `startTime` .. `endTime` happen twice.
+ * `dateKey` is the local date the interval starts on; `endTime` may be '00:00' of the next day.
+ * @param {string} fromDateKey @param {string} toDateKey @param {string} [timeZone]
+ * @returns {Array<{ dateKey: string, kind: 'skipped' | 'repeated', startTime: string, endTime: string,
+ *   offsetBeforeMinutes: number, offsetAfterMinutes: number }>}
+ */
+export function findClockChanges(fromDateKey, toDateKey, timeZone = resolveOrgTimeZone()) {
+  const from = parseDateKey(fromDateKey);
+  const to = parseDateKey(toDateKey);
+  if (!from || !to || fromDateKey > toDateKey) return [];
+
+  // Scan whole UTC days with a day of margin on each side: offsets are at most ±14h, so every
+  // instant whose local date is in the range is covered.
+  const scanStart = Date.UTC(from.year, from.month - 1, from.day) - DAY_MS;
+  const scanEnd = Date.UTC(to.year, to.month - 1, to.day) + (2 * DAY_MS);
+  const changes = [];
+  let cursor = scanStart;
+  let cursorOffset = utcOffsetMinutes(cursor, timeZone);
+  while (cursor < scanEnd) {
+    const next = cursor + DAY_MS;
+    const nextOffset = utcOffsetMinutes(next, timeZone);
+    if (nextOffset !== cursorOffset) {
+      // Binary search for the first minute with the new offset.
+      let low = cursor; // old offset
+      let high = next; // new offset
+      while (high - low > MINUTE_MS) {
+        const mid = low + (Math.floor((high - low) / MINUTE_MS / 2) * MINUTE_MS);
+        if (utcOffsetMinutes(mid, timeZone) === cursorOffset) low = mid;
+        else high = mid;
+      }
+      const offsetBeforeMinutes = utcOffsetMinutes(high - MINUTE_MS, timeZone);
+      const offsetAfterMinutes = utcOffsetMinutes(high, timeZone);
+      if (offsetAfterMinutes !== offsetBeforeMinutes) {
+        const wallOld = high + (offsetBeforeMinutes * MINUTE_MS);
+        const wallNew = high + (offsetAfterMinutes * MINUTE_MS);
+        const kind = offsetAfterMinutes > offsetBeforeMinutes ? 'skipped' : 'repeated';
+        const start = wallKeyAndClock(Math.min(wallOld, wallNew));
+        const end = wallKeyAndClock(Math.max(wallOld, wallNew));
+        if (start.dateKey >= fromDateKey && start.dateKey <= toDateKey) {
+          changes.push({
+            dateKey: start.dateKey,
+            kind,
+            startTime: start.clock,
+            endTime: end.clock,
+            offsetBeforeMinutes,
+            offsetAfterMinutes,
+          });
+        }
+      }
+    }
+    cursor = next;
+    cursorOffset = nextOffset;
+  }
+  return changes;
+}
+
+/**
+ * The clock change whose interval contains this local wall time, or null.
+ * @param {string} dateKey @param {string} clock 'HH:mm' @param {string} [timeZone]
+ */
+export function findClockChangeAt(dateKey, clock, timeZone = resolveOrgTimeZone()) {
+  const date = parseDateKey(dateKey);
+  const time = parseClock(clock);
+  if (!date || !time) return null;
+  const wall = Date.UTC(date.year, date.month - 1, date.day, time.hour, time.minute, time.second);
+  // An interval that starts the previous evening can reach past midnight into this date.
+  for (const change of findClockChanges(addDays(dateKey, -1), dateKey, timeZone)) {
+    const changeDate = parseDateKey(change.dateKey);
+    const startTime = parseClock(change.startTime);
+    if (!changeDate || !startTime) continue;
+    const start = Date.UTC(changeDate.year, changeDate.month - 1, changeDate.day, startTime.hour, startTime.minute);
+    const length = Math.abs(change.offsetAfterMinutes - change.offsetBeforeMinutes) * MINUTE_MS;
+    if (wall >= start && wall < start + length) return change;
+  }
+  return null;
+}
+
+/**
+ * Whether a local wall time exists once ('normal'), not at all ('skipped') or twice ('repeated').
+ * Returns 'normal' for an invalid date or time (callers validate those separately).
+ * @param {string} dateKey @param {string} clock 'HH:mm' @param {string} [timeZone]
+ * @returns {'normal' | 'skipped' | 'repeated'}
+ */
+export function classifyLocalTime(dateKey, clock, timeZone = resolveOrgTimeZone()) {
+  return findClockChangeAt(dateKey, clock, timeZone)?.kind || 'normal';
 }
 
 /** UTC instant (ISO) where the local day starts. */

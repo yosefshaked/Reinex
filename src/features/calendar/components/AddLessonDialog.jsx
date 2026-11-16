@@ -31,6 +31,8 @@ import { toAgorot } from '@/lib/currency.js';
 import { readMissingLessonRate } from '../utils/lessonDialogModel.js';
 import { useMissingRateForSelection } from '../hooks/useMissingRateForSelection.js';
 import { MissingRateNotice } from './MissingRateNotice.jsx';
+import { ClockChangeNotice } from './ClockChangeNotice.jsx';
+import { describeLessonStartClockChange, lessonLocalStartFields } from '@/lib/clock-change.js';
 
 function toLocalTimeString(dateObj) {
   if (!(dateObj instanceof Date) || Number.isNaN(dateObj.getTime())) return null;
@@ -323,6 +325,12 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
   const missingCapability = Boolean(formData.instructor_employee_id && formData.service_id && !selectedCapability);
   const missingAvailability = Boolean(selectedCapability && !hasConfiguredAvailability(selectedCapability.availability_windows));
   const hasAvailableSlots = availableTimeSlots.length > 0;
+  // Spring forward: the typed time may not exist (blocked); autumn: it may happen twice (notice).
+  const clockChangeNotice = useMemo(
+    () => describeLessonStartClockChange(formData.date, formData.time),
+    [formData.date, formData.time],
+  );
+
   const selectedTimeOutsideAvailability = useMemo(() => {
     if (
       useSchedulingOverride
@@ -635,6 +643,10 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
         setError('יש להזין מחיר לשיעור הזה לפני יצירת לקוח/ה חד-פעמי/ת ללא מחיר שירות ברירת מחדל.');
         return;
       }
+      if (clockChangeNotice?.blocking) {
+        setError(clockChangeNotice.message);
+        return;
+      }
       const datetime_start = toUtcIsoString(formData.date, formData.time);
       if (!datetime_start) {
         setError('תאריך או שעה אינם תקינים.');
@@ -648,6 +660,7 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
         body: {
           org_id: activeOrgId,
           datetime_start,
+          ...lessonLocalStartFields(formData.date, formData.time),
           duration_minutes: formData.duration_minutes,
           instructor_employee_id: formData.instructor_employee_id,
           service_id: formData.service_id,
@@ -1039,6 +1052,8 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
             </div>
           </div>
 
+          <ClockChangeNotice notice={clockChangeNotice} />
+
           {formData.instructor_employee_id && formData.service_id && !useSchedulingOverride && missingCapability ? (
             <Alert variant="destructive">
               <AlertCircle className="h-4 w-4" />
@@ -1199,6 +1214,7 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
                 || !formData.instructor_employee_id
                 || !formData.date
                 || !formData.time
+                || Boolean(clockChangeNotice?.blocking)
                 || (selectedService && !selectedServiceHasValidDuration)
                 || participantTokens.length === 0
                 || (requiresDirectClientChargeAmount && !hasValidDirectClientChargeAmount)

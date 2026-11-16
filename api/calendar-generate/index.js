@@ -17,6 +17,10 @@ import { dayTokenForDate, normalizeDayToken } from '../_shared/day-of-week.js';
 import { breakTemplateMatchesDate, normalizeBreakTemplateTime } from '../_shared/break-template-schedule.js';
 import { extractScheduleSlotFromIso } from '../_shared/instructor-availability.js';
 import { enumerateDateKeys, localDateKey, localDateRangeUtc, localDateTimeToUtc, localTime } from '../_shared/local-time.js';
+import {
+  describeLessonStartClockChange,
+  GENERATION_SKIPPED_BY_CLOCK_CHANGE_TYPE,
+} from '../_shared/clock-change-rules.js';
 import { resolveLessonCoverageDecision } from '../_shared/hmo.js';
 import { attachErrorTracking, respondTracked } from '../_shared/error-events.js';
 
@@ -905,6 +909,24 @@ export default async function calendarGenerate(context, req) {
           time_of_day: finalTime,
           reason: 'matching_template_instance_exists',
           retry_item: buildRetryItem(template.id, date),
+        });
+        continue;
+      }
+
+      // A template keeps its weekday and time; only the one occurrence whose start falls in the
+      // hour the clock skips (spring forward) is not created, and the office is told.
+      const clockChange = describeLessonStartClockChange(date, finalTime);
+      if (clockChange?.blocking) {
+        conflicts.push({
+          type: GENERATION_SKIPPED_BY_CLOCK_CHANGE_TYPE,
+          template_id: template.id,
+          student_id: primaryStudentId,
+          student_name: primaryStudentName,
+          client_profile_id: primaryClientProfileId,
+          service_name: finalServiceName,
+          target_date: date,
+          time_of_day: finalTime,
+          message: `${clockChange.message} המפגש הזה לא נוצר; אפשר לקבוע אותו ידנית בשעה אחרת.`,
         });
         continue;
       }
