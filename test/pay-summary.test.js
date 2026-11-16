@@ -25,6 +25,10 @@ function lesson(id, overrides = {}) {
     duration_minutes: 45,
     payout_amount: 7500,
     rate_used: 10000,
+    pay_basis: 'lesson_hourly',
+    service_payment_model: 'fixed_rate',
+    paid_participant_count: 1,
+    rate_effective_date: '2026-01-01',
     unmarked: false,
     unmarked_amount: 0,
     missing_rate: false,
@@ -133,29 +137,92 @@ describe('the overview', () => {
   });
 });
 
-describe('lessons by service', () => {
-  it('shows count × amount when every lesson of the service paid the same', () => {
+describe('lessons by service, pay basis and rate', () => {
+  it('shows an hourly service as hours × rate per hour, the amount being the server sum', () => {
     const [group] = groupLessonsByService(PAY.details.lessons);
     assert.equal(group.name, 'רכיבה');
     assert.equal(group.count, 2);
     assert.equal(group.amount, 15000);
-    assert.match(group.countLabel, /^2 × ₪75/);
+    assert.equal(group.countLabel, '1:30 שעות × ₪100.00 לשעה');
     assert.deepEqual(group.lessons.map((line) => [line.dateLabel, line.time, line.minutes, line.stateLabel, line.amount]), [
       ['05.10', '11:00', 45, 'הגיע', 7500],
       ['06.10', '11:00', 45, 'לא סומן', 7500],
     ]);
   });
 
-  it('shows only the count when the lessons paid different amounts, never a made-up rate', () => {
-    const [group] = groupLessonsByService([lesson('a'), lesson('b', { payout_amount: 10000, duration_minutes: 60 })]);
-    assert.equal(group.unitAmount, null);
-    assert.equal(group.countLabel, '2 מפגשים');
-    assert.equal(group.amount, 17500);
+  it('shows a per-lesson rate as lessons × rate', () => {
+    const flat = (id) => lesson(id, { pay_basis: 'lesson_flat', rate_used: 9000, payout_amount: 9000, duration_minutes: 30 });
+    const [group] = groupLessonsByService([flat('a'), flat('b'), flat('c')]);
+    assert.equal(group.countLabel, '3 מפגשים × ₪90.00');
+    assert.equal(group.amount, 27000);
+    assert.equal(groupLessonsByService([flat('a')])[0].countLabel, '1 מפגש × ₪90.00');
+  });
+
+  it('shows a per-rider service paid per lesson as riders × rate', () => {
+    const rider = (id, riders) => lesson(id, {
+      pay_basis: 'lesson_flat',
+      service_payment_model: 'per_student',
+      rate_used: 3000,
+      paid_participant_count: riders,
+      payout_amount: 3000 * riders,
+    });
+    const [group] = groupLessonsByService([rider('a', 6), rider('b', 8)]);
+    assert.equal(group.countLabel, '14 רוכבים × ₪30.00');
+    assert.equal(group.amount, 42000);
+  });
+
+  it('shows a per-rider hourly service as rider-hours × rate per hour', () => {
+    const rider = (id, riders) => lesson(id, {
+      service_payment_model: 'per_student',
+      rate_used: 8000,
+      duration_minutes: 60,
+      paid_participant_count: riders,
+      payout_amount: 8000 * riders,
+    });
+    const [group] = groupLessonsByService([rider('a', 2), rider('b', 1)]);
+    assert.equal(group.countLabel, '3:00 שעות רוכב × ₪80.00 לשעה');
+    assert.equal(group.amount, 24000);
+  });
+
+  it('gives a service two lines when its rate changed in the month, the older rate first', () => {
+    const groups = groupLessonsByService([
+      lesson('late', { lesson_date: '2026-10-20', rate_used: 12000, payout_amount: 9000, rate_effective_date: '2026-10-15' }),
+      lesson('early', { lesson_date: '2026-10-05', rate_used: 10000, payout_amount: 7500 }),
+      lesson('other', { service_id: 'group', service_name: 'קבוצה', pay_basis: 'lesson_flat', rate_used: 5000, payout_amount: 5000 }),
+    ]);
+    assert.deepEqual(groups.map((group) => [group.serviceId, group.countLabel, group.amount]), [
+      ['riding', '0:45 שעות × ₪100.00 לשעה', 7500],
+      ['riding', '0:45 שעות × ₪120.00 לשעה', 9000],
+      ['group', '1 מפגש × ₪50.00', 5000],
+    ]);
+  });
+
+  it('drops the "× rate" part when quantity × rate does not equal what was paid', () => {
+    const [hourly] = groupLessonsByService([lesson('a'), lesson('b', { payout_amount: 7400 })]);
+    assert.equal(hourly.countLabel, '1:30 שעות');
+    assert.equal(hourly.amount, 14900);
+    const [flat] = groupLessonsByService([
+      lesson('c', { pay_basis: 'lesson_flat', rate_used: 9000, payout_amount: 9000 }),
+      lesson('d', { pay_basis: 'lesson_flat', rate_used: 9000, payout_amount: 4500 }),
+    ]);
+    assert.equal(flat.countLabel, '2 מפגשים');
+    const [riders] = groupLessonsByService([
+      lesson('e', { pay_basis: 'lesson_flat', service_payment_model: 'per_student', rate_used: 3000, paid_participant_count: 2, payout_amount: 6000 }),
+      lesson('f', { pay_basis: 'lesson_flat', service_payment_model: 'per_student', rate_used: 3000, paid_participant_count: 3, payout_amount: 8000 }),
+    ]);
+    assert.equal(riders.countLabel, '5 רוכבים');
   });
 
   it('leaves a lesson with no rate out of the services: it is listed under "חסר תעריף"', () => {
     const groups = groupLessonsByService(PAY.details.lessons);
     assert.deepEqual(groups.map((group) => group.serviceId), ['riding']);
+  });
+
+  it('marks the missing-rate exception as not paid: red, shown as zero', () => {
+    const { exceptions } = buildSummaryRows(PAY);
+    assert.deepEqual(exceptions.map((row) => [row.key, row.tone]), [['unmarked', 'warning'], ['missing_rate', 'danger']]);
+    assert.equal(exceptions[1].amountLabel, '₪0');
+    assert.equal(exceptions[1].note, 'לא נכלל בסכום');
   });
 });
 
@@ -179,6 +246,7 @@ describe('the all-employees table', () => {
   it('tags an employee only with the exceptions they have', () => {
     const rows = buildPayrollTableRows([PAY, { ...PAY, employee_id: 'omer', unmarked_lesson_count: 0, missing_rate_lesson_count: 0 }]);
     assert.deepEqual(rows[0].tags.map((tag) => tag.label), ['לא סומן: 1', 'חסר תעריף: 1']);
+    assert.deepEqual(rows[0].tags.map((tag) => tag.tone), ['warning', 'danger']);
     assert.deepEqual(rows[1].tags, []);
     assert.equal(rows[0].total, 20500);
   });

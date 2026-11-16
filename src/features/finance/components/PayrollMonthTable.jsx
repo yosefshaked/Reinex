@@ -1,5 +1,5 @@
 import React, { useEffect, useId, useMemo, useState } from 'react';
-import { AlertTriangle, ChevronDown, Loader2, Printer } from 'lucide-react';
+import { AlertTriangle, BanknoteX, ChevronDown, Loader2, Printer } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useOrg } from '@/org/OrgContext.jsx';
 import { authenticatedFetch } from '@/lib/api-client.js';
@@ -27,9 +27,11 @@ function EmployeeRow({ row, open, onToggle, children }) {
             <span
               key={tag.key}
               data-payroll-tag={tag.key}
-              className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-900"
+              className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium ${tag.tone === 'danger' ? 'border-red-200 bg-red-50 text-red-900' : 'border-amber-200 bg-amber-50 text-amber-900'}`}
             >
-              <AlertTriangle aria-hidden="true" className="h-3 w-3" />
+              {tag.tone === 'danger'
+                ? <BanknoteX aria-hidden="true" className="h-3 w-3" />
+                : <AlertTriangle aria-hidden="true" className="h-3 w-3" />}
               {tag.label}
             </span>
           ))}

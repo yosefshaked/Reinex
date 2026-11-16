@@ -114,7 +114,7 @@ export function PaySummaryPrintSheet({ pay, orgName, monthLabel, detailed }) {
             <React.Fragment key={row.key}>
               <tr className="pay-print-exception">
                 <td>! {row.label} ({row.note})</td>
-                <td>{row.amount === null ? '' : formatCurrency(row.amount)}</td>
+                <td>{row.amountLabel || (row.amount === null ? '' : formatCurrency(row.amount))}</td>
               </tr>
               {detailed ? <LessonLines lines={row.lessons} /> : null}
             </React.Fragment>

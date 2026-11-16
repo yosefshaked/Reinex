@@ -2,7 +2,7 @@
   "meta": {
     "id": "pay-summary",
     "name": "Monthly pay summary — finance tab and the \"כספים\" page",
-    "description": "Payroll stage 6. An instructor with a lesson rate teaches two lessons last month: one marked attended, one nobody marked. Pay counts the unmarked one as attended and flags it. The finance tab shows the month total, the \"לא סומן אם הגיעו · 1\" exception row, and the lessons row opens by service with count × amount; the unmarked row links to the lesson in the calendar, which opens it. The \"כספים\" page lists the employee with the total and the \"לא סומן: 1\" tag, the total row for everyone, and opens the employee's summary under the row. Nothing is stored: everything is read from GET /api/payroll.",
+    "description": "Payroll stage 6. An instructor with a lesson rate teaches two lessons last month: one marked attended, one nobody marked. Pay counts the unmarked one as attended and flags it. The finance tab shows the month total, the \"לא סומן אם הגיעו · 1\" exception row, and the lessons row opens by service with the calculation (hours × hourly rate); the unmarked row links to the lesson in the calendar, which opens it. The \"כספים\" page lists the employee with the total and the \"לא סומן: 1\" tag, the total row for everyone, and opens the employee's summary under the row. Nothing is stored: everything is read from GET /api/payroll.",
     "version": "1.0.0",
     "last_validated_at": "2026-11-15T12:00:00Z",
     "author": "claude-ai",
@@ -249,9 +249,9 @@
         },
         {
           "id": "assert-service-line",
-          "description": "The lessons row opens by service: name · count × amount, and the total",
+          "description": "The lessons row opens by service: name · hours × hourly rate, and the total",
           "action": "waitForSelector",
-          "selector": "[data-pay-row='service-{{SERVICE_ID}}']:has-text('{{SERVICE_NAME}}'):has-text('2 × ₪75.00'):has-text('₪150.00')"
+          "selector": "[data-pay-row='service-{{SERVICE_ID}}']:has-text('{{SERVICE_NAME}}'):has-text('1:30 שעות × ₪100.00 לשעה'):has-text('₪150.00')"
         },
         {
           "id": "open-service",
@@ -483,7 +483,7 @@
           "id": "assert-missing-row",
           "description": "Flagged, and not in the total",
           "action": "waitForSelector",
-          "selector": "[data-pay-row='missing_rate']:has-text('חסר תעריף · 1'):has-text('לא נכלל בסכום')"
+          "selector": "[data-pay-row='missing_rate']:has-text('חסר תעריף · 1'):has-text('לא נכלל בסכום'):has-text('₪0')"
         },
         {
           "id": "assert-total-unchanged",

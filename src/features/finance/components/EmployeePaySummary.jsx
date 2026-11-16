@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { AlertTriangle, ChevronDown, Loader2, Plus, Printer } from 'lucide-react';
+import { AlertTriangle, BanknoteX, ChevronDown, Loader2, Plus, Printer } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useOrg } from '@/org/OrgContext.jsx';
 import { authenticatedFetch } from '@/lib/api-client.js';
@@ -12,27 +12,50 @@ import { buildLessonCalendarPath, buildSummaryRows, formatMonthLabel, monthBound
 import { PaySummaryPrintSheet, PrintPortal } from './PaySummaryPrint.jsx';
 
 /** A row that opens in place: button semantics, aria-expanded, the content right under it. */
-function ExpandableRow({ label, amount, note, warning = false, open, onToggle, children, dataKey, nested = false }) {
+const EXCEPTION_TONES = {
+  warning: {
+    row: 'rounded-xl bg-amber-50',
+    hover: 'hover:bg-amber-100',
+    icon: 'text-amber-600',
+    label: 'font-semibold text-amber-900',
+    note: 'text-amber-800',
+    Icon: AlertTriangle,
+  },
+  danger: {
+    row: 'rounded-xl bg-red-50',
+    hover: 'hover:bg-red-100',
+    icon: 'text-red-600',
+    label: 'font-semibold text-red-900',
+    note: 'text-red-800',
+    Icon: BanknoteX,
+  },
+};
+
+function ExpandableRow({ label, amount, amountLabel, note, tone, open, onToggle, children, dataKey, nested = false }) {
   const contentId = useId();
+  const toneStyle = tone ? EXCEPTION_TONES[tone] : null;
+  const ToneIcon = toneStyle?.Icon;
   return (
-    <li data-pay-row={dataKey} className={warning ? 'rounded-xl bg-amber-50' : ''}>
+    <li data-pay-row={dataKey} data-pay-tone={tone || undefined} className={toneStyle ? toneStyle.row : ''}>
       <button
         type="button"
         aria-expanded={open}
         aria-controls={contentId}
         onClick={onToggle}
-        className={`grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-xl px-2 text-start transition hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${nested ? 'py-1.5 text-sm' : 'py-2'} ${warning ? 'hover:bg-amber-100' : ''}`}
+        className={`grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-xl px-2 text-start transition hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${nested ? 'py-1.5 text-sm' : 'py-2'} ${toneStyle ? toneStyle.hover : ''}`}
       >
         <span className="flex min-w-0 items-center gap-1.5">
           <ChevronDown aria-hidden="true" className={`h-4 w-4 shrink-0 text-slate-400 transition-transform ${open ? '' : 'rotate-90'}`} />
-          {warning ? <AlertTriangle aria-hidden="true" className="h-4 w-4 shrink-0 text-amber-600" /> : null}
-          <span className={`min-w-0 break-words ${warning ? 'font-semibold text-amber-900' : 'text-slate-800'}`}>{label}</span>
+          {ToneIcon ? <ToneIcon aria-hidden="true" className={`h-4 w-4 shrink-0 ${toneStyle.icon}`} /> : null}
+          <span className={`min-w-0 break-words ${toneStyle ? toneStyle.label : 'text-slate-800'}`}>{label}</span>
         </span>
         <span className="flex flex-col items-end text-end">
-          {amount !== null && amount !== undefined ? (
+          {amountLabel ? (
+            <span className={`tabular-nums font-semibold ${toneStyle ? toneStyle.label : 'text-slate-900'}`}>{amountLabel}</span>
+          ) : amount !== null && amount !== undefined ? (
             <span className={`tabular-nums ${nested ? '' : 'font-semibold'} text-slate-900`}>{formatCurrency(amount)}</span>
           ) : null}
-          {note ? <span className="text-xs font-medium text-amber-800">{note}</span> : null}
+          {note ? <span className={`text-xs font-medium ${toneStyle ? toneStyle.note : 'text-amber-800'}`}>{note}</span> : null}
         </span>
       </button>
       {open ? (
@@ -291,9 +314,10 @@ export default function EmployeePaySummary({
                 <ExpandableRow
                   key={row.key}
                   dataKey={row.key}
-                  warning
+                  tone={row.tone}
                   label={row.label}
                   amount={row.amount}
+                  amountLabel={row.amountLabel}
                   note={row.note}
                   open={openRow === row.key}
                   onToggle={() => toggleRow(row.key)}

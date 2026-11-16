@@ -102,44 +102,86 @@ export function buildLessonLine(lesson) {
   };
 }
 
+/** 1 → "1 רוכב", 14 → "14 רוכבים". */
+function formatRiderCount(count) {
+  const number = Math.max(0, Number(count) || 0);
+  return number === 1 ? '1 רוכב' : `${number} רוכבים`;
+}
+
+const PER_RIDER_MODEL = 'per_student';
+const PAY_BASIS_FLAT = 'lesson_flat';
+const PAY_BASIS_HOURLY = 'lesson_hourly';
+
 /**
- * The paid lessons grouped by service, in the order they first appear. A lesson with no rate pays
- * nothing and is listed under "חסר תעריף" instead. "count × amount" is shown only when every lesson
- * of the service paid the same, so it is exact; otherwise (different rates, lengths or rider
- * counts) the group shows its count and total only.
+ * The calculation of one group of lessons that share a service, pay basis, payment model and rate,
+ * mirroring resolveLessonInstructorPayout: the rate is paid per lesson (flat) or per lesson hour
+ * (hourly), and a per-rider service multiplies that by the paid riders of each lesson. So the
+ * quantity is lessons (flat), hours (hourly), riders (flat per rider) or rider-hours (hourly per
+ * rider). The "× rate" part is shown only when quantity × rate equals the sum the server paid for
+ * the group; otherwise the label is the quantity alone, so a line never shows a sum that does not add up.
+ */
+function describeLessonGroupCalculation(group) {
+  const { payBasis, perRider, rate, lessons, amount } = group;
+  const knownRate = Number.isFinite(rate) && rate !== null;
+  if (payBasis === PAY_BASIS_HOURLY) {
+    const minutes = lessons.reduce((sum, line) => sum + line.minutes * (perRider ? line.riders : 1), 0);
+    const quantityLabel = `${formatMinutes(minutes)} ${perRider ? 'שעות רוכב' : 'שעות'}`;
+    const adds = knownRate && Math.round((rate * minutes) / 60) === amount;
+    return adds ? `${quantityLabel} × ${formatCurrency(rate)} לשעה` : quantityLabel;
+  }
+  if (perRider && payBasis === PAY_BASIS_FLAT) {
+    const riders = lessons.reduce((sum, line) => sum + line.riders, 0);
+    const quantityLabel = formatRiderCount(riders);
+    return knownRate && riders * rate === amount ? `${quantityLabel} × ${formatCurrency(rate)}` : quantityLabel;
+  }
+  const quantityLabel = formatLessonCount(lessons.length);
+  const adds = payBasis === PAY_BASIS_FLAT && knownRate && lessons.length * rate === amount;
+  return adds ? `${lessons.length} ${lessons.length === 1 ? 'מפגש' : 'מפגשים'} × ${formatCurrency(rate)}` : quantityLabel;
+}
+
+/**
+ * The paid lessons grouped by service, pay basis, payment model and rate, one group per
+ * combination: a service whose rate changed mid-month has two groups, the older rate first. Groups
+ * keep the order in which their service first appears. A lesson with no rate pays nothing and is
+ * listed under "חסר תעריף" instead. Every group's amount is the sum of the server's payouts.
  */
 export function groupLessonsByService(lessons = []) {
   const groups = new Map();
+  const serviceOrder = new Map();
   for (const lesson of lessons || []) {
     if (lesson?.missing_rate) continue;
-    const key = lesson?.service_id || 'none';
+    const serviceKey = lesson?.service_id || 'none';
+    if (!serviceOrder.has(serviceKey)) serviceOrder.set(serviceKey, serviceOrder.size);
+    const payBasis = lesson?.pay_basis || '';
+    const perRider = lesson?.service_payment_model === PER_RIDER_MODEL;
+    const rate = lesson?.rate_used === null || lesson?.rate_used === undefined ? null : Number(lesson.rate_used);
+    const key = [serviceKey, payBasis, perRider ? 'rider' : 'lesson', rate ?? 'none'].join('|');
     if (!groups.has(key)) {
       groups.set(key, {
         key,
         serviceId: lesson?.service_id || '',
         name: lesson?.service_name || 'שירות ללא שם',
+        payBasis,
+        perRider,
+        rate,
+        order: serviceOrder.get(serviceKey),
+        since: lesson?.rate_effective_date || lesson?.lesson_date || '',
         count: 0,
         amount: 0,
         lessons: [],
       });
     }
     const group = groups.get(key);
-    const line = buildLessonLine(lesson);
+    const line = { ...buildLessonLine(lesson), riders: Number(lesson?.paid_participant_count) || 0 };
+    const since = lesson?.rate_effective_date || lesson?.lesson_date || '';
+    if (since && (!group.since || since < group.since)) group.since = since;
     group.count += 1;
     group.amount += line.amount;
     group.lessons.push(line);
   }
-  return Array.from(groups.values()).map((group) => {
-    const unitAmounts = new Set(group.lessons.map((line) => line.amount));
-    const unitAmount = unitAmounts.size === 1 ? group.lessons[0].amount : null;
-    return {
-      ...group,
-      unitAmount,
-      countLabel: unitAmount !== null
-        ? `${group.count} × ${formatCurrency(unitAmount)}`
-        : formatLessonCount(group.count),
-    };
-  });
+  return Array.from(groups.values())
+    .sort((left, right) => left.order - right.order || String(left.since).localeCompare(String(right.since)))
+    .map((group) => ({ ...group, countLabel: describeLessonGroupCalculation(group) }));
 }
 
 /**
@@ -259,6 +301,7 @@ export function buildSummaryRows(pay) {
       key: 'unmarked',
       label: `לא סומן אם הגיעו · ${formatLessonCount(unmarkedCount)}`,
       amount: toAmount(pay.unmarked_lesson_amount),
+      tone: 'warning',
       note: 'נכלל בסכום',
       lessons: details ? lessons.filter((lesson) => lesson?.unmarked).map(buildLessonLine) : null,
     });
@@ -268,6 +311,8 @@ export function buildSummaryRows(pay) {
       key: 'missing_rate',
       label: `חסר תעריף · ${formatLessonCount(missingRateCount)}`,
       amount: null,
+      amountLabel: '₪0',
+      tone: 'danger',
       note: 'לא נכלל בסכום',
       lessons: details ? lessons.filter((lesson) => lesson?.missing_rate).map(buildLessonLine) : null,
     });
@@ -282,8 +327,8 @@ export function buildPayrollTableRows(employees = []) {
     const tags = [];
     const unmarked = Number(employee?.unmarked_lesson_count) || 0;
     const missingRate = Number(employee?.missing_rate_lesson_count) || 0;
-    if (unmarked > 0) tags.push({ key: 'unmarked', label: `לא סומן: ${unmarked}` });
-    if (missingRate > 0) tags.push({ key: 'missing_rate', label: `חסר תעריף: ${missingRate}` });
+    if (unmarked > 0) tags.push({ key: 'unmarked', label: `לא סומן: ${unmarked}`, tone: 'warning' });
+    if (missingRate > 0) tags.push({ key: 'missing_rate', label: `חסר תעריף: ${missingRate}`, tone: 'danger' });
     return {
       id: employee?.employee_id || '',
       name: employee?.employee_name || '',

@@ -17,7 +17,7 @@ export const LOOKBACK_MONTHS_MAX = 12;
 
 /** The methods an organisation default can use. The fixed value is set per employee only. */
 export const LEAVE_PAY_DEFAULT_METHODS = Object.freeze([
-  { value: 'legal', label: 'ממוצע חוקי' },
+  { value: 'legal', label: 'ממוצע מומלץ' },
   { value: 'avg_hourly_x_avg_day_hours', label: 'ממוצע היסטורי' },
 ]);
 
@@ -51,7 +51,7 @@ export function readLeavePayPolicy(raw) {
 
 export function getLeavePayMethodLabel(method) {
   if (method === 'fixed_rate') return 'ערך קבוע ליום';
-  return LEAVE_PAY_DEFAULT_METHODS.find((option) => option.value === method)?.label || 'ממוצע חוקי';
+  return LEAVE_PAY_DEFAULT_METHODS.find((option) => option.value === method)?.label || 'ממוצע מומלץ';
 }
 
 function describePeriod(months) {

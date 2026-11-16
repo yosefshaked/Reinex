@@ -2,7 +2,7 @@
   "meta": {
     "id": "leave-pay-default",
     "name": "Settings — the organisation's default leave-pay method",
-    "description": "The \"תשלום חופשה\" tile in the settings page. The policy is first reset to the seeded default (\"ממוצע חוקי\", 3 months) through POST /api/settings. The tile button opens the shared dialog with the form and \"שמירה\" disabled while nothing changed; choosing \"ממוצע היסטורי\" and saving closes the dialog and shows it when reopened after a reload; then \"ממוצע חוקי\" is restored the same way. A write with 13 months is refused by the server (400 invalid_leave_pay_lookback_months).",
+    "description": "The \"תשלום חופשה\" tile in the settings page. The policy is first reset to the seeded default (\"ממוצע מומלץ\", 3 months) through POST /api/settings. The tile button opens the shared dialog with the form and \"שמירה\" disabled while nothing changed; choosing \"ממוצע היסטורי\" and saving closes the dialog and shows it when reopened after a reload; then \"ממוצע מומלץ\" is restored the same way. A write with 13 months is refused by the server (400 invalid_leave_pay_lookback_months).",
     "version": "1.0.0",
     "last_validated_at": "2026-11-16T09:00:00Z",
     "author": "claude-ai",
@@ -38,7 +38,7 @@
       "steps": [
         {
           "id": "reset-policy",
-          "description": "Store the seeded default so the run starts from \"ממוצע חוקי\"",
+          "description": "Store the seeded default so the run starts from \"ממוצע מומלץ\"",
           "action": "apiCall",
           "method": "POST",
           "endpoint": "/api/settings",
@@ -79,7 +79,7 @@
         },
         {
           "id": "wait-legal-selected",
-          "description": "The form opens directly with the current values: \"ממוצע חוקי\" chosen, 3 months (the 13-month write was refused)",
+          "description": "The form opens directly with the current values: \"ממוצע מומלץ\" chosen, 3 months (the 13-month write was refused)",
           "action": "waitForSelector",
           "selector": "[role='dialog'] [data-settings-block='leave-pay-default'] #leave-pay-method-legal:checked"
         },
@@ -136,7 +136,7 @@
 
     {
       "id": "restore-legal",
-      "name": "UI – Restore \"ממוצע חוקי\"",
+      "name": "UI – Restore \"ממוצע מומלץ\"",
       "steps": [
         {
           "id": "choose-legal",

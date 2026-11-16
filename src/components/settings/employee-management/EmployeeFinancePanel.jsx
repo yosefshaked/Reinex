@@ -34,7 +34,7 @@ function endOfMonth(date) {
  */
 const LEAVE_PAY_METHODS = [
   { value: '', label: 'ברירת המחדל של הארגון' },
-  { value: 'legal', label: 'ממוצע חוקי' },
+  { value: 'legal', label: 'ממוצע מומלץ' },
   { value: 'avg_hourly_x_avg_day_hours', label: 'ממוצע היסטורי' },
   { value: 'fixed_rate', label: 'ערך קבוע ליום' },
 ];
@@ -54,7 +54,7 @@ function describeLeavePayMethod(method, policy) {
   if (method === 'fixed_rate') {
     return 'סכום קבוע ליום חופשה. הסכום והתאריך שממנו הוא חל נקבעים כאן.';
   }
-  const orgDefault = LEAVE_PAY_METHODS.find((option) => option.value === policy?.default_method)?.label || 'ממוצע חוקי';
+  const orgDefault = LEAVE_PAY_METHODS.find((option) => option.value === policy?.default_method)?.label || 'ממוצע מומלץ';
   return `כמו שאר העובדים בארגון. כרגע: "${orgDefault}".`;
 }
 
