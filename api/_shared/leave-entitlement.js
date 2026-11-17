@@ -23,8 +23,8 @@
  *   - Employed the whole year: 200 days worked or more -> full; fewer -> days / 200 x gross.
  *     Employed part of the year (started or left during it): 240 or more -> full; fewer -> days / 240 x gross.
  *     Paid sick days count as days worked (the system records no sick leave, so callers pass 0).
- *   - The proportional gross figure is converted to working days and kept to 2 decimals (the law
- *     rounds down; the owner chose to show the days earned so far exactly, 2026-11-17).
+ *   - The days earned so far are the full year's working days x days counted / threshold, kept to 2
+ *     decimals (the law rounds down; the owner chose to show them exactly, 2026-11-17).
  *   - Hourly / daily workers are covered only after 75 consecutive days of employment.
  *
  * Gross -> net (working days off): every 7 gross days are one week, i.e. 5 (or 6) working days;
@@ -339,7 +339,7 @@ export function daysToNextLeaveDay({ seniorityYear, weekDays, employedWholeYear,
 
 /**
  * The legal share of a year: full from 200 days worked (whole year) or 240 (part of the year);
- * below that the proportional gross figure (2 decimals, not rounded down) converted to working days.
+ * below that the full year's working days x days counted / threshold (2 decimals, not rounded down).
  *
  * @param {{ seniorityYear: number, weekDays: number, employedWholeYear: boolean, daysCounted: number }} params
  */
@@ -348,7 +348,9 @@ export function legalShareOfYear({ seniorityYear, weekDays, employedWholeYear, d
   const threshold = employedWholeYear ? FULL_YEAR_THRESHOLD_DAYS : PART_YEAR_THRESHOLD_DAYS;
   const counted = Math.max(0, Math.floor(Number(daysCounted) || 0));
   const reachedFull = counted >= threshold;
-  // Not rounded down: the days earned so far are shown with up to 2 decimals.
+  // The days earned are the share of the full year's working days (the figure "בשנה מלאה מגיעים"
+  // says), not rounded down: 3 of 200 days of a 12-day year is 0.18. gross_earned is the same share
+  // of the gross days, for information.
   const grossEarned = reachedFull ? full.gross : round((counted * full.gross) / threshold, 2);
   return {
     threshold_days: threshold,
@@ -356,6 +358,6 @@ export function legalShareOfYear({ seniorityYear, weekDays, employedWholeYear, d
     full_net: full.net,
     gross_earned: grossEarned,
     reached_full: reachedFull,
-    net: reachedFull ? full.net : round(grossToNet(grossEarned, weekDays), 2),
+    net: reachedFull ? full.net : Math.min(full.net, round((counted * full.net) / threshold, 2)),
   };
 }

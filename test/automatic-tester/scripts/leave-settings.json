@@ -138,9 +138,9 @@
         },
         {
           "id": "assert-days-to-next",
-          "description": "Seniority year 7 (21 gross days, 200 days): the 10th counted work day gives the first leave day",
+          "description": "Seniority year 7 (15 working days a year, 200 days): the 14th counted work day gives the first leave day",
           "action": "waitForSelector",
-          "selector": "[data-leave-balance-line]:has-text('עוד 10 ימי עבודה ליום החופשה הבא')"
+          "selector": "[data-leave-balance-line]:has-text('עוד 14 ימי עבודה ליום החופשה הבא')"
         },
         {
           "id": "assert-row-defaults",
@@ -499,9 +499,9 @@
         { "id": "open-attendance-tab", "action": "click", "selector": "[role='tab']:has-text('נוכחות')" },
         {
           "id": "assert-one-day-counted",
-          "description": "One counted work day (the leave day, 0.1 earned): 10 more reach 1.1",
+          "description": "One counted work day (the leave day, 0.075 earned): 14 more reach 1.1",
           "action": "waitForSelector",
-          "selector": "[data-leave-balance-line]:has-text('עוד 10 ימי עבודה ליום החופשה הבא')"
+          "selector": "[data-leave-balance-line]:has-text('עוד 14 ימי עבודה ליום החופשה הבא')"
         },
         { "id": "open-explain", "action": "click", "selector": "[data-leave-explain-open]" },
         {

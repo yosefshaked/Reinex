@@ -137,15 +137,15 @@ describe('seniority and work week', () => {
 });
 
 describe('the law: Kol Zchut worked examples', () => {
-  it('(a) 5-day week, year 8, whole year, 150 days: 150/200 x 22 = 16.5 gross -> 12.5 net', () => {
+  it('(a) 5-day week, year 8, whole year, 150 days: 150/200 x 16 net = 12', () => {
     const result = legalPast({ start: '2010-01-01', year: 2017, daysWorked: 150 });
     assert.equal(result.seniority_year, 8);
     assert.equal(result.threshold_days, 200);
     assert.equal(result.gross_earned, 16.5);
-    assert.equal(result.days, 12.5);
+    assert.equal(result.days, 12);
   });
 
-  it('(b) 5-day week, started July 2017 (part year): 120 days -> 8 gross -> 6 net; 110 days -> 7.33 gross -> 5.33 net', () => {
+  it('(b) 5-day week, started July 2017 (part year): 120/240 x 12 = 6 net; 110 days -> 5.5 net', () => {
     const at120 = legalPast({ start: '2017-07-02', year: 2017, daysWorked: 120 });
     assert.equal(at120.employed_whole_year, false);
     assert.equal(at120.threshold_days, 240);
@@ -153,31 +153,31 @@ describe('the law: Kol Zchut worked examples', () => {
     assert.equal(at120.days, 6);
     const at110 = legalPast({ start: '2017-07-02', year: 2017, daysWorked: 110 });
     assert.equal(at110.gross_earned, 7.33);
-    assert.equal(at110.days, 5.33);
+    assert.equal(at110.days, 5.5);
   });
 
-  it('(c) 6-day week, year 6, whole year, 85 days: 85/200 x 18 = 7.65 gross -> 6.65 net', () => {
+  it('(c) 6-day week, year 6, whole year, 85 days: 85/200 x 16 net = 6.8', () => {
     const result = legalPast({ start: '2012-03-01', year: 2017, daysWorked: 85, workingDays: SIX_DAYS });
     assert.equal(result.seniority_year, 6);
     assert.equal(result.work_week_days, 6);
     assert.equal(result.gross_earned, 7.65);
-    assert.equal(result.days, 6.65);
+    assert.equal(result.days, 6.8);
   });
 
-  it('(d) 6-day week, year 10, left in May (part year), 90 days: 90/240 x 24 = 9 gross -> 8 net', () => {
+  it('(d) 6-day week, year 10, left in May (part year), 90 days: 90/240 x 21 net = 7.88', () => {
     // The system has no end date, so a year the employee left in cannot be expressed on an employee;
     // the rule itself is checked through the share of the year.
     const share = legalShareOfYear({ seniorityYear: 10, weekDays: 6, employedWholeYear: false, daysCounted: 90 });
     assert.equal(share.threshold_days, 240);
     assert.equal(share.gross_full, 24);
     assert.equal(share.gross_earned, 9);
-    assert.equal(share.net, 8);
-    // The same employee without an end date is a whole-year employee: 90/200 x 24 = 10.8 gross -> 9.8 net.
+    assert.equal(share.net, 7.88);
+    // The same employee without an end date is a whole-year employee: 90/200 x 21 net = 9.45.
     const result = computeLeaveEntitlement({
       employee: employee('2008-01-01', SIX_DAYS), policy: LEGAL, year: 2017, today: '2026-11-16', daysWorked: 90,
     });
     assert.equal(result.seniority_year, 10);
-    assert.equal(result.days, 9.8);
+    assert.equal(result.days, 9.45);
   });
 
   it('(e) 170 days worked + 30 paid sick days = 200: the full entitlement', () => {
@@ -200,8 +200,8 @@ describe('the law: Kol Zchut worked examples', () => {
     assert.equal(result.in_progress, true);
     assert.equal(result.seniority_year, 2);
     assert.equal(result.full_year_days, 12);
-    // 96/200 x 16 = 7.68 gross -> 5 net (the first week) + 0.68 = 5.68, not rounded down.
-    assert.equal(result.days, 5.68);
+    // 12 days a year x 96 / 200 = 5.76, not rounded down.
+    assert.equal(result.days, 5.76);
   });
 });
 
@@ -454,7 +454,7 @@ describe('"הסבר מלא"', () => {
     const result = computeLeaveEntitlement({ employee: employee('2025-02-01'), policy: LEGAL, year: 2026, today: '2026-11-16', daysWorked: 96 });
     const sentences = leaveEntitlementExplanation(result, { name: 'דנה' });
     assert.equal(sentences[0], 'דנה בשנת העבודה השנייה. בשנה מלאה מגיעים 12 ימי חופשה.');
-    assert.equal(sentences[1], 'השנה נרשמו עד עכשיו 96 ימי עבודה. שנה מלאה היא 200 ימי עבודה, ולכן מגיעים כרגע 5.68 ימי חופשה.');
+    assert.equal(sentences[1], 'השנה נרשמו עד עכשיו 96 ימי עבודה. שנה מלאה היא 200 ימי עבודה, ולכן מגיעים כרגע 5.76 ימי חופשה.');
     assert.ok(sentences.includes('המספר יגדל ככל שיירשמו עוד ימי עבודה.'));
     assert.ok(sentences.includes('אפשר להוסיף או להוריד ימים לעובד/ת בכל רגע דרך "שינוי יתרה" כאן למעלה.'));
     assert.match(sentences.at(-1), /נחשב יום עבודה שלם, וגם יום חופשה בתשלום \(גם חצי יום\) נחשב יום עבודה; ימי החופשה מחושבים עד שתי ספרות אחרי הנקודה; לפי טבלת שבוע עבודה של 5 ימים/);
@@ -473,35 +473,35 @@ describe('"הסבר מלא"', () => {
 });
 
 describe('days to the next leave day', () => {
-  // Year 1 on a 5-day week: 12 days a year, 16 gross, 200 days for the whole year. Below 7 gross days
-  // a worked day earns 16/200 = 0.08 of a leave day.
+  // Year 1 on a 5-day week: 12 days a year, 200 days for the whole year, so a worked day earns
+  // 12 / 200 = 0.06 of a leave day.
   const base = { seniorityYear: 1, weekDays: 5, employedWholeYear: true };
 
-  it('3 days worked: 0.24 days now; 1.24 is reached at 16 worked days (1.28), so 13 more', () => {
-    assert.equal(legalShareOfYear({ ...base, daysCounted: 3 }).net, 0.24);
-    assert.equal(legalShareOfYear({ ...base, daysCounted: 15 }).net, 1.2);
-    assert.equal(legalShareOfYear({ ...base, daysCounted: 16 }).net, 1.28);
-    assert.equal(daysToNextLeaveDay({ ...base, daysCounted: 3 }), 13);
+  it('3 days worked: 12 x 3 / 200 = 0.18 now; 1.18 is reached at 20 worked days (1.2), so 17 more', () => {
+    assert.equal(legalShareOfYear({ ...base, daysCounted: 3 }).net, 0.18);
+    assert.equal(legalShareOfYear({ ...base, daysCounted: 19 }).net, 1.14);
+    assert.equal(legalShareOfYear({ ...base, daysCounted: 20 }).net, 1.2);
+    assert.equal(daysToNextLeaveDay({ ...base, daysCounted: 3 }), 17);
   });
 
-  it('13 more days worked add one whole day again (13 -> 1.04, 25 -> 2)', () => {
-    assert.equal(legalShareOfYear({ ...base, daysCounted: 13 }).net, 1.04);
-    assert.equal(legalShareOfYear({ ...base, daysCounted: 25 }).net, 2);
-    assert.equal(daysToNextLeaveDay({ ...base, daysCounted: 13 }), 13);
+  it('13 worked days: 0.78; 1.78 is reached at 30 days (1.8), so 17 more', () => {
+    assert.equal(legalShareOfYear({ ...base, daysCounted: 13 }).net, 0.78);
+    assert.equal(legalShareOfYear({ ...base, daysCounted: 30 }).net, 1.8);
+    assert.equal(daysToNextLeaveDay({ ...base, daysCounted: 13 }), 17);
   });
 
   it('stops at the full year when that comes first', () => {
-    assert.equal(legalShareOfYear({ ...base, daysCounted: 195 }).net, 11.6);
+    assert.equal(legalShareOfYear({ ...base, daysCounted: 195 }).net, 11.7);
     assert.equal(daysToNextLeaveDay({ ...base, daysCounted: 195 }), 5);
     assert.equal(daysToNextLeaveDay({ ...base, daysCounted: 199 }), 1);
     assert.equal(daysToNextLeaveDay({ ...base, daysCounted: 200 }), null);
     assert.equal(daysToNextLeaveDay({ ...base, employedWholeYear: false, daysCounted: 239 }), 1);
   });
 
-  it('seniority year 7: 0 days worked -> 10 (10 x 21 / 200 = 1.05); 1 day worked -> 10 more', () => {
+  it('seniority year 7 (15 days a year): 0 days worked -> 14 (14 x 15 / 200 = 1.05); 1 day worked -> 14 more', () => {
     const year7 = { seniorityYear: 7, weekDays: 5, employedWholeYear: true };
-    assert.equal(daysToNextLeaveDay({ ...year7, daysCounted: 0 }), 10);
-    assert.equal(daysToNextLeaveDay({ ...year7, daysCounted: 1 }), 10);
+    assert.equal(daysToNextLeaveDay({ ...year7, daysCounted: 0 }), 14);
+    assert.equal(daysToNextLeaveDay({ ...year7, daysCounted: 1 }), 14);
   });
 
   it('is returned with the entitlement only while the year is growing', () => {
@@ -518,9 +518,9 @@ describe('days to the next leave day', () => {
 });
 
 describe('days are kept to 2 decimals, not rounded down', () => {
-  it('3 days worked in year 1 give 0.24, 15 give 1.2 and the full year gives the whole table value', () => {
-    assert.equal(legalShareOfYear({ seniorityYear: 1, weekDays: 5, employedWholeYear: true, daysCounted: 3 }).net, 0.24);
-    assert.equal(legalShareOfYear({ seniorityYear: 1, weekDays: 5, employedWholeYear: true, daysCounted: 15 }).net, 1.2);
+  it('3 of 200 days of a 12-day year is 0.18, 15 days is 0.9, and the full year gives the whole table value', () => {
+    assert.equal(legalShareOfYear({ seniorityYear: 1, weekDays: 5, employedWholeYear: true, daysCounted: 3 }).net, 0.18);
+    assert.equal(legalShareOfYear({ seniorityYear: 1, weekDays: 5, employedWholeYear: true, daysCounted: 15 }).net, 0.9);
     assert.equal(legalShareOfYear({ seniorityYear: 1, weekDays: 5, employedWholeYear: true, daysCounted: 200 }).net, 12);
   });
 });
