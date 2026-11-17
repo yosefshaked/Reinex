@@ -23,7 +23,8 @@
  *   - Employed the whole year: 200 days worked or more -> full; fewer -> days / 200 x gross.
  *     Employed part of the year (started or left during it): 240 or more -> full; fewer -> days / 240 x gross.
  *     Paid sick days count as days worked (the system records no sick leave, so callers pass 0).
- *   - The proportional gross figure is rounded down to whole days, then converted to working days.
+ *   - The proportional gross figure is converted to working days and kept to 2 decimals (the law
+ *     rounds down; the owner chose to show the days earned so far exactly, 2026-11-17).
  *   - Hourly / daily workers are covered only after 75 consecutive days of employment.
  *
  * Gross -> net (working days off): every 7 gross days are one week, i.e. 5 (or 6) working days;
@@ -112,11 +113,16 @@ export function seniorityYearIn(startDate, year) {
   return seniority >= 1 ? seniority : null;
 }
 
-/** Working days off contained in `gross` consecutive leave days (see the header). */
+/**
+ * Working days off contained in `gross` consecutive leave days (see the header). A table
+ * conversion: whole numbers of gross days give the whole numbers of the law's tables, and a part of
+ * a day (the days earned so far in a year) converts proportionally, never rounded down here.
+ */
 export function grossToNet(gross, weekDays = 5) {
-  const days = Math.max(0, Math.floor(Number(gross) || 0));
+  const days = Math.max(0, Number(gross) || 0);
   const week = weekDays === 6 ? 6 : 5;
-  return week * Math.floor(days / 7) + Math.min(days % 7, week);
+  const weeks = Math.floor(days / 7);
+  return week * weeks + Math.min(days - 7 * weeks, week);
 }
 
 /** Full-year entitlement by law for a seniority year: { gross, net }. */
@@ -326,14 +332,14 @@ export function daysToNextLeaveDay({ seniorityYear, weekDays, employedWholeYear,
   if (now.reached_full) return null;
   for (let more = 1; counted + more <= now.threshold_days; more += 1) {
     const next = legalShareOfYear({ seniorityYear, weekDays, employedWholeYear, daysCounted: counted + more });
-    if (next.reached_full || next.net >= now.net + 1) return more;
+    if (next.reached_full || next.net >= now.net + 1 - 1e-9) return more;
   }
   return null;
 }
 
 /**
  * The legal share of a year: full from 200 days worked (whole year) or 240 (part of the year);
- * below that the proportional gross figure, rounded down, converted to working days.
+ * below that the proportional gross figure (2 decimals, not rounded down) converted to working days.
  *
  * @param {{ seniorityYear: number, weekDays: number, employedWholeYear: boolean, daysCounted: number }} params
  */
@@ -342,14 +348,14 @@ export function legalShareOfYear({ seniorityYear, weekDays, employedWholeYear, d
   const threshold = employedWholeYear ? FULL_YEAR_THRESHOLD_DAYS : PART_YEAR_THRESHOLD_DAYS;
   const counted = Math.max(0, Math.floor(Number(daysCounted) || 0));
   const reachedFull = counted >= threshold;
-  // Integer arithmetic so 90 x 24 / 240 is exactly 9.
-  const grossEarned = reachedFull ? full.gross : Math.floor((counted * full.gross) / threshold);
+  // Not rounded down: the days earned so far are shown with up to 2 decimals.
+  const grossEarned = reachedFull ? full.gross : round((counted * full.gross) / threshold, 2);
   return {
     threshold_days: threshold,
     gross_full: full.gross,
     full_net: full.net,
     gross_earned: grossEarned,
     reached_full: reachedFull,
-    net: reachedFull ? full.net : grossToNet(grossEarned, weekDays),
+    net: reachedFull ? full.net : round(grossToNet(grossEarned, weekDays), 2),
   };
 }

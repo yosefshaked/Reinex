@@ -161,7 +161,7 @@
           "id": "assert-explain",
           "description": "Plain sentences: the seniority year, a full year's days, the days worked so far and the 200-day rule",
           "action": "waitForSelector",
-          "selector": "[data-leave-explain]:has-text('בשנה מלאה מגיעים'):has-text('שנה מלאה היא 200 ימי עבודה'):has-text('חלקי ימים מעוגלים כלפי מטה')"
+          "selector": "[data-leave-explain]:has-text('בשנה מלאה מגיעים'):has-text('שנה מלאה היא 200 ימי עבודה'):has-text('ימי החופשה מחושבים עד שתי ספרות אחרי הנקודה')"
         },
         {
           "id": "assert-explain-no-legal-wording",
@@ -499,9 +499,9 @@
         { "id": "open-attendance-tab", "action": "click", "selector": "[role='tab']:has-text('נוכחות')" },
         {
           "id": "assert-one-day-counted",
-          "description": "One counted work day (the leave day): 9 more to the 10th, which gives the first leave day",
+          "description": "One counted work day (the leave day, 0.1 earned): 10 more reach 1.1",
           "action": "waitForSelector",
-          "selector": "[data-leave-balance-line]:has-text('עוד 9 ימי עבודה ליום החופשה הבא')"
+          "selector": "[data-leave-balance-line]:has-text('עוד 10 ימי עבודה ליום החופשה הבא')"
         },
         { "id": "open-explain", "action": "click", "selector": "[data-leave-explain-open]" },
         {

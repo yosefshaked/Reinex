@@ -956,14 +956,14 @@ export function computeLeaveSummary({ entitlement = null, balanceEvents = [], ye
 
   return {
     year,
-    quota: Number(quota.toFixed(3)),
-    carryIn: Number(carryIn.toFixed(3)),
-    allocations: Number(allocations.toFixed(3)),
-    adjustments: Number(adjustments.toFixed(3)),
-    used: Number(used.toFixed(3)),
-    remaining: Number(remaining.toFixed(3)),
+    quota: Number(quota.toFixed(2)),
+    carryIn: Number(carryIn.toFixed(2)),
+    allocations: Number(allocations.toFixed(2)),
+    adjustments: Number(adjustments.toFixed(2)),
+    used: Number(used.toFixed(2)),
+    remaining: Number(remaining.toFixed(2)),
     // Everything the year gives: the entitlement plus the manual movements ("מגיעים N ימים").
-    available: Number((remaining + used).toFixed(3)),
+    available: Number((remaining + used).toFixed(2)),
   };
 }
 
