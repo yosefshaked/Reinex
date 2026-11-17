@@ -144,7 +144,10 @@ export default function PayrollMonthTable({ payroll, loading, orgId, session, mo
       {printRequest ? (
         <PrintPortal key={printRequest.id} onDone={() => setPrintRequest(null)}>
           {printRequest.detailed
-            ? (detailedPayroll?.employees || []).map((pay) => (
+            // A page per employee only when there is something to read on it: pay, or a lesson to fix.
+            ? (detailedPayroll?.employees || [])
+              .filter((pay) => Number(pay.total_amount) !== 0 || Number(pay.unmarked_lesson_count) > 0 || Number(pay.missing_rate_lesson_count) > 0)
+              .map((pay) => (
               <PaySummaryPrintSheet key={pay.employee_id} pay={pay} orgName={org?.name} monthLabel={monthLabel} detailed />
             ))
             : (

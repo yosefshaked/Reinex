@@ -184,23 +184,59 @@
    hidden on screen; while it prints, everything else under <body> (the app's chrome) is hidden. */
 .pay-print-root { display: none; }
 @media print {
-  @page { margin: 14mm; }
+  /* A4 portrait. The page number sits in a margin box where the browser supports them (recent
+     Chrome); elsewhere the browser's own print header/footer option can add it. */
+  @page {
+    size: A4 portrait;
+    margin: 14mm 14mm 18mm;
+    @bottom-center { content: "עמוד " counter(page) " מתוך " counter(pages); font: 9pt Arial, sans-serif; color: #666; }
+  }
   body.pay-printing { background: #fff !important; overflow: visible !important; }
   body.pay-printing > *:not(.pay-print-root) { display: none !important; }
-  body.pay-printing .pay-print-root { display: block; color: #000; font-size: 11pt; }
+  body.pay-printing .pay-print-root {
+    display: block; color: #1a1a1a; font: 10.5pt/1.5 Arial, Tahoma, "Noto Sans Hebrew", sans-serif;
+    -webkit-print-color-adjust: exact; print-color-adjust: exact;
+  }
   .pay-print-page { break-after: page; }
-  .pay-print-page:last-child { break-after: auto; }
-  .pay-print-header { margin-bottom: 8mm; }
-  .pay-print-org { font-size: 10pt; color: #444; }
-  .pay-print-header h1 { font-size: 15pt; font-weight: 700; margin: 0; }
-  .pay-print-header h2 { font-size: 13pt; font-weight: 600; margin: 2mm 0 0; }
-  .pay-print-table { width: 100%; border-collapse: collapse; }
-  .pay-print-table td { padding: 1.5mm 0; vertical-align: top; }
-  .pay-print-table td:last-child { text-align: left; white-space: nowrap; font-variant-numeric: tabular-nums; }
-  .pay-print-main td { border-top: 1px solid #ccc; font-weight: 600; }
-  .pay-print-sub td:first-child { padding-inline-start: 6mm; }
+  .pay-print-page:last-of-type { break-after: auto; }
+  .pay-print-header {
+    display: flex; align-items: center; gap: 4mm; margin-bottom: 7mm; padding-bottom: 4mm;
+    border-bottom: 0.8mm solid #4f46e5;
+  }
+  .pay-print-logo { height: 14mm; width: auto; max-width: 30mm; object-fit: contain; }
+  .pay-print-heading { flex: 1; }
+  .pay-print-org { font-size: 10pt; color: #666; }
+  .pay-print-header h1 { font-size: 17pt; font-weight: 700; margin: 0; }
+  .pay-print-header h2 { font-size: 13pt; font-weight: 600; margin: 1mm 0 0; color: #4f46e5; }
+  .pay-print-date { font-size: 9pt; color: #666; white-space: nowrap; align-self: flex-start; }
+  .pay-print-footer {
+    position: fixed; bottom: -12mm; inset-inline: 0; text-align: center;
+    font-size: 9pt; color: #666;
+  }
+  .pay-print-table { width: 100%; border-collapse: collapse; border: 1px solid #d1d5db; }
+  .pay-print-table thead { display: table-header-group; }
+  .pay-print-table tr { break-inside: avoid; }
+  .pay-print-table th {
+    background: #eef0fb; color: #3730a3; font-size: 9.5pt; font-weight: 700;
+    padding: 1.8mm 3mm; border-bottom: 1px solid #c7cbe8; text-align: start;
+  }
+  .pay-print-table td { padding: 1.5mm 3mm; vertical-align: top; border-top: 1px solid #e5e7eb; }
+  .pay-print-table th:last-child, .pay-print-table td:last-child {
+    text-align: left; white-space: nowrap; font-variant-numeric: tabular-nums; width: 32mm;
+  }
+  .pay-print-main td { background: #f3f4f6; border-top: 1px solid #9ca3af; font-weight: 700; }
+  .pay-print-table-flat .pay-print-main td { background: transparent; border-top: 1px solid #e5e7eb; font-weight: 600; }
+  .pay-print-table-flat .pay-print-main:nth-child(even) td { background: #f9fafb; }
+  .pay-print-sub td:first-child { padding-inline-start: 8mm; }
   .pay-print-sub2 td { font-size: 9.5pt; color: #333; }
-  .pay-print-sub2 td:first-child { padding-inline-start: 12mm; }
-  .pay-print-total td { border-top: 2px solid #000; font-weight: 700; font-size: 12pt; }
-  .pay-print-exception td { font-style: italic; }
+  .pay-print-sub2 td:first-child { padding-inline-start: 14mm; }
+  .pay-print-total td {
+    border-top: 0.6mm solid #1a1a1a; border-bottom: 0.6mm solid #1a1a1a;
+    font-weight: 700; font-size: 12.5pt; padding-block: 2.5mm;
+  }
+  /* Exceptions are told apart by their words and their border, not by colour alone:
+     "שימו לב" has a dashed frame, "חסר" a double one. */
+  .pay-print-exception td { font-weight: 700; }
+  .pay-print-exception-warning td { background: #fffbeb; color: #92400e; border-top: 0.5mm dashed #92400e; }
+  .pay-print-exception-danger td { background: #fef2f2; color: #991b1b; border-top: 1.2mm double #991b1b; }
 }

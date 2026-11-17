@@ -1,20 +1,73 @@
-import React, { useEffect, useRef } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { formatCurrency } from '@/lib/currency.js';
+import { authenticatedFetch } from '@/lib/api-client.js';
+import { useOrg } from '@/org/OrgContext.jsx';
 import { buildPayrollTableRows, buildSummaryRows } from '../lib/pay-summary.js';
+
+const PrintContext = createContext({ logoUrl: null, printedAt: '' });
+
+/** "17/11/2026", the day the page was printed. */
+function formatPrintDate(date) {
+  return new Intl.DateTimeFormat('he-IL', { day: '2-digit', month: '2-digit', year: 'numeric' }).format(date);
+}
+
+/** Resolves once the image has loaded (or failed, or 2.5 seconds passed) so the print never waits on it. */
+function preloadImage(url) {
+  return new Promise((resolve) => {
+    const image = new Image();
+    const timer = window.setTimeout(resolve, 2500);
+    const done = () => {
+      window.clearTimeout(timer);
+      resolve();
+    };
+    image.onload = done;
+    image.onerror = done;
+    image.src = url;
+  });
+}
 
 /**
  * Prints its children and nothing else. The content is placed straight under <body> in a
  * container that is hidden on screen; while printing, the print stylesheet in index.css hides every
- * other child of <body> (the app's chrome included). Remount it (a new `key`) to print again.
+ * other child of <body> (the app's chrome included). It fetches the organization's logo (the same
+ * `org-logo` endpoint the sidebar uses) before printing and gives the headers the logo and the print
+ * date. Remount it (a new `key`) to print again.
  */
 export function PrintPortal({ children, onDone }) {
+  const { activeOrgId } = useOrg();
   const onDoneRef = useRef(onDone);
+  const [printedAt] = useState(() => formatPrintDate(new Date()));
+  const [logoUrl, setLogoUrl] = useState(null);
+  const [ready, setReady] = useState(false);
   useEffect(() => {
     onDoneRef.current = onDone;
   }, [onDone]);
 
   useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      let url = null;
+      if (activeOrgId) {
+        try {
+          const data = await authenticatedFetch(`org-logo?org_id=${encodeURIComponent(activeOrgId)}`, { method: 'GET' });
+          url = data?.logo_url || null;
+        } catch {
+          url = null;
+        }
+      }
+      if (url) await preloadImage(url);
+      if (cancelled) return;
+      setLogoUrl(url);
+      setReady(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeOrgId]);
+
+  useEffect(() => {
+    if (!ready) return undefined;
     const { body } = document;
     body.classList.add('pay-printing');
     const finish = () => {
@@ -29,22 +82,30 @@ export function PrintPortal({ children, onDone }) {
       window.removeEventListener('afterprint', finish);
       body.classList.remove('pay-printing');
     };
-  }, []);
+  }, [ready]);
 
   return createPortal(
-    <div className="pay-print-root" dir="rtl" data-pay-print="">
-      {children}
-    </div>,
+    <PrintContext.Provider value={{ logoUrl, printedAt }}>
+      <div className="pay-print-root" dir="rtl" data-pay-print="">
+        {children}
+        <footer className="pay-print-footer">הופק ב-{printedAt}</footer>
+      </div>
+    </PrintContext.Provider>,
     document.body,
   );
 }
 
 function PrintHeader({ orgName, title, monthLabel, employeeName }) {
+  const { logoUrl, printedAt } = useContext(PrintContext);
   return (
     <header className="pay-print-header">
-      {orgName ? <div className="pay-print-org">{orgName}</div> : null}
-      <h1>{title} · {monthLabel}</h1>
-      {employeeName ? <h2>{employeeName}</h2> : null}
+      {logoUrl ? <img className="pay-print-logo" src={logoUrl} alt="" /> : null}
+      <div className="pay-print-heading">
+        {orgName ? <div className="pay-print-org">{orgName}</div> : null}
+        <h1>{title} — {monthLabel}</h1>
+        {employeeName ? <h2>{employeeName}</h2> : null}
+      </div>
+      <div className="pay-print-date">הופק ב-{printedAt}</div>
     </header>
   );
 }
@@ -70,6 +131,12 @@ export function PaySummaryPrintSheet({ pay, orgName, monthLabel, detailed }) {
         employeeName={pay?.employee_name}
       />
       <table className="pay-print-table">
+        <thead>
+          <tr>
+            <th>פריט</th>
+            <th>סכום</th>
+          </tr>
+        </thead>
         <tbody>
           {rows.map((row) => (
             <React.Fragment key={row.key}>
@@ -112,8 +179,8 @@ export function PaySummaryPrintSheet({ pay, orgName, monthLabel, detailed }) {
           </tr>
           {exceptions.map((row) => (
             <React.Fragment key={row.key}>
-              <tr className="pay-print-exception">
-                <td>! {row.label} ({row.note})</td>
+              <tr className={`pay-print-exception pay-print-exception-${row.tone}`}>
+                <td>{row.tone === 'danger' ? 'חסר: ' : 'שימו לב: '}{row.label} ({row.note})</td>
                 <td>{row.amountLabel || (row.amount === null ? '' : formatCurrency(row.amount))}</td>
               </tr>
               {detailed ? <LessonLines lines={row.lessons} /> : null}
@@ -131,7 +198,13 @@ export function PayrollPrintTable({ employees, totalAmount, orgName, monthLabel 
   return (
     <section className="pay-print-page">
       <PrintHeader orgName={orgName} title="סיכום שכר" monthLabel={monthLabel} />
-      <table className="pay-print-table">
+      <table className="pay-print-table pay-print-table-flat">
+        <thead>
+          <tr>
+            <th>עובד</th>
+            <th>סכום</th>
+          </tr>
+        </thead>
         <tbody>
           {rows.map((row) => (
             <tr key={row.id} className="pay-print-main">
