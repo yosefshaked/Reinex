@@ -126,6 +126,75 @@ export function entitlementManualReason(entitlement) {
   return ENTITLEMENT_MANUAL_REASONS[entitlement.reason] || 'אי אפשר לחשב את ימי החופשה לבד. אפשר לקבוע אותם ידנית.';
 }
 
+// "שינוי יתרה": two actions, each with a required reason. The older event types (allocation,
+// correction, reversal) are no longer offered but stay readable in the history.
+export const BALANCE_ACTIONS = [
+  { value: 'carryover', label: 'העברה מהשנה הקודמת', hint: 'מספר חיובי' },
+  { value: 'adjustment', label: 'הוספה או הורדה', hint: 'מוסיף, או מוריד במספר שלילי' },
+];
+
+export const BALANCE_REASON_OPTIONS = [
+  { value: 'previous_system', label: 'מעבר מהמערכת הקודמת' },
+  { value: 'agreed_with_employee', label: 'סוכם עם העובד/ת' },
+  { value: 'mistake_correction', label: 'תיקון טעות' },
+  { value: 'other', label: 'אחר' },
+];
+
+const BALANCE_EVENT_LABELS = {
+  carryover: 'העברה מהשנה הקודמת',
+  adjustment: 'הוספה או הורדה',
+  allocation: 'הקצאה',
+  correction: 'תיקון',
+  reversal: 'היפוך',
+};
+
+export function balanceEventLabel(value) {
+  return BALANCE_EVENT_LABELS[value] || value || 'שינוי';
+}
+
+export function emptyBalanceForm() {
+  return { eventType: 'carryover', quantityDays: '', effectiveDate: '', reason: '', notes: '' };
+}
+
+// What is missing before a balance change can be saved; '' when it can.
+export function balanceFormError(form) {
+  const quantity = Number(form?.quantityDays);
+  if (form?.quantityDays === '' || !Number.isFinite(quantity) || quantity === 0) return 'יש להזין מספר ימים שאינו אפס.';
+  if (form.eventType === 'carryover' && quantity < 0) return 'העברה מהשנה הקודמת היא מספר חיובי.';
+  if (!BALANCE_REASON_OPTIONS.some((option) => option.value === form.reason)) return 'יש לבחור סיבה.';
+  if (form.reason === 'other' && !String(form.notes || '').trim()) return 'כשהסיבה היא "אחר" יש לכתוב אותה.';
+  return '';
+}
+
+export function buildBalanceEventBody(form, { orgId, employeeId, effectiveDate }) {
+  return {
+    entity_type: 'balance_event',
+    org_id: orgId,
+    employee_id: employeeId,
+    event_type: form.eventType,
+    quantity_days: Number(form.quantityDays),
+    effective_date: effectiveDate,
+    reason: form.reason,
+    notes: String(form.notes || '').trim() || null,
+  };
+}
+
+// One manual change in the history: date, action, amount, reason (with its text), who and when.
+export function describeBalanceEvent(entry, formatDate = (value) => value) {
+  const quantity = Number(entry?.quantity_days);
+  const reasonLabel = BALANCE_REASON_OPTIONS.find((option) => option.value === entry?.metadata?.reason)?.label || '';
+  let reason = [reasonLabel, entry?.notes].filter(Boolean).join(' - ');
+  if (reasonLabel === 'אחר') reason = `אחר: ${entry?.notes || ''}`;
+  if (!reasonLabel) reason = entry?.notes || '';
+  const created = entry?.created_at ? formatDate(String(entry.created_at).slice(0, 10)) : '';
+  const who = [entry?.created_by_name, created].filter(Boolean).join(' · ');
+  return {
+    title: `${formatDate(entry?.effective_date)} · ${balanceEventLabel(entry?.event_type)} · ${quantity > 0 ? '+' : ''}${quantity}`,
+    reason,
+    who,
+  };
+}
+
 // The leave balance from GET /api/employee-leave (computeLeaveSummary + computeLeaveEntitlement), as
 // one line plus the figures shown on hover. `currentYear` decides between "השנה" and the year.
 export function leaveBalanceText(summary, entitlement = null, currentYear = null) {

@@ -17,22 +17,16 @@ import { toast } from '@/lib/toast.jsx';
 import { authenticatedFetch } from '@/lib/api-client.js';
 import { todayKey } from '@/lib/local-time.js';
 import {
+  BALANCE_ACTIONS,
+  BALANCE_REASON_OPTIONS,
+  balanceFormError,
+  buildBalanceEventBody,
+  describeBalanceEvent,
+  emptyBalanceForm,
   entitlementManualReason,
   leaveBalanceText,
   leaveEntitlementExplanation,
 } from './attendance-month-grid.js';
-
-const BALANCE_EVENT_TYPES = [
-  { value: 'allocation', label: 'הקצאה', effect: 'מוסיף ימים' },
-  { value: 'carryover', label: 'צבירה משנה קודמת', effect: 'מוסיף ימים' },
-  { value: 'adjustment', label: 'התאמה', effect: 'מוסיף, או מוריד במספר שלילי' },
-  { value: 'correction', label: 'תיקון', effect: 'מוסיף, או מוריד במספר שלילי' },
-  { value: 'reversal', label: 'היפוך', effect: 'מוסיף, או מוריד במספר שלילי' },
-];
-
-function balanceEventLabel(value) {
-  return BALANCE_EVENT_TYPES.find((option) => option.value === value)?.label || value || 'שינוי';
-}
 
 // Usage rows are written by recording leave; only the office's own movements can be removed here.
 function isManualBalanceEvent(entry) {
@@ -49,7 +43,7 @@ export default function LeaveBalanceLine({ summary, entitlement, balanceEvents, 
   const employeeId = employee?.id;
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({ eventType: 'carryover', quantityDays: '', effectiveDate: '', notes: '' });
+  const [form, setForm] = useState(emptyBalanceForm());
   const text = leaveBalanceText(summary, entitlement, Number(todayKey().slice(0, 4)));
   if (!text) return null;
   const manualReason = entitlementManualReason(entitlement);
@@ -59,6 +53,8 @@ export default function LeaveBalanceLine({ summary, entitlement, balanceEvents, 
   const manualEvents = (balanceEvents || [])
     .filter((entry) => isManualBalanceEvent(entry) && String(entry.effective_date || '').startsWith(yearPrefix));
   const effectiveDate = form.effectiveDate || `${summary.year}-01-01`;
+  const formError = balanceFormError(form);
+  const actionHint = BALANCE_ACTIONS.find((option) => option.value === form.eventType)?.hint || '';
 
   async function handleAdd() {
     setSaving(true);
@@ -66,17 +62,9 @@ export default function LeaveBalanceLine({ summary, entitlement, balanceEvents, 
       await authenticatedFetch('employee-leave', {
         session,
         method: 'POST',
-        body: {
-          entity_type: 'balance_event',
-          org_id: orgId,
-          employee_id: employeeId,
-          event_type: form.eventType,
-          quantity_days: Number(form.quantityDays),
-          effective_date: effectiveDate,
-          notes: form.notes || null,
-        },
+        body: buildBalanceEventBody(form, { orgId, employeeId, effectiveDate }),
       });
-      setForm({ eventType: 'carryover', quantityDays: '', effectiveDate: '', notes: '' });
+      setForm(emptyBalanceForm());
       toast.success('שינוי היתרה נשמר.');
       await onChanged?.();
     } catch (error) {
@@ -133,36 +121,39 @@ export default function LeaveBalanceLine({ summary, entitlement, balanceEvents, 
         <PopoverContent dir="rtl" align="start" className="w-80 max-w-[calc(100vw-2rem)] space-y-3">
           <div>
             <p className="text-sm font-bold text-slate-900">שינויי יתרה ידניים · {summary.year}</p>
-            <p className="text-xs text-slate-500">הקצאה, צבירה או תיקון שלא באים מרישום חופשה.</p>
+            <p className="text-xs text-slate-500">העברה מהשנה הקודמת, או הוספה והורדה של ימים. כל שינוי נרשם עם סיבה.</p>
           </div>
           {manualEvents.length ? (
             <ul className="space-y-1">
-              {manualEvents.map((entry) => (
-                <li key={entry.id} className="flex items-center justify-between gap-2 text-xs">
-                  <span title={entry.notes || undefined}>
-                    {formatDateKey(entry.effective_date)} · {balanceEventLabel(entry.event_type)} · <bdi dir="ltr">{Number(entry.quantity_days) > 0 ? '+' : ''}{Number(entry.quantity_days)}</bdi>
+              {manualEvents.map((entry) => {
+                const line = describeBalanceEvent(entry, formatDateKey);
+                return (
+                <li key={entry.id} className="flex items-center justify-between gap-2 text-xs" data-balance-event>
+                  <span>
+                    <bdi dir="ltr">{line.title}</bdi>
+                    {line.reason ? <span className="block text-slate-600">{line.reason}</span> : null}
+                    {line.who ? <span className="block text-[11px] text-slate-500">{line.who}</span> : null}
                   </span>
                   <Button type="button" size="sm" variant="ghost" className="h-6 px-2 text-xs" onClick={() => handleRemove(entry.id)} disabled={saving}>הסרה</Button>
                 </li>
-              ))}
+                );
+              })}
             </ul>
           ) : null}
           <div className="grid grid-cols-2 gap-2">
             <div className="space-y-1">
-              <Label className="text-xs text-slate-600">סוג</Label>
+              <Label htmlFor="balance-action" className="text-xs text-slate-600">פעולה</Label>
               <Select value={form.eventType} onValueChange={(value) => setForm((current) => ({ ...current, eventType: value }))} disabled={saving}>
-                <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
+                <SelectTrigger id="balance-action" className="h-8"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {BALANCE_EVENT_TYPES.map((option) => (
-                    <SelectItem key={option.value} value={option.value}>
-                      {option.label} <span className="text-[11px] text-slate-500">· {option.effect}</span>
-                    </SelectItem>
+                  {BALANCE_ACTIONS.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
             <div className="space-y-1">
-              <Label htmlFor="balance-quantity" className="text-xs text-slate-600">ימים</Label>
+              <Label htmlFor="balance-quantity" className="text-xs text-slate-600">ימים · {actionHint}</Label>
               <Input id="balance-quantity" className="h-8" type="number" step="0.5" value={form.quantityDays} onChange={(event) => setForm((current) => ({ ...current, quantityDays: event.target.value }))} disabled={saving} />
             </div>
             <div className="space-y-1">
@@ -170,11 +161,24 @@ export default function LeaveBalanceLine({ summary, entitlement, balanceEvents, 
               <Input id="balance-date" className="h-8" type="date" value={effectiveDate} onChange={(event) => setForm((current) => ({ ...current, effectiveDate: event.target.value }))} disabled={saving} />
             </div>
             <div className="space-y-1">
-              <Label htmlFor="balance-notes" className="text-xs text-slate-600">הערה</Label>
-              <Input id="balance-notes" className="h-8" value={form.notes} onChange={(event) => setForm((current) => ({ ...current, notes: event.target.value }))} disabled={saving} />
+              <Label htmlFor="balance-reason" className="text-xs text-slate-600">סיבה (חובה)</Label>
+              <Select value={form.reason} onValueChange={(value) => setForm((current) => ({ ...current, reason: value }))} disabled={saving}>
+                <SelectTrigger id="balance-reason" className="h-8"><SelectValue placeholder="בחירת סיבה" /></SelectTrigger>
+                <SelectContent>
+                  {BALANCE_REASON_OPTIONS.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
+            {form.reason === 'other' ? (
+              <div className="col-span-2 space-y-1">
+                <Label htmlFor="balance-notes" className="text-xs text-slate-600">מה הסיבה?</Label>
+                <Input id="balance-notes" className="h-8" value={form.notes} onChange={(event) => setForm((current) => ({ ...current, notes: event.target.value }))} disabled={saving} />
+              </div>
+            ) : null}
           </div>
-          <Button type="button" size="sm" onClick={handleAdd} disabled={saving || form.quantityDays === ''}>
+          <Button type="button" size="sm" onClick={handleAdd} disabled={saving || Boolean(formError)} title={formError || undefined}>
             {saving ? <Loader2 className="me-2 h-4 w-4 animate-spin" /> : null}
             הוספה
           </Button>

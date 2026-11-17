@@ -35,9 +35,11 @@ import {
   needsDaysWorked,
 } from '../_shared/leave-entitlement.js';
 import { loadWorkedDates } from '../_shared/pay-calculation.js';
+import { OFFERED_BALANCE_EVENT_TYPES, readBalanceReason } from '../_shared/leave-balance-reason.js';
 
 const MAX_BODY_BYTES = 64 * 1024;
-const MUTABLE_BALANCE_EVENT_TYPES = new Set(['allocation', 'carryover', 'adjustment', 'reversal', 'correction']);
+// Only these two are offered for a new manual change; rows of the older types stay readable and removable.
+const MUTABLE_BALANCE_EVENT_TYPES = new Set(OFFERED_BALANCE_EVENT_TYPES);
 
 async function respondTrackedLeaveError(context, status, message, error, metadata = {}) {
   return respondTracked(context, status, { message }, undefined, {
@@ -145,7 +147,15 @@ async function fetchBalanceEvents(client, orgId, employeeId) {
     throw error;
   }
 
-  return data || [];
+  // Who made a manual change: the name of the employee row of the user who created it, when there is one.
+  const rows = data || [];
+  const creatorIds = Array.from(new Set(rows.map((row) => row.created_by).filter(Boolean)));
+  if (creatorIds.length === 0) return rows;
+  const { data: people } = await withOrgScope(client, 'Employees', orgId)
+    .select('user_id, first_name, last_name')
+    .in('user_id', creatorIds);
+  const nameByUser = new Map((people || []).map((person) => [person.user_id, [person.first_name, person.last_name].filter(Boolean).join(' ')]));
+  return rows.map((row) => ({ ...row, created_by_name: nameByUser.get(row.created_by) || null }));
 }
 
 async function fetchBalanceEvent(client, orgId, balanceEventId) {
@@ -618,13 +628,14 @@ async function handleBalanceEventUpsert(context, client, orgId, body, userId, me
   const employeeId = normalizeString(body?.employee_id);
   const eventType = normalizeBalanceEventType(body?.event_type);
   const effectiveDate = normalizeString(body?.effective_date);
-  const notes = normalizeString(body?.notes) || null;
   const quantityDays = Number(body?.quantity_days);
   const leaveType = normalizeLeaveType(body?.leave_type) || 'employee_paid';
 
   if (!employeeId) {
     return respond(context, 400, { message: 'missing_employee_id' });
   }
+  const reasonResult = readBalanceReason(body);
+  const notes = reasonResult.notes || null;
   if (!eventType) {
     return respond(context, 400, { message: 'invalid_balance_event_type' });
   }
@@ -634,8 +645,11 @@ async function handleBalanceEventUpsert(context, client, orgId, body, userId, me
   if (!Number.isFinite(quantityDays) || quantityDays === 0) {
     return respond(context, 400, { message: 'invalid_quantity_days' });
   }
-  if ((eventType === 'allocation' || eventType === 'carryover') && quantityDays < 0) {
+  if (eventType === 'carryover' && quantityDays < 0) {
     return respond(context, 400, { message: 'balance_event_requires_positive_quantity' });
+  }
+  if (reasonResult.error) {
+    return respond(context, 400, { message: reasonResult.error });
   }
 
   const employeeCheck = await respondUnlessEmployeeInOrg(context, client, orgId, employeeId, userId);
@@ -668,9 +682,10 @@ async function handleBalanceEventUpsert(context, client, orgId, body, userId, me
     quantity_days: quantityDays,
     effective_date: effectiveDate,
     notes,
-    metadata: body?.metadata && typeof body.metadata === 'object'
-      ? body.metadata
-      : {},
+    metadata: {
+      ...(body?.metadata && typeof body.metadata === 'object' ? body.metadata : {}),
+      reason: reasonResult.reason,
+    },
   };
 
   try {

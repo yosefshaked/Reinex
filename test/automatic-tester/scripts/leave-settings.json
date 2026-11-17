@@ -509,7 +509,74 @@
           "action": "waitForSelector",
           "selector": "[data-leave-explain]:has-text('יום חופשה בתשלום')"
         },
-        { "id": "close-explain", "action": "pressKey", "key": "Escape" }
+        { "id": "close-explain", "action": "pressKey", "key": "Escape" },
+        {
+          "id": "refuse-balance-change-without-reason",
+          "description": "A manual balance change without a reason is refused (400 missing_balance_reason)",
+          "action": "apiCall",
+          "method": "POST",
+          "endpoint": "/api/employee-leave",
+          "ignoreStatus": [400],
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "entity_type": "balance_event",
+            "employee_id": "{{LEAVE_INSTRUCTOR_ID}}",
+            "event_type": "carryover",
+            "quantity_days": 2,
+            "effective_date": "{{CURRENT_MONTH_FIRST_DAY}}"
+          }
+        },
+        {
+          "id": "refuse-other-without-text",
+          "description": "\"אחר\" without text is refused (400 missing_balance_reason_text)",
+          "action": "apiCall",
+          "method": "POST",
+          "endpoint": "/api/employee-leave",
+          "ignoreStatus": [400],
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "entity_type": "balance_event",
+            "employee_id": "{{LEAVE_INSTRUCTOR_ID}}",
+            "event_type": "adjustment",
+            "quantity_days": -1,
+            "effective_date": "{{CURRENT_MONTH_FIRST_DAY}}",
+            "reason": "other"
+          }
+        },
+        {
+          "id": "refuse-old-event-type",
+          "description": "The older event types are no longer accepted for a new row (400 invalid_balance_event_type)",
+          "action": "apiCall",
+          "method": "POST",
+          "endpoint": "/api/employee-leave",
+          "ignoreStatus": [400],
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "entity_type": "balance_event",
+            "employee_id": "{{LEAVE_INSTRUCTOR_ID}}",
+            "event_type": "allocation",
+            "quantity_days": 2,
+            "effective_date": "{{CURRENT_MONTH_FIRST_DAY}}",
+            "reason": "agreed_with_employee"
+          }
+        },
+        { "id": "open-balance-change", "action": "click", "selector": "button:has-text('שינוי יתרה')" },
+        { "id": "fill-quantity", "action": "fill", "selector": "#balance-quantity", "value": "2" },
+        {
+          "id": "assert-add-disabled-without-reason",
+          "action": "assert",
+          "type": "visible",
+          "selector": "[role='dialog'] button:has-text('הוספה')[disabled]"
+        },
+        { "id": "open-reason", "action": "click", "selector": "#balance-reason" },
+        { "id": "choose-reason", "action": "click", "selector": "[role='option']:has-text('מעבר מהמערכת הקודמת')" },
+        { "id": "add-balance-change", "action": "click", "selector": "[role='dialog'] button:has-text('הוספה'):not([disabled])" },
+        {
+          "id": "assert-history-shows-reason",
+          "description": "The change is listed with its reason",
+          "action": "waitForSelector",
+          "selector": "[data-balance-event]:has-text('העברה מהשנה הקודמת'):has-text('מעבר מהמערכת הקודמת')"
+        }
       ]
     },
 
