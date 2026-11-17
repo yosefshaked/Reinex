@@ -112,7 +112,7 @@ export default async function (context, req) {
     const resolvedStart = isYmdDate(startDate) ? startDate : firstDayOfMonth(defaultMonthDate);
     const resolvedEnd = isYmdDate(endDate) ? endDate : lastDayOfMonth(resolvedStart);
 
-    const employeeResult = await resolveEmployeeRecord(supabase, {
+    const employeeResult = await resolveEmployeeRecord(supabase, orgId, {
       employeeId,
       userId,
       canManageAll,
@@ -132,8 +132,8 @@ export default async function (context, req) {
     let records, leaveDays, lessons;
     try {
       [records, leaveDays, lessons] = await Promise.all([
-        fetchAttendanceRecords(supabase, { employeeId: employee.id, startDate: resolvedStart, endDate: resolvedEnd }),
-        fetchApprovedLeaveDays(supabase, { employeeId: employee.id, startDate: resolvedStart, endDate: resolvedEnd }),
+        fetchAttendanceRecords(supabase, orgId, { employeeId: employee.id, startDate: resolvedStart, endDate: resolvedEnd }),
+        fetchApprovedLeaveDays(supabase, orgId, { employeeId: employee.id, startDate: resolvedStart, endDate: resolvedEnd }),
         loadCountedLessons(supabase, orgId, { employeeId: employee.id, startDate: resolvedStart, endDate: resolvedEnd }),
       ]);
     } catch (loadError) {
@@ -186,7 +186,17 @@ export default async function (context, req) {
       return respond(context, 400, { message: 'invalid_other_minutes' });
     }
 
-    const conflict = await assertNoLeaveForAttendance(supabase, {
+    // An employee of another organisation is not found here, before anything about them is read.
+    const targetEmployee = await resolveEmployeeRecord(supabase, orgId, { employeeId, userId, canManageAll });
+    if (targetEmployee.error === 'employee_not_found') {
+      return respond(context, 404, { message: 'employee_not_found' });
+    }
+    if (targetEmployee.error) {
+      context.log?.error?.('employee-attendance failed to resolve employee', { employeeId, message: targetEmployee.error?.message });
+      return respond(context, 500, { message: 'failed_to_load_employee' });
+    }
+
+    const conflict = await assertNoLeaveForAttendance(supabase, orgId, {
       employeeId,
       date: attendanceDate,
       excludeEntryId: '',

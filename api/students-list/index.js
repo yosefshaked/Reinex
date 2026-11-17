@@ -319,7 +319,7 @@ function extractStudentId(context, req, body) {
 }
 
 async function findStudentByIdentityNumber(client, orgId, identityNumber, { excludeId } = {}) {
-  const { data: clientProfile, error } = await findClientProfileByIdentityNumber(client, identityNumber);
+  const { data: clientProfile, error } = await findClientProfileByIdentityNumber(client, identityNumber, { orgId });
   if (error || !clientProfile?.id) {
     return { data: null, error };
   }
@@ -366,7 +366,7 @@ async function fetchPrimaryGuardian(client, orgId, studentId) {
     .maybeSingle();
   if (studentError) return { guardian: null, error: studentError };
   if (!student?.client_profile_id) return { guardian: null, error: null };
-  return fetchPrimaryGuardianForClientProfile(client, student.client_profile_id);
+  return fetchPrimaryGuardianForClientProfile(client, orgId, student.client_profile_id);
 }
 
 function parseTimeToMinutes(value) {
@@ -1131,7 +1131,7 @@ export default async function handler(context, req) {
       // Non-admin instructors can only view their own students
       if (!canManageRoster) {
         const { studentIds: instructorStudentIds, error: accessError } =
-          await fetchStudentIdsByInstructor(supabase, userId);
+          await fetchStudentIdsByInstructor(supabase, userId, { orgId });
         if (accessError) {
           context.log?.error?.('students-list failed to verify instructor student access', {
             message: accessError.message,
@@ -1245,6 +1245,7 @@ export default async function handler(context, req) {
       const { studentIds, error: lessonError } = await fetchStudentIdsByInstructor(
         supabase,
         instructorFilterId,
+        { orgId },
       );
 
       if (lessonError) {
@@ -1301,7 +1302,7 @@ export default async function handler(context, req) {
 
       let matchingClientProfileIds = null;
       if (studentSearch.hasQuery) {
-        const { ids, error: searchError } = await fetchMatchingStudentClientProfileIds(supabase, studentSearch, { limit: 5000 });
+        const { ids, error: searchError } = await fetchMatchingStudentClientProfileIds(supabase, orgId, studentSearch, { limit: 5000 });
         if (searchError) {
           context.log?.error?.('students-list failed to query client profiles for search', { message: searchError.message });
           return respondStudentsListError(context, 500, 'failed_to_load_students', searchError, {
@@ -1626,7 +1627,7 @@ export default async function handler(context, req) {
     }
 
     const { data: clientProfilesAfterCreate } = await fetchClientProfilesByIds(supabase, orgId, [clientProfileResult.clientProfileId]);
-    const { guardian } = await fetchPrimaryGuardianForClientProfile(supabase, clientProfileResult.clientProfileId);
+    const { guardian } = await fetchPrimaryGuardianForClientProfile(supabase, orgId, clientProfileResult.clientProfileId);
     const responsePayload = mergeStudentWithClientProfile(
       data,
       clientProfilesAfterCreate.get(clientProfileResult.clientProfileId) || null,
@@ -1752,6 +1753,7 @@ export default async function handler(context, req) {
 
     if (desiredIdentityNumber) {
       const { data: conflict, error: lookupError } = await findClientProfileByIdentityNumber(supabase, desiredIdentityNumber, {
+        orgId,
         excludeId: existingStudent.client_profile_id,
       });
 
@@ -2015,7 +2017,7 @@ export default async function handler(context, req) {
   const mergedResponse = mergeStudentWithClientProfile(
     data,
     clientProfileAfterUpdate || clientProfilesAfterUpdate.get(existingStudent.client_profile_id) || null,
-    (await fetchPrimaryGuardianForClientProfile(supabase, existingStudent.client_profile_id)).guardian || null,
+    (await fetchPrimaryGuardianForClientProfile(supabase, orgId, existingStudent.client_profile_id)).guardian || null,
   );
 
   if (

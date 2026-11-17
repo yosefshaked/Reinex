@@ -369,6 +369,7 @@ export default async function legacyImport(context, req) {
 
   const metadataResult = await buildSessionMetadata({
     tenantClient: supabase,
+    orgId,
     userId,
     role,
     source: 'legacy_import',

@@ -43,7 +43,8 @@ export async function ensureCapacity(context, tenantClient, { orgId, key, newEnt
     const { data, error } = await tenantClient
       .from('Settings')
       .select('settings_value')
-      .eq('key', key);
+      .eq('key', key)
+      .eq('org_id', orgId);
 
     if (error) {
       context.log?.warn?.('history-quota failed to compute current size', { key, message: error.message });

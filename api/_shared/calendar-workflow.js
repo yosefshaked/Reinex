@@ -99,6 +99,11 @@ function evaluateParticipantSettlement(participant, context) {
   };
 }
 
+/**
+ * The closure state of one lesson. The lesson is read by id and everything under it (participants,
+ * locks, charges, claim batches) is read in the lesson's own organisation, so nothing of another
+ * organisation is mixed in. Callers pass an id they already read in the request's organisation.
+ */
 export async function loadLessonWorkflowState(tenantClient, lessonInstanceId) {
   const normalizedLessonInstanceId = normalizeString(lessonInstanceId);
   if (!normalizedLessonInstanceId) {
@@ -118,8 +123,7 @@ export async function loadLessonWorkflowState(tenantClient, lessonInstanceId) {
     return null;
   }
 
-  const { data: participants, error: participantsError } = await tenantClient
-    .from('lesson_participants')
+  const { data: participants, error: participantsError } = await withOrgScope(tenantClient, 'lesson_participants', instance.org_id)
     .select('id, lesson_instance_id, student_id, participant_status, metadata')
     .eq('lesson_instance_id', normalizedLessonInstanceId);
 
@@ -138,19 +142,16 @@ export async function loadLessonWorkflowState(tenantClient, lessonInstanceId) {
     openTaskGroups,
   ] = await Promise.all([
     loadFinancePolicies(tenantClient, instance.org_id, { asOf: localDateKey(instance.datetime_start) || todayKey() }),
-    tenantClient
-      .from('instance_locks')
+    withOrgScope(tenantClient, 'instance_locks', instance.org_id)
       .select('id, lesson_instance_id, lock_source_type, lock_source_id, metadata')
       .eq('lesson_instance_id', normalizedLessonInstanceId),
     participantIds.length > 0
-      ? tenantClient
-        .from('participant_locks')
+      ? withOrgScope(tenantClient, 'participant_locks', instance.org_id)
         .select('id, lesson_participant_id, lock_source_type, lock_source_id, metadata')
         .in('lesson_participant_id', participantIds)
       : Promise.resolve({ data: [], error: null }),
     participantIds.length > 0
-      ? tenantClient
-        .from('ledger_transactions')
+      ? withOrgScope(tenantClient, 'ledger_transactions', instance.org_id)
         .select('id, lesson_participant_id, direction, source_type, amount, hmo_provider_id, metadata')
         .in('lesson_participant_id', participantIds)
         .in('source_type', LESSON_BILLING_USAGE_TYPES)
@@ -178,14 +179,12 @@ export async function loadLessonWorkflowState(tenantClient, lessonInstanceId) {
 
   const [{ data: claimBatches, error: claimBatchesError }, { data: hmoInvoiceBatches, error: hmoInvoiceBatchesError }] = await Promise.all([
     claimBatchIds.length > 0
-      ? tenantClient
-        .from('claim_batches')
+      ? withOrgScope(tenantClient, 'claim_batches', instance.org_id)
         .select('id, status, submitted_at, paid_at')
         .in('id', claimBatchIds)
       : Promise.resolve({ data: [], error: null }),
     claimBatchIds.length > 0
-      ? tenantClient
-        .from('hmo_invoice_batches')
+      ? withOrgScope(tenantClient, 'hmo_invoice_batches', instance.org_id)
         .select('id, status, submitted_at, issued_at, paid_at')
         .in('id', claimBatchIds)
       : Promise.resolve({ data: [], error: null }),

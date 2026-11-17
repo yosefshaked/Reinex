@@ -127,13 +127,15 @@ function buildBreakdown({
   };
 }
 
-async function loadServiceForInstance(tenantClient, instance) {
+async function loadServiceForInstance(tenantClient, orgId, instance) {
   if (!instance?.service_id) {
     return null;
   }
+  if (!normalizeString(orgId)) {
+    throw new Error('loadServiceForInstance needs the organisation id');
+  }
 
-  const { data, error } = await tenantClient
-    .from('Services')
+  const { data, error } = await withOrgScope(tenantClient, 'Services', orgId)
     .select('id, name, default_customer_charge_amount')
     .eq('id', instance.service_id)
     .maybeSingle();
@@ -163,7 +165,7 @@ export async function buildBillingDecision({
   service: providedService = null,
   coverageDecision: providedCoverageDecision = null,
 }) {
-  const service = providedService || (tenantClient ? await loadServiceForInstance(tenantClient, instance) : null);
+  const service = providedService || (tenantClient ? await loadServiceForInstance(tenantClient, orgId, instance) : null);
   const coverageDecision = providedCoverageDecision || (participant?.student_id && tenantClient
     ? await resolveLessonCoverageDecision(tenantClient, {
       orgId,

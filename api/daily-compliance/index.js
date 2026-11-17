@@ -180,6 +180,7 @@ export default async function (context, req) {
 
   const colorsResult = await ensureInstructorColors(supabase, {
     context,
+    orgId,
     columns: 'id, name, metadata, is_active',
   })
 

@@ -312,9 +312,26 @@ export function financePoliciesOnDate(policies, dateKey) {
   return policies && typeof policies.onDate === 'function' && dateKey ? policies.onDate(dateKey) : policies;
 }
 
-export async function resolveEmployeeRecord(tenantClient, { employeeId, userId, canManageAll = false }) {
-  let query = tenantClient
-    .from('Employees')
+/**
+ * The org id a tenant read is scoped to. Every helper here reads through withOrgScope, so a missing
+ * org id is a bug in the caller, never "all organisations".
+ */
+function requireOrgId(orgId, helperName) {
+  const normalized = normalizeString(orgId);
+  if (!normalized) {
+    throw new Error(`${helperName} needs the organisation id`);
+  }
+  return normalized;
+}
+
+/**
+ * The employee a request is about, in the organisation the user is signed in to. An employee of
+ * another organisation is "not found", even when the id exists there: the same person can be an
+ * employee of several organisations, each with its own row.
+ */
+export async function resolveEmployeeRecord(tenantClient, orgId, { employeeId, userId, canManageAll = false }) {
+  const scopedOrgId = requireOrgId(orgId, 'resolveEmployeeRecord');
+  let query = withOrgScope(tenantClient, 'Employees', scopedOrgId)
     .select('id, user_id, first_name, last_name, employee_type, start_date, annual_leave_days, leave_pay_method, employment_scope, working_days')
     .limit(1);
 
@@ -341,14 +358,14 @@ export async function resolveEmployeeRecord(tenantClient, { employeeId, userId, 
   return { employee };
 }
 
-export async function loadInstructorProfilesMap(tenantClient, employeeIds = []) {
+export async function loadInstructorProfilesMap(tenantClient, orgId, employeeIds = []) {
+  const scopedOrgId = requireOrgId(orgId, 'loadInstructorProfilesMap');
   const ids = Array.from(new Set((employeeIds || []).map((id) => normalizeString(id)).filter(Boolean)));
   if (ids.length === 0) {
     return new Map();
   }
 
-  const { data, error } = await tenantClient
-    .from('instructor_profiles')
+  const { data, error } = await withOrgScope(tenantClient, 'instructor_profiles', scopedOrgId)
     .select('employee_id, break_time_minutes, metadata')
     .in('employee_id', ids);
 
@@ -406,14 +423,14 @@ export function normalizeServicePaymentModel(value) {
   return SERVICE_PAYMENT_MODELS.has(normalized) ? normalized : 'fixed_rate';
 }
 
-export async function loadGraceCancellationParticipantIds(tenantClient, participantIds = []) {
+export async function loadGraceCancellationParticipantIds(tenantClient, orgId, participantIds = []) {
+  const scopedOrgId = requireOrgId(orgId, 'loadGraceCancellationParticipantIds');
   const ids = Array.from(new Set((participantIds || []).map((participantId) => normalizeString(participantId)).filter(Boolean)));
   if (ids.length === 0) {
     return new Set();
   }
 
-  const { data: graceRows, error: graceRowsError } = await tenantClient
-    .from('grace_cancellation_requests')
+  const { data: graceRows, error: graceRowsError } = await withOrgScope(tenantClient, 'grace_cancellation_requests', scopedOrgId)
     .select('lesson_participant_id')
     .in('lesson_participant_id', ids);
 
@@ -656,15 +673,15 @@ export function buildLeaveDayRows({
   }));
 }
 
-export async function fetchApprovedLeaveDays(tenantClient, { employeeId, startDate, endDate, excludeEntryId = '' }) {
+export async function fetchApprovedLeaveDays(tenantClient, orgId, { employeeId, startDate, endDate, excludeEntryId = '' }) {
+  const scopedOrgId = requireOrgId(orgId, 'fetchApprovedLeaveDays');
   const startKey = localDateKey(startDate);
   const endKey = localDateKey(endDate);
   if (!employeeId || !startKey || !endKey) {
     return [];
   }
 
-  const { data: leaveDays, error: leaveDayError } = await tenantClient
-    .from('employee_leave_days')
+  const { data: leaveDays, error: leaveDayError } = await withOrgScope(tenantClient, 'employee_leave_days', scopedOrgId)
     .select('id, leave_entry_id, employee_id, leave_date, day_portion, leave_type, balance_days_delta, pay_fraction, metadata')
     .eq('employee_id', employeeId)
     .gte('leave_date', startKey)
@@ -683,8 +700,7 @@ export async function fetchApprovedLeaveDays(tenantClient, { employeeId, startDa
   }
 
   const entryIds = Array.from(new Set(leaveDays.map((row) => row.leave_entry_id).filter(Boolean)));
-  const { data: entries, error: entriesError } = await tenantClient
-    .from('employee_leave_entries')
+  const { data: entries, error: entriesError } = await withOrgScope(tenantClient, 'employee_leave_entries', scopedOrgId)
     .select('id, employee_id, leave_type, status, duration_mode, half_day_part, start_date, end_date, reason, notes, source_type, approved_by, created_by, updated_by, created_at, updated_at, metadata')
     .in('id', entryIds);
 
@@ -701,15 +717,15 @@ export async function fetchApprovedLeaveDays(tenantClient, { employeeId, startDa
     .filter((day) => day.entry?.status === 'approved' && day.leave_entry_id !== excludeEntryId);
 }
 
-export async function fetchAttendanceRecords(tenantClient, { employeeId, startDate, endDate }) {
+export async function fetchAttendanceRecords(tenantClient, orgId, { employeeId, startDate, endDate }) {
+  const scopedOrgId = requireOrgId(orgId, 'fetchAttendanceRecords');
   const startKey = localDateKey(startDate);
   const endKey = localDateKey(endDate);
   if (!employeeId || !startKey || !endKey) {
     return [];
   }
 
-  const { data, error } = await tenantClient
-    .from('employee_attendance_records')
+  const { data, error } = await withOrgScope(tenantClient, 'employee_attendance_records', scopedOrgId)
     .select('id, employee_id, attendance_date, status, other_minutes, notes, source_type, created_by, updated_by, created_at, updated_at, metadata')
     .eq('employee_id', employeeId)
     .gte('attendance_date', startKey)
@@ -726,7 +742,8 @@ export async function fetchAttendanceRecords(tenantClient, { employeeId, startDa
   return data || [];
 }
 
-export async function fetchLessonConflicts(tenantClient, { employeeId, startDate, endDate, excludeInstanceId = '' }) {
+export async function fetchLessonConflicts(tenantClient, orgId, { employeeId, startDate, endDate, excludeInstanceId = '' }) {
+  const scopedOrgId = requireOrgId(orgId, 'fetchLessonConflicts');
   const startKey = localDateKey(startDate);
   const endKey = localDateKey(endDate);
   if (!employeeId || !startKey || !endKey) {
@@ -738,8 +755,7 @@ export async function fetchLessonConflicts(tenantClient, { employeeId, startDate
     return [];
   }
 
-  const { data, error } = await tenantClient
-    .from('lesson_instances')
+  const { data, error } = await withOrgScope(tenantClient, 'lesson_instances', scopedOrgId)
     .select('id, datetime_start, duration_minutes, status, service_id')
     .eq('instructor_employee_id', employeeId)
     .gte('datetime_start', rangeBounds.startIso)
@@ -761,8 +777,8 @@ export async function fetchLessonConflicts(tenantClient, { employeeId, startDate
   ));
 }
 
-export async function assertNoLeaveForAttendance(tenantClient, { employeeId, date, excludeEntryId = '' }) {
-  const rows = await fetchApprovedLeaveDays(tenantClient, {
+export async function assertNoLeaveForAttendance(tenantClient, orgId, { employeeId, date, excludeEntryId = '' }) {
+  const rows = await fetchApprovedLeaveDays(tenantClient, orgId, {
     employeeId,
     startDate: date,
     endDate: date,
@@ -780,8 +796,8 @@ export async function assertNoLeaveForAttendance(tenantClient, { employeeId, dat
   };
 }
 
-export async function assertNoLeaveForLesson(tenantClient, { employeeId, date, excludeEntryId = '' }) {
-  const rows = await fetchApprovedLeaveDays(tenantClient, {
+export async function assertNoLeaveForLesson(tenantClient, orgId, { employeeId, date, excludeEntryId = '' }) {
+  const rows = await fetchApprovedLeaveDays(tenantClient, orgId, {
     employeeId,
     startDate: date,
     endDate: date,
@@ -799,10 +815,10 @@ export async function assertNoLeaveForLesson(tenantClient, { employeeId, date, e
   };
 }
 
-export async function assertNoOperationalConflictsForLeave(tenantClient, { employeeId, startDate, endDate, excludeEntryId = '' }) {
+export async function assertNoOperationalConflictsForLeave(tenantClient, orgId, { employeeId, startDate, endDate, excludeEntryId = '' }) {
   const [attendanceRecords, lessonConflicts] = await Promise.all([
-    fetchAttendanceRecords(tenantClient, { employeeId, startDate, endDate }),
-    fetchLessonConflicts(tenantClient, { employeeId, startDate, endDate }),
+    fetchAttendanceRecords(tenantClient, orgId, { employeeId, startDate, endDate }),
+    fetchLessonConflicts(tenantClient, orgId, { employeeId, startDate, endDate }),
   ]);
 
   if (attendanceRecords.length > 0) {
@@ -930,9 +946,9 @@ export function computeLeaveSummary({ entitlement = null, balanceEvents = [], ye
   };
 }
 
-export async function listFinanceCorrections(tenantClient, { employeeId = '', startDate = '', endDate = '' } = {}) {
-  let query = tenantClient
-    .from('finance_corrections')
+export async function listFinanceCorrections(tenantClient, orgId, { employeeId = '', startDate = '', endDate = '' } = {}) {
+  const scopedOrgId = requireOrgId(orgId, 'listFinanceCorrections');
+  let query = withOrgScope(tenantClient, 'finance_corrections', scopedOrgId)
     .select('id, employee_id, correction_type, amount, effective_date, notes, created_by, updated_by, created_at, updated_at, metadata')
     .order('effective_date', { ascending: false })
     .order('created_at', { ascending: false });
@@ -973,22 +989,22 @@ export async function validateInstructorRateForLesson(
   tenantClient,
   { orgId = null, lessonInstanceId, instructorEmployeeId, serviceId, lessonDate = null } = {},
 ) {
+  // Everything is read in the organisation the request is signed in to; the org is never taken
+  // from the lesson or the employee row, so an id of another organisation finds nothing.
+  const resolvedOrgId = requireOrgId(orgId, 'validateInstructorRateForLesson');
   let resolvedInstructorId = instructorEmployeeId || null;
   let resolvedServiceId = serviceId || null;
-  let resolvedOrgId = normalizeString(orgId) || null;
   let resolvedLessonDate = lessonDate || null;
 
-  if ((!resolvedInstructorId || !resolvedServiceId || !resolvedOrgId || !resolvedLessonDate) && lessonInstanceId) {
-    const { data: instance, error: instanceError } = await tenantClient
-      .from('lesson_instances')
-      .select('org_id, instructor_employee_id, service_id, datetime_start')
+  if ((!resolvedInstructorId || !resolvedServiceId || !resolvedLessonDate) && lessonInstanceId) {
+    const { data: instance, error: instanceError } = await withOrgScope(tenantClient, 'lesson_instances', resolvedOrgId)
+      .select('instructor_employee_id, service_id, datetime_start')
       .eq('id', lessonInstanceId)
       .maybeSingle();
 
     if (instanceError) throw instanceError;
     resolvedInstructorId = resolvedInstructorId || instance?.instructor_employee_id || null;
     resolvedServiceId = resolvedServiceId || instance?.service_id || null;
-    resolvedOrgId = resolvedOrgId || instance?.org_id || null;
     resolvedLessonDate = resolvedLessonDate || instance?.datetime_start || null;
   }
 
@@ -997,23 +1013,11 @@ export async function validateInstructorRateForLesson(
     return null;
   }
 
-  if (!resolvedOrgId) {
-    const { data: employee, error: employeeError } = await tenantClient
-      .from('Employees')
-      .select('org_id')
-      .eq('id', resolvedInstructorId)
-      .maybeSingle();
-    if (employeeError) throw employeeError;
-    resolvedOrgId = employee?.org_id || null;
-  }
-
   const rateDate = localDateKey(resolvedLessonDate || new Date());
-  const rateRows = resolvedOrgId
-    ? await loadRateHistoryRows(tenantClient, resolvedOrgId, {
-      employeeIds: [resolvedInstructorId],
-      payBases: [...LESSON_PAY_BASES],
-    })
-    : [];
+  const rateRows = await loadRateHistoryRows(tenantClient, resolvedOrgId, {
+    employeeIds: [resolvedInstructorId],
+    payBases: [...LESSON_PAY_BASES],
+  });
 
   // A rate of 0 is explicitly valid (volunteer / zero-rate service). Only a missing rate on that date is an error.
   if (!resolveLessonRateOnDate(rateRows, { employeeId: resolvedInstructorId, serviceId: resolvedServiceId, date: rateDate })) {
@@ -1028,8 +1032,8 @@ export async function validateInstructorRateForLesson(
       .sort()[0] || null;
 
     const [{ data: employee }, { data: service }] = await Promise.all([
-      tenantClient.from('Employees').select('first_name, last_name').eq('id', resolvedInstructorId).maybeSingle(),
-      tenantClient.from('Services').select('name').eq('id', resolvedServiceId).maybeSingle(),
+      withOrgScope(tenantClient, 'Employees', resolvedOrgId).select('first_name, last_name').eq('id', resolvedInstructorId).maybeSingle(),
+      withOrgScope(tenantClient, 'Services', resolvedOrgId).select('name').eq('id', resolvedServiceId).maybeSingle(),
     ]);
 
     return {

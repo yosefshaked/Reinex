@@ -2,7 +2,7 @@
 /* eslint-env node */
 import { loadFinancePolicies } from './employee-finance.js';
 import { coerceAgorot } from './currency.js';
-import { normalizeString } from './org-bff.js';
+import { normalizeString, withOrgScope } from './org-bff.js';
 import { loadHmoAuthorizations, resolveLessonCoverageDecision } from './hmo.js';
 import { createDashboardTask, resolveDashboardTask } from './dashboard-tasks.js';
 import { buildLessonCountBuckets, resolveEntitlementUsageDelta } from './commitment-behavior.js';
@@ -345,9 +345,8 @@ async function loadServiceMap(tenantClient, orgId, serviceIds = []) {
   }]));
 }
 
-async function loadParticipantContext(tenantClient, lessonParticipantId) {
-  const { data, error } = await tenantClient
-    .from('lesson_participants')
+async function loadParticipantContext(tenantClient, orgId, lessonParticipantId) {
+  const { data, error } = await withOrgScope(tenantClient, 'lesson_participants', orgId)
     .select(`
       id,
       lesson_instance_id,
@@ -380,9 +379,8 @@ async function loadParticipantContext(tenantClient, lessonParticipantId) {
   return data || null;
 }
 
-async function loadInstanceParticipants(tenantClient, lessonInstanceId) {
-  const { data, error } = await tenantClient
-    .from('lesson_participants')
+async function loadInstanceParticipants(tenantClient, orgId, lessonInstanceId) {
+  const { data, error } = await withOrgScope(tenantClient, 'lesson_participants', orgId)
     .select('id')
     .eq('lesson_instance_id', lessonInstanceId)
     .order('id', { ascending: true });
@@ -394,9 +392,8 @@ async function loadInstanceParticipants(tenantClient, lessonInstanceId) {
   return data || [];
 }
 
-async function loadOpenLessonCharges(tenantClient, lessonParticipantId) {
-  const { data, error } = await tenantClient
-    .from('ledger_transactions')
+async function loadOpenLessonCharges(tenantClient, orgId, lessonParticipantId) {
+  const { data, error } = await withOrgScope(tenantClient, 'ledger_transactions', orgId)
     .select(`
       id,
       ledger_account_id,
@@ -923,7 +920,7 @@ export default class BillingLedgerService {
     reasonCode,
     effectiveAt = null,
   }) {
-    const participant = await loadParticipantContext(this.tenantClient, lessonParticipantId);
+    const participant = await loadParticipantContext(this.tenantClient, this.orgId, lessonParticipantId);
     if (!participant?.id || !participant?.lesson_instance?.id) {
       return {
         lessonParticipantId,
@@ -972,7 +969,7 @@ export default class BillingLedgerService {
       };
     }
 
-    const existingOpenCharges = await loadOpenLessonCharges(this.tenantClient, lessonParticipantId);
+    const existingOpenCharges = await loadOpenLessonCharges(this.tenantClient, this.orgId, lessonParticipantId);
     const desiredEntries = [];
     for (const descriptor of desiredResult.entries) {
       const ledgerAccount = await resolveLedgerAccount(this.tenantClient, effectiveOrgId, descriptor.accountType, descriptor.accountRefId);
@@ -1131,7 +1128,7 @@ export default class BillingLedgerService {
     actorUserId,
     reasonCode,
   }) {
-    const participants = await loadInstanceParticipants(this.tenantClient, lessonInstanceId);
+    const participants = await loadInstanceParticipants(this.tenantClient, this.orgId, lessonInstanceId);
     const participantResults = [];
     for (const participant of participants) {
       participantResults.push(await this.syncLessonParticipantCharge({
@@ -1229,8 +1226,7 @@ export default class BillingLedgerService {
       };
     }
 
-    let participantsQuery = this.tenantClient
-      .from('lesson_participants')
+    let participantsQuery = withOrgScope(this.tenantClient, 'lesson_participants', this.orgId)
       .select(`
         id,
         lesson_instance:lesson_instances!inner(
@@ -1360,8 +1356,7 @@ export default class BillingLedgerService {
     sourceId = null,
     metadata = {},
   }) {
-    const { data: original, error } = await this.tenantClient
-      .from('ledger_transactions')
+    const { data: original, error } = await withOrgScope(this.tenantClient, 'ledger_transactions', this.orgId)
       .select('*')
       .eq('id', transactionId)
       .maybeSingle();
@@ -1376,8 +1371,7 @@ export default class BillingLedgerService {
       throw new Error('lesson_charge_reversal_must_use_calendar');
     }
 
-    const { data: existingReversal, error: reversalLookupError } = await this.tenantClient
-      .from('ledger_transactions')
+    const { data: existingReversal, error: reversalLookupError } = await withOrgScope(this.tenantClient, 'ledger_transactions', this.orgId)
       .select('id')
       .eq('reverses_transaction_id', transactionId)
       .maybeSingle();
@@ -1395,11 +1389,11 @@ export default class BillingLedgerService {
     const reversalDirection = resolveReversalDirectionOrThrow(original);
     const reversal = await appendLedgerTransaction(this.tenantClient, {
       ...buildLegacyLedgerCompatFields({
-        orgId: original.org_id || this.orgId,
+        orgId: this.orgId,
         direction: reversalDirection,
         sourceType: normalizeString(sourceType) || 'reversal',
       }),
-      org_id: original.org_id || this.orgId,
+      org_id: this.orgId,
       ledger_account_id: original.ledger_account_id,
       direction: reversalDirection,
       amount: coerceAgorot(original.amount),
@@ -1621,7 +1615,7 @@ export default class BillingLedgerService {
     };
 
     const participant = normalizedParticipantId
-      ? await loadParticipantContext(this.tenantClient, normalizedParticipantId)
+      ? await loadParticipantContext(this.tenantClient, this.orgId, normalizedParticipantId)
       : null;
     const instance = participant?.lesson_instance || null;
     const effectiveProviderId = normalizeString(
@@ -1674,7 +1668,7 @@ export default class BillingLedgerService {
       })
       : null;
     const openLessonCharges = participant?.id
-      ? await loadOpenLessonCharges(this.tenantClient, participant.id)
+      ? await loadOpenLessonCharges(this.tenantClient, this.orgId, participant.id)
       : [];
     const hmoChargeRows = openLessonCharges.filter((row) => normalizeString(row?.hmo_provider_id));
     const activeHmoProviderId = normalizeString(

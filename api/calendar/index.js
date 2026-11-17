@@ -583,7 +583,7 @@ async function handleGetInstances(context, req, dbContext, userId, canManageAll)
 
   // Non-admin/office users: filter by their instructor record
   if (!canManageAll) {
-    const { instructorId, error: instructorError } = await resolveActorInstructorId(client, userId);
+    const { instructorId, error: instructorError } = await resolveActorInstructorId(client, orgId, userId);
 
     if (instructorError) {
       context.log?.error?.('calendar/instances failed to find instructor', { message: instructorError.message });
@@ -776,7 +776,7 @@ async function handleGetInstances(context, req, dbContext, userId, canManageAll)
   });
 
   const coverageEnrichedInstances = await enrichLessonInstancesWithHmoCoverage(client, orgId, transformedInstances);
-  const enrichedInstances = await enrichInstancesWithCorrectionState(client, coverageEnrichedInstances);
+  const enrichedInstances = await enrichInstancesWithCorrectionState(client, orgId, coverageEnrichedInstances);
   return respond(context, 200, enrichedInstances);
 }
 
@@ -816,7 +816,7 @@ async function handleCreateInstance(context, body, dbContext, supabase, authCont
 
   // Non-admin users can only create lessons for themselves
   if (!isAdmin) {
-    const { instructorId, error: instructorError } = await resolveActorInstructorId(client, userId);
+    const { instructorId, error: instructorError } = await resolveActorInstructorId(client, orgId, userId);
     if (instructorError) {
       context.log?.error?.('calendar/instances failed to resolve actor instructor', { message: instructorError.message, userId });
       return respondTracked(context, 500, { message: 'failed_to_resolve_actor_instructor' }, undefined, { error: instructorError });
@@ -967,7 +967,7 @@ async function handleCreateInstance(context, body, dbContext, supabase, authCont
     return respond(context, 400, { message: 'missing_or_invalid_participants' });
   }
 
-  const leaveConflict = await assertNoLeaveForLesson(client, {
+  const leaveConflict = await assertNoLeaveForLesson(client, orgId, {
     employeeId: body.instructor_employee_id,
     date: localDateKey(body.datetime_start),
   });
@@ -1163,7 +1163,7 @@ async function handleUpdateInstance(context, req, body, dbContext, supabase, aut
 
   const expectedVersion = parseExpectedVersion(body.version, body.expected_version, body.expectedVersion);
 
-  const { error: mutationStateError, result: mutationState } = await fetchLessonMutationState(client, {
+  const { error: mutationStateError, result: mutationState } = await fetchLessonMutationState(client, orgId, {
     instanceId: body.id,
   });
 
@@ -1200,7 +1200,7 @@ async function handleUpdateInstance(context, req, body, dbContext, supabase, aut
 
   // Instructors (non-admin/office) can only update their own lessons
   if (!canManageAll) {
-    const { instructorId, error: instructorError } = await resolveActorInstructorId(client, userId);
+    const { instructorId, error: instructorError } = await resolveActorInstructorId(client, orgId, userId);
     if (instructorError) {
       context.log?.error?.('calendar/instances failed to resolve actor instructor', { message: instructorError.message, userId });
       return respondTrackedCalendarError({
@@ -1338,7 +1338,7 @@ async function handleUpdateInstance(context, req, body, dbContext, supabase, aut
 
   let leaveConflict = null;
   if (targetInstructorId && targetDate) {
-    leaveConflict = await assertNoLeaveForLesson(client, {
+    leaveConflict = await assertNoLeaveForLesson(client, orgId, {
       employeeId: targetInstructorId,
       date: targetDate,
     });
@@ -1540,7 +1540,7 @@ async function handleUpdateInstance(context, req, body, dbContext, supabase, aut
       }
 
       if (cancellationResult.outcome === 'locked' || cancellationResult.outcome === 'closed') {
-        const { error: refreshedError, result: refreshedState } = await fetchLessonMutationState(client, {
+        const { error: refreshedError, result: refreshedState } = await fetchLessonMutationState(client, orgId, {
           instanceId: body.id,
         });
         if (refreshedError) {
@@ -1628,7 +1628,7 @@ async function handleUpdateInstance(context, req, body, dbContext, supabase, aut
       }
 
       if (completionResult.outcome === 'locked' || completionResult.outcome === 'closed') {
-        const { error: refreshedError, result: refreshedState } = await fetchLessonMutationState(client, {
+        const { error: refreshedError, result: refreshedState } = await fetchLessonMutationState(client, orgId, {
           instanceId: body.id,
         });
         if (refreshedError) {
@@ -1718,7 +1718,7 @@ async function handleUpdateInstance(context, req, body, dbContext, supabase, aut
     }
 
     if (!updatedInstanceRow) {
-      const { error: refreshedError, result: refreshedState } = await fetchLessonMutationState(client, {
+      const { error: refreshedError, result: refreshedState } = await fetchLessonMutationState(client, orgId, {
         instanceId: body.id,
       });
       if (refreshedError) {

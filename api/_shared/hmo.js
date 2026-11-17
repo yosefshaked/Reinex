@@ -1,8 +1,17 @@
 // @ts-check
 /* eslint-env node */
-import { normalizeString } from './org-bff.js';
+import { normalizeString, withOrgScope } from './org-bff.js';
 import { coerceAgorot } from './currency.js';
 import { localDateKey } from './local-time.js';
+
+// HMO providers, tracks and authorizations belong to one organisation; a read without one is a bug.
+function requireHmoOrgId(orgId) {
+  const normalized = normalizeString(orgId);
+  if (!normalized) {
+    throw new Error('hmo reads need the organisation id');
+  }
+  return normalized;
+}
 
 export const HMO_PAYMENT_MODES = new Set([
   'fully_paid_by_hmo',
@@ -55,16 +64,11 @@ function normalizeTrackRow(row) {
 }
 
 async function selectHmoProviders(tenantClient, { orgId = '', ids = [], activeOnly = false } = {}) {
-  let query = tenantClient
-    .from('hmo_providers')
+  let query = withOrgScope(tenantClient, 'hmo_providers', requireHmoOrgId(orgId))
     .select('id, name, is_active, metadata, created_at, updated_at')
     .order('name', { ascending: true });
 
-  const normalizedOrgId = normalizeString(orgId);
   const normalizedIds = Array.from(new Set((ids || []).map((value) => normalizeString(value)).filter(Boolean)));
-  if (normalizedOrgId) {
-    query = query.eq('org_id', normalizedOrgId);
-  }
   if (activeOnly) {
     query = query.eq('is_active', true);
   }
@@ -88,17 +92,12 @@ async function selectHmoProviders(tenantClient, { orgId = '', ids = [], activeOn
 }
 
 async function selectHmoTracks(tenantClient, { orgId = '', providerIds = [], trackIds = [], activeOnly = false } = {}) {
-  let query = tenantClient
-    .from('hmo_provider_tracks')
+  let query = withOrgScope(tenantClient, 'hmo_provider_tracks', requireHmoOrgId(orgId))
     .select('id, provider_id, service_id, name, payment_mode, default_customer_charge_amount, default_insurer_claim_amount, default_post_coverage_policy, default_post_coverage_customer_charge_amount, default_workflow_notes, is_active, metadata, created_at, updated_at')
     .order('name', { ascending: true });
 
-  const normalizedOrgId = normalizeString(orgId);
   const normalizedProviderIds = Array.from(new Set((providerIds || []).map((value) => normalizeString(value)).filter(Boolean)));
   const normalizedTrackIds = Array.from(new Set((trackIds || []).map((value) => normalizeString(value)).filter(Boolean)));
-  if (normalizedOrgId) {
-    query = query.eq('org_id', normalizedOrgId);
-  }
   if (activeOnly) {
     query = query.eq('is_active', true);
   }
@@ -160,8 +159,7 @@ export async function loadHmoAuthorizations(tenantClient, {
   activeOnly = false,
 } = {}) {
   const normalizedOrgId = normalizeString(orgId);
-  let query = tenantClient
-    .from('hmo_authorizations')
+  let query = withOrgScope(tenantClient, 'hmo_authorizations', requireHmoOrgId(normalizedOrgId))
     .select(`
       id,
       student_id,
@@ -185,9 +183,6 @@ export async function loadHmoAuthorizations(tenantClient, {
     `)
     .order('created_at', { ascending: false });
 
-  if (normalizedOrgId) {
-    query = query.eq('org_id', normalizedOrgId);
-  }
 
   const ids = Array.from(new Set((authorizationIds || []).map((value) => normalizeString(value)).filter(Boolean)));
   if (ids.length > 0) {

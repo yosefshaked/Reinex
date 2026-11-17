@@ -1,5 +1,5 @@
 /* eslint-env node */
-import { UUID_PATTERN, normalizeString, respond } from './org-bff.js';
+import { UUID_PATTERN, normalizeString, respond, withOrgScope } from './org-bff.js';
 
 export function normalizeUuid(value) {
   const normalized = normalizeString(value);
@@ -31,14 +31,26 @@ export function usesLegacyNullVersion(value) {
   return value === null || value === undefined || value === '';
 }
 
-export async function resolveActorInstructorId(tenantClient, userId) {
+function requireOrgId(orgId, helperName) {
+  const normalized = normalizeString(orgId);
+  if (!normalized) {
+    throw new Error(`${helperName} needs the organisation id`);
+  }
+  return normalized;
+}
+
+/**
+ * The signed-in user's employee row in this organisation. The same person can be an instructor in
+ * several organisations, each with its own row, so the lookup is by user and organisation.
+ */
+export async function resolveActorInstructorId(tenantClient, orgId, userId) {
+  const scopedOrgId = requireOrgId(orgId, 'resolveActorInstructorId');
   const normalizedUserId = normalizeUuid(userId);
   if (!normalizedUserId) {
     return { instructorId: '', error: null };
   }
 
-  const { data, error } = await tenantClient
-    .from('Employees')
+  const { data, error } = await withOrgScope(tenantClient, 'Employees', scopedOrgId)
     .select('id')
     .eq('user_id', normalizedUserId)
     .limit(1)
@@ -50,7 +62,9 @@ export async function resolveActorInstructorId(tenantClient, userId) {
   };
 }
 
-export async function fetchLessonMutationState(tenantClient, options) {
+/** A lesson and its locks before a change, read in this organisation only (another org's id is not found). */
+export async function fetchLessonMutationState(tenantClient, orgId, options) {
+  const scopedOrgId = requireOrgId(orgId, 'fetchLessonMutationState');
   const instanceId = normalizeUuid(options?.instanceId);
   const participantId = normalizeUuid(options?.participantId);
 
@@ -62,8 +76,7 @@ export async function fetchLessonMutationState(tenantClient, options) {
   };
 
   if (instanceId) {
-    const { data: instance, error } = await tenantClient
-      .from('lesson_instances')
+    const { data: instance, error } = await withOrgScope(tenantClient, 'lesson_instances', scopedOrgId)
       .select('id, datetime_start, duration_minutes, instructor_employee_id, service_id, status, documentation_status, is_closed, version, metadata')
       .eq('id', instanceId)
       .maybeSingle();
@@ -80,8 +93,7 @@ export async function fetchLessonMutationState(tenantClient, options) {
         }
       : null;
 
-    const { data: instanceLocks, error: instanceLocksError } = await tenantClient
-      .from('instance_locks')
+    const { data: instanceLocks, error: instanceLocksError } = await withOrgScope(tenantClient, 'instance_locks', scopedOrgId)
       .select('id, lock_source_type, lock_source_id, lock_reason, created_at, metadata')
       .eq('lesson_instance_id', instanceId)
       .order('created_at', { ascending: false });
@@ -94,8 +106,7 @@ export async function fetchLessonMutationState(tenantClient, options) {
   }
 
   if (participantId) {
-    const { data: participant, error } = await tenantClient
-      .from('lesson_participants')
+    const { data: participant, error } = await withOrgScope(tenantClient, 'lesson_participants', scopedOrgId)
       .select('id, lesson_instance_id, client_profile_id, student_id, participant_status, version, locked_at, updated_by, metadata')
       .eq('id', participantId)
       .maybeSingle();
@@ -112,8 +123,7 @@ export async function fetchLessonMutationState(tenantClient, options) {
         }
       : null;
 
-    const { data: participantLocks, error: participantLocksError } = await tenantClient
-      .from('participant_locks')
+    const { data: participantLocks, error: participantLocksError } = await withOrgScope(tenantClient, 'participant_locks', scopedOrgId)
       .select('id, lock_source_type, lock_source_id, lock_reason, created_at, metadata')
       .eq('lesson_participant_id', participantId)
       .order('created_at', { ascending: false });

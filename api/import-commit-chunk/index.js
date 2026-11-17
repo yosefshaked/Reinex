@@ -156,7 +156,7 @@ async function commitCustomer(supabase, orgId, candidate) {
   let studentLedgerAction = null;
   let noteSaved = false;
   if (customerType === 'student') {
-    const { student, created, error: studentError } = await ensureStudentForClientProfile(supabase, clientProfileId);
+    const { student, created, error: studentError } = await ensureStudentForClientProfile(supabase, orgId, clientProfileId);
     if (studentError) throw new Error(`failed_to_ensure_student:${studentError}`);
     if (student?.id) {
       studentId = student.id;

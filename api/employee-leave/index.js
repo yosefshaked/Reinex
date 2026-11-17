@@ -97,6 +97,27 @@ function computeRecordedBalances(summary) {
   }];
 }
 
+/**
+ * Writes name an employee in the body. One of another organisation is "not found" (404), the same
+ * answer as an id that does not exist, so nothing about them is read or revealed.
+ * Returns the response to send, or null when the employee is in the organisation.
+ */
+async function respondUnlessEmployeeInOrg(context, client, orgId, employeeId, userId) {
+  const result = await resolveEmployeeRecord(client, orgId, { employeeId, userId, canManageAll: true });
+  if (!result.error) {
+    return null;
+  }
+  if (result.error === 'employee_not_found') {
+    return respond(context, 404, { message: 'employee_not_found' });
+  }
+  return respondTrackedLeaveError(context, 500, 'failed_to_load_employee', result.error, {
+    action: 'resolve_employee_record',
+    orgId,
+    userId,
+    employeeId,
+  });
+}
+
 async function fetchLeaveEntry(client, orgId, leaveEntryId) {
   const { data, error } = await withOrgScope(client, 'employee_leave_entries', orgId)
     .select('id, employee_id, leave_type, status, duration_mode, half_day_part, start_date, end_date, reason, notes, source_type, approved_by, created_by, updated_by, created_at, updated_at, metadata')
@@ -288,7 +309,7 @@ async function handleGet(context, req, client, orgId, userId, canManageAll) {
   const employeeIdParam = normalizeString(req?.query?.employee_id);
   const startDate = normalizeString(req?.query?.start_date);
   const endDate = normalizeString(req?.query?.end_date);
-  const employeeResult = await resolveEmployeeRecord(client, {
+  const employeeResult = await resolveEmployeeRecord(client, orgId, {
     employeeId: employeeIdParam,
     userId,
     canManageAll,
@@ -333,7 +354,7 @@ async function handleGet(context, req, client, orgId, userId, canManageAll) {
         startDate: isYmdDate(startDate) ? startDate : '',
         endDate: isYmdDate(endDate) ? endDate : '',
       }),
-      fetchApprovedLeaveDays(client, {
+      fetchApprovedLeaveDays(client, orgId, {
         employeeId: employee.id,
         startDate: isYmdDate(startDate) ? startDate : `${year}-01-01`,
         endDate: isYmdDate(endDate) ? endDate : `${year}-12-31`,
@@ -411,6 +432,11 @@ async function handleUpsert(context, client, orgId, body, userId, method) {
     return respond(context, 400, { message: 'missing_half_day_part' });
   }
 
+  const employeeCheck = await respondUnlessEmployeeInOrg(context, client, orgId, employeeId, userId);
+  if (employeeCheck) {
+    return employeeCheck;
+  }
+
   let existingEntry = null;
   if (method === 'PUT') {
     const leaveEntryId = normalizeString(body?.id);
@@ -424,7 +450,7 @@ async function handleUpsert(context, client, orgId, body, userId, method) {
     }
   }
 
-  const overlappingLeaveDays = await fetchApprovedLeaveDays(client, {
+  const overlappingLeaveDays = await fetchApprovedLeaveDays(client, orgId, {
     employeeId,
     startDate,
     endDate,
@@ -439,7 +465,7 @@ async function handleUpsert(context, client, orgId, body, userId, method) {
     });
   }
 
-  const operationalConflict = await assertNoOperationalConflictsForLeave(client, {
+  const operationalConflict = await assertNoOperationalConflictsForLeave(client, orgId, {
     employeeId,
     startDate,
     endDate,
@@ -610,6 +636,11 @@ async function handleBalanceEventUpsert(context, client, orgId, body, userId, me
   }
   if ((eventType === 'allocation' || eventType === 'carryover') && quantityDays < 0) {
     return respond(context, 400, { message: 'balance_event_requires_positive_quantity' });
+  }
+
+  const employeeCheck = await respondUnlessEmployeeInOrg(context, client, orgId, employeeId, userId);
+  if (employeeCheck) {
+    return employeeCheck;
   }
 
   let existingEvent = null;

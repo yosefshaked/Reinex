@@ -381,6 +381,7 @@ export default async function (context, req) {
   if (method === 'GET') {
     const colorResult = await ensureInstructorColors(supabase, {
       context,
+      orgId,
       table: 'Employees',
       columns: 'id, metadata',
     });

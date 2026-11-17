@@ -2,7 +2,7 @@
 import { loadGraceCancellationParticipantIds, loadFinancePolicies } from './employee-finance.js';
 import { resolveCountedLesson } from './pay-calculation.js';
 import { normalizeEntityVersion } from './calendar-editing.js';
-import { normalizeString } from './org-bff.js';
+import { normalizeString, withOrgScope } from './org-bff.js';
 import { buildBillingDecision, buildDirectClientBillingDecision } from './student-billing.js';
 import { normalizeLessonInstanceStatus } from './lesson-instance-status.js';
 import { coerceAgorot } from './currency.js';
@@ -10,6 +10,16 @@ import { LESSON_PAY_BASES, loadRateHistoryRows } from './rate-history.js';
 import { localDateKey, todayKey } from './local-time.js';
 
 const LESSON_BILLING_USAGE_TYPES = ['lesson_charge', 'reversal', 'manual_adjustment', 'manual_payment'];
+
+// Every read here is scoped to the organisation the request is signed in to; a missing org id is a
+// bug in the caller, never "all organisations".
+function requireOrgId(orgId, helperName) {
+  const normalized = normalizeString(orgId);
+  if (!normalized) {
+    throw new Error(`${helperName} needs the organisation id`);
+  }
+  return normalized;
+}
 const PARTICIPANT_STATUSES = new Set(['scheduled', 'attended', 'no_show', 'cancelled_student', 'cancelled_clinic']);
 
 class CorrectionValidationError extends Error {
@@ -91,14 +101,13 @@ function applyParticipantPatches(participants, participantPatches) {
   });
 }
 
-async function loadServicesMap(tenantClient, serviceIds = []) {
+async function loadServicesMap(tenantClient, orgId, serviceIds = []) {
   const ids = Array.from(new Set(asArray(serviceIds).map((value) => normalizeString(value)).filter(Boolean)));
   if (ids.length === 0) {
     return new Map();
   }
 
-  const { data, error } = await tenantClient
-    .from('Services')
+  const { data, error } = await withOrgScope(tenantClient, 'Services', orgId)
     .select('id, payment_model, default_customer_charge_amount')
     .in('id', ids);
 
@@ -158,9 +167,8 @@ function validateCorrectionEffectiveState(instance, participants) {
   }
 }
 
-async function loadCorrectionContext(tenantClient, originalInstanceId) {
-  const { data: instance, error: instanceError } = await tenantClient
-    .from('lesson_instances')
+async function loadCorrectionContext(tenantClient, orgId, originalInstanceId) {
+  const { data: instance, error: instanceError } = await withOrgScope(tenantClient, 'lesson_instances', orgId)
     .select('id, org_id, template_id, datetime_start, duration_minutes, instructor_employee_id, service_id, status, documentation_status, version, metadata, created_at, updated_at')
     .eq('id', originalInstanceId)
     .maybeSingle();
@@ -174,8 +182,7 @@ async function loadCorrectionContext(tenantClient, originalInstanceId) {
 
   instance.version = normalizeEntityVersion(instance.version);
 
-  const { data: participants, error: participantsError } = await tenantClient
-    .from('lesson_participants')
+  const { data: participants, error: participantsError } = await withOrgScope(tenantClient, 'lesson_participants', orgId)
     .select('id, lesson_instance_id, client_profile_id, student_id, participant_status, reminder_sent, reminder_seen, attendance_confirmed_at, documented_at, version, metadata')
     .eq('lesson_instance_id', originalInstanceId);
 
@@ -191,31 +198,26 @@ async function loadCorrectionContext(tenantClient, originalInstanceId) {
 
   const [{ data: ledgerRows, error: ledgerError }, { data: instanceLocks, error: instanceLocksError }, { data: participantLocks, error: participantLocksError }, { data: latestCorrectionRows, error: latestCorrectionError }, { data: correctionLedgerRows, error: correctionLedgerError }] = await Promise.all([
     participantIds.length > 0
-      ? tenantClient
-        .from('ledger_transactions')
+      ? withOrgScope(tenantClient, 'ledger_transactions', orgId)
         .select('id, student_id, client_profile_id, hmo_provider_id, direction, source_type, amount, lesson_participant_id, reverses_transaction_id, metadata')
         .in('lesson_participant_id', participantIds)
         .in('source_type', LESSON_BILLING_USAGE_TYPES)
       : Promise.resolve({ data: [], error: null }),
-    tenantClient
-      .from('instance_locks')
+    withOrgScope(tenantClient, 'instance_locks', orgId)
       .select('id, lesson_instance_id, lock_source_type, lock_source_id, lock_reason, created_at, metadata')
       .eq('lesson_instance_id', originalInstanceId),
     participantIds.length > 0
-      ? tenantClient
-        .from('participant_locks')
+      ? withOrgScope(tenantClient, 'participant_locks', orgId)
         .select('id, lesson_participant_id, lock_source_type, lock_source_id, lock_reason, created_at, metadata')
         .in('lesson_participant_id', participantIds)
       : Promise.resolve({ data: [], error: null }),
-    tenantClient
-      .from('calendar_instance_corrections')
+    withOrgScope(tenantClient, 'calendar_instance_corrections', orgId)
       .select('id, original_instance_id, status, effective_state, impact_snapshot, created_at, metadata')
       .eq('original_instance_id', originalInstanceId)
       .eq('status', 'applied')
       .order('created_at', { ascending: false })
       .limit(1),
-    tenantClient
-      .from('ledger_transactions')
+    withOrgScope(tenantClient, 'ledger_transactions', orgId)
       .select('id, student_id, client_profile_id, hmo_provider_id, direction, source_type, amount, lesson_participant_id, reverses_transaction_id, metadata')
       .contains('metadata', { source_type: 'calendar_instance_correction', original_instance_id: originalInstanceId }),
   ]);
@@ -242,8 +244,7 @@ async function loadCorrectionContext(tenantClient, originalInstanceId) {
   ].filter(Boolean)));
 
   const { data: claimBatches, error: claimBatchesError } = claimBatchIds.length > 0
-    ? await tenantClient
-      .from('claim_batches')
+    ? await withOrgScope(tenantClient, 'claim_batches', orgId)
       .select('id, status, batch_type, submitted_at, paid_at')
       .in('id', claimBatchIds)
     : { data: [], error: null };
@@ -278,13 +279,18 @@ function buildChargeMap(ledgerRows) {
   return map;
 }
 
+/**
+ * What a correction of one lesson would change. The lesson is read in `options.orgId`, the
+ * organisation the request is signed in to: a lesson of another organisation is not found (null).
+ */
 export async function buildInstanceCorrectionPreview(tenantClient, options) {
+  const orgId = requireOrgId(options?.orgId, 'buildInstanceCorrectionPreview');
   const originalInstanceId = normalizeString(options?.originalInstanceId);
   if (!originalInstanceId) {
     throw new Error('missing_original_instance_id');
   }
 
-  const context = await loadCorrectionContext(tenantClient, originalInstanceId);
+  const context = await loadCorrectionContext(tenantClient, orgId, originalInstanceId);
   if (!context) {
     return null;
   }
@@ -292,7 +298,7 @@ export async function buildInstanceCorrectionPreview(tenantClient, options) {
   const correctionMode = normalizeCorrectionMode(options?.correctionMode);
   const instancePatch = normalizePatchObject(options?.instancePatch);
   const participantPatches = asArray(options?.participantPatches).map((patch) => normalizePatchObject(patch));
-  const policies = await loadFinancePolicies(tenantClient, context.instance?.org_id || context.originalInstance?.org_id, {
+  const policies = await loadFinancePolicies(tenantClient, orgId, {
     asOf: localDateKey(context.instance?.datetime_start || context.originalInstance?.datetime_start) || todayKey(),
   });
   const currentInstance = context.latestCorrection?.effective_state?.instance || context.instance;
@@ -307,18 +313,18 @@ export async function buildInstanceCorrectionPreview(tenantClient, options) {
   // service: a correction records what actually happened, so refusing it would leave the record
   // wrong. A missing rate is shown in the impact (proposed pay) and in the monthly summary instead.
 
-  const orgId = context.instance?.org_id;
   const rateRows = await loadRateHistoryRows(tenantClient, orgId, {
     employeeIds: [currentInstance.instructor_employee_id, effectiveInstance.instructor_employee_id].filter(Boolean),
     payBases: [...LESSON_PAY_BASES],
   });
-  const serviceMap = await loadServicesMap(tenantClient, [
+  const serviceMap = await loadServicesMap(tenantClient, orgId, [
     context.instance.service_id,
     currentInstance.service_id,
     effectiveInstance.service_id,
   ]);
   const graceParticipantIds = await loadGraceCancellationParticipantIds(
     tenantClient,
+    orgId,
     currentParticipants.map((participant) => participant.id).filter(Boolean),
   );
 
@@ -431,7 +437,8 @@ export async function buildInstanceCorrectionPreview(tenantClient, options) {
   };
 }
 
-export async function enrichInstancesWithCorrectionState(tenantClient, instances = []) {
+export async function enrichInstancesWithCorrectionState(tenantClient, orgId, instances = []) {
+  requireOrgId(orgId, 'enrichInstancesWithCorrectionState');
   const rows = asArray(instances);
   if (rows.length === 0) {
     return rows;
@@ -441,18 +448,15 @@ export async function enrichInstancesWithCorrectionState(tenantClient, instances
   const participantIds = rows.flatMap((row) => asArray(row.participants).map((participant) => participant.id).filter(Boolean));
 
   const [{ data: instanceLocks, error: instanceLocksError }, { data: participantLocks, error: participantLocksError }, { data: corrections, error: correctionsError }] = await Promise.all([
-    tenantClient
-      .from('instance_locks')
+    withOrgScope(tenantClient, 'instance_locks', orgId)
       .select('id, lesson_instance_id, lock_source_type, lock_source_id, lock_reason, created_at, metadata')
       .in('lesson_instance_id', instanceIds),
     participantIds.length > 0
-      ? tenantClient
-        .from('participant_locks')
+      ? withOrgScope(tenantClient, 'participant_locks', orgId)
         .select('id, lesson_participant_id, lock_source_type, lock_source_id, lock_reason, created_at, metadata')
         .in('lesson_participant_id', participantIds)
       : Promise.resolve({ data: [], error: null }),
-    tenantClient
-      .from('calendar_instance_corrections')
+    withOrgScope(tenantClient, 'calendar_instance_corrections', orgId)
       .select('id, original_instance_id, correction_mode, reason_code, reason_text, status, effective_state, impact_snapshot, created_at, metadata')
       .in('original_instance_id', instanceIds)
       .eq('status', 'applied')
@@ -480,8 +484,7 @@ export async function enrichInstancesWithCorrectionState(tenantClient, instances
 
   let claimBatchStatusById = new Map();
   if (claimBatchIds.length > 0) {
-    const { data: claimBatches, error: claimBatchesError } = await tenantClient
-      .from('claim_batches')
+    const { data: claimBatches, error: claimBatchesError } = await withOrgScope(tenantClient, 'claim_batches', orgId)
       .select('id, status, paid_at')
       .in('id', claimBatchIds);
 

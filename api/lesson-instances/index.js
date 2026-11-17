@@ -159,7 +159,7 @@ async function enrichLessonInstanceRecordsForResponse(client, orgId, records = [
     return [];
   }
 
-  const correctionEnriched = await enrichInstancesWithCorrectionState(client, normalizedRecords);
+  const correctionEnriched = await enrichInstancesWithCorrectionState(client, orgId, normalizedRecords);
   const coverageEnriched = await enrichLessonInstancesWithHmoCoverage(client, orgId, correctionEnriched);
   return coverageEnriched.map((record) => (
     record?.version !== undefined
@@ -374,7 +374,7 @@ export default async function lessonInstances(context, req) {
   const billingService = new BillingLedgerService({ tenantClient: supabase, orgId });
 
   if (!isAdmin) {
-    const { instructorId, error: instructorError } = await resolveActorInstructorId(supabase, userId);
+    const { instructorId, error: instructorError } = await resolveActorInstructorId(supabase, orgId, userId);
     if (instructorError) {
       context.log?.error?.('lesson-instances failed to resolve actor instructor', { message: instructorError.message, userId });
       return respondLessonInstanceError(context, 500, 'failed_to_resolve_actor_instructor', instructorError, {
@@ -818,7 +818,7 @@ export default async function lessonInstances(context, req) {
     const allowedStatus = ACTIVE_LESSON_INSTANCE_STATUSES;
     const allowedDocumentation = new Set(['undocumented', 'documented']);
 
-    const { error: stateError, result: mutationState } = await fetchLessonMutationState(supabase, {
+    const { error: stateError, result: mutationState } = await fetchLessonMutationState(supabase, orgId, {
       instanceId: lessonInstanceId,
     });
 
@@ -947,7 +947,7 @@ export default async function lessonInstances(context, req) {
           }
 
           if (cancellationResult.outcome === 'locked' || cancellationResult.outcome === 'closed') {
-            const { error: refreshedError, result: refreshedState } = await fetchLessonMutationState(supabase, {
+            const { error: refreshedError, result: refreshedState } = await fetchLessonMutationState(supabase, orgId, {
               instanceId: lessonInstanceId,
             });
             if (refreshedError) {
@@ -1033,7 +1033,7 @@ export default async function lessonInstances(context, req) {
           }
 
           if (completionResult.outcome === 'locked' || completionResult.outcome === 'closed') {
-            const { error: refreshedError, result: refreshedState } = await fetchLessonMutationState(supabase, {
+            const { error: refreshedError, result: refreshedState } = await fetchLessonMutationState(supabase, orgId, {
               instanceId: lessonInstanceId,
             });
             if (refreshedError) {
@@ -1128,7 +1128,7 @@ export default async function lessonInstances(context, req) {
       }
 
       if (!updatedInstanceRows) {
-        const { error: refreshedError, result: refreshedState } = await fetchLessonMutationState(supabase, {
+        const { error: refreshedError, result: refreshedState } = await fetchLessonMutationState(supabase, orgId, {
           instanceId: lessonInstanceId,
         });
         if (refreshedError) {
@@ -1290,7 +1290,7 @@ export default async function lessonInstances(context, req) {
       if (!instanceId) return respond(context, 400, { message: 'missing_instance_id' });
       if (!studentId && !clientProfileId) return respond(context, 400, { message: 'missing_client_profile_or_student_id' });
 
-      const { error: addStateError, result: addMutationState } = await fetchLessonMutationState(supabase, { instanceId });
+      const { error: addStateError, result: addMutationState } = await fetchLessonMutationState(supabase, orgId, { instanceId });
       if (addStateError) {
         context.log?.error?.('lesson-instances add-participant failed to load state', { message: addStateError.message });
         return respondLessonInstanceError(context, 500, 'failed_to_load_lesson_instance', addStateError, {

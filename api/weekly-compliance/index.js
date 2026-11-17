@@ -222,10 +222,6 @@ export default async function (context, req) {
     return respond(context, 403, { message: 'forbidden' });
   }
 
-  const orgScopedClient = {
-    from: table => withOrgScope(supabase, table, orgId),
-  };
-
   const weekStartQuery = normalizeString(req?.query?.week_start || req?.query?.weekStart);
   const requestedWeekStart = parseWeekStart(weekStartQuery);
   // Today in the org's zone, carried as a UTC-midnight calendar Date like the rest of this file.
@@ -234,8 +230,9 @@ export default async function (context, req) {
   const weekEnd = addDaysUtc(weekStart, 6);
   const todayIso = formatUtcDate(today);
 
-  const colorsResult = await ensureInstructorColors(orgScopedClient, {
+  const colorsResult = await ensureInstructorColors(supabase, {
     context,
+    orgId,
     columns: 'id, name, metadata, is_active',
   });
 

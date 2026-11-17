@@ -404,7 +404,7 @@ async function handleUpdateReminder(context, body, dbContext, userId) {
     body.expectedVersion,
   );
 
-  const { error: mutationStateError, result: mutationState } = await fetchLessonMutationState(client, {
+  const { error: mutationStateError, result: mutationState } = await fetchLessonMutationState(client, orgId, {
     instanceId: body.instance_id,
     participantId: body.participant_id,
   });
@@ -472,7 +472,7 @@ async function handleUpdateReminder(context, body, dbContext, userId) {
   }
 
   if (!updatedRow) {
-    const { error: refreshedError, result: refreshedState } = await fetchLessonMutationState(client, {
+    const { error: refreshedError, result: refreshedState } = await fetchLessonMutationState(client, orgId, {
       participantId: body.participant_id,
       instanceId: body.instance_id,
     });
@@ -525,7 +525,7 @@ async function buildParticipantStatusPreview(client, orgId, body, {
   targetStatus,
   requestedInstructorCompensationDecision = 'unknown',
 } = {}) {
-  const { error: mutationStateError, result: mutationState } = await fetchLessonMutationState(client, {
+  const { error: mutationStateError, result: mutationState } = await fetchLessonMutationState(client, orgId, {
     instanceId: body.instance_id,
     participantId: body.participant_id,
   });
@@ -577,6 +577,7 @@ async function buildParticipantStatusPreview(client, orgId, body, {
   const currentParticipants = allParticipants || [];
   const graceParticipantIds = await loadGraceCancellationParticipantIds(
     client,
+    orgId,
     currentParticipants.map((row) => row.id).filter(Boolean),
   );
   const projectedParticipants = projectParticipantsForStatusChange(
@@ -946,7 +947,7 @@ async function handleMarkAttendance(context, body, dbContext, userId, isAdmin, a
   }
 
   // Fetch instance to verify permissions
-  const { error: mutationStateError, result: mutationState } = await fetchLessonMutationState(client, {
+  const { error: mutationStateError, result: mutationState } = await fetchLessonMutationState(client, orgId, {
     instanceId: body.instance_id,
     participantId: body.participant_id,
   });
@@ -993,7 +994,7 @@ async function handleMarkAttendance(context, body, dbContext, userId, isAdmin, a
 
   // Non-admin users can only mark attendance for their own lessons
   if (!isAdmin) {
-    const { instructorId, error: instructorError } = await resolveActorInstructorId(client, userId);
+    const { instructorId, error: instructorError } = await resolveActorInstructorId(client, orgId, userId);
     if (instructorError) {
       context.log?.error?.('calendar/attendance failed to resolve actor instructor', { message: instructorError.message, userId });
       return respondTracked(context, 500, { message: 'failed_to_resolve_actor_instructor' }, undefined, { error: instructorError });
@@ -1243,7 +1244,7 @@ async function handleMarkAttendance(context, body, dbContext, userId, isAdmin, a
   }
 
   if (!updatedParticipant) {
-    const { error: refreshedError, result: refreshedState } = await fetchLessonMutationState(client, {
+    const { error: refreshedError, result: refreshedState } = await fetchLessonMutationState(client, orgId, {
       instanceId: body.instance_id,
       participantId: body.participant_id,
     });

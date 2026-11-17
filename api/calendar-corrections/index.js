@@ -254,6 +254,7 @@ export default async function calendarCorrections(context, req) {
   let preview;
   try {
     preview = await buildInstanceCorrectionPreview(supabase, {
+      orgId,
       originalInstanceId,
       correctionMode,
       instancePatch,

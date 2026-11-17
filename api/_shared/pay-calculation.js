@@ -329,7 +329,7 @@ export async function loadCountedLessons(client, orgId, {
   const participantIds = effectiveLessons.flatMap((lesson) => lesson.participants.map((row) => row?.id)).filter(Boolean);
   const graceParticipantIds = new Set();
   for (const idChunk of chunk(participantIds, ID_CHUNK_SIZE)) {
-    for (const id of await loadGraceCancellationParticipantIds(client, idChunk)) graceParticipantIds.add(id);
+    for (const id of await loadGraceCancellationParticipantIds(client, orgId, idChunk)) graceParticipantIds.add(id);
   }
 
   const serviceIds = Array.from(new Set(effectiveLessons.map((lesson) => lesson.instance.service_id).filter(Boolean)));
@@ -385,7 +385,7 @@ export async function loadWorkedDates(client, orgId, { employeeId, startDate, en
   if (!normalizeString(employeeId) || !startKey || !endKey || startKey > endKey) return [];
   const [lessons, attendanceRecords] = await Promise.all([
     loadCountedLessons(client, orgId, { employeeId, startDate: startKey, endDate: endKey, policies, rateRows: [] }),
-    fetchAttendanceRecords(client, { employeeId, startDate: startKey, endDate: endKey }),
+    fetchAttendanceRecords(client, orgId, { employeeId, startDate: startKey, endDate: endKey }),
   ]);
   return collectWorkedDates({ lessons, attendanceRecords });
 }
@@ -417,15 +417,15 @@ export async function computeEmployeePay(client, orgId, {
   const [resolvedPolicies, resolvedRateRows, leaveDays, corrections] = await Promise.all([
     policies || loadFinancePolicies(client, orgId, { asOf: localDateKey(endDate) }),
     rateRows || loadRateHistoryRows(client, orgId, { employeeIds: [employeeId] }),
-    fetchApprovedLeaveDays(client, { employeeId, startDate, endDate }),
-    listFinanceCorrections(client, { employeeId, startDate, endDate }),
+    fetchApprovedLeaveDays(client, orgId, { employeeId, startDate, endDate }),
+    listFinanceCorrections(client, orgId, { employeeId, startDate, endDate }),
   ]);
 
   // A leave day can be valued by the average of the days before it, so history is read only when
   // the period has leave in it.
   const historyStart = leaveDays.length > 0 ? shiftMonths(startDate, -12) : startDate;
   const [attendanceHistory, lessonHistory] = await Promise.all([
-    fetchAttendanceRecords(client, { employeeId, startDate: historyStart, endDate }),
+    fetchAttendanceRecords(client, orgId, { employeeId, startDate: historyStart, endDate }),
     loadCountedLessons(client, orgId, {
       employeeId,
       startDate: historyStart,

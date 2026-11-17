@@ -99,7 +99,7 @@ export default async function (context, req) {
     }
     employees = data || [];
   } else {
-    const employeeResult = await resolveEmployeeRecord(supabase, {
+    const employeeResult = await resolveEmployeeRecord(supabase, orgId, {
       employeeId,
       userId,
       canManageAll,

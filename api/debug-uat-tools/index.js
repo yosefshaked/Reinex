@@ -147,6 +147,7 @@ async function inspectHmoChargeContext({
   const studentId = normalizeString(selectedParticipant.student_id);
   const coverageDecision = studentId
     ? await resolveLessonCoverageDecision(client, {
+      orgId,
       studentId,
       serviceId: instance.service_id,
       lessonDate: instance.datetime_start,
@@ -155,6 +156,7 @@ async function inspectHmoChargeContext({
 
   const allActiveAuthorizationsForStudent = studentId
     ? await loadHmoAuthorizations(client, {
+      orgId,
       studentId,
       activeOnly: true,
     })

@@ -855,7 +855,7 @@ export default async function lessonTemplates(context, req) {
 
       if (!effectiveStudentId && resolvedClientProfileId) {
         try {
-          const ensuredStudent = await ensureStudentForClientProfile(supabase, resolvedClientProfileId);
+          const ensuredStudent = await ensureStudentForClientProfile(supabase, orgId, resolvedClientProfileId);
           if (ensuredStudent.error || !ensuredStudent.student?.id) {
             return tracked500('failed_to_activate_student_from_waiting_list');
           }
@@ -891,7 +891,7 @@ export default async function lessonTemplates(context, req) {
 
     } else if (!effectiveStudentId && resolvedClientProfileId) {
       try {
-        const ensuredStudent = await ensureStudentForClientProfile(supabase, resolvedClientProfileId);
+        const ensuredStudent = await ensureStudentForClientProfile(supabase, orgId, resolvedClientProfileId);
         if (ensuredStudent.error || !ensuredStudent.student?.id) {
           return tracked500('failed_to_create_lesson_template');
         }
@@ -1431,7 +1431,7 @@ export default async function lessonTemplates(context, req) {
           addStudentIds.push(waitingEntry.student_id);
         } else if (clientProfileId) {
           try {
-            const ensured = await ensureStudentForClientProfile(supabase, clientProfileId);
+            const ensured = await ensureStudentForClientProfile(supabase, orgId, clientProfileId);
             if (ensured.error || !ensured.student?.id) {
               return tracked500('failed_to_activate_student_from_waiting_list');
             }
