@@ -134,6 +134,22 @@ export async function fetchDatedSetting({ session, orgId, key, signal } = {}) {
   return { value: response?.settings?.[key] ?? null, versions };
 }
 
+/**
+ * Saves new versions of several dated settings in one request, all in force from `effectiveDate`:
+ * `versions` is [{ key, value }].
+ */
+export async function saveDatedSettings({ session, orgId, versions, effectiveDate, notes = null, signal } = {}) {
+  const list = Array.isArray(versions) ? versions.filter((entry) => entry?.key) : [];
+  if (!list.length) {
+    throw new Error('אין שינוי לשמירה.');
+  }
+  if (!effectiveDate) {
+    throw new Error('יש לבחור מאיזה תאריך ההגדרה בתוקף.');
+  }
+  const settings = Object.fromEntries(list.map(({ key, value }) => [key, { value, effective_date: effectiveDate, notes }]));
+  return upsertSettings({ session, orgId, signal, settings });
+}
+
 /** Saves a new version of a dated setting, in force from `effectiveDate` ('YYYY-MM-DD'). */
 export async function saveDatedSetting({ session, orgId, key, value, effectiveDate, notes = null, signal } = {}) {
   const normalizedKey = typeof key === 'string' ? key.trim() : '';

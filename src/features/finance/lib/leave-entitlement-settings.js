@@ -1,5 +1,5 @@
-// The "ימי חופשה" settings dialog: the organisation default leave entitlement (leave_entitlement_policy,
-// a dated setting). Pure helpers so node:test can import them; the rules live in
+// Step 1 of the "חופשה" settings dialog: the organisation default leave entitlement
+// (leave_entitlement_policy, a dated setting). Pure helpers so node:test can import them; the rules live in
 // api/_shared/leave-entitlement.js (re-exported by src/lib/leave-entitlement.js).
 import {
   DEFAULT_FIXED_DAYS_BY_YEAR,
@@ -11,8 +11,11 @@ import {
 
 export { LEAVE_ENTITLEMENT_POLICY_KEY, MAX_FIXED_TABLE_ROWS };
 
+// "legal" is the stored mode; the screen calls it "מומלץ" and never names the law.
+export const ENTITLEMENT_RECOMMENDED_LABEL = 'מומלץ: לפי ותק וימי עבודה';
+
 export const ENTITLEMENT_DEFAULT_OPTIONS = [
-  { value: 'legal', label: 'לפי החוק', description: 'המערכת מחשבת לבד לפי הוותק וימי העבודה של כל עובד.' },
+  { value: 'legal', label: ENTITLEMENT_RECOMMENDED_LABEL, description: 'המערכת מחשבת לבד לפי הוותק וימי העבודה של כל עובד.' },
   { value: 'fixed', label: 'כמות קבועה', description: 'אתם קובעים כמה ימי חופשה מגיעים בכל שנת ותק.' },
 ];
 
@@ -57,7 +60,7 @@ export function seniorityRowLabel(index, count) {
 /** One stored version in a few words, for the history list. */
 export function describeEntitlementVersion(version) {
   const policy = normalizeLeaveEntitlementPolicy(version?.settings_value);
-  if (policy.mode !== 'fixed') return 'לפי החוק';
+  if (policy.mode !== 'fixed') return ENTITLEMENT_RECOMMENDED_LABEL;
   const table = policy.fixed_days_by_year;
   const min = Math.min(...table);
   const max = Math.max(...table);

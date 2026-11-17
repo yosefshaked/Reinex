@@ -714,8 +714,9 @@ export function AddLessonRateDialog({
 
 /**
  * The fixed value of a paid leave day (pay_basis leave_day), for an employee whose leave is paid by
- * the fixed value method. It sits with the leave settings in the finance tab, not with the rates for
- * work, and is saved the same way: a dated row in RateHistory through api/employee-rates.
+ * the fixed value method. It sits in the "חופשה" row of the "נוכחות" tab (EmployeeLeaveSettings), not
+ * with the rates for work, and is saved the same way: a dated row in RateHistory through
+ * api/employee-rates.
  */
 export function LeaveDayRateEditor({ employeeId, orgId, session, onSaved }) {
   const [rates, setRates] = useState([]);

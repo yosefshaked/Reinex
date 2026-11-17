@@ -5,7 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { EnhancedDialogHeader } from '@/components/ui/DialogHeader';
-import { Sparkles, ClipboardList, ShieldCheck, Tag, EyeOff, HardDrive, FileText, Briefcase, History, CalendarClock, CalendarDays } from 'lucide-react';
+import { Sparkles, ClipboardList, ShieldCheck, Tag, EyeOff, HardDrive, FileText, Briefcase, History, CalendarClock } from 'lucide-react';
 import LocalExportImportManager from '@/components/settings/LocalExportImportManager.jsx';
 import BackupManager from '@/components/settings/BackupManager.jsx';
 import LogoManager from '@/components/settings/LogoManager.jsx';
@@ -17,8 +17,7 @@ import MyInstructorDocuments from '@/components/settings/MyInstructorDocuments.j
 import OrgDocumentsManager from '@/components/settings/OrgDocumentsManager.jsx';
 import AuditLogViewer from '@/components/settings/AuditLogViewer.jsx';
 import BillingSettingsWorkspace from '@/features/finance/components/BillingSettingsWorkspace.jsx';
-import LeavePayDefaultSettings from '@/features/finance/components/LeavePayDefaultSettings.jsx';
-import LeaveEntitlementDefaultSettings from '@/features/finance/components/LeaveEntitlementDefaultSettings.jsx';
+import LeaveDefaultSettings from '@/features/finance/components/LeaveDefaultSettings.jsx';
 import { fetchSettingsValue } from '@/features/settings/api/settings.js';
 import { upsertSetting } from '@/features/settings/api/settings.js';
 import { useInstructorEarningsPolicy } from '@/features/finance/hooks/useInstructorEarningsPolicy.js';
@@ -43,7 +42,7 @@ export default function Settings() {
   const canManageSessionForm = normalizedRole === 'admin' || normalizedRole === 'owner';
   const orgIdSyncCompletedRef = useRef(new Set());
   const orgIdSyncInFlightRef = useRef(new Set());
-  const [selectedModule, setSelectedModule] = useState(null); // 'backup' | 'localExport' | 'logo' | 'tags' | 'studentVisibility' | 'storage' | 'documents' | 'orgDocuments' | 'myDocuments' | 'auditLogs' | 'billingSettings' | 'leavePayDefault' | 'leaveEntitlementDefault'
+  const [selectedModule, setSelectedModule] = useState(null); // 'backup' | 'localExport' | 'logo' | 'tags' | 'studentVisibility' | 'storage' | 'documents' | 'orgDocuments' | 'myDocuments' | 'auditLogs' | 'billingSettings' | 'leaveDefault'
   const [localExportEnabled, setLocalExportEnabled] = useState(false);
   const [logoEnabled, setLogoEnabled] = useState(false);
   const [storageEnabled, setStorageEnabled] = useState(false);
@@ -573,49 +572,22 @@ export default function Settings() {
                   <CalendarClock className="h-5 w-5" aria-hidden="true" />
                 </div>
                 <CardTitle className="text-lg font-bold text-slate-900">
-                  תשלום חופשה
+                  חופשה
                 </CardTitle>
               </div>
               <p className="text-sm text-slate-600 leading-relaxed min-h-[2.5rem]">
-                ברירת המחדל של הארגון לחישוב שווי יום חופשה בתשלום.
+                כמה ימי חופשה מגיעים לעובדים בשנה, וכמה משלמים על יום חופשה.
               </p>
             </CardHeader>
             <CardContent className="pt-0 mt-auto">
               <Button
                 size="sm"
                 className="w-full gap-2"
-                onClick={() => setSelectedModule('leavePayDefault')}
+                onClick={() => setSelectedModule('leaveDefault')}
                 disabled={!canManageSessionForm || !orgReady}
                 variant={(!canManageSessionForm || !orgReady) ? 'secondary' : 'default'}
               >
-                <CalendarClock className="h-4 w-4" /> פתיחת הגדרות תשלום חופשה
-              </Button>
-            </CardContent>
-          </Card>
-
-          <Card className="group relative w-full overflow-hidden border-0 bg-white/80 shadow-md transition-all duration-200 hover:shadow-xl hover:scale-[1.02] flex flex-col">
-            <CardHeader className="space-y-2 pb-3 flex-1">
-              <div className="flex items-start gap-2">
-                <div className="rounded-lg bg-emerald-100 p-2 text-emerald-600 transition-colors group-hover:bg-emerald-600 group-hover:text-white">
-                  <CalendarDays className="h-5 w-5" aria-hidden="true" />
-                </div>
-                <CardTitle className="text-lg font-bold text-slate-900">
-                  ימי חופשה
-                </CardTitle>
-              </div>
-              <p className="text-sm text-slate-600 leading-relaxed min-h-[2.5rem]">
-                כמה ימי חופשה מגיעים לעובדים בכל שנה.
-              </p>
-            </CardHeader>
-            <CardContent className="pt-0 mt-auto">
-              <Button
-                size="sm"
-                className="w-full gap-2"
-                onClick={() => setSelectedModule('leaveEntitlementDefault')}
-                disabled={!canManageSessionForm || !orgReady}
-                variant={(!canManageSessionForm || !orgReady) ? 'secondary' : 'default'}
-              >
-                <CalendarDays className="h-4 w-4" /> פתיחת הגדרות ימי חופשה
+                <CalendarClock className="h-4 w-4" /> פתיחת הגדרות חופשה
               </Button>
             </CardContent>
           </Card>
@@ -957,8 +929,7 @@ export default function Settings() {
                 selectedModule === 'studentVisibility' ? <EyeOff /> :
                 selectedModule === 'storage' ? <HardDrive /> :
                 selectedModule === 'billingSettings' ? <Briefcase /> :
-                selectedModule === 'leavePayDefault' ? <CalendarClock /> :
-                selectedModule === 'leaveEntitlementDefault' ? <CalendarDays /> :
+                selectedModule === 'leaveDefault' ? <CalendarClock /> :
                 selectedModule === 'documents' ? <FileText /> :
                 selectedModule === 'orgDocuments' ? <Briefcase /> :
                 selectedModule === 'myDocuments' ? <FileText /> :
@@ -973,8 +944,7 @@ export default function Settings() {
                 selectedModule === 'studentVisibility' ? 'תצוגת תלמידים לא פעילים' :
                 selectedModule === 'storage' ? 'הגדרות אחסון' :
                 selectedModule === 'billingSettings' ? 'חיובים וגורמים מממנים' :
-                selectedModule === 'leavePayDefault' ? 'תשלום חופשה' :
-                selectedModule === 'leaveEntitlementDefault' ? 'ימי חופשה' :
+                selectedModule === 'leaveDefault' ? 'חופשה' :
                 selectedModule === 'documents' ? 'ניהול מסמכים' :
                 selectedModule === 'orgDocuments' ? 'מסמכי הארגון' :
                 selectedModule === 'myDocuments' ? 'המסמכים שלי' :
@@ -1026,16 +996,8 @@ export default function Settings() {
                     onSaveBillingPolicy={handleSaveBillingPolicy}
                   />
                 )}
-                {selectedModule === 'leavePayDefault' && (
-                  <LeavePayDefaultSettings
-                    session={session}
-                    orgId={activeOrgId}
-                    canEdit={canManageSessionForm && orgReady}
-                    onClose={() => setSelectedModule(null)}
-                  />
-                )}
-                {selectedModule === 'leaveEntitlementDefault' && (
-                  <LeaveEntitlementDefaultSettings
+                {selectedModule === 'leaveDefault' && (
+                  <LeaveDefaultSettings
                     session={session}
                     orgId={activeOrgId}
                     canEdit={canManageSessionForm && orgReady}

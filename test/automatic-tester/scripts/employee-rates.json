@@ -2,7 +2,7 @@
   "meta": {
     "id": "employee-rates",
     "name": "Employee Pay Rates — dated rates screen",
-    "description": "Payroll phase 1b: the rates panel in an employee's finance tab. Creates an instructor with a service capability through the API (the DB trigger seeds its first rate), then in the UI schedules a future rate, checks the warnings for a back-dated rate and for a date that already has a rate, adds a rate for another service through the add-rate dialog, and adds an hourly rate — which switches the employee's pay model so the rate is actually read. Rates are never edited in place (PAY-A1, PAY-A2). A missing rate blocks adding a lesson (422 instructor_rate_not_configured) but never blocks marking attendance. Leave pay is a method chosen in the finance tab's leave-pay box (for any employee type), with the fixed day value beside it; leave itself is recorded from the attendance tab's day editor, which is the only leave screen.",
+    "description": "Payroll phase 1b: the rates panel in an employee's finance tab. Creates an instructor with a service capability through the API (the DB trigger seeds its first rate), then in the UI schedules a future rate, checks the warnings for a back-dated rate and for a date that already has a rate, adds a rate for another service through the add-rate dialog, and adds an hourly rate — which switches the employee's pay model so the rate is actually read. Rates are never edited in place (PAY-A1, PAY-A2). A missing rate blocks adding a lesson (422 instructor_rate_not_configured) but never blocks marking attendance. Leave pay is a method chosen in the attendance tab's leave row (\"חופשה\", for any employee type), with the fixed day value beside it, and the finance tab has no leave box; leave itself is recorded from the attendance tab's day editor, which is the only leave screen.",
     "version": "1.12.0",
     "last_validated_at": "2026-11-15T12:00:00Z",
     "author": "claude-ai",
@@ -787,8 +787,8 @@
     },
     {
       "id": "ui-leave-day-value",
-      "name": "UI – Leave pay is chosen in the finance tab, with the fixed day value beside it",
-      "description": "The leave-pay method is chosen in the finance tab's leave-pay box (read-first: the method as text, 'שינוי' opens the choice) and saved on the employee through PUT /api/instructors. When the method is a fixed day value, the same box sets the dated leave_day rate through api/employee-rates. The employee card dialog no longer has the choice.",
+      "name": "UI – Leave pay is chosen in the \"נוכחות\" tab's \"חופשה\" row, with the fixed day value beside it",
+      "description": "The leave-pay method is step 2 of the \"חופשה\" row in the \"נוכחות\" tab (read-first: one line \"ימים: ... · תשלום: ...\", one \"שינוי\" opens the two steps) and is saved on the employee through PUT /api/instructors. When the method is a fixed day value, the same step sets the dated leave_day rate through api/employee-rates. The \"פיננסים\" tab has no leave box, and the employee card dialog has no choice.",
       "steps": [
         {
           "id": "navigate-employees",
@@ -812,39 +812,62 @@
           "selector": "[role='tab']:has-text('פיננסים')"
         },
         {
-          "id": "assert-default-method",
-          "description": "The box reads first: the org default, as text, with no value row",
+          "id": "wait-finance",
           "action": "waitForSelector",
-          "selector": "[data-leave-pay-box]:has-text('ברירת המחדל של הארגון')"
+          "selector": "h3:has-text('תעריפי שכר')"
+        },
+        {
+          "id": "assert-no-leave-box",
+          "description": "Leave pay is no longer in the finance tab",
+          "action": "assert",
+          "type": "count",
+          "selector": "[data-leave-pay-box], h3:has-text('תשלום חופשה')",
+          "value": "0"
+        },
+        {
+          "id": "open-attendance-tab",
+          "action": "click",
+          "selector": "[role='tab']:has-text('נוכחות')"
+        },
+        {
+          "id": "assert-default-method",
+          "description": "The row reads first: pay follows the org default, and no value row is shown",
+          "action": "waitForSelector",
+          "selector": "[data-leave-settings-line]:has-text('תשלום: לפי ברירת המחדל')"
         },
         {
           "id": "assert-no-value-row-yet",
           "action": "assert",
           "type": "count",
-          "selector": "[data-leave-pay-box]:has-text('ערך ליום')",
+          "selector": "[data-leave-day-rate]",
           "value": "0"
         },
         {
-          "id": "open-method-choice",
-          "description": "'שינוי' opens the choice of method",
+          "id": "open-change",
+          "description": "'שינוי' opens the two steps",
           "action": "click",
-          "selector": "[data-leave-pay-box] button:has-text('שינוי')"
+          "selector": "[data-leave-settings-change]"
         },
         {
           "id": "choose-fixed",
           "action": "click",
-          "selector": "[data-leave-pay-box] [role='radio']:has-text('ערך קבוע ליום')"
-        },
-        {
-          "id": "save-method",
-          "action": "click",
-          "selector": "[data-leave-pay-box] button:text-is('שמירה')"
+          "selector": "[data-leave-settings-form] [data-pay-choice='fixed_rate']"
         },
         {
           "id": "assert-no-value-yet",
           "description": "The fixed method shows its value row: no leave-day value has been set yet",
           "action": "waitForSelector",
-          "selector": "[data-leave-pay-box]:has-text('לא הוגדר ערך ליום')"
+          "selector": "[data-leave-day-rate]:has-text('לא הוגדר ערך ליום')"
+        },
+        {
+          "id": "save-method",
+          "action": "click",
+          "selector": "[data-leave-settings-actions] button:text-is('שמירה')"
+        },
+        {
+          "id": "assert-method-line",
+          "action": "waitForSelector",
+          "selector": "[data-leave-settings-line]:has-text('תשלום: ערך קבוע ליום')"
         },
         {
           "id": "leave-tab",
@@ -855,17 +878,22 @@
         {
           "id": "return-tab",
           "action": "click",
-          "selector": "[role='tab']:has-text('פיננסים')"
+          "selector": "[role='tab']:has-text('נוכחות')"
         },
         {
           "id": "assert-method-saved",
           "action": "waitForSelector",
-          "selector": "[data-leave-pay-box]:has-text('ערך קבוע ליום'):has-text('לא הוגדר ערך ליום')"
+          "selector": "[data-leave-settings-line]:has-text('תשלום: ערך קבוע ליום')"
+        },
+        {
+          "id": "open-change-again",
+          "action": "click",
+          "selector": "[data-leave-settings-change]"
         },
         {
           "id": "open-leave-day-form",
           "action": "click",
-          "selector": "[data-leave-pay-box] button:text-is('הגדרה')"
+          "selector": "[data-leave-day-rate] button:text-is('הגדרה')"
         },
         {
           "id": "fill-leave-day",
@@ -876,13 +904,33 @@
         {
           "id": "save-leave-day",
           "action": "click",
-          "selector": "[data-leave-pay-box] button:text-is('שמירה')"
+          "selector": "[data-leave-day-rate] button:text-is('שמירה')"
         },
         {
           "id": "assert-leave-day-shown",
-          "description": "The value is shown per day in the leave-pay box",
+          "description": "The value is shown per day next to the fixed method",
           "action": "waitForSelector",
-          "selector": "[data-leave-pay-box]:has-text('₪250.00 ליום')"
+          "selector": "[data-leave-day-rate]:has-text('₪250.00 ליום')"
+        },
+        {
+          "id": "screenshot-leave-day",
+          "action": "screenshot",
+          "name": "05b-leave-day-value"
+        },
+        {
+          "id": "close-change",
+          "action": "click",
+          "selector": "[data-leave-settings-actions] button:text-is('ביטול')"
+        },
+        {
+          "id": "back-to-finance",
+          "action": "click",
+          "selector": "[role='tab']:has-text('פיננסים')"
+        },
+        {
+          "id": "wait-finance-again",
+          "action": "waitForSelector",
+          "selector": "h3:has-text('תעריפי שכר')"
         },
         {
           "id": "assert-not-a-rate-card",
@@ -891,11 +939,6 @@
           "type": "count",
           "selector": "article:has-text('ליום')",
           "value": "0"
-        },
-        {
-          "id": "screenshot-leave-day",
-          "action": "screenshot",
-          "name": "05b-leave-day-value"
         }
       ]
     },

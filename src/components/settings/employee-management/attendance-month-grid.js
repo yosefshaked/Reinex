@@ -135,13 +135,23 @@ export function leaveBalanceText(summary, entitlement = null, currentYear = null
   };
 }
 
-// The entitlement source as the "שינוי" choice shows it.
+// The employee's "חופשה" row in the "נוכחות" tab: one "שינוי" opens two steps. Step 1 is how many
+// leave days a year (Employees.annual_leave_days, null = the organisation default), step 2 what a
+// leave day is paid (Employees.leave_pay_method, null = the organisation default; the fixed value per
+// day is a dated leave_day rate set in the same step).
 export const ENTITLEMENT_CHOICES = [
   { value: 'default', label: 'לפי ברירת המחדל של הארגון' },
   { value: 'manual', label: 'מספר ימים קבוע לשנה' },
 ];
 
-/** Body of PUT /api/instructors for the per-employee choice; refuses a bad manual number (null). */
+export const EMPLOYEE_LEAVE_PAY_CHOICES = [
+  { value: '', label: 'לפי ברירת המחדל של הארגון' },
+  { value: 'legal', label: 'ממוצע מומלץ' },
+  { value: 'avg_hourly_x_avg_day_hours', label: 'ממוצע היסטורי' },
+  { value: 'fixed_rate', label: 'ערך קבוע ליום' },
+];
+
+/** Body of PUT /api/instructors for the days choice alone; refuses a bad manual number (null). */
 export function buildEntitlementChoiceBody({ choice, manualDays }, { orgId, employeeId }) {
   if (choice === 'default') {
     return { org_id: orgId, instructor_id: employeeId, annual_leave_days: null };
@@ -151,6 +161,64 @@ export function buildEntitlementChoiceBody({ choice, manualDays }, { orgId, empl
     return null;
   }
   return { org_id: orgId, instructor_id: employeeId, annual_leave_days: value };
+}
+
+/**
+ * The PUT /api/instructors body for the two steps, with only the fields that change:
+ * { body, changed }, or null when the manual number is not valid. `current` is what is stored
+ * ({ annual_leave_days, leave_pay_method }).
+ */
+export function buildEmployeeLeaveBody({ daysChoice, manualDays, payMethod }, { orgId, employeeId }, current = {}) {
+  const daysBody = buildEntitlementChoiceBody({ choice: daysChoice, manualDays }, { orgId, employeeId });
+  if (!daysBody) return null;
+  const body = { org_id: orgId, instructor_id: employeeId };
+  const storedDays = current?.annual_leave_days == null ? null : Number(current.annual_leave_days);
+  if (daysBody.annual_leave_days !== storedDays) body.annual_leave_days = daysBody.annual_leave_days;
+  const nextMethod = payMethod || null;
+  if (nextMethod !== (current?.leave_pay_method || null)) body.leave_pay_method = nextMethod;
+  return { body, changed: Object.keys(body).length > 2 };
+}
+
+function payPolicyMonths(orgPolicy) {
+  const months = Number(orgPolicy?.lookback_months);
+  return Number.isFinite(months) && months > 0 ? Math.round(months) : 3;
+}
+
+// The organisation's default method as the screen names it ("legal" without the 12-month
+// comparison calculates like the historic average).
+function orgPayMethod(orgPolicy) {
+  const method = String(orgPolicy?.default_method || 'legal');
+  if (method === 'legal' && orgPolicy?.legal_allow_12m_if_better === false) return 'avg_hourly_x_avg_day_hours';
+  return method;
+}
+
+function payMethodLabel(method) {
+  return EMPLOYEE_LEAVE_PAY_CHOICES.find((option) => option.value === method)?.label || 'ממוצע מומלץ';
+}
+
+/** What a leave day is worth under a step-2 choice, in words, with the organisation's months. */
+export function describeEmployeeLeavePayChoice(method, orgPolicy) {
+  const months = payPolicyMonths(orgPolicy);
+  const period = months === 1 ? 'בחודש האחרון' : `ב-${months} החודשים האחרונים`;
+  if (method === 'legal') {
+    return orgPolicy?.legal_allow_12m_if_better === false
+      ? `השכר היומי הממוצע בימים שעבד/ה ${period}.`
+      : `השכר היומי הממוצע בימים שעבד/ה ${period}, או ב-12 החודשים האחרונים אם שם הממוצע גבוה יותר.`;
+  }
+  if (method === 'avg_hourly_x_avg_day_hours') return `השכר היומי הממוצע בימים שעבד/ה ${period} בלבד.`;
+  if (method === 'fixed_rate') return 'סכום קבוע ליום חופשה, מהתאריך שנקבע לו.';
+  return `כמו שאר העובדים בארגון. כרגע: "${payMethodLabel(orgPayMethod(orgPolicy))}".`;
+}
+
+/** The read-first line of the row: "ימים: 9 בשנה · תשלום: ממוצע היסטורי". */
+export function employeeLeaveSummaryText(current = {}, orgPolicy = null) {
+  const storedDays = current?.annual_leave_days;
+  const daysText = storedDays == null ? 'לפי ברירת המחדל' : `${days(storedDays)} בשנה`;
+  const method = current?.leave_pay_method || '';
+  const payText = method
+    ? payMethodLabel(method)
+    : `לפי ברירת המחדל (${payMethodLabel(orgPayMethod(orgPolicy))})`;
+  return `ימים: ${daysText} · תשלום: ${payText}`;
 }
 
 const ORDINALS = ['הראשונה', 'השנייה', 'השלישית', 'הרביעית', 'החמישית', 'השישית', 'השביעית', 'השמינית', 'התשיעית', 'העשירית'];
@@ -212,7 +280,7 @@ export function leaveEntitlementExplanation(entitlement, { name = 'העובד/ת
     const table = entitlement.work_week_days === 6
       ? 'לפי טבלת שבוע עבודה של 6 ימים, כי הוגדרו לעובד/ת 6 ימי עבודה'
       : 'לפי טבלת שבוע עבודה של 5 ימים, כי לא הוגדרו לעובד/ת 6 ימי עבודה';
-    sentences.push(`איך חישבנו במקומות שהחוק לא חד: יום עם שיעור או עם שעות עבודה כלשהן נחשב יום עבודה שלם; חלקי ימים מעוגלים כלפי מטה; ${table}.`);
+    sentences.push(`איך חישבנו במקרים שאינם חד-משמעיים: יום עם שיעור או עם שעות עבודה כלשהן נחשב יום עבודה שלם; חלקי ימים מעוגלים כלפי מטה; ${table}.`);
   }
   return sentences;
 }

@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { todayKey } from '@/lib/local-time.js';
-import { buildDatedSettingWarnings, versionFromLabel } from '@/features/settings/lib/dated-setting.js';
+import { buildDatedSettingsWarnings, mergeVersionHistory, versionFromLabel } from '@/features/settings/lib/dated-setting.js';
 
 /**
  * The date part of every dated setting (a setting read as of a date, like a rate): "בתוקף מ-" with
@@ -12,6 +12,11 @@ import { buildDatedSettingWarnings, versionFromLabel } from '@/features/settings
  * collapsible "היסטוריה (N)" of the versions with their dates. The form owns the value and the save;
  * `describeVersion(version)` says in a few words what a stored version holds. The warnings show only
  * while there is something to save (`changed`).
+ *
+ * A screen that saves several dated settings from one date passes `parts` instead
+ * ([{ key, label, versions, describeVersion, changed, pastDateWarning }]): one date, the warnings of
+ * each part that will get a new version (each with its own past-date wording), and one history list
+ * of all their versions, each labelled.
  */
 export default function DatedSettingFields({
   idPrefix,
@@ -22,13 +27,19 @@ export default function DatedSettingFields({
   changed = true,
   disabled = false,
   pastDateWarning,
+  parts,
 }) {
   const [showHistory, setShowHistory] = useState(false);
   const today = todayKey();
-  const list = useMemo(() => (Array.isArray(versions) ? versions : []), [versions]);
+  const allParts = useMemo(() => (
+    Array.isArray(parts) && parts.length
+      ? parts
+      : [{ key: '', label: '', versions: Array.isArray(versions) ? versions : [], describeVersion, changed, pastDateWarning }]
+  ), [parts, versions, describeVersion, changed, pastDateWarning]);
+  const history = useMemo(() => mergeVersionHistory(allParts), [allParts]);
   const warnings = useMemo(
-    () => buildDatedSettingWarnings({ versions: list, effectiveDate, today, ...(pastDateWarning ? { pastDateWarning } : {}) }),
-    [list, effectiveDate, today, pastDateWarning],
+    () => buildDatedSettingsWarnings({ parts: allParts, effectiveDate, today }),
+    [allParts, effectiveDate, today],
   );
   const dateId = `${idPrefix}-effective-date`;
   const historyId = `${idPrefix}-history`;
@@ -45,7 +56,7 @@ export default function DatedSettingFields({
           onChange={(event) => onEffectiveDateChange?.(event.target.value)}
           disabled={disabled}
         />
-        {list.length > 0 ? (
+        {history.length > 0 ? (
           <Button
             type="button"
             size="sm"
@@ -55,13 +66,13 @@ export default function DatedSettingFields({
             aria-controls={historyId}
             onClick={() => setShowHistory((value) => !value)}
           >
-            היסטוריה ({list.length})
+            היסטוריה ({history.length})
             <ChevronDown className={`h-3.5 w-3.5 transition-transform ${showHistory ? 'rotate-180' : ''}`} />
           </Button>
         ) : null}
       </div>
 
-      {changed && warnings.length > 0 ? (
+      {warnings.length > 0 ? (
         <ul className="space-y-1 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800" role="status">
           {warnings.map((warning) => (
             <li key={warning} className="flex items-start gap-1.5">
@@ -72,11 +83,18 @@ export default function DatedSettingFields({
         </ul>
       ) : null}
 
-      {showHistory && list.length > 0 ? (
+      {showHistory && history.length > 0 ? (
         <ol id={historyId} className="divide-y divide-slate-100 rounded-xl border border-slate-200 bg-white">
-          {list.map((version) => (
-            <li key={`${version.effective_date}-${version.created_at || ''}`} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 text-sm">
-              <span className="font-semibold text-slate-900">{describeVersion ? describeVersion(version) : ''}</span>
+          {history.map(({ key, label, text, version }) => (
+            <li
+              key={`${key}-${version.effective_date}-${version.created_at || ''}`}
+              className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 text-sm"
+              data-history-key={key || undefined}
+            >
+              <span className="text-slate-900">
+                {label ? <span className="text-slate-500">{label} · </span> : null}
+                <span className="font-semibold">{text}</span>
+              </span>
               <span className="text-xs text-slate-500">
                 {versionFromLabel(version)}
                 {version.effective_date > today ? ' (עתידי)' : ''}

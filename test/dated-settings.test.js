@@ -23,6 +23,8 @@ import {
 import {
   SINCE_THE_BEGINNING as SCREEN_SINCE_THE_BEGINNING,
   buildDatedSettingWarnings,
+  buildDatedSettingsWarnings,
+  mergeVersionHistory,
   versionFromLabel,
   versionInForce,
 } from '../src/features/settings/lib/dated-setting.js';
@@ -157,5 +159,49 @@ describe('the settings screen pattern', () => {
     assert.match(backDated[0], /ימים שכבר עברו/);
     assert.match(backDated[1], /לפני ההגדרה הנוכחית \(מ-01.12.2026\)/);
     assert.match(buildDatedSettingWarnings({ versions, effectiveDate: '2026-12-01', today }).at(-1), /השמירה תחליף אותה/);
+  });
+});
+
+describe('one screen that saves two dated settings from one date', () => {
+  const entitlementVersions = [
+    { effective_date: '2026-12-01', settings_value: { mode: 'fixed' }, created_at: '2026-12-01T08:00:00Z' },
+  ];
+  const payVersions = [
+    { effective_date: '2026-12-01', settings_value: { default_method: 'legal' }, created_at: '2026-12-01T08:00:01Z' },
+    { effective_date: '2000-01-01', settings_value: { default_method: 'legal' }, created_at: '2026-01-01T00:00:00Z' },
+  ];
+  const parts = (entitlementChanged, payChanged) => [
+    { key: 'leave_entitlement_policy', label: 'ימי חופשה', versions: entitlementVersions, changed: entitlementChanged, pastDateWarning: 'שנים שכבר עברו', describeVersion: () => 'כמות קבועה' },
+    { key: 'leave_pay_policy', label: 'תשלום', versions: payVersions, changed: payChanged, pastDateWarning: 'ימי חופשה שכבר היו', describeVersion: () => 'ממוצע מומלץ' },
+  ];
+  const today = '2026-12-10';
+
+  it('warns only for a key that will get a new version, each past date in its own words', () => {
+    assert.deepEqual(buildDatedSettingsWarnings({ parts: parts(false, false), effectiveDate: '2026-11-01', today }), []);
+    assert.deepEqual(buildDatedSettingsWarnings({ parts: parts(true, false), effectiveDate: today, today }), []);
+    const onlyPay = buildDatedSettingsWarnings({ parts: parts(false, true), effectiveDate: '2026-11-01', today });
+    assert.equal(onlyPay[0], 'ימי חופשה שכבר היו');
+    assert.match(onlyPay[1], /^תשלום: ההגדרה תיכנס לפני ההגדרה הנוכחית/);
+    const both = buildDatedSettingsWarnings({ parts: parts(true, true), effectiveDate: '2026-11-01', today });
+    assert.deepEqual(both.slice(0, 1), ['שנים שכבר עברו']);
+    assert.ok(both.includes('ימי חופשה שכבר היו'));
+    assert.ok(both.some((warning) => warning.startsWith('ימי חופשה: ההגדרה תיכנס לפני')));
+  });
+
+  it('names the key in the "replaces" warning and does not repeat a warning', () => {
+    const both = buildDatedSettingsWarnings({ parts: parts(true, true), effectiveDate: '2026-12-01', today });
+    assert.deepEqual(both.filter((warning) => warning.includes('תחליף')), ['ימי חופשה: כבר קיימת הגדרה מהתאריך הזה. השמירה תחליף אותה.', 'תשלום: כבר קיימת הגדרה מהתאריך הזה. השמירה תחליף אותה.']);
+    const single = buildDatedSettingsWarnings({ parts: [parts(true, true)[0]], effectiveDate: '2026-12-01', today });
+    assert.deepEqual(single.filter((warning) => warning.includes('תחליף')), ['כבר קיימת הגדרה מהתאריך הזה. השמירה תחליף אותה.'], 'one key: no label');
+  });
+
+  it('lists the versions of both keys in one history, newest first and labelled', () => {
+    const rows = mergeVersionHistory(parts(false, false));
+    assert.deepEqual(rows.map((row) => [row.key, row.label, row.text, row.version.effective_date]), [
+      ['leave_entitlement_policy', 'ימי חופשה', 'כמות קבועה', '2026-12-01'],
+      ['leave_pay_policy', 'תשלום', 'ממוצע מומלץ', '2026-12-01'],
+      ['leave_pay_policy', 'תשלום', 'ממוצע מומלץ', '2000-01-01'],
+    ]);
+    assert.deepEqual(mergeVersionHistory([]), []);
   });
 });

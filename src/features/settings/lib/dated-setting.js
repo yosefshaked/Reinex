@@ -49,3 +49,57 @@ export function buildDatedSettingWarnings({ versions = [], effectiveDate, today,
   }
   return warnings;
 }
+
+/**
+ * The warnings of a screen that saves several dated settings from one date (one "בתוקף מ-", one
+ * save). `parts` is [{ key, label, versions, changed, pastDateWarning }]: only a part that will get a
+ * new version (`changed`) warns, each with its own past-date wording; when there are several parts,
+ * the warnings about another version name the part they belong to. Duplicates are dropped.
+ */
+export function buildDatedSettingsWarnings({ parts = [], effectiveDate, today }) {
+  const list = (Array.isArray(parts) ? parts : []).filter(Boolean);
+  const many = list.length > 1;
+  const warnings = [];
+  for (const part of list) {
+    if (!part.changed) continue;
+    const own = buildDatedSettingWarnings({
+      versions: part.versions,
+      effectiveDate,
+      today,
+      ...(part.pastDateWarning ? { pastDateWarning: part.pastDateWarning } : {}),
+    });
+    const pastWarning = part.pastDateWarning || PAST_DATE_WARNING;
+    for (const warning of own) {
+      const text = many && part.label && warning !== pastWarning ? `${part.label}: ${warning}` : warning;
+      if (!warnings.includes(text)) warnings.push(text);
+    }
+  }
+  return warnings;
+}
+
+/**
+ * One history list for several dated settings, newest first: each row is { key, label, text,
+ * version } where `text` is the part's `describeVersion(version)`. Rows of the same date keep the
+ * order of `parts`.
+ */
+export function mergeVersionHistory(parts = []) {
+  const rows = [];
+  (Array.isArray(parts) ? parts : []).forEach((part, partIndex) => {
+    for (const version of Array.isArray(part?.versions) ? part.versions : []) {
+      if (!version?.effective_date) continue;
+      rows.push({
+        key: part.key || '',
+        label: part.label || '',
+        text: typeof part.describeVersion === 'function' ? part.describeVersion(version) : '',
+        version,
+        partIndex,
+      });
+    }
+  });
+  rows.sort((a, b) => {
+    if (a.version.effective_date !== b.version.effective_date) return a.version.effective_date < b.version.effective_date ? 1 : -1;
+    if (a.partIndex !== b.partIndex) return a.partIndex - b.partIndex;
+    return String(b.version.created_at || '').localeCompare(String(a.version.created_at || ''));
+  });
+  return rows.map(({ key, label, text, version }) => ({ key, label, text, version }));
+}

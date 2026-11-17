@@ -16,6 +16,13 @@ import {
   validateLeavePayDraft,
 } from '../src/features/finance/lib/leave-pay-policy.js';
 import { DEFAULT_LEAVE_PAY_POLICY, validateLeavePayPolicyInput } from '../api/_shared/employee-finance.js';
+import {
+  buildEntitlementStepDraft,
+  buildLeaveSettingsVersions,
+  describeLeavePayVersion,
+  isEntitlementStepChanged,
+  validateLeaveSettingsDraft,
+} from '../src/features/finance/lib/leave-settings.js';
 
 const SEEDED = { default_method: 'legal', lookback_months: 3, legal_allow_12m_if_better: true, fixed_rate_default: 0 };
 
@@ -139,5 +146,54 @@ describe('validateLeavePayPolicyInput (server, settings write)', () => {
 
   it('still accepts a fixed-rate default written by another client', () => {
     assert.equal(validateLeavePayPolicyInput({ ...SEEDED, default_method: 'fixed_rate', fixed_rate_default: 25000 }).value.default_method, 'fixed_rate');
+  });
+});
+
+describe('the "חופשה" dialog: two steps, one save', () => {
+  const LEGAL_ENTITLEMENT = { mode: 'legal', fixed_days_by_year: [12, 12] };
+  const entitlementDraft = (mode, rows = ['12', '12']) => ({ mode, rows });
+  const payDraft = (method, lookbackMonths = '3') => ({ method, lookbackMonths });
+
+  it('starts step 1 with nothing chosen only when the organisation never chose', () => {
+    assert.equal(buildEntitlementStepDraft(null, false).mode, '');
+    assert.equal(buildEntitlementStepDraft(null, false).rows.length, 14, 'the table is still prefilled');
+    assert.equal(buildEntitlementStepDraft({ mode: 'fixed', fixed_days_by_year: [10] }, true).mode, 'fixed');
+    assert.equal(buildEntitlementStepDraft(null, true).mode, 'legal');
+  });
+
+  it('asks for step 1 before anything else, then checks the table and the months', () => {
+    assert.equal(validateLeaveSettingsDraft({ entitlementDraft: entitlementDraft(''), payDraft: payDraft('legal') }), 'יש לבחור כמה ימי חופשה מגיעים בשנה.');
+    assert.equal(validateLeaveSettingsDraft({ entitlementDraft: entitlementDraft('legal'), payDraft: payDraft('legal') }), '');
+    assert.match(validateLeaveSettingsDraft({ entitlementDraft: entitlementDraft('fixed', ['']), payDraft: payDraft('legal') }), /בכל שורה/);
+    assert.match(validateLeaveSettingsDraft({ entitlementDraft: entitlementDraft('legal'), payDraft: payDraft('legal', '13') }), /בין 1 ל-12/);
+  });
+
+  it('saves a version only of the keys that changed', () => {
+    const unchangedEntitlement = { baseline: LEGAL_ENTITLEMENT, draft: entitlementDraft('legal'), hasVersionOnDate: true };
+    const unchangedPay = { baseline: SEEDED, draft: payDraft('legal') };
+    assert.deepEqual(buildLeaveSettingsVersions({ entitlement: unchangedEntitlement, pay: unchangedPay }), []);
+
+    const onlyPay = buildLeaveSettingsVersions({ entitlement: unchangedEntitlement, pay: { baseline: SEEDED, draft: payDraft('avg_hourly_x_avg_day_hours', '6') } });
+    assert.deepEqual(onlyPay.map((entry) => entry.key), ['leave_pay_policy']);
+    assert.equal(onlyPay[0].value.default_method, 'avg_hourly_x_avg_day_hours');
+    assert.equal(onlyPay[0].value.lookback_months, 6);
+
+    const both = buildLeaveSettingsVersions({
+      entitlement: { baseline: LEGAL_ENTITLEMENT, draft: entitlementDraft('fixed', ['10', '14']), hasVersionOnDate: true },
+      pay: { baseline: SEEDED, draft: payDraft('avg_hourly_x_avg_day_hours') },
+    });
+    assert.deepEqual(both.map((entry) => entry.key), ['leave_entitlement_policy', 'leave_pay_policy']);
+    assert.deepEqual(both[0].value, { mode: 'fixed', fixed_days_by_year: [10, 14] });
+  });
+
+  it('keeps a first choice of step 1 even when it matches what the system already did', () => {
+    assert.equal(isEntitlementStepChanged({ baseline: null, draft: entitlementDraft('legal'), hasVersionOnDate: false }), true);
+    assert.equal(isEntitlementStepChanged({ baseline: null, draft: entitlementDraft(''), hasVersionOnDate: false }), false);
+    assert.equal(isEntitlementStepChanged({ baseline: LEGAL_ENTITLEMENT, draft: entitlementDraft('legal'), hasVersionOnDate: true }), false);
+  });
+
+  it('describes a stored pay version for the shared history', () => {
+    assert.equal(describeLeavePayVersion({ settings_value: SEEDED }), 'ממוצע מומלץ · 3 חודשים');
+    assert.equal(describeLeavePayVersion({ settings_value: { ...SEEDED, default_method: 'avg_hourly_x_avg_day_hours', lookback_months: 6 } }), 'ממוצע היסטורי · 6 חודשים');
   });
 });

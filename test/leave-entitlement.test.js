@@ -35,7 +35,10 @@ import {
   validateEntitlementDraft,
 } from '../src/features/finance/lib/leave-entitlement-settings.js';
 import {
+  buildEmployeeLeaveBody,
   buildEntitlementChoiceBody,
+  describeEmployeeLeavePayChoice,
+  employeeLeaveSummaryText,
   entitlementManualReason,
   leaveEntitlementExplanation,
 } from '../src/components/settings/employee-management/attendance-month-grid.js';
@@ -367,7 +370,7 @@ describe('the settings dialog and the employee choice', () => {
   it('labels the rows and the history', () => {
     assert.equal(seniorityRowLabel(0, 14), 'שנה 1');
     assert.equal(seniorityRowLabel(13, 14), 'שנה 14 ואילך');
-    assert.equal(describeEntitlementVersion({ settings_value: { mode: 'legal' } }), 'לפי החוק');
+    assert.equal(describeEntitlementVersion({ settings_value: { mode: 'legal' } }), 'מומלץ: לפי ותק וימי עבודה');
     assert.equal(describeEntitlementVersion({ settings_value: { mode: 'fixed', fixed_days_by_year: [12, 20] } }), 'כמות קבועה · 12–20 ימים');
   });
 
@@ -383,6 +386,43 @@ describe('the settings dialog and the employee choice', () => {
     assert.equal(buildEntitlementChoiceBody({ choice: 'manual', manualDays: '' }, ids), null);
     assert.equal(buildEntitlementChoiceBody({ choice: 'manual', manualDays: '14.3' }, ids), null);
   });
+
+  it('the "חופשה" row sends only the fields that change, both in one body', () => {
+    const ids = { orgId: 'o', employeeId: 'e' };
+    const stored = { annual_leave_days: null, leave_pay_method: null };
+    assert.deepEqual(buildEmployeeLeaveBody({ daysChoice: 'default', manualDays: '', payMethod: '' }, ids, stored), { body: { org_id: 'o', instructor_id: 'e' }, changed: false });
+    assert.deepEqual(
+      buildEmployeeLeaveBody({ daysChoice: 'manual', manualDays: '9', payMethod: 'fixed_rate' }, ids, stored),
+      { body: { org_id: 'o', instructor_id: 'e', annual_leave_days: 9, leave_pay_method: 'fixed_rate' }, changed: true },
+    );
+    assert.deepEqual(
+      buildEmployeeLeaveBody({ daysChoice: 'manual', manualDays: '9', payMethod: '' }, ids, { annual_leave_days: 9, leave_pay_method: 'legal' }),
+      { body: { org_id: 'o', instructor_id: 'e', leave_pay_method: null }, changed: true },
+    );
+    assert.deepEqual(
+      buildEmployeeLeaveBody({ daysChoice: 'default', manualDays: '9', payMethod: 'legal' }, ids, { annual_leave_days: 9, leave_pay_method: 'legal' }),
+      { body: { org_id: 'o', instructor_id: 'e', annual_leave_days: null }, changed: true },
+    );
+    assert.equal(buildEmployeeLeaveBody({ daysChoice: 'manual', manualDays: '400', payMethod: '' }, ids, stored), null);
+  });
+
+  it('the "חופשה" row reads first as one short line', () => {
+    const orgPolicy = { default_method: 'legal', lookback_months: 3, legal_allow_12m_if_better: true };
+    assert.equal(employeeLeaveSummaryText({ annual_leave_days: null, leave_pay_method: null }, orgPolicy), 'ימים: לפי ברירת המחדל · תשלום: לפי ברירת המחדל (ממוצע מומלץ)');
+    assert.equal(employeeLeaveSummaryText({ annual_leave_days: 14.5, leave_pay_method: 'fixed_rate' }, orgPolicy), 'ימים: 14.5 בשנה · תשלום: ערך קבוע ליום');
+    assert.equal(
+      employeeLeaveSummaryText({ annual_leave_days: null, leave_pay_method: null }, { ...orgPolicy, default_method: 'avg_hourly_x_avg_day_hours' }),
+      'ימים: לפי ברירת המחדל · תשלום: לפי ברירת המחדל (ממוצע היסטורי)',
+    );
+  });
+
+  it('step 2 explains each choice with the organisation months', () => {
+    const orgPolicy = { default_method: 'legal', lookback_months: 6, legal_allow_12m_if_better: true };
+    assert.equal(describeEmployeeLeavePayChoice('', orgPolicy), 'כמו שאר העובדים בארגון. כרגע: "ממוצע מומלץ".');
+    assert.match(describeEmployeeLeavePayChoice('legal', orgPolicy), /ב-6 החודשים האחרונים, או ב-12 החודשים האחרונים/);
+    assert.match(describeEmployeeLeavePayChoice('avg_hourly_x_avg_day_hours', orgPolicy), /ב-6 החודשים האחרונים בלבד/);
+    assert.match(describeEmployeeLeavePayChoice('fixed_rate', orgPolicy), /סכום קבוע/);
+  });
 });
 
 describe('"הסבר מלא"', () => {
@@ -396,6 +436,7 @@ describe('"הסבר מלא"', () => {
     assert.match(sentences.at(-1), /נחשב יום עבודה שלם; חלקי ימים מעוגלים כלפי מטה; לפי טבלת שבוע עבודה של 5 ימים/);
     assert.ok(sentences.every((sentence) => !sentence.includes('÷')), 'no formulas');
     assert.ok(sentences.every((sentence) => !/[„”“]/.test(sentence)), 'straight quotes only');
+    assert.ok(sentences.every((sentence) => !/חוק/.test(sentence)), 'no legal wording');
   });
 
   it('explains the fixed table and a manual number', () => {

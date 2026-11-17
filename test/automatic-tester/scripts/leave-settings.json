@@ -1,0 +1,461 @@
+{
+  "meta": {
+    "id": "leave-settings",
+    "name": "Leave — the organisation's \"חופשה\" settings and the employee's \"חופשה\" row",
+    "description": "Leave is set in one place per level. Settings page: one tile \"חופשה\" opens one dialog with two steps — step 1 \"כמה ימי חופשה מגיעים בשנה?\" (leave_entitlement_policy: \"מומלץ: לפי ותק וימי עבודה\" or \"כמות קבועה\" with a table per seniority year) and, once step 1 has a choice, step 2 \"כמה משלמים על יום חופשה?\" (leave_pay_policy: \"ממוצע מומלץ\" / \"ממוצע היסטורי\" and the months). Both are dated settings: one \"בתוקף מ-\", one save that writes a version of each key that changed, and one \"היסטוריה\" that lists both, labelled. Per employee: the \"נוכחות\" tab has a \"חופשה\" row next to the balance (\"ימים: ... · תשלום: ...\") with one \"שינוי\" that opens the same two steps (Employees.annual_leave_days, Employees.leave_pay_method); the \"פיננסים\" tab has no leave box. The run resets both defaults through the API (and checks the server refuses bad values), creates an instructor who started on 2020-01-01 with no lessons (the recommended count gives 0 days so far), switches the organisation to \"כמות קבועה\" + \"ממוצע היסטורי\" in one save and reads the history, sees the instructor follow it, sets 9 days and \"ממוצע מומלץ\" for the instructor, goes back to the defaults, and restores the organisation defaults in the dialog. The words \"לפי החוק\" appear nowhere.",
+    "version": "2.0.0",
+    "last_validated_at": "2026-11-17T12:00:00Z",
+    "author": "claude-ai",
+    "dependencies": {
+      "routes": [
+        "/Settings",
+        "/employees"
+      ],
+      "api_endpoints": [
+        "GET /api/settings",
+        "POST /api/settings",
+        "POST /api/instructors",
+        "PUT /api/instructors",
+        "GET /api/employee-leave"
+      ]
+    }
+  },
+  "config": {
+    "timeout_ms": 25000,
+    "screenshot_on_failure": true,
+    "continue_on_step_failure": false,
+    "continue_on_workflow_failure": false
+  },
+  "workflows": [
+    {
+      "id": "login",
+      "name": "Login as Admin",
+      "steps": [
+        { "id": "do-login", "action": "login", "role": "admin" },
+        { "id": "assert-dashboard", "action": "assert", "type": "url", "pattern": "#/dashboard" }
+      ]
+    },
+
+    {
+      "id": "api-setup",
+      "name": "API – Both defaults reset from today; bad values refused; an instructor who started in 2020",
+      "steps": [
+        {
+          "id": "reset-both",
+          "description": "Store the recommended count and the seeded pay default from today in one request (replacing today's versions of an earlier run)",
+          "action": "apiCall",
+          "method": "POST",
+          "endpoint": "/api/settings",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "settings": {
+              "leave_entitlement_policy": { "value": { "mode": "legal" }, "effective_date": "{{TODAY}}" },
+              "leave_pay_policy": {
+                "value": { "default_method": "legal", "lookback_months": 3, "legal_allow_12m_if_better": true, "fixed_rate_default": 0 },
+                "effective_date": "{{TODAY}}"
+              }
+            }
+          }
+        },
+        {
+          "id": "refuse-without-date",
+          "description": "A dated setting needs effective_date (400 missing_effective_date)",
+          "action": "apiCall",
+          "method": "POST",
+          "endpoint": "/api/settings",
+          "ignoreStatus": [400],
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "settings": {
+              "leave_pay_policy": { "default_method": "avg_hourly_x_avg_day_hours", "lookback_months": 3, "legal_allow_12m_if_better": true }
+            }
+          }
+        },
+        {
+          "id": "refuse-13-months",
+          "description": "13 months is refused (400); the dialog below re-checks the stored value is still 3 months",
+          "action": "apiCall",
+          "method": "POST",
+          "endpoint": "/api/settings",
+          "ignoreStatus": [400],
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "settings": {
+              "leave_pay_policy": {
+                "value": { "default_method": "legal", "lookback_months": 13, "legal_allow_12m_if_better": true },
+                "effective_date": "{{TODAY}}"
+              }
+            }
+          }
+        },
+        {
+          "id": "refuse-bad-table",
+          "description": "A fixed table with a negative row is refused (400 invalid_leave_entitlement_table); the dialog below still opens on the recommended count",
+          "action": "apiCall",
+          "method": "POST",
+          "endpoint": "/api/settings",
+          "ignoreStatus": [400],
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "settings": {
+              "leave_entitlement_policy": { "value": { "mode": "fixed", "fixed_days_by_year": [-1] }, "effective_date": "{{TODAY}}" }
+            }
+          }
+        },
+        {
+          "id": "create-instructor",
+          "description": "An instructor employed since 2020-01-01 with no lessons yet: 0 days so far this year",
+          "action": "apiCall",
+          "method": "POST",
+          "endpoint": "/api/instructors",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "first_name": "זכאות",
+            "last_name": "בדיקה {{RUN_NUMERIC_ID}}",
+            "employee_id": "TEST-LEAVE-{{RUN_NUMERIC_ID}}",
+            "employee_type": "instructor",
+            "start_date": "2020-01-01"
+          },
+          "store": "LEAVE_INSTRUCTOR_ID",
+          "storeField": "id"
+        }
+      ]
+    },
+
+    {
+      "id": "ui-employee-defaults",
+      "name": "UI – The instructor follows both defaults; one \"חופשה\" row in \"נוכחות\", nothing in \"פיננסים\"",
+      "steps": [
+        { "id": "navigate-employees", "action": "navigate", "url": "{{BASE_URL}}/#/employees" },
+        { "id": "wait-main", "action": "waitForSelector", "selector": "main, [role='main']" },
+        { "id": "open-employee", "action": "click", "selector": "button:has-text('זכאות בדיקה {{RUN_NUMERIC_ID}}')", "first": true },
+        { "id": "open-attendance-tab", "action": "click", "selector": "[role='tab']:has-text('נוכחות')" },
+        {
+          "id": "assert-zero-line",
+          "description": "No days worked yet this year: nothing is owed so far",
+          "action": "waitForSelector",
+          "selector": "[data-leave-balance-line]:has-text('מגיעים 0 ימי חופשה השנה · נוצלו 0 · נשארו 0')"
+        },
+        {
+          "id": "assert-row-defaults",
+          "description": "The \"חופשה\" row reads first: both choices follow the organisation",
+          "action": "waitForSelector",
+          "selector": "[data-leave-settings-line]:has-text('ימים: לפי ברירת המחדל · תשלום: לפי ברירת המחדל (ממוצע מומלץ)')"
+        },
+        {
+          "id": "assert-one-change",
+          "description": "One \"שינוי\" for leave days and pay; the balance line has no separate one",
+          "action": "assert",
+          "type": "count",
+          "selector": "[data-leave-entitlement-change]",
+          "value": "0"
+        },
+        { "id": "open-explain", "action": "click", "selector": "[data-leave-explain-open]" },
+        {
+          "id": "assert-explain",
+          "description": "Plain sentences: the seniority year, a full year's days, the days worked so far and the 200-day rule",
+          "action": "waitForSelector",
+          "selector": "[data-leave-explain]:has-text('בשנה מלאה מגיעים'):has-text('שנה מלאה היא 200 ימי עבודה'):has-text('חלקי ימים מעוגלים כלפי מטה')"
+        },
+        {
+          "id": "assert-explain-no-legal-wording",
+          "action": "assert",
+          "type": "count",
+          "selector": "[data-leave-explain]:has-text('חוק')",
+          "value": "0"
+        },
+        { "id": "screenshot-defaults", "action": "screenshot", "name": "01-leave-employee-defaults" },
+        { "id": "close-explain", "action": "pressKey", "key": "Escape" },
+        { "id": "open-finance-tab", "action": "click", "selector": "[role='tab']:has-text('פיננסים')" },
+        { "id": "wait-finance", "action": "waitForSelector", "selector": "h3:has-text('תעריפי שכר')" },
+        {
+          "id": "assert-no-leave-box",
+          "description": "The finance tab no longer has the leave-pay box",
+          "action": "assert",
+          "type": "count",
+          "selector": "[data-leave-pay-box], h3:has-text('תשלום חופשה')",
+          "value": "0"
+        }
+      ]
+    },
+
+    {
+      "id": "ui-org-dialog",
+      "name": "UI – One \"חופשה\" tile; two steps; one save writes both keys; one history shows both",
+      "steps": [
+        { "id": "navigate", "action": "navigate", "url": "{{BASE_URL}}/#/Settings" },
+        { "id": "wait-tile", "action": "waitForSelector", "selector": "button:has-text('פתיחת הגדרות חופשה')" },
+        {
+          "id": "assert-old-tiles-gone",
+          "action": "assert",
+          "type": "count",
+          "selector": "button:has-text('פתיחת הגדרות תשלום חופשה'), button:has-text('פתיחת הגדרות ימי חופשה')",
+          "value": "0"
+        },
+        { "id": "open-dialog", "action": "click", "selector": "button:has-text('פתיחת הגדרות חופשה')" },
+        {
+          "id": "assert-disclaimer",
+          "description": "The owner's one-line advice is at the top of the dialog",
+          "action": "waitForSelector",
+          "selector": "[role='dialog'] [data-leave-entitlement-disclaimer]:has-text('בהתייעצות עם רואה החשבון')"
+        },
+        {
+          "id": "assert-step-1",
+          "description": "Step 1 asks the question and shows the stored choice: the recommended count",
+          "action": "waitForSelector",
+          "selector": "[role='dialog'] [data-leave-step='1']:has-text('כמה ימי חופשה מגיעים בשנה?') #leave-entitlement-mode-legal:checked"
+        },
+        {
+          "id": "assert-recommended-label",
+          "action": "waitForSelector",
+          "selector": "[role='dialog'] label[for='leave-entitlement-mode-legal']:has-text('מומלץ: לפי ותק וימי עבודה')"
+        },
+        {
+          "id": "assert-no-legal-label",
+          "description": "\"לפי החוק\" is not shown anywhere in the dialog",
+          "action": "assert",
+          "type": "count",
+          "selector": "[role='dialog'] :text('לפי החוק')",
+          "value": "0"
+        },
+        {
+          "id": "assert-step-2-open",
+          "description": "Step 1 has a choice, so step 2 is open below it with the stored pay default (3 months, the 13-month write was refused)",
+          "action": "waitForSelector",
+          "selector": "[role='dialog'] [data-leave-step='2'][data-shown='true']:has-text('כמה משלמים על יום חופשה?') #leave-pay-method-legal:checked"
+        },
+        {
+          "id": "assert-months-3",
+          "action": "waitForSelector",
+          "selector": "[role='dialog'] #leave-pay-lookback-months[value='3']"
+        },
+        {
+          "id": "assert-pay-meaning",
+          "action": "waitForSelector",
+          "selector": "[role='dialog'] label[for='leave-pay-method-avg_hourly_x_avg_day_hours']:has-text('ב-3 החודשים האחרונים בלבד')"
+        },
+        {
+          "id": "assert-effective-today",
+          "description": "One \"בתוקף מ-\" for the dialog, starting at today",
+          "action": "assert",
+          "type": "value",
+          "selector": "[role='dialog'] [data-dated-setting='leave-default'] #leave-default-effective-date",
+          "value": "{{TODAY}}"
+        },
+        {
+          "id": "assert-save-disabled",
+          "description": "Nothing changed yet: \"שמירה\" is disabled",
+          "action": "waitForSelector",
+          "selector": "[role='dialog'] [data-settings-block='leave-default'] button:has-text('שמירה')[disabled]"
+        },
+        { "id": "choose-fixed", "action": "click", "selector": "[role='dialog'] label[for='leave-entitlement-mode-fixed']" },
+        {
+          "id": "assert-table-prefilled",
+          "description": "The table opens prefilled; the last row means \"and onwards\"",
+          "action": "waitForSelector",
+          "selector": "[role='dialog'] [data-leave-entitlement-table] label:has-text('שנה 14 ואילך')"
+        },
+        {
+          "id": "assert-year-1",
+          "action": "assert",
+          "type": "value",
+          "selector": "[role='dialog'] #leave-entitlement-year-1",
+          "value": "12"
+        },
+        { "id": "choose-historic", "action": "click", "selector": "[role='dialog'] label[for='leave-pay-method-avg_hourly_x_avg_day_hours']" },
+        {
+          "id": "assert-replace-warnings",
+          "description": "Both keys get a version today, where the reset already wrote one: each warning names its key",
+          "action": "waitForSelector",
+          "selector": "[role='dialog'] [data-dated-setting='leave-default'] [role='status']:has-text('ימי חופשה: כבר קיימת הגדרה'):has-text('תשלום: כבר קיימת הגדרה')"
+        },
+        { "id": "screenshot-both-steps", "action": "screenshot", "name": "02-leave-dialog-fixed-historic" },
+        { "id": "save", "action": "click", "selector": "[role='dialog'] [data-settings-block='leave-default'] button:has-text('שמירה'):not([disabled])" },
+        { "id": "wait-dialog-closed", "action": "assert", "type": "hidden", "selector": "[role='dialog'] [data-settings-block='leave-default']" },
+        { "id": "reload", "action": "navigate", "url": "{{BASE_URL}}/#/dashboard" },
+        { "id": "wait-dashboard", "action": "waitForURL", "pattern": "#/dashboard" },
+        { "id": "back-to-settings", "action": "navigate", "url": "{{BASE_URL}}/#/Settings" },
+        { "id": "reopen-dialog", "action": "click", "selector": "button:has-text('פתיחת הגדרות חופשה')" },
+        {
+          "id": "assert-fixed-stored",
+          "action": "waitForSelector",
+          "selector": "[role='dialog'] #leave-entitlement-mode-fixed:checked"
+        },
+        {
+          "id": "assert-historic-stored",
+          "action": "waitForSelector",
+          "selector": "[role='dialog'] #leave-pay-method-avg_hourly_x_avg_day_hours:checked"
+        },
+        {
+          "id": "open-history",
+          "description": "One \"היסטוריה (N)\" for both keys",
+          "action": "click",
+          "selector": "[role='dialog'] [data-dated-setting='leave-default'] button:has-text('היסטוריה')"
+        },
+        {
+          "id": "assert-history-entitlement",
+          "description": "Today's leave-days version, labelled",
+          "action": "waitForSelector",
+          "selector": "[role='dialog'] li[data-history-key='leave_entitlement_policy']:has-text('ימי חופשה'):has-text('כמות קבועה'):has-text('מ-{{TODAY_DISPLAY}}')"
+        },
+        {
+          "id": "assert-history-pay",
+          "description": "Today's pay version, labelled",
+          "action": "waitForSelector",
+          "selector": "[role='dialog'] li[data-history-key='leave_pay_policy']:has-text('תשלום'):has-text('ממוצע היסטורי'):has-text('מ-{{TODAY_DISPLAY}}')"
+        },
+        {
+          "id": "assert-history-first-version",
+          "description": "The pay version carried over from before dated settings is shown as \"מאז ההתחלה\"",
+          "action": "waitForSelector",
+          "selector": "[role='dialog'] li[data-history-key='leave_pay_policy']:has-text('מאז ההתחלה')"
+        },
+        { "id": "screenshot-history", "action": "screenshot", "name": "03-leave-dialog-history" },
+        { "id": "close-dialog", "action": "pressKey", "key": "Escape" }
+      ]
+    },
+
+    {
+      "id": "ui-employee-follows-org",
+      "name": "UI – The instructor follows the organisation's table and pay method",
+      "steps": [
+        { "id": "navigate-employees", "action": "navigate", "url": "{{BASE_URL}}/#/employees" },
+        { "id": "wait-main", "action": "waitForSelector", "selector": "main, [role='main']" },
+        { "id": "open-employee", "action": "click", "selector": "button:has-text('זכאות בדיקה {{RUN_NUMERIC_ID}}')", "first": true },
+        { "id": "open-attendance-tab", "action": "click", "selector": "[role='tab']:has-text('נוכחות')" },
+        { "id": "wait-line", "action": "waitForSelector", "selector": "[data-leave-balance-line]:has-text('ימי חופשה השנה')" },
+        {
+          "id": "assert-not-zero",
+          "description": "Seniority year 7 or more in the default table is at least 15 days, so the line no longer says 0",
+          "action": "assert",
+          "type": "count",
+          "selector": "[data-leave-balance-line]:has-text('מגיעים 0 ימי')",
+          "value": "0"
+        },
+        {
+          "id": "assert-row-follows-pay",
+          "action": "waitForSelector",
+          "selector": "[data-leave-settings-line]:has-text('תשלום: לפי ברירת המחדל (ממוצע היסטורי)')"
+        },
+        { "id": "open-explain", "action": "click", "selector": "[data-leave-explain-open]" },
+        { "id": "assert-fixed-explain", "action": "waitForSelector", "selector": "[data-leave-explain]:has-text('לפי ההגדרה של הארגון:')" },
+        { "id": "close-explain", "action": "pressKey", "key": "Escape" }
+      ]
+    },
+
+    {
+      "id": "ui-employee-change",
+      "name": "UI – One \"שינוי\": 9 days a year and \"ממוצע מומלץ\" for the instructor, then back to the defaults",
+      "steps": [
+        { "id": "open-change", "action": "click", "selector": "[data-leave-settings-change]" },
+        {
+          "id": "assert-steps",
+          "description": "The same two steps as the organisation dialog, step 1 holding the current choice and step 2 open",
+          "action": "waitForSelector",
+          "selector": "[data-leave-settings-form] [data-leave-step='1']:has-text('כמה ימי חופשה מגיעים בשנה?') [data-choice='default'][aria-checked='true']"
+        },
+        {
+          "id": "assert-step-2-open",
+          "action": "waitForSelector",
+          "selector": "[data-leave-settings-form] [data-leave-step='2'][data-shown='true']:has-text('כמה משלמים על יום חופשה?') [data-pay-choice='default'][aria-checked='true']"
+        },
+        { "id": "choose-manual", "action": "click", "selector": "[data-leave-settings-form] [data-choice='manual']" },
+        { "id": "fill-days", "action": "fill", "selector": "[data-leave-settings-form] #leave-entitlement-days", "value": "9" },
+        { "id": "choose-recommended-pay", "action": "click", "selector": "[data-leave-settings-form] [data-pay-choice='legal']" },
+        { "id": "screenshot-employee-steps", "action": "screenshot", "name": "04-leave-employee-steps" },
+        { "id": "save", "action": "click", "selector": "[data-leave-settings-actions] button:has-text('שמירה'):not([disabled])" },
+        {
+          "id": "assert-manual-line",
+          "action": "waitForSelector",
+          "selector": "[data-leave-balance-line]:has-text('מגיעים 9 ימי חופשה השנה')"
+        },
+        {
+          "id": "assert-row-manual",
+          "action": "waitForSelector",
+          "selector": "[data-leave-settings-line]:has-text('ימים: 9 בשנה · תשלום: ממוצע מומלץ')"
+        },
+        { "id": "open-explain", "action": "click", "selector": "[data-leave-explain-open]" },
+        {
+          "id": "assert-manual-explain",
+          "description": "The full explanation says it was set by hand, and how to add or remove days",
+          "action": "waitForSelector",
+          "selector": "[data-leave-explain]:has-text('נקבע ידנית לעובד/ת: 9 ימי חופשה בשנה.'):has-text('שינוי יתרה')"
+        },
+        { "id": "close-explain", "action": "pressKey", "key": "Escape" },
+        { "id": "leave-tab", "description": "Leave the tab and come back: both choices come from the saved employee", "action": "click", "selector": "[role='tab']:has-text('סקירה')" },
+        { "id": "return-tab", "action": "click", "selector": "[role='tab']:has-text('נוכחות')" },
+        {
+          "id": "assert-row-saved",
+          "action": "waitForSelector",
+          "selector": "[data-leave-settings-line]:has-text('ימים: 9 בשנה · תשלום: ממוצע מומלץ')"
+        },
+        { "id": "open-change-again", "action": "click", "selector": "[data-leave-settings-change]" },
+        { "id": "choose-default-days", "action": "click", "selector": "[data-leave-settings-form] [data-choice='default']" },
+        { "id": "choose-default-pay", "action": "click", "selector": "[data-leave-settings-form] [data-pay-choice='default']" },
+        { "id": "save-default", "action": "click", "selector": "[data-leave-settings-actions] button:has-text('שמירה'):not([disabled])" },
+        {
+          "id": "assert-row-back",
+          "action": "waitForSelector",
+          "selector": "[data-leave-settings-line]:has-text('ימים: לפי ברירת המחדל · תשלום: לפי ברירת המחדל (ממוצע היסטורי)')"
+        },
+        {
+          "id": "wait-back-to-org",
+          "description": "The line is reread and follows the organisation's table again (no longer 9 days)",
+          "action": "waitForSelector",
+          "selector": "[data-leave-balance-line]:has-text('ימי חופשה השנה'):not(:has-text('מגיעים 9 ימי'))"
+        }
+      ]
+    },
+
+    {
+      "id": "ui-org-restore",
+      "name": "UI – Restore both organisation defaults in the dialog",
+      "steps": [
+        { "id": "navigate", "action": "navigate", "url": "{{BASE_URL}}/#/Settings" },
+        { "id": "open-dialog", "action": "click", "selector": "button:has-text('פתיחת הגדרות חופשה')" },
+        { "id": "choose-recommended", "action": "click", "selector": "[role='dialog'] label[for='leave-entitlement-mode-legal']" },
+        {
+          "id": "assert-table-closed",
+          "action": "assert",
+          "type": "count",
+          "selector": "[role='dialog'] [data-leave-entitlement-table]",
+          "value": "0"
+        },
+        { "id": "choose-recommended-pay", "action": "click", "selector": "[role='dialog'] label[for='leave-pay-method-legal']" },
+        { "id": "save", "action": "click", "selector": "[role='dialog'] [data-settings-block='leave-default'] button:has-text('שמירה'):not([disabled])" },
+        { "id": "wait-dialog-closed", "action": "assert", "type": "hidden", "selector": "[role='dialog'] [data-settings-block='leave-default']" },
+        { "id": "reload", "action": "navigate", "url": "{{BASE_URL}}/#/dashboard" },
+        { "id": "wait-dashboard", "action": "waitForURL", "pattern": "#/dashboard" },
+        { "id": "back-to-settings", "action": "navigate", "url": "{{BASE_URL}}/#/Settings" },
+        { "id": "reopen-dialog", "action": "click", "selector": "button:has-text('פתיחת הגדרות חופשה')" },
+        { "id": "assert-legal-days", "action": "waitForSelector", "selector": "[role='dialog'] #leave-entitlement-mode-legal:checked" },
+        { "id": "assert-legal-pay", "action": "waitForSelector", "selector": "[role='dialog'] #leave-pay-method-legal:checked" },
+        { "id": "close-dialog", "action": "pressKey", "key": "Escape" }
+      ]
+    },
+
+    {
+      "id": "api-check",
+      "name": "API – The instructor follows the organisation default again",
+      "steps": [
+        {
+          "id": "read-balance",
+          "action": "apiCall",
+          "method": "GET",
+          "endpoint": "/api/employee-leave?org_id={{TEST_ORG_ID}}&employee_id={{LEAVE_INSTRUCTOR_ID}}",
+          "store": "LEAVE_SOURCE",
+          "storeField": "entitlement.source"
+        }
+      ]
+    },
+
+    {
+      "id": "logout",
+      "name": "Logout",
+      "steps": [
+        { "id": "do-logout", "action": "logout" },
+        { "id": "assert-login-page", "action": "assert", "type": "url", "pattern": "#/login" }
+      ]
+    }
+  ]
+}

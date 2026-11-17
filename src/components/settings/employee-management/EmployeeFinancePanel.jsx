@@ -9,13 +9,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Badge } from '@/components/ui/badge';
 import ConfirmDialog from '@/components/ui/ConfirmDialog.jsx';
 import { Loader2 } from 'lucide-react';
 import { toast } from '@/lib/toast.jsx';
 import { authenticatedFetch } from '@/lib/api-client.js';
 import { toAgorot, formatCurrency } from '@/lib/currency.js';
-import { LeaveDayRateEditor } from './EmployeeRatesPanel.jsx';
 import EmployeePaySummary from '@/features/finance/components/EmployeePaySummary.jsx';
 import { calendarDateFromDateKey, dateKeyFromCalendarDate, firstDayOfMonth, todayKey } from '@/lib/local-time.js';
 
@@ -28,135 +26,13 @@ function endOfMonth(date) {
 }
 
 /**
- * How a paid leave day is valued. This is a method on the employee, not a rate for work, chosen
- * here for every employee type: the org default applies when none is set, and a farm can override it
- * per employee with a fixed day value, which is a dated leave_day rate set in the same box.
+ * The employee's month of pay and the office's corrections. Leave (days a year and how a leave day
+ * is paid) is set in the "נוכחות" tab's "חופשה" row, not here.
  */
-const LEAVE_PAY_METHODS = [
-  { value: '', label: 'ברירת המחדל של הארגון' },
-  { value: 'legal', label: 'ממוצע מומלץ' },
-  { value: 'avg_hourly_x_avg_day_hours', label: 'ממוצע היסטורי' },
-  { value: 'fixed_rate', label: 'ערך קבוע ליום' },
-];
-
-/** What a leave day is worth under each method, in words, using the organisation's own settings. */
-function describeLeavePayMethod(method, policy) {
-  const months = Number(policy?.lookback_months) > 0 ? Number(policy.lookback_months) : 3;
-  const period = months === 1 ? 'בחודש האחרון' : `ב-${months} החודשים האחרונים`;
-  if (method === 'legal') {
-    return policy?.legal_allow_12m_if_better === false
-      ? `השכר היומי הממוצע בימים שעבד/ה ${period}.`
-      : `השכר היומי הממוצע בימים שעבד/ה ${period}, או ב-12 החודשים האחרונים אם שם הממוצע גבוה יותר.`;
-  }
-  if (method === 'avg_hourly_x_avg_day_hours') {
-    return `השכר היומי הממוצע בימים שעבד/ה ${period} בלבד, בלי השוואה ל-12 חודשים.`;
-  }
-  if (method === 'fixed_rate') {
-    return 'סכום קבוע ליום חופשה. הסכום והתאריך שממנו הוא חל נקבעים כאן.';
-  }
-  const orgDefault = LEAVE_PAY_METHODS.find((option) => option.value === policy?.default_method)?.label || 'ממוצע מומלץ';
-  return `כמו שאר העובדים בארגון. כרגע: "${orgDefault}".`;
-}
-
-function getLeavePayMethodLabel(method) {
-  return (LEAVE_PAY_METHODS.find((option) => option.value === (method || '')) || LEAVE_PAY_METHODS[0]).label;
-}
-
-/**
- * The leave-pay box: the method as text with "שינוי", and for the fixed method the dated day value.
- * The method is saved on the employee through PUT /api/instructors (the same field the card used).
- */
-function LeavePayBox({ employee, orgId, session, policy, onSaved, onEmployeeChanged }) {
-  const [method, setMethod] = useState(employee?.leave_pay_method || '');
-  const [choice, setChoice] = useState(null);
-  const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    setMethod(employee?.leave_pay_method || '');
-    setChoice(null);
-  }, [employee?.id, employee?.leave_pay_method]);
-
-  async function handleSave() {
-    setSaving(true);
-    try {
-      await authenticatedFetch('instructors', {
-        session,
-        method: 'PUT',
-        body: { org_id: orgId, instructor_id: employee.id, leave_pay_method: choice || null },
-      });
-      setMethod(choice);
-      setChoice(null);
-      toast.success('שיטת תשלום החופשה נשמרה.');
-      onSaved?.();
-      await onEmployeeChanged?.();
-    } catch (error) {
-      console.error('Failed to save leave pay method', error);
-      toast.error(error?.message || 'שמירת שיטת תשלום החופשה נכשלה.');
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <section className="space-y-2 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm" data-leave-pay-box>
-      <div>
-        <h3 className="text-sm font-bold text-slate-900">תשלום חופשה</h3>
-        <p className="text-xs text-slate-500">כמה שווה יום חופשה בתשלום של העובד/ת.</p>
-      </div>
-      <div className="grid grid-cols-[5rem_minmax(0,1fr)] items-center gap-2">
-        <span className="text-sm text-slate-600">שיטה</span>
-        <span className="flex items-center gap-2">
-          <span className="font-bold text-slate-900">{getLeavePayMethodLabel(method)}</span>
-          <Button type="button" size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => setChoice(choice === null ? method : null)} disabled={saving}>
-            שינוי
-          </Button>
-        </span>
-      </div>
-      {choice === null ? (
-        <p className="text-xs text-slate-500" data-leave-pay-explain>{describeLeavePayMethod(method, policy)}</p>
-      ) : null}
-      {choice !== null ? (
-        <div className="space-y-2 rounded-xl border border-dashed border-slate-300 bg-white p-3">
-          <div className="grid gap-1" role="radiogroup" aria-label="שיטת תשלום חופשה">
-            {LEAVE_PAY_METHODS.map((option) => (
-              <button
-                key={option.value || 'default'}
-                type="button"
-                role="radio"
-                aria-checked={choice === option.value}
-                onClick={() => setChoice(option.value)}
-                disabled={saving}
-                className={`rounded-lg border px-3 py-1.5 text-start text-sm transition ${choice === option.value ? 'border-blue-500 bg-blue-50 font-semibold text-slate-900' : 'border-slate-200 text-slate-700 hover:bg-slate-50'}`}
-              >
-                <span className="block">{option.label}</span>
-                <span className="block text-xs font-normal text-slate-500">{describeLeavePayMethod(option.value, policy)}</span>
-              </button>
-            ))}
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <Button type="button" size="sm" onClick={handleSave} disabled={saving || choice === method}>
-              {saving ? <Loader2 className="me-2 h-4 w-4 animate-spin" /> : null}
-              שמירה
-            </Button>
-            <Button type="button" size="sm" variant="ghost" onClick={() => setChoice(null)} disabled={saving}>ביטול</Button>
-          </div>
-        </div>
-      ) : null}
-      {method === 'fixed_rate' ? (
-        <div className="grid grid-cols-[5rem_minmax(0,1fr)] items-start gap-2">
-          <span className="pt-1.5 text-sm text-slate-600">ערך ליום</span>
-          <LeaveDayRateEditor employeeId={employee?.id} orgId={orgId} session={session} onSaved={onSaved} />
-        </div>
-      ) : null}
-    </section>
-  );
-}
-
-export default function EmployeeFinancePanel({ employee, orgId, session, onEditEmployee, onEmployeeChanged }) {
+export default function EmployeeFinancePanel({ employee, orgId, session, onEditEmployee }) {
   const [monthDate, setMonthDate] = useState(() => calendarDateFromDateKey(firstDayOfMonth(todayKey())));
-  const [leavePolicy, setLeavePolicy] = useState(null);
   const [adjustments, setAdjustments] = useState([]);
-  // Bumped after a change here (a correction, a leave-day value) so the pay summary reads again.
+  // Bumped after a correction here so the pay summary reads again.
   const [summaryReloadKey, setSummaryReloadKey] = useState(0);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({
@@ -199,10 +75,6 @@ export default function EmployeeFinancePanel({ employee, orgId, session, onEditE
     setSummaryReloadKey((value) => value + 1);
     await loadData();
   }, [loadData]);
-
-  const handleSummaryLoaded = useCallback((payload) => {
-    setLeavePolicy(payload?.leave_pay_policy || null);
-  }, []);
 
   useEffect(() => {
     void loadData();
@@ -268,14 +140,6 @@ export default function EmployeeFinancePanel({ employee, orgId, session, onEditE
 
   return (
     <div className="space-y-3 [font-family:inherit]">
-    <LeavePayBox
-      employee={employee}
-      orgId={orgId}
-      session={session}
-      policy={leavePolicy}
-      onSaved={reloadAll}
-      onEmployeeChanged={onEmployeeChanged}
-    />
     <div className="grid gap-3 xl:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)] [font-family:inherit]">
       <div className="space-y-2">
         {onEditEmployee ? (
@@ -288,7 +152,6 @@ export default function EmployeeFinancePanel({ employee, orgId, session, onEditE
           monthDate={monthDate}
           onMonthChange={setMonthDate}
           reloadKey={summaryReloadKey}
-          onLoaded={handleSummaryLoaded}
         />
       </div>
 

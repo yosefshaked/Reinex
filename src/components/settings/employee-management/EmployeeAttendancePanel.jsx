@@ -25,6 +25,7 @@ import {
   leaveSaveErrorMessage,
 } from './attendance-month-grid.js';
 import LeaveBalanceLine from './LeaveBalanceLine.jsx';
+import EmployeeLeaveSettings from './EmployeeLeaveSettings.jsx';
 import { Loader2, TriangleAlert } from 'lucide-react';
 import ConfirmDialog from '@/components/ui/ConfirmDialog.jsx';
 import { formatDateKey } from '@/lib/date-key-format.js';
@@ -66,7 +67,7 @@ const DAY_MODES = [
   { value: 'leave', label: 'חופשה' },
 ];
 
-export default function EmployeeAttendancePanel({ employee, orgId, session }) {
+export default function EmployeeAttendancePanel({ employee, orgId, session, onEmployeeChanged }) {
   const editorRef = useRef(null);
   const [monthDate, setMonthDate] = useState(() => calendarDateFromDateKey(firstDayOfMonth(todayKey())));
   const [selectedDate, setSelectedDate] = useState(() => todayKey());
@@ -76,6 +77,10 @@ export default function EmployeeAttendancePanel({ employee, orgId, session }) {
   const [leaveSummary, setLeaveSummary] = useState(null);
   const [leaveEntitlement, setLeaveEntitlement] = useState(null);
   const [balanceEvents, setBalanceEvents] = useState([]);
+  // The employee's leave choices and the organisation's leave-pay default, as GET /api/employee-leave
+  // returns them with the balance.
+  const [leaveChoices, setLeaveChoices] = useState(null);
+  const [orgLeavePayPolicy, setOrgLeavePayPolicy] = useState(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({ status: 'present', workedMinutes: '', notes: '' });
@@ -132,7 +137,15 @@ export default function EmployeeAttendancePanel({ employee, orgId, session }) {
     setLeaveSummary(leave?.summary || null);
     setLeaveEntitlement(leave?.entitlement || null);
     setBalanceEvents(Array.isArray(leave?.balance_events) ? leave.balance_events : []);
+    setLeaveChoices(leave?.policy || null);
+    setOrgLeavePayPolicy(leave?.leave_pay_policy || null);
   }, [balanceYear, employee?.id, orgId, session]);
+
+  // After the "חופשה" row saves: the balance (the entitlement may change) and the employee record.
+  const handleLeaveSettingsChanged = useCallback(async () => {
+    await loadBalance();
+    await onEmployeeChanged?.();
+  }, [loadBalance, onEmployeeChanged]);
 
   useEffect(() => {
     if (!employee?.id || !orgId) return;
@@ -532,6 +545,19 @@ export default function EmployeeAttendancePanel({ employee, orgId, session }) {
               session={session}
               onChanged={loadBalance}
             />
+            {employee?.id ? (
+              <EmployeeLeaveSettings
+                employeeId={employee.id}
+                orgId={orgId}
+                session={session}
+                current={leaveChoices || {
+                  annual_leave_days: employee.annual_leave_days ?? null,
+                  leave_pay_method: employee.leave_pay_method || null,
+                }}
+                orgPayPolicy={orgLeavePayPolicy}
+                onChanged={handleLeaveSettingsChanged}
+              />
+            ) : null}
             <div className="max-w-full overflow-x-auto rounded-xl border border-slate-200" dir="rtl" role="region" aria-label="טבלת נוכחות חודשית" tabIndex={0}>
               <table className="w-full min-w-[640px] table-fixed border-collapse text-start">
                 <caption className="sr-only">{formatMonth(monthDate)} — בחירת יום לעריכה</caption>

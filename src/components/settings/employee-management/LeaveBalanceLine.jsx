@@ -17,8 +17,6 @@ import { toast } from '@/lib/toast.jsx';
 import { authenticatedFetch } from '@/lib/api-client.js';
 import { todayKey } from '@/lib/local-time.js';
 import {
-  ENTITLEMENT_CHOICES,
-  buildEntitlementChoiceBody,
   entitlementManualReason,
   leaveBalanceText,
   leaveEntitlementExplanation,
@@ -42,99 +40,10 @@ function isManualBalanceEvent(entry) {
 }
 
 /**
- * The leave entitlement choice for one employee, behind "שינוי" next to the balance: the
- * organisation default, or a fixed number of days a year (Employees.annual_leave_days, saved through
- * PUT /api/instructors like the leave-pay method).
- */
-function EntitlementChoice({ entitlement, employeeId, orgId, session, onChanged }) {
-  const isManual = entitlement?.source === 'manual';
-  const [open, setOpen] = useState(false);
-  const [choice, setChoice] = useState(isManual ? 'manual' : 'default');
-  const [manualDays, setManualDays] = useState(isManual ? String(entitlement.full_year_days ?? '') : '');
-  const [saving, setSaving] = useState(false);
-  const body = buildEntitlementChoiceBody({ choice, manualDays }, { orgId, employeeId });
-  const unchanged = choice === 'default' ? !isManual : (isManual && Number(manualDays) === Number(entitlement?.full_year_days));
-
-  function handleOpenChange(next) {
-    setOpen(next);
-    if (next) {
-      setChoice(isManual ? 'manual' : 'default');
-      setManualDays(isManual ? String(entitlement.full_year_days ?? '') : '');
-    }
-  }
-
-  async function handleSave() {
-    if (!body) return;
-    setSaving(true);
-    try {
-      await authenticatedFetch('instructors', { session, method: 'PUT', body });
-      toast.success('ימי החופשה לשנה נשמרו.');
-      setOpen(false);
-      await onChanged?.();
-    } catch (error) {
-      console.error('Failed to save the leave entitlement choice', error);
-      toast.error(error?.status === 403 ? 'רק מנהל/ת יכול/ה לשנות את ימי החופשה לשנה.' : (error?.message || 'שמירת ימי החופשה נכשלה.'));
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <Popover open={open} onOpenChange={handleOpenChange}>
-      <PopoverTrigger asChild>
-        <Button type="button" size="sm" variant="ghost" className="h-7 px-2 text-xs" aria-label="שינוי ימי החופשה לשנה" data-leave-entitlement-change>שינוי</Button>
-      </PopoverTrigger>
-      <PopoverContent dir="rtl" align="start" className="w-72 max-w-[calc(100vw-2rem)] space-y-3" data-leave-entitlement-choice>
-        <p className="text-sm font-bold text-slate-900">כמה ימי חופשה מגיעים בשנה</p>
-        <div className="grid gap-1" role="radiogroup" aria-label="ימי חופשה לשנה">
-          {ENTITLEMENT_CHOICES.map((option) => (
-            <button
-              key={option.value}
-              type="button"
-              role="radio"
-              aria-checked={choice === option.value}
-              data-choice={option.value}
-              onClick={() => setChoice(option.value)}
-              disabled={saving}
-              className={`rounded-lg border px-3 py-1.5 text-start text-sm transition ${choice === option.value ? 'border-blue-500 bg-blue-50 font-semibold text-slate-900' : 'border-slate-200 text-slate-700 hover:bg-slate-50'}`}
-            >
-              {option.label}
-            </button>
-          ))}
-        </div>
-        {choice === 'manual' ? (
-          <div className="flex items-center gap-2">
-            <Label htmlFor="leave-entitlement-days" className="text-xs text-slate-600">ימים בשנה</Label>
-            <Input
-              id="leave-entitlement-days"
-              className="h-8 w-24"
-              type="number"
-              min="0"
-              max="365"
-              step="0.5"
-              value={manualDays}
-              onChange={(event) => setManualDays(event.target.value)}
-              disabled={saving}
-            />
-          </div>
-        ) : null}
-        <div className="flex items-center gap-2">
-          <Button type="button" size="sm" onClick={handleSave} disabled={saving || !body || unchanged}>
-            {saving ? <Loader2 className="me-2 h-4 w-4 animate-spin" /> : null}
-            שמירה
-          </Button>
-          <Button type="button" size="sm" variant="ghost" onClick={() => setOpen(false)} disabled={saving}>ביטול</Button>
-        </div>
-      </PopoverContent>
-    </Popover>
-  );
-}
-
-/**
  * The leave balance as one line above the attendance grid ("מגיעים N ימי חופשה השנה · נוצלו X ·
- * נשארו Y"): the figures behind it on hover, "הסבר מלא" (why N, in plain sentences), "שינוי" (the
- * organisation default or a fixed number for this employee), and the office's manual balance
- * movements (allocation, carryover, adjustment) behind "שינוי יתרה".
+ * נשארו Y"): the figures behind it on hover, "הסבר מלא" (why N, in plain sentences), and the
+ * office's manual balance movements (allocation, carryover, adjustment) behind "שינוי יתרה". How
+ * many days a year and how a leave day is paid are set in the "חופשה" row (EmployeeLeaveSettings).
  */
 export default function LeaveBalanceLine({ summary, entitlement, balanceEvents, employee, orgId, session, onChanged }) {
   const employeeId = employee?.id;
@@ -216,15 +125,6 @@ export default function LeaveBalanceLine({ summary, entitlement, balanceEvents, 
             {explanation.map((sentence) => <p key={sentence}>{sentence}</p>)}
           </PopoverContent>
         </Popover>
-      ) : null}
-      {employeeId ? (
-        <EntitlementChoice
-          entitlement={entitlement}
-          employeeId={employeeId}
-          orgId={orgId}
-          session={session}
-          onChanged={onChanged}
-        />
       ) : null}
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>

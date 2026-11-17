@@ -1283,6 +1283,7 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
                     employee={currentEmployee}
                     orgId={orgId}
                     session={session}
+                    onEmployeeChanged={refetchInstructors}
                   />
                 </TabsContent>
 
@@ -1299,7 +1300,6 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
                     orgId={orgId}
                     session={session}
                     onEditEmployee={() => openEmployeeEditor(currentEmployee)}
-                    onEmployeeChanged={refetchInstructors}
                   />
                 </TabsContent>
 
