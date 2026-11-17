@@ -31,7 +31,18 @@ const EXCEPTION_TONES = {
   },
 };
 
-function ExpandableRow({ label, amount, amountLabel, note, tone, open, onToggle, children, dataKey, nested = false }) {
+/** A small amber count of lessons nobody marked: icon and words, not colour alone. */
+function UnmarkedBadge({ label }) {
+  if (!label) return null;
+  return (
+    <span data-pay-unmarked-badge="" className="inline-flex shrink-0 items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-900">
+      <AlertTriangle aria-hidden="true" className="h-3 w-3" />
+      {label}
+    </span>
+  );
+}
+
+function ExpandableRow({ label, badge, amount, amountLabel, note, tone, open, onToggle, children, dataKey, nested = false }) {
   const contentId = useId();
   const toneStyle = tone ? EXCEPTION_TONES[tone] : null;
   const ToneIcon = toneStyle?.Icon;
@@ -48,6 +59,7 @@ function ExpandableRow({ label, amount, amountLabel, note, tone, open, onToggle,
           <ChevronDown aria-hidden="true" className={`h-4 w-4 shrink-0 text-slate-400 transition-transform ${open ? '' : 'rotate-90'}`} />
           {ToneIcon ? <ToneIcon aria-hidden="true" className={`h-4 w-4 shrink-0 ${toneStyle.icon}`} /> : null}
           <span className={`min-w-0 break-words ${toneStyle ? toneStyle.label : 'text-slate-800'}`}>{label}</span>
+          <UnmarkedBadge label={badge} />
         </span>
         <span className="flex flex-col items-end text-end">
           {amountLabel ? (
@@ -83,6 +95,29 @@ function DetailLine({ text, amount, amountLabel, children }) {
 
 function lessonText(line) {
   return [line.dateLabel, line.time, `${line.minutes} דק'`, line.stateLabel].filter(Boolean).join(' · ');
+}
+
+/**
+ * A lesson in a service's list. One nobody marked says so where it is (icon and "לא סומן", amber)
+ * with the link to mark it in the calendar; its state words are not repeated next to the marker.
+ */
+function LessonLine({ line }) {
+  if (!line.unmarked) return <DetailLine text={lessonText(line)} amount={line.amount} />;
+  const text = lessonText({ ...line, stateLabel: line.stateLabel === 'לא סומן' ? '' : line.stateLabel });
+  return (
+    <DetailLine text={text} amount={line.amount}>
+      <span data-pay-unmarked-lesson="" className="ms-2 inline-flex items-center gap-1 whitespace-nowrap text-xs font-semibold text-amber-800">
+        <AlertTriangle aria-hidden="true" className="h-3.5 w-3.5 text-amber-600" />
+        לא סומן
+      </span>
+      <Link
+        to={buildLessonCalendarPath(line)}
+        className="ms-2 whitespace-nowrap text-xs font-semibold text-blue-700 underline-offset-2 hover:underline"
+      >
+        למפגש ביומן
+      </Link>
+    </DetailLine>
+  );
 }
 
 /**
@@ -176,12 +211,13 @@ export default function EmployeePaySummary({
               dataKey={`service-${group.serviceId || 'none'}`}
               nested
               label={`${group.name} · ${group.countLabel}`}
+              badge={group.unmarkedLabel}
               amount={group.amount}
               open={openGroup === group.key}
               onToggle={() => setOpenGroup((current) => (current === group.key ? null : group.key))}
             >
               <ul>
-                {group.lessons.map((line) => <DetailLine key={line.id} text={lessonText(line)} amount={line.amount} />)}
+                {group.lessons.map((line) => <LessonLine key={line.id} line={line} />)}
               </ul>
             </ExpandableRow>
           ))}
@@ -225,15 +261,7 @@ export default function EmployeePaySummary({
     return (
       <ul>
         {lines.map((line) => (
-          <DetailLine key={line.id} text={`${line.serviceName ? `${line.serviceName} · ` : ''}${lessonText(line)}`} amount={row.key === 'unmarked' ? line.amount : null}>
-            {row.key === 'unmarked' ? (
-              <Link
-                to={buildLessonCalendarPath(line)}
-                className="ms-2 whitespace-nowrap text-xs font-semibold text-blue-700 underline-offset-2 hover:underline"
-              >
-                למפגש ביומן
-              </Link>
-            ) : null}
+          <DetailLine key={line.id} text={`${line.serviceName ? `${line.serviceName} · ` : ''}${lessonText(line)}`} amount={null}>
             {row.key === 'missing_rate' && canManagePay ? (
               <Button
                 type="button"
@@ -303,6 +331,7 @@ export default function EmployeePaySummary({
                   key={row.key}
                   dataKey={row.key}
                   label={row.label}
+                  badge={row.unmarkedLabel}
                   amount={row.amount}
                   open={openRow === row.key}
                   onToggle={() => toggleRow(row.key)}
@@ -347,7 +376,11 @@ export default function EmployeePaySummary({
       ) : null}
 
       {printRequest && pay ? (
-        <PrintPortal key={printRequest.id} onDone={() => setPrintRequest(null)}>
+        <PrintPortal
+          key={printRequest.id}
+          title={[printRequest.detailed ? 'סיכום שכר עם פירוט' : 'סיכום שכר', pay.employee_name, monthLabel].filter(Boolean).join(' — ')}
+          onDone={() => setPrintRequest(null)}
+        >
           <PaySummaryPrintSheet pay={pay} orgName={org?.name} monthLabel={monthLabel} detailed={printRequest.detailed} />
         </PrintPortal>
       ) : null}

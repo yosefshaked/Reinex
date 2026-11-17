@@ -10,6 +10,7 @@ import {
   describeLessonState,
   formatDays,
   formatMinutes,
+  formatUnmarkedCount,
   groupAttendanceByRate,
   groupLessonsByService,
 } from '../src/features/finance/lib/pay-summary.js';
@@ -83,7 +84,7 @@ describe('formatting', () => {
 });
 
 describe('the overview', () => {
-  it('has the total, a row per part that has something, and the two exception rows', () => {
+  it('has the total, a row per part that has something, and the missing-rate exception', () => {
     const { total, rows, exceptions } = buildSummaryRows(PAY);
     assert.equal(total, 20500);
     assert.deepEqual(rows.map((row) => [row.key, row.label, row.amount]), [
@@ -92,11 +93,45 @@ describe('the overview', () => {
       ['corrections', 'תיקונים · 1', -2000],
     ]);
     assert.deepEqual(exceptions.map((row) => [row.key, row.label, row.amount, row.note]), [
-      ['unmarked', 'לא סומן אם הגיעו · 1 מפגש', 7500, 'נכלל בסכום'],
       ['missing_rate', 'חסר תעריף · 1 מפגש', null, 'לא נכלל בסכום'],
     ]);
-    assert.deepEqual(exceptions[0].lessons.map((line) => line.id), ['l2']);
-    assert.deepEqual(exceptions[1].lessons.map((line) => [line.id, line.serviceId, line.date]), [['l3', 'therapy', '2026-10-05']]);
+    assert.deepEqual(exceptions[0].lessons.map((line) => [line.id, line.serviceId, line.date]), [['l3', 'therapy', '2026-10-05']]);
+  });
+
+  it('lists an unmarked lesson once, in "מפגשים", with the count on the row and on its service line', () => {
+    const { rows, exceptions } = buildSummaryRows(PAY);
+    assert.equal(exceptions.some((row) => row.key === 'unmarked'), false);
+    const lessons = rows.find((row) => row.key === 'lessons');
+    assert.equal(lessons.unmarkedCount, 1);
+    assert.equal(lessons.unmarkedLabel, '1 לא סומן');
+    assert.equal(lessons.amount, 15000, 'the unmarked lesson stays in the total');
+    const [group] = lessons.groups;
+    assert.equal(group.unmarkedLabel, '1 לא סומן');
+    assert.deepEqual(group.lessons.map((line) => [line.id, line.unmarked]), [['l1', false], ['l2', true]]);
+    const listed = lessons.groups.flatMap((g) => g.lessons).concat(exceptions.flatMap((row) => row.lessons))
+      .filter((line) => line.id === 'l2');
+    assert.equal(listed.length, 1);
+  });
+
+  it('counts unmarked lessons in plural, without the ones that have no rate, and from the server without details', () => {
+    assert.equal(formatUnmarkedCount(2), '2 לא סומנו');
+    const pay = {
+      ...PAY,
+      lesson_count: 4,
+      unmarked_lesson_count: 3,
+      details: { ...PAY.details, lessons: [
+        ...PAY.details.lessons,
+        lesson('l4', { lesson_date: '2026-10-07', unmarked: true, participant_states: { unmarked: 1 } }),
+        lesson('l5', { service_id: 'therapy', service_name: 'טיפולית', missing_rate: true, unmarked: true, payout_amount: 0, rate_used: null }),
+      ] },
+    };
+    const lessons = buildSummaryRows(pay).rows.find((row) => row.key === 'lessons');
+    assert.equal(lessons.unmarkedLabel, '2 לא סומנו');
+    assert.equal(lessons.groups[0].unmarkedLabel, '2 לא סומנו');
+    const withoutDetails = buildSummaryRows({ ...PAY, details: null }).rows.find((row) => row.key === 'lessons');
+    assert.equal(withoutDetails.unmarkedLabel, '1 לא סומן');
+    const none = buildSummaryRows({ ...PAY, unmarked_lesson_count: 0, details: null }).rows.find((row) => row.key === 'lessons');
+    assert.equal(none.unmarkedLabel, '');
   });
 
   it('shows no exception row when there is nothing to flag, and no row for an empty part', () => {
@@ -220,9 +255,9 @@ describe('lessons by service, pay basis and rate', () => {
 
   it('marks the missing-rate exception as not paid: red, shown as zero', () => {
     const { exceptions } = buildSummaryRows(PAY);
-    assert.deepEqual(exceptions.map((row) => [row.key, row.tone]), [['unmarked', 'warning'], ['missing_rate', 'danger']]);
-    assert.equal(exceptions[1].amountLabel, '₪0');
-    assert.equal(exceptions[1].note, 'לא נכלל בסכום');
+    assert.deepEqual(exceptions.map((row) => [row.key, row.tone]), [['missing_rate', 'danger']]);
+    assert.equal(exceptions[0].amountLabel, '₪0');
+    assert.equal(exceptions[0].note, 'לא נכלל בסכום');
   });
 });
 

@@ -45,6 +45,12 @@ export function formatLessonCount(count) {
   return number === 1 ? '1 מפגש' : `${number} מפגשים`;
 }
 
+/** 1 → "1 לא סומן", 2 → "2 לא סומנו": lessons nobody marked, paid as attended. */
+export function formatUnmarkedCount(count) {
+  const number = Math.max(0, Number(count) || 0);
+  return number === 1 ? '1 לא סומן' : `${number} לא סומנו`;
+}
+
 /** Leave days in words: 0.5 → "חצי יום", 1 → "יום אחד", 2.5 → "2.5 ימים". */
 export function formatDays(days) {
   const number = Math.round((Number(days) || 0) * 10) / 10;
@@ -181,7 +187,15 @@ export function groupLessonsByService(lessons = []) {
   }
   return Array.from(groups.values())
     .sort((left, right) => left.order - right.order || String(left.since).localeCompare(String(right.since)))
-    .map((group) => ({ ...group, countLabel: describeLessonGroupCalculation(group) }));
+    .map((group) => {
+      const unmarkedCount = group.lessons.filter((line) => line.unmarked).length;
+      return {
+        ...group,
+        countLabel: describeLessonGroupCalculation(group),
+        unmarkedCount,
+        unmarkedLabel: unmarkedCount > 0 ? formatUnmarkedCount(unmarkedCount) : '',
+      };
+    });
 }
 
 /**
@@ -245,7 +259,9 @@ export function buildCorrectionLines(corrections = []) {
 
 /**
  * The overview of one employee's month: the total, one row per pay part that has something, and
- * the two exception rows when they are not zero. With details, each row carries what it opens to.
+ * the missing-rate exception when it is not zero. Unmarked lessons are not a separate section: the
+ * lessons row, its service lines and the lesson lines carry them. With details, each row carries
+ * what it opens to.
  */
 export function buildSummaryRows(pay) {
   if (!pay) return { total: 0, rows: [], exceptions: [] };
@@ -254,12 +270,19 @@ export function buildSummaryRows(pay) {
   const missingRateCount = Number(pay.missing_rate_lesson_count) || 0;
   const paidLessonCount = Math.max(0, (Number(pay.lesson_count) || 0) - missingRateCount);
   const rows = [];
+  // A lesson nobody marked is paid as attended, so it stays in "מפגשים" (once) with a marker; the
+  // row and its service lines carry the count. Without details the server's count is used.
+  const unmarkedCount = details
+    ? lessons.filter((lesson) => lesson?.unmarked && !lesson?.missing_rate).length
+    : Number(pay.unmarked_lesson_count) || 0;
 
   if (paidLessonCount > 0 || toAmount(pay.lesson_amount) !== 0) {
     rows.push({
       key: 'lessons',
       label: `מפגשים · ${paidLessonCount}`,
       amount: toAmount(pay.lesson_amount),
+      unmarkedCount,
+      unmarkedLabel: unmarkedCount > 0 ? formatUnmarkedCount(unmarkedCount) : '',
       groups: details ? groupLessonsByService(lessons) : null,
     });
   }
@@ -294,18 +317,8 @@ export function buildSummaryRows(pay) {
     });
   }
 
+  // Lessons with no rate are not in "מפגשים" and are not paid, so they get their own section.
   const exceptions = [];
-  const unmarkedCount = Number(pay.unmarked_lesson_count) || 0;
-  if (unmarkedCount > 0) {
-    exceptions.push({
-      key: 'unmarked',
-      label: `לא סומן אם הגיעו · ${formatLessonCount(unmarkedCount)}`,
-      amount: toAmount(pay.unmarked_lesson_amount),
-      tone: 'warning',
-      note: 'נכלל בסכום',
-      lessons: details ? lessons.filter((lesson) => lesson?.unmarked).map(buildLessonLine) : null,
-    });
-  }
   if (missingRateCount > 0) {
     exceptions.push({
       key: 'missing_rate',

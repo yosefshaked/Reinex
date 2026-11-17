@@ -142,7 +142,11 @@ export default function PayrollMonthTable({ payroll, loading, orgId, session, mo
       </div>
 
       {printRequest ? (
-        <PrintPortal key={printRequest.id} onDone={() => setPrintRequest(null)}>
+        <PrintPortal
+          key={printRequest.id}
+          title={`${printRequest.detailed ? 'סיכום שכר עם פירוט' : 'סיכום שכר'} — ${monthLabel}`}
+          onDone={() => setPrintRequest(null)}
+        >
           {printRequest.detailed
             // A page per employee only when there is something to read on it: pay, or a lesson to fix.
             ? (detailedPayroll?.employees || [])

@@ -2,9 +2,9 @@
   "meta": {
     "id": "pay-summary",
     "name": "Monthly pay summary — finance tab and the \"כספים\" page",
-    "description": "Payroll stage 6. An instructor with a lesson rate teaches two lessons last month: one marked attended, one nobody marked. Pay counts the unmarked one as attended and flags it. The finance tab shows the month total, the \"לא סומן אם הגיעו · 1\" exception row, and the lessons row opens by service with the calculation (hours × hourly rate); the unmarked row links to the lesson in the calendar, which opens it. The \"כספים\" page lists the employee with the total and the \"לא סומן: 1\" tag, the total row for everyone, and opens the employee's summary under the row. Nothing is stored: everything is read from GET /api/payroll.",
+    "description": "Payroll stage 6. An instructor with a lesson rate teaches two lessons last month: one marked attended, one nobody marked. Pay counts the unmarked one as attended and flags it. The finance tab shows the month total and the lessons row with the amber \"1 לא סומן\" badge (the unmarked lesson is listed once, under \"מפגשים\", not in a separate section); the lessons row opens by service with the calculation (hours × hourly rate) and the same count, and the unmarked lesson is marked \"לא סומן\" in its service with a link to the lesson in the calendar, which opens it. The \"כספים\" page lists the employee with the total and the \"לא סומן: 1\" tag, the total row for everyone, and opens the employee's summary under the row. Nothing is stored: everything is read from GET /api/payroll.",
     "version": "1.0.0",
-    "last_validated_at": "2026-11-15T12:00:00Z",
+    "last_validated_at": "2026-11-17T12:00:00Z",
     "author": "claude-ai",
     "dependencies": {
       "routes": [
@@ -179,7 +179,7 @@
     },
     {
       "id": "ui-finance-tab-summary",
-      "name": "UI – The finance tab shows the month total, the unmarked row, and the lessons by service",
+      "name": "UI – The finance tab shows the month total, the unmarked badge, and the lessons by service with the unmarked lesson marked",
       "steps": [
         {
           "id": "navigate-employees",
@@ -224,10 +224,18 @@
           "selector": "[data-pay-row='lessons']:has-text('מפגשים · 2'):has-text('₪150.00')"
         },
         {
-          "id": "assert-unmarked-row",
-          "description": "The unmarked lesson is flagged, with its amount and the words that it is included",
+          "id": "assert-unmarked-badge",
+          "description": "The lessons row carries the count of unmarked lessons; they stay in its total",
           "action": "waitForSelector",
-          "selector": "[data-pay-row='unmarked']:has-text('לא סומן אם הגיעו · 1'):has-text('₪75.00'):has-text('נכלל בסכום')"
+          "selector": "[data-pay-row='lessons'] > button [data-pay-unmarked-badge]:has-text('1 לא סומן')"
+        },
+        {
+          "id": "assert-no-unmarked-section",
+          "description": "One lesson is listed once: no separate unmarked section",
+          "action": "assert",
+          "type": "count",
+          "selector": "[data-pay-row='unmarked']",
+          "value": "0"
         },
         {
           "id": "assert-no-missing-rate-row",
@@ -256,6 +264,11 @@
           "selector": "[data-pay-row='service-{{SERVICE_ID}}']:has-text('{{SERVICE_NAME}}'):has-text('1:30 שעות × ₪100.00 לשעה'):has-text('₪150.00')"
         },
         {
+          "id": "assert-service-unmarked-count",
+          "action": "waitForSelector",
+          "selector": "[data-pay-row='service-{{SERVICE_ID}}'] > button [data-pay-unmarked-badge]:has-text('1 לא סומן')"
+        },
+        {
           "id": "open-service",
           "action": "click",
           "selector": "[data-pay-row='service-{{SERVICE_ID}}'] > button"
@@ -264,7 +277,13 @@
           "id": "assert-lesson-states",
           "description": "The service opens to its lessons, each with what happened",
           "action": "waitForSelector",
-          "selector": "[data-pay-row='service-{{SERVICE_ID}}']:has-text('הגיע'):has-text('לא סומן'):has-text('45 דק')"
+          "selector": "[data-pay-row='service-{{SERVICE_ID}}']:has-text('הגיע'):has-text('45 דק')"
+        },
+        {
+          "id": "assert-unmarked-lesson-marker",
+          "description": "The unmarked lesson is marked where it is listed: icon and \"לא סומן\"",
+          "action": "waitForSelector",
+          "selector": "[data-pay-row='service-{{SERVICE_ID}}'] li:has([data-pay-unmarked-lesson]:has-text('לא סומן')):has-text('₪75.00')"
         },
         {
           "id": "screenshot-finance-tab",
@@ -272,14 +291,9 @@
           "name": "pay-summary-finance-tab"
         },
         {
-          "id": "open-unmarked",
-          "action": "click",
-          "selector": "[data-pay-row='unmarked'] > button"
-        },
-        {
           "id": "follow-calendar-link",
           "action": "click",
-          "selector": "[data-pay-row='unmarked'] a:has-text('למפגש ביומן')"
+          "selector": "[data-pay-row='service-{{SERVICE_ID}}'] li:has([data-pay-unmarked-lesson]) a:has-text('למפגש ביומן')"
         },
         {
           "id": "assert-lesson-opened",
@@ -351,7 +365,7 @@
         {
           "id": "assert-unmarked-in-place",
           "action": "waitForSelector",
-          "selector": "[data-payroll-row='{{PAY_INSTRUCTOR_ID}}'] [data-pay-row='unmarked']:has-text('לא סומן אם הגיעו · 1')"
+          "selector": "[data-payroll-row='{{PAY_INSTRUCTOR_ID}}'] [data-pay-row='lessons'] [data-pay-unmarked-badge]:has-text('1 לא סומן')"
         },
         {
           "id": "screenshot-financials",
