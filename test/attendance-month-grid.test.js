@@ -124,10 +124,17 @@ describe('attendance month grid', () => {
 
     it('shows the balance as one line with the figures behind it', () => {
       assert.equal(leaveBalanceText(null), null);
-      const text = leaveBalanceText({ year: 2026, quota: 12, carryIn: 2, allocations: 0, adjustments: -1, used: 3.5, remaining: 9.5 });
-      assert.equal(text.line, 'יתרת חופשה 2026: 9.5 ימים · נוצלו 3.5');
+      const summary = { year: 2026, quota: 12, carryIn: 2, allocations: 0, adjustments: -1, used: 3.5, remaining: 9.5, available: 13 };
+      const text = leaveBalanceText(summary, { status: 'ok' }, 2026);
+      assert.equal(text.line, 'מגיעים 13 ימי חופשה השנה · נוצלו 3.5 · נשארו 9.5');
       assert.equal(text.details.length, 5);
       assert.ok(text.details.includes('צבירה משנה קודמת: 2'));
+      assert.ok(text.details.includes('לפי הזכאות: 12'));
+      assert.equal(leaveBalanceText(summary, null, 2027).line, 'מגיעים 13 ימי חופשה ב-2026 · נוצלו 3.5 · נשארו 9.5');
+      assert.equal(
+        leaveBalanceText({ ...summary, quota: 0 }, { status: 'manual_needed', reason: 'before_75_days' }, 2026).line,
+        'ימי החופשה השנה עדיין לא נקבעו · נוצלו 3.5 · נשארו 9.5',
+      );
     });
   });
 });

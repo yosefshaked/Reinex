@@ -48,7 +48,6 @@ function buildInitialState(employee) {
     email: employee?.email || '',
     phone: employee?.phone || '',
     startDate: employee?.start_date || '',
-    annualLeaveDays: employee?.annual_leave_days ?? '',
     employmentScope: employee?.employment_scope || '',
     notes: employee?.notes || '',
     officeWorkingDays: employeeType === 'office' && Array.isArray(employee?.working_days) ? employee.working_days : [],
@@ -246,7 +245,6 @@ export default function EditEmployeeDialog({
         email: form.email || null,
         phone: form.phone || null,
         start_date: form.startDate || null,
-        annual_leave_days: form.annualLeaveDays === '' ? null : Number(form.annualLeaveDays),
         employment_scope: form.employmentScope || null,
         notes: form.notes || null,
       };
@@ -392,10 +390,12 @@ export default function EditEmployeeDialog({
               </div>
             </div>
 
-            <div className="grid gap-4 md:grid-cols-3">
+            <div className="grid gap-4 md:grid-cols-2">
               <div className="space-y-2">
-                <Label htmlFor="annual_leave_days" className="text-xs text-slate-600">מכסת חופשה שנתית</Label>
-                <Input id="annual_leave_days" type="number" min="0" step="0.5" value={form.annualLeaveDays} onChange={(e) => updateField('annualLeaveDays', e.target.value)} disabled={isSaving} />
+                <span className="text-xs text-slate-600">ימי חופשה</span>
+                <p className="rounded-md border border-dashed border-slate-200 px-3 py-2 text-xs text-slate-500">
+                  נקבעים בלשונית נוכחות, ליד יתרת החופשה.
+                </p>
               </div>
               <div className="space-y-2">
                 <span className="text-xs text-slate-600">תשלום חופשה</span>

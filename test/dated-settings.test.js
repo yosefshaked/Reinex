@@ -38,8 +38,9 @@ const ROWS = [
 ];
 
 describe('the registry of dated settings', () => {
-  it('names every setting that affects instructor pay, and only those', () => {
-    assert.deepEqual([...DATED_SETTING_KEYS].sort(), ['instructor_earnings_policy', 'leave_pay_policy']);
+  it('names every setting that affects pay, and only those', () => {
+    assert.deepEqual([...DATED_SETTING_KEYS].sort(), ['instructor_earnings_policy', 'leave_entitlement_policy', 'leave_pay_policy']);
+    assert.equal(isDatedSettingKey('leave_entitlement_policy'), true);
     assert.equal(isDatedSettingKey('leave_pay_policy'), true);
     assert.equal(isDatedSettingKey(' instructor_earnings_policy '), true);
     assert.equal(isDatedSettingKey('billing_consumption_policy'), false, 'student billing is not dated yet');

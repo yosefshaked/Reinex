@@ -1010,7 +1010,7 @@
           "id": "assert-balance-line",
           "description": "The leave balance is one line above the grid",
           "action": "waitForSelector",
-          "selector": "[data-leave-balance]:has-text('יתרת חופשה')"
+          "selector": "[data-leave-balance] [data-leave-balance-line]:has-text('נוצלו')"
         },
         {
           "id": "pick-day",

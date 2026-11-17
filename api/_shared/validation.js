@@ -241,12 +241,23 @@ function coerceOptionalDateString(value) {
   return { valid: true, value: normalized };
 }
 
+// A manual yearly leave number (null = the organisation default): 0 to 365, in half days.
+function isValidAnnualLeaveDays(value) {
+  return value === null || (value >= 0 && value <= 365 && Number.isInteger(value * 2));
+}
+
 function coerceOptionalNumberValue(value) {
   if (value === undefined) {
     return { present: false, valid: true, value: null };
   }
   if (value === null) {
     return { present: true, valid: true, value: null };
+  }
+  // A JSON number arrives as a number; normalizeString only reads strings.
+  if (typeof value === 'number') {
+    return Number.isFinite(value)
+      ? { present: true, valid: true, value }
+      : { present: true, valid: false, value: null };
   }
 
   const normalized = normalizeString(value);
@@ -293,7 +304,7 @@ export function validateInstructorCreate(body) {
     return { error: 'invalid_start_date' };
   }
   const annualLeaveDaysResult = coerceOptionalNumberValue(body?.annual_leave_days ?? body?.annualLeaveDays);
-  if (!annualLeaveDaysResult.valid) {
+  if (!annualLeaveDaysResult.valid || !isValidAnnualLeaveDays(annualLeaveDaysResult.value)) {
     return { error: 'invalid_annual_leave_days' };
   }
   const employeeType = normalizeString(body?.employee_type ?? body?.employeeType).toLowerCase() || '';
@@ -423,7 +434,7 @@ export function validateInstructorUpdate(body, orgPermissions = {}) {
     const result = coerceOptionalNumberValue(
       Object.prototype.hasOwnProperty.call(body, 'annual_leave_days') ? body.annual_leave_days : body.annualLeaveDays
     );
-    if (!result.valid) {
+    if (!result.valid || !isValidAnnualLeaveDays(result.value)) {
       return { error: 'invalid_annual_leave_days' };
     }
     updates.annual_leave_days = result.value;

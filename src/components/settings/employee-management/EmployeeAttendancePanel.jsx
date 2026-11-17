@@ -74,6 +74,7 @@ export default function EmployeeAttendancePanel({ employee, orgId, session }) {
   const [lessonDays, setLessonDays] = useState([]);
   const [leaveDays, setLeaveDays] = useState([]);
   const [leaveSummary, setLeaveSummary] = useState(null);
+  const [leaveEntitlement, setLeaveEntitlement] = useState(null);
   const [balanceEvents, setBalanceEvents] = useState([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -103,30 +104,46 @@ export default function EmployeeAttendancePanel({ employee, orgId, session }) {
   const monthStart = useMemo(() => dateKeyFromCalendarDate(startOfMonth(monthDate)), [monthDate]);
   const monthEnd = useMemo(() => dateKeyFromCalendarDate(endOfMonth(monthDate)), [monthDate]);
 
+  // The balance belongs to a calendar year, not a month: it is read once per employee and year (its
+  // entitlement may count a whole year of lessons), and again after a change on this tab.
+  const balanceYear = monthStart.slice(0, 4);
+
   const fetchMonth = useCallback(async () => {
     const params = { org_id: orgId, employee_id: employee.id, start_date: monthStart, end_date: monthEnd };
-    const [attendance, leave] = await Promise.all([
-      authenticatedFetch('employee-attendance', { session, params }),
-      // The balance is secondary: the grid still works when it cannot be read.
-      authenticatedFetch('employee-leave', { session, params }).catch((error) => {
-        console.error('Failed to load leave balance', error);
-        return null;
-      }),
-    ]);
-    return { attendance, leave };
+    const attendance = await authenticatedFetch('employee-attendance', { session, params });
+    return { attendance };
   }, [employee?.id, monthEnd, monthStart, orgId, session]);
 
-  const applyMonth = useCallback(({ attendance, leave }) => {
+  const applyMonth = useCallback(({ attendance }) => {
     setRecords(Array.isArray(attendance?.records) ? attendance.records : []);
     setLessonDays(Array.isArray(attendance?.lesson_days) ? attendance.lesson_days : []);
     setLeaveDays(Array.isArray(attendance?.leave_days) ? attendance.leave_days : []);
-    setLeaveSummary(leave?.summary || null);
-    setBalanceEvents(Array.isArray(leave?.balance_events) ? leave.balance_events : []);
   }, []);
 
+  const loadBalance = useCallback(async () => {
+    // The balance is secondary: the grid still works when it cannot be read.
+    const leave = await authenticatedFetch('employee-leave', {
+      session,
+      params: { org_id: orgId, employee_id: employee.id, year: balanceYear },
+    }).catch((error) => {
+      console.error('Failed to load leave balance', error);
+      return null;
+    });
+    setLeaveSummary(leave?.summary || null);
+    setLeaveEntitlement(leave?.entitlement || null);
+    setBalanceEvents(Array.isArray(leave?.balance_events) ? leave.balance_events : []);
+  }, [balanceYear, employee?.id, orgId, session]);
+
+  useEffect(() => {
+    if (!employee?.id || !orgId) return;
+    void loadBalance();
+    // A changed start date or work week (edited elsewhere) changes the entitlement.
+  }, [employee?.id, employee?.start_date, employee?.working_days, loadBalance, orgId]);
+
   const reloadMonth = useCallback(async () => {
-    applyMonth(await fetchMonth());
-  }, [applyMonth, fetchMonth]);
+    const [month] = await Promise.all([fetchMonth(), loadBalance()]);
+    applyMonth(month);
+  }, [applyMonth, fetchMonth, loadBalance]);
 
   useEffect(() => {
     if (!employee?.id || !orgId) return undefined;
@@ -508,11 +525,12 @@ export default function EmployeeAttendancePanel({ employee, orgId, session }) {
             </p>
             <LeaveBalanceLine
               summary={leaveSummary}
+              entitlement={leaveEntitlement}
               balanceEvents={balanceEvents}
-              employeeId={employee?.id}
+              employee={employee}
               orgId={orgId}
               session={session}
-              onChanged={reloadMonth}
+              onChanged={loadBalance}
             />
             <div className="max-w-full overflow-x-auto rounded-xl border border-slate-200" dir="rtl" role="region" aria-label="טבלת נוכחות חודשית" tabIndex={0}>
               <table className="w-full min-w-[640px] table-fixed border-collapse text-start">

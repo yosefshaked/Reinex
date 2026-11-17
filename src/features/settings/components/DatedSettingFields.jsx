@@ -21,13 +21,14 @@ export default function DatedSettingFields({
   describeVersion,
   changed = true,
   disabled = false,
+  pastDateWarning,
 }) {
   const [showHistory, setShowHistory] = useState(false);
   const today = todayKey();
   const list = useMemo(() => (Array.isArray(versions) ? versions : []), [versions]);
   const warnings = useMemo(
-    () => buildDatedSettingWarnings({ versions: list, effectiveDate, today }),
-    [list, effectiveDate, today],
+    () => buildDatedSettingWarnings({ versions: list, effectiveDate, today, ...(pastDateWarning ? { pastDateWarning } : {}) }),
+    [list, effectiveDate, today, pastDateWarning],
   );
   const dateId = `${idPrefix}-effective-date`;
   const historyId = `${idPrefix}-history`;

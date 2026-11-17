@@ -1072,7 +1072,7 @@ CREATE TABLE IF NOT EXISTS public."Employees" (
   "is_active" boolean DEFAULT true,
   "notes" text,
   "working_days" jsonb,
-  "annual_leave_days" numeric DEFAULT 12,
+  "annual_leave_days" numeric, -- manual leave days per year; null = the organisation default (leave_entitlement_policy)
   "leave_pay_method" text,
   "employment_scope" text,
   "instructor_types" uuid[],

@@ -28,6 +28,13 @@ import {
 } from '../_shared/employee-finance.js';
 import { todayKey } from '../_shared/local-time.js';
 import { attachErrorTracking, respondTracked } from '../_shared/error-events.js';
+import {
+  computeLeaveEntitlement,
+  daysWorkedRange,
+  entitlementPolicyDateForYear,
+  needsDaysWorked,
+} from '../_shared/leave-entitlement.js';
+import { loadWorkedDates } from '../_shared/pay-calculation.js';
 
 const MAX_BODY_BYTES = 64 * 1024;
 const MUTABLE_BALANCE_EVENT_TYPES = new Set(['allocation', 'carryover', 'adjustment', 'reversal', 'correction']);
@@ -71,6 +78,14 @@ function isBalanceEventRequest(body) {
 function normalizeBalanceEventType(value) {
   const normalized = normalizeString(value).toLowerCase();
   return MUTABLE_BALANCE_EVENT_TYPES.has(normalized) ? normalized : '';
+}
+
+// The calendar year of the balance: `year` when given, else the year of `end_date`, else this year.
+function resolveBalanceYear(yearParam, endDate, today) {
+  const year = Number(normalizeString(yearParam));
+  if (Number.isInteger(year) && year >= 2000 && year <= 2100) return year;
+  const fromEnd = isYmdDate(endDate) ? Number(normalizeString(endDate).slice(0, 4)) : NaN;
+  return Number.isInteger(fromEnd) ? fromEnd : Number(today.slice(0, 4));
 }
 
 function computeRecordedBalances(summary) {
@@ -293,12 +308,26 @@ async function handleGet(context, req, client, orgId, userId, canManageAll) {
   }
 
   const employee = employeeResult.employee;
+  const today = todayKey();
+  const year = resolveBalanceYear(req?.query?.year, endDate, today);
 
-  let policies, balanceEvents, leaveEntries, leaveDays;
+  let policies, balanceEvents, leaveEntries, leaveDays, entitlement;
   try {
     // The leave-pay default shown with the employee's leave is the one in force today.
-    policies = await loadFinancePolicies(client, orgId, { asOf: todayKey() });
-    [balanceEvents, leaveEntries, leaveDays] = await Promise.all([
+    policies = await loadFinancePolicies(client, orgId, { asOf: today });
+    // The entitlement of a year follows the org setting in force on 31 December (today for the
+    // current year), and counts the days worked so far from the same lessons and hours pay uses.
+    const yearPolicies = policies.onDate(entitlementPolicyDateForYear(year, today));
+    const entitlementInput = {
+      employee,
+      policy: yearPolicies.leaveEntitlementPolicy,
+      policyEffectiveDate: yearPolicies.leaveEntitlementPolicyEffectiveDate,
+      year,
+      today,
+    };
+    const workedRange = needsDaysWorked(entitlementInput) ? daysWorkedRange(entitlementInput) : null;
+    let workedDates;
+    [balanceEvents, leaveEntries, leaveDays, workedDates] = await Promise.all([
       fetchBalanceEvents(client, orgId, employee.id),
       fetchLeaveEntriesForEmployee(client, orgId, employee.id, {
         startDate: isYmdDate(startDate) ? startDate : '',
@@ -306,10 +335,14 @@ async function handleGet(context, req, client, orgId, userId, canManageAll) {
       }),
       fetchApprovedLeaveDays(client, {
         employeeId: employee.id,
-        startDate: isYmdDate(startDate) ? startDate : `${new Date().getFullYear()}-01-01`,
-        endDate: isYmdDate(endDate) ? endDate : `${new Date().getFullYear()}-12-31`,
+        startDate: isYmdDate(startDate) ? startDate : `${year}-01-01`,
+        endDate: isYmdDate(endDate) ? endDate : `${year}-12-31`,
       }),
+      workedRange
+        ? loadWorkedDates(client, orgId, { employeeId: employee.id, ...workedRange, policies })
+        : Promise.resolve([]),
     ]);
+    entitlement = computeLeaveEntitlement({ ...entitlementInput, daysWorked: workedDates.length });
   } catch (error) {
     context.log?.error?.('employee-leave GET failed to load data', { employeeId: employee.id, message: error?.message, code: error?.code });
     return respondTrackedLeaveError(context, 500, 'failed_to_load_leave_data', error, {
@@ -323,19 +356,21 @@ async function handleGet(context, req, client, orgId, userId, canManageAll) {
   }
 
   const summary = computeLeaveSummary({
-    employee,
+    entitlement,
     balanceEvents,
-    targetDate: endDate || new Date(),
+    year,
     leavePolicy: policies.leavePolicy,
   });
 
   return respond(context, 200, {
     employee_id: employee.id,
+    year,
     policy_source: 'Employees',
     policy: {
       annual_leave_days: employee.annual_leave_days ?? null,
       leave_pay_method: employee.leave_pay_method || null,
     },
+    entitlement,
     ledger_status: balanceEvents.length > 0 ? 'employee_leave_balance_events' : 'unavailable',
     entry_count: balanceEvents.length,
     recorded_balances: computeRecordedBalances(summary),

@@ -25,10 +25,12 @@ import {
   validateSettingEffectiveDate,
 } from '../_shared/dated-settings.js';
 import { isDateKey, todayKey } from '../_shared/local-time.js';
+import { validateLeaveEntitlementPolicyInput } from '../_shared/leave-entitlement.js';
 
 const TYPED_SETTING_VALIDATORS = {
   leave_pay_policy: validateLeavePayPolicyInput,
   instructor_earnings_policy: validateInstructorEarningsPolicyInput,
+  leave_entitlement_policy: validateLeaveEntitlementPolicyInput,
 };
 
 /**

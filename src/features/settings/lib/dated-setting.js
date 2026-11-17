@@ -24,19 +24,22 @@ export function versionFromLabel(version) {
   return version.effective_date <= SINCE_THE_BEGINNING ? 'מאז ההתחלה' : `מ-${formatDateKey(version.effective_date)}`;
 }
 
+const PAST_DATE_WARNING = 'ההגדרה תחול על ימים שכבר עברו. השכר על מפגשים וימי חופשה שכבר היו מהתאריך הזה יחושב מחדש לפיה.';
+
 /**
  * What the office should know before saving a version from `effectiveDate`, in the words the rate
  * screen uses for a rate (EmployeeRatesPanel.jsx): a date in the past changes pay already computed,
  * a date before the current version only lasts until it, and a date that has a version replaces it.
+ * A setting whose past date reaches back differently passes its own words (`pastDateWarning`).
  */
-export function buildDatedSettingWarnings({ versions = [], effectiveDate, today }) {
+export function buildDatedSettingWarnings({ versions = [], effectiveDate, today, pastDateWarning = PAST_DATE_WARNING }) {
   const warnings = [];
   if (!effectiveDate) return warnings;
   const list = Array.isArray(versions) ? versions : [];
   const current = versionInForce(list, today);
   const existingOnDate = list.find((version) => version.effective_date === effectiveDate) || null;
   if (effectiveDate < today) {
-    warnings.push('ההגדרה תחול על ימים שכבר עברו. השכר על מפגשים וימי חופשה שכבר היו מהתאריך הזה יחושב מחדש לפיה.');
+    warnings.push(pastDateWarning);
   }
   if (current && effectiveDate < current.effective_date) {
     warnings.push(`ההגדרה תיכנס לפני ההגדרה הנוכחית (${versionFromLabel(current)}) ותהיה בתוקף רק עד אליה.`);

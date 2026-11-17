@@ -21,10 +21,14 @@
 import { normalizeString, withOrgScope } from './org-bff.js';
 import { isDateKey, normalizeDateKey } from './local-time.js';
 
-/** The settings that are read as of a date. Each affects instructor pay. */
+/**
+ * The settings that are read as of a date. Each affects pay: what pays an instructor, what a leave
+ * day is worth, and how many leave days an employee is owed (leave-entitlement.js).
+ */
 export const DATED_SETTING_KEYS = Object.freeze([
   'instructor_earnings_policy',
   'leave_pay_policy',
+  'leave_entitlement_policy',
 ]);
 
 const DATED_KEY_SET = new Set(DATED_SETTING_KEYS);

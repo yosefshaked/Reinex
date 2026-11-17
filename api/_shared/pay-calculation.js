@@ -361,6 +361,35 @@ export async function loadCountedLessons(client, orgId, {
     .sort((left, right) => String(left.datetime_start).localeCompare(String(right.datetime_start)));
 }
 
+/**
+ * The local dates an employee worked: a day with a counted lesson (summarizeLessonsByDate) or with
+ * office minutes on the attendance record. Each date counts once, whatever happened on it. The leave
+ * entitlement (leave-entitlement.js) counts these days; there is no other count of days worked.
+ */
+export function collectWorkedDates({ lessons = [], attendanceRecords = [] } = {}) {
+  const dates = new Set(summarizeLessonsByDate(lessons).keys());
+  for (const record of attendanceRecords || []) {
+    const dateKey = localDateKey(record?.attendance_date);
+    if (dateKey && Number(record?.other_minutes) > 0) dates.add(dateKey);
+  }
+  return Array.from(dates).sort();
+}
+
+/**
+ * Reads the days an employee worked between two dates (inclusive) from the same sources pay uses.
+ * Rates are not read: whether a lesson counts does not depend on them.
+ */
+export async function loadWorkedDates(client, orgId, { employeeId, startDate, endDate, policies = null } = {}) {
+  const startKey = localDateKey(startDate);
+  const endKey = localDateKey(endDate);
+  if (!normalizeString(employeeId) || !startKey || !endKey || startKey > endKey) return [];
+  const [lessons, attendanceRecords] = await Promise.all([
+    loadCountedLessons(client, orgId, { employeeId, startDate: startKey, endDate: endKey, policies, rateRows: [] }),
+    fetchAttendanceRecords(client, { employeeId, startDate: startKey, endDate: endKey }),
+  ]);
+  return collectWorkedDates({ lessons, attendanceRecords });
+}
+
 function buildDisplayName(employee) {
   return [employee?.first_name, employee?.last_name].filter(Boolean).join(' ').trim() || employee?.employee_id || employee?.id;
 }

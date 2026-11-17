@@ -23,6 +23,7 @@ import {
   resolveRateOnDate,
 } from './rate-history.js';
 import { isDatedSettingKey, loadDatedSettingRows, resolveSettingOnDate } from './dated-settings.js';
+import { LEAVE_ENTITLEMENT_POLICY_KEY, normalizeLeaveEntitlementPolicy } from './leave-entitlement.js';
 
 export const DEFAULT_LEAVE_POLICY = Object.freeze({
   carryover_enabled: false,
@@ -284,7 +285,10 @@ export function buildFinancePolicies({ settingsMap = {}, datedRows = [], asOf })
   const onDate = (dateKey) => {
     const date = localDateKey(dateKey) || asOf;
     if (!byDate.has(date)) {
+      const entitlementVersion = resolveSettingOnDate(datedRows, LEAVE_ENTITLEMENT_POLICY_KEY, date);
       byDate.set(date, Object.freeze({
+        leaveEntitlementPolicy: normalizeLeaveEntitlementPolicy(entitlementVersion?.settings_value),
+        leaveEntitlementPolicyEffectiveDate: entitlementVersion?.effective_date || null,
         ...undated,
         leavePayPolicy: normalizeLeavePayPolicy(resolveSettingOnDate(datedRows, 'leave_pay_policy', date)?.settings_value),
         instructorEarningsPolicy: normalizeBooleanPolicy(
@@ -871,21 +875,19 @@ export async function deleteLeaveArtifacts(tenantClient, orgId, leaveEntryId) {
     .eq('leave_entry_id', leaveEntryId);
 }
 
-export function computeLeaveSummary({ employee, balanceEvents = [], targetDate, leavePolicy = DEFAULT_LEAVE_POLICY }) {
-  const year = Number((localDateKey(targetDate) || todayKey()).slice(0, 4));
+/**
+ * The leave balance of one calendar year. The year's entitlement (`quota`) comes from
+ * computeLeaveEntitlement (leave-entitlement.js) and is passed in; this adds the manual balance
+ * movements and subtracts usage. An entitlement the system cannot compute (it asks for a manual
+ * number) counts as 0. `leave_policy.carryover_cap_days`, when set, caps how many carried-over days
+ * count; nothing is carried over automatically.
+ */
+export function computeLeaveSummary({ entitlement = null, balanceEvents = [], year: requestedYear, leavePolicy = DEFAULT_LEAVE_POLICY }) {
+  const year = Number.isInteger(requestedYear) ? requestedYear : Number(todayKey().slice(0, 4));
   const yearStart = `${year}-01-01`;
   const yearEnd = `${year}-12-31`;
 
-  const annualLeaveDays = Number(employee?.annual_leave_days || 0);
-  let quota = annualLeaveDays;
-  const startDate = localDateKey(employee?.start_date);
-  if (startDate && startDate > yearStart && startDate <= yearEnd) {
-    const totalDaysInYear = ((year % 4 === 0 && year % 100 !== 0) || year % 400 === 0) ? 366 : 365;
-    const start = new Date(`${startDate}T00:00:00Z`);
-    const end = new Date(`${yearEnd}T00:00:00Z`);
-    const remainingDays = Math.max(0, Math.round((end.getTime() - start.getTime()) / 86400000) + 1);
-    quota = (annualLeaveDays * remainingDays) / totalDaysInYear;
-  }
+  const quota = Number.isFinite(Number(entitlement?.days)) ? Number(entitlement.days) : 0;
 
   let carryIn = 0;
   let allocations = 0;
@@ -923,6 +925,8 @@ export function computeLeaveSummary({ employee, balanceEvents = [], targetDate, 
     adjustments: Number(adjustments.toFixed(3)),
     used: Number(used.toFixed(3)),
     remaining: Number(remaining.toFixed(3)),
+    // Everything the year gives: the entitlement plus the manual movements ("מגיעים N ימים").
+    available: Number((remaining + used).toFixed(3)),
   };
 }
 

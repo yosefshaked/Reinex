@@ -27,3 +27,6 @@ on deploy is planned and not built yet.
   `leave_pay_policy`) move from `Settings` to `SettingsHistory` as a first version from 2000-01-01;
   pay decisions the system stored by itself on attended participants and on whole-lesson
   cancellations are cleared so the policy in force on the lesson's date decides.
+- `0004_leave_entitlement_default.sql` - `Employees.annual_leave_days` loses its default of 12 and
+  becomes the manual yearly leave number (null = the organisation's `leave_entitlement_policy`);
+  existing 12s (the old default) become null, once.
