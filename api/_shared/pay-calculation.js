@@ -361,13 +361,23 @@ export async function loadCountedLessons(client, orgId, {
     .sort((left, right) => String(left.datetime_start).localeCompare(String(right.datetime_start)));
 }
 
+const PAID_LEAVE_TYPES = new Set(['employee_paid', 'system_paid', 'half_day']);
+
 /**
  * The local dates an employee worked: a day with a counted lesson (summarizeLessonsByDate) or with
- * office minutes on the attendance record. Each date counts once, whatever happened on it. The leave
+ * office minutes on the attendance record, or a day of paid leave. Each date counts once, whatever happened on it. The leave
  * entitlement (leave-entitlement.js) counts these days; there is no other count of days worked.
  */
-export function collectWorkedDates({ lessons = [], attendanceRecords = [] } = {}) {
+export function collectWorkedDates({ lessons = [], attendanceRecords = [], leaveDays = [] } = {}) {
   const dates = new Set(summarizeLessonsByDate(lessons).keys());
+  // A day of paid leave (employee_paid, system_paid, or the older half_day) counts as a work day;
+  // unpaid leave does not. Any part of a day is a day, so a half-day leave with no work on it counts
+  // as a whole day. A date counts once, even when it also has work.
+  for (const leaveDay of leaveDays || []) {
+    const dateKey = localDateKey(leaveDay?.leave_date);
+    const leaveType = leaveDay?.leave_type || leaveDay?.entry?.leave_type;
+    if (dateKey && PAID_LEAVE_TYPES.has(leaveType)) dates.add(dateKey);
+  }
   for (const record of attendanceRecords || []) {
     const dateKey = localDateKey(record?.attendance_date);
     if (dateKey && Number(record?.other_minutes) > 0) dates.add(dateKey);
@@ -383,11 +393,12 @@ export async function loadWorkedDates(client, orgId, { employeeId, startDate, en
   const startKey = localDateKey(startDate);
   const endKey = localDateKey(endDate);
   if (!normalizeString(employeeId) || !startKey || !endKey || startKey > endKey) return [];
-  const [lessons, attendanceRecords] = await Promise.all([
+  const [lessons, attendanceRecords, leaveDays] = await Promise.all([
     loadCountedLessons(client, orgId, { employeeId, startDate: startKey, endDate: endKey, policies, rateRows: [] }),
     fetchAttendanceRecords(client, orgId, { employeeId, startDate: startKey, endDate: endKey }),
+    fetchApprovedLeaveDays(client, orgId, { employeeId, startDate: startKey, endDate: endKey }),
   ]);
-  return collectWorkedDates({ lessons, attendanceRecords });
+  return collectWorkedDates({ lessons, attendanceRecords, leaveDays });
 }
 
 function buildDisplayName(employee) {

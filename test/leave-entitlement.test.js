@@ -332,6 +332,18 @@ describe('days worked and the balance', () => {
       { attendance_date: '2026-03-04', other_minutes: 0 },
     ];
     assert.deepEqual(collectWorkedDates({ lessons, attendanceRecords }), ['2026-03-01', '2026-03-03']);
+    // Paid leave (including half a day and the older half_day type) counts, once per date; unpaid does not.
+    const leaveDays = [
+      { leave_date: '2026-03-01', leave_type: 'employee_paid', day_portion: 'full_day' },
+      { leave_date: '2026-03-05', leave_type: 'system_paid', day_portion: 'full_day' },
+      { leave_date: '2026-03-06', leave_type: 'employee_paid', day_portion: 'first_half' },
+      { leave_date: '2026-03-07', leave_type: 'half_day', day_portion: 'first_half' },
+      { leave_date: '2026-03-08', leave_type: 'unpaid', day_portion: 'full_day' },
+    ];
+    assert.deepEqual(
+      collectWorkedDates({ lessons, attendanceRecords, leaveDays }),
+      ['2026-03-01', '2026-03-03', '2026-03-05', '2026-03-06', '2026-03-07'],
+    );
   });
 
   it('the balance takes the entitlement as its quota and adds the manual movements', () => {
@@ -434,7 +446,7 @@ describe('"הסבר מלא"', () => {
     assert.equal(sentences[1], 'השנה נרשמו עד עכשיו 96 ימי עבודה. שנה מלאה היא 200 ימי עבודה, ולכן מגיעים כרגע 5 ימי חופשה.');
     assert.ok(sentences.includes('המספר יגדל ככל שיירשמו עוד ימי עבודה.'));
     assert.ok(sentences.includes('אפשר להוסיף או להוריד ימים לעובד/ת בכל רגע דרך "שינוי יתרה" כאן למעלה.'));
-    assert.match(sentences.at(-1), /נחשב יום עבודה שלם; חלקי ימים מעוגלים כלפי מטה; לפי טבלת שבוע עבודה של 5 ימים/);
+    assert.match(sentences.at(-1), /נחשב יום עבודה שלם, וגם יום חופשה בתשלום \(גם חצי יום\) נחשב יום עבודה; חלקי ימים מעוגלים כלפי מטה; לפי טבלת שבוע עבודה של 5 ימים/);
     assert.ok(sentences.every((sentence) => !sentence.includes('÷')), 'no formulas');
     assert.ok(sentences.every((sentence) => !/[„”“]/.test(sentence)), 'straight quotes only');
     assert.ok(sentences.every((sentence) => !/חוק/.test(sentence)), 'no legal wording');

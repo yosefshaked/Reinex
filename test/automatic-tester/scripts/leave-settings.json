@@ -474,6 +474,46 @@
     },
 
     {
+      "id": "paid-leave-counts-as-work-day",
+      "name": "Paid leave counts as a work day for the entitlement; the same leave on a half day counts as a whole day",
+      "steps": [
+        {
+          "id": "record-half-day-paid-leave",
+          "description": "Half a day of paid leave on the 1st of this month, a day with no work",
+          "action": "apiCall",
+          "method": "POST",
+          "endpoint": "/api/employee-leave",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "employee_id": "{{LEAVE_INSTRUCTOR_ID}}",
+            "leave_type": "employee_paid",
+            "duration_mode": "half_day",
+            "half_day_part": "first_half",
+            "start_date": "{{CURRENT_MONTH_FIRST_DAY}}",
+            "end_date": "{{CURRENT_MONTH_FIRST_DAY}}"
+          }
+        },
+        { "id": "navigate-employees", "action": "navigate", "url": "{{BASE_URL}}/#/employees" },
+        { "id": "wait-main", "action": "waitForSelector", "selector": "main, [role='main']" },
+        { "id": "open-employee", "action": "click", "selector": "button:has-text('זכאות בדיקה {{RUN_NUMERIC_ID}}')", "first": true },
+        { "id": "open-attendance-tab", "action": "click", "selector": "[role='tab']:has-text('נוכחות')" },
+        {
+          "id": "assert-one-day-counted",
+          "description": "One counted work day (the leave day): 9 more to the 10th, which gives the first leave day",
+          "action": "waitForSelector",
+          "selector": "[data-leave-balance-line]:has-text('עוד 9 ימי עבודה ליום החופשה הבא')"
+        },
+        { "id": "open-explain", "action": "click", "selector": "[data-leave-explain-open]" },
+        {
+          "id": "assert-explain-mentions-paid-leave",
+          "action": "waitForSelector",
+          "selector": "[data-leave-explain]:has-text('יום חופשה בתשלום')"
+        },
+        { "id": "close-explain", "action": "pressKey", "key": "Escape" }
+      ]
+    },
+
+    {
       "id": "logout",
       "name": "Logout",
       "steps": [
