@@ -50,7 +50,7 @@ function buildInitialState(employee) {
     startDate: employee?.start_date || '',
     employmentScope: employee?.employment_scope || '',
     notes: employee?.notes || '',
-    officeWorkingDays: employeeType === 'office' && Array.isArray(employee?.working_days) ? employee.working_days : [],
+    officeWorkingDays: Array.isArray(employee?.working_days) ? employee.working_days : [],
     conversionBreakTimeMinutes: employee?.instructor_profile?.break_time_minutes ?? '',
     conversionCapabilities: Array.isArray(employee?.service_capabilities)
       ? employee.service_capabilities.map((capability) => ({
@@ -154,7 +154,6 @@ export default function EditEmployeeDialog({
     () => form.sourceType !== 'instructor' && form.employeeType === 'instructor',
     [form.employeeType, form.sourceType],
   );
-  const isOfficeEditing = useMemo(() => form.employeeType === 'office', [form.employeeType]);
 
   const updateField = (key, value) => {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -249,9 +248,7 @@ export default function EditEmployeeDialog({
         notes: form.notes || null,
       };
 
-      if (isOfficeEditing) {
-        payload.working_days = form.officeWorkingDays;
-      }
+      payload.working_days = form.officeWorkingDays;
 
       if (isRoleConversion) {
         payload.break_time_minutes = form.conversionBreakTimeMinutes === '' ? null : Number(form.conversionBreakTimeMinutes);
@@ -361,11 +358,10 @@ export default function EditEmployeeDialog({
             </div>
           </Section>
 
-          {isOfficeEditing ? (
           <Section
             title="פרטי העסקה"
             icon={Calendar}
-            description="פרטי העסקה בסיסיים וזמינות שבועית לעובדי משרד"
+            description="היקף העסקה וימי עבודה שבועיים. ימי העבודה קובעים לפי איזו טבלה מחושבת החופשה."
           >
             <div className="grid gap-4 md:grid-cols-2">
               <div className="space-y-2">
@@ -405,18 +401,11 @@ export default function EditEmployeeDialog({
               </div>
             </div>
 
-            {isOfficeEditing ? (
-              <div className="space-y-3">
-                <div className="text-xs font-medium text-slate-600">ימי עבודה שבועיים</div>
-                <WorkingDaysPicker value={form.officeWorkingDays} onToggle={toggleOfficeWorkingDay} disabled={isSaving} />
-              </div>
-            ) : (
-              <div className="rounded-xl border border-dashed border-slate-200 bg-white px-3 py-3 text-xs text-slate-500">
-                לעובדי הדרכה זמינות תפעולית מנוהלת ברמת השירות, ולא דרך כרטיס העובד הכללי.
-              </div>
-            )}
+            <div className="space-y-3">
+              <div className="text-xs font-medium text-slate-600">ימי עבודה שבועיים</div>
+              <WorkingDaysPicker value={form.officeWorkingDays} onToggle={toggleOfficeWorkingDay} disabled={isSaving} />
+            </div>
           </Section>
-          ) : null}
 
           {isRoleConversion ? (
             <Section

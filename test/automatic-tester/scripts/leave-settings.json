@@ -175,7 +175,25 @@
           "type": "count",
           "selector": "[data-leave-pay-box], h3:has-text('תשלום חופשה')",
           "value": "0"
-        }
+        },
+        { "id": "open-edit-card", "description": "Working days and employment scope are on every employee's card, instructors included", "action": "click", "selector": "button:has-text('עריכת כרטיס העובד')" },
+        { "id": "assert-employment-section", "action": "waitForSelector", "selector": "[role='dialog'] :text('ימי עבודה שבועיים')" },
+        { "id": "assert-scope-field", "action": "assert", "type": "visible", "selector": "[role='dialog'] #employment_scope" },
+        { "id": "pick-sun", "action": "click", "selector": "[role='dialog'] button:has(div:text-is('ראשון'))" },
+        { "id": "pick-mon", "action": "click", "selector": "[role='dialog'] button:has(div:text-is('שני'))" },
+        { "id": "pick-tue", "action": "click", "selector": "[role='dialog'] button:has(div:text-is('שלישי'))" },
+        { "id": "pick-wed", "action": "click", "selector": "[role='dialog'] button:has(div:text-is('רביעי'))" },
+        { "id": "pick-thu", "action": "click", "selector": "[role='dialog'] button:has(div:text-is('חמישי'))" },
+        { "id": "pick-fri", "action": "click", "selector": "[role='dialog'] button:has(div:text-is('שישי'))" },
+        { "id": "save-card", "action": "click", "selector": "[role='dialog'] button:has-text('שמור שינויים')" },
+        { "id": "wait-card-closed", "action": "assert", "type": "hidden", "selector": "[role='dialog']:has-text('עריכת עובד')" },
+        { "id": "reopen-edit-card", "action": "click", "selector": "button:has-text('עריכת כרטיס העובד')" },
+        { "id": "assert-six-days-stored", "description": "Six working days persisted for the instructor", "action": "assert", "type": "count", "selector": "[role='dialog'] button.bg-blue-600:has(div.font-semibold)", "value": "6" },
+        { "id": "close-edit-card", "action": "pressKey", "key": "Escape" },
+        { "id": "back-to-attendance", "action": "click", "selector": "[role='tab']:has-text('נוכחות')" },
+        { "id": "open-explain-six", "action": "click", "selector": "[data-leave-explain-open]" },
+        { "id": "assert-six-day-table", "description": "The leave explanation now uses the 6-day table", "action": "waitForSelector", "selector": "[data-leave-explain]:has-text('שבוע עבודה של 6 ימים')" },
+        { "id": "close-explain-six", "action": "pressKey", "key": "Escape" }
       ]
     },
 

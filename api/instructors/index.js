@@ -522,7 +522,7 @@ export default async function (context, req) {
       start_date: validation.startDate,
       is_active: true,
       notes: validation.notes || null,
-      working_days: employeeType === 'office' ? workingDaysInput.value : null,
+      working_days: workingDaysInput.value,
       leave_pay_method: validation.leavePayMethod || null,
       employment_scope: validation.employmentScope || null,
     };
@@ -729,9 +729,11 @@ export default async function (context, req) {
       }
     }
 
-    if (targetEmployeeType === 'office' && workingDaysInput.provided) {
+    // Working days are set for every employee type (they decide which leave table applies); only an
+    // administrator changes them.
+    if (isAdmin && workingDaysInput.provided) {
       updates.working_days = workingDaysInput.value;
-    } else if (targetEmployeeType === 'instructor' && Object.prototype.hasOwnProperty.call(updates, 'working_days')) {
+    } else if (Object.prototype.hasOwnProperty.call(updates, 'working_days')) {
       delete updates.working_days;
     }
 
