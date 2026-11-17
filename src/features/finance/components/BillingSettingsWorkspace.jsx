@@ -119,6 +119,7 @@ export default function BillingSettingsWorkspace({
           <div className="mt-4 rounded-xl border border-border bg-slate-50 p-4">
             <div className="mb-2 text-sm font-semibold text-zinc-900">שכר מדריך</div>
             <DatedSettingFields
+              pastDateWarning="ההגדרה תחול על ימים שכבר עברו. השכר של המדריכים על מפגשים שכבר היו מהתאריך הזה יחושב מחדש לפיה."
               idPrefix="instructor-earnings-policy"
               effectiveDate={instructorPolicyDates.effectiveDate}
               onEffectiveDateChange={instructorPolicyDates.setEffectiveDate}

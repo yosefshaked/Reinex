@@ -390,7 +390,7 @@ describe('"הסבר מלא"', () => {
     const result = computeLeaveEntitlement({ employee: employee('2025-02-01'), policy: LEGAL, year: 2026, today: '2026-11-16', daysWorked: 96 });
     const sentences = leaveEntitlementExplanation(result, { name: 'דנה' });
     assert.equal(sentences[0], 'דנה בשנת העבודה השנייה. בשנה מלאה מגיעים 12 ימי חופשה.');
-    assert.equal(sentences[1], 'השנה נרשמו עד עכשיו 96 ימי עבודה. שנה מלאה היא 200 ימי עבודה, ולכן מגיעים כרגע 5 ימים.');
+    assert.equal(sentences[1], 'השנה נרשמו עד עכשיו 96 ימי עבודה. שנה מלאה היא 200 ימי עבודה, ולכן מגיעים כרגע 5 ימי חופשה.');
     assert.ok(sentences.includes('המספר יגדל ככל שיירשמו עוד ימי עבודה.'));
     assert.ok(sentences.includes('אפשר להוסיף או להוריד ימים לעובד/ת בכל רגע דרך "שינוי יתרה" כאן למעלה.'));
     assert.match(sentences.at(-1), /נחשב יום עבודה שלם; חלקי ימים מעוגלים כלפי מטה; לפי טבלת שבוע עבודה של 5 ימים/);

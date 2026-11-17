@@ -169,6 +169,7 @@ export default function LeavePayDefaultSettings({ session, orgId, canEdit, onClo
       </div>
 
       <DatedSettingFields
+        pastDateWarning="ההגדרה תחול על ימים שכבר עברו. תשלום ימי חופשה שכבר היו מהתאריך הזה יחושב מחדש לפיה."
         idPrefix="leave-pay-default"
         effectiveDate={effectiveDate}
         onEffectiveDateChange={setEffectiveDate}

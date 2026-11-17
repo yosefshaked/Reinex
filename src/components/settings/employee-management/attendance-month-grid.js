@@ -189,13 +189,13 @@ export function leaveEntitlementExplanation(entitlement, { name = 'העובד/ת
     const yearWord = entitlement.in_progress ? 'השנה' : 'בשנה הזו';
     if (entitlement.employed_whole_year) {
       if (entitlement.reached_full) {
-        sentences.push(`${yearWord} נרשמו${soFar} ${counted} ימי עבודה. מ-200 ימי עבודה מגיעה השנה המלאה, ולכן מגיעים ${days(entitlement.days)} ימים.`);
+        sentences.push(`${yearWord} נרשמו${soFar} ${counted} ימי עבודה. מ-200 ימי עבודה מגיעה השנה המלאה, ולכן מגיעים ${days(entitlement.days)} ימי חופשה.`);
       } else {
-        sentences.push(`${yearWord} נרשמו${soFar} ${counted} ימי עבודה. שנה מלאה היא 200 ימי עבודה, ולכן מגיעים${entitlement.in_progress ? ' כרגע' : ''} ${days(entitlement.days)} ימים.`);
+        sentences.push(`${yearWord} נרשמו${soFar} ${counted} ימי עבודה. שנה מלאה היא 200 ימי עבודה, ולכן מגיעים${entitlement.in_progress ? ' כרגע' : ''} ${days(entitlement.days)} ימי חופשה.`);
       }
     } else {
       sentences.push(`${who} התחיל/ה לעבוד ב-${displayDate(entitlement.start_date)}, באמצע השנה. במצב כזה מגיעה השנה המלאה מ-240 ימי עבודה.`);
-      sentences.push(`נרשמו${soFar} ${counted} ימי עבודה, ולכן מגיעים${entitlement.in_progress && !entitlement.reached_full ? ' כרגע' : ''} ${days(entitlement.days)} ימים.`);
+      sentences.push(`נרשמו${soFar} ${counted} ימי עבודה, ולכן מגיעים${entitlement.in_progress && !entitlement.reached_full ? ' כרגע' : ''} ${days(entitlement.days)} ימי חופשה.`);
     }
     if (entitlement.in_progress && !entitlement.reached_full) {
       sentences.push('המספר יגדל ככל שיירשמו עוד ימי עבודה.');
