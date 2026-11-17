@@ -499,9 +499,9 @@
         { "id": "open-attendance-tab", "action": "click", "selector": "[role='tab']:has-text('נוכחות')" },
         {
           "id": "assert-one-day-counted",
-          "description": "One counted work day (the leave day, 0.075 earned): 14 more reach 1.1",
+          "description": "One counted work day (the leave day). The instructor has 6 working days by now, so year 7 is 18 days a year: 0.09 earned, 12 more reach 1.17",
           "action": "waitForSelector",
-          "selector": "[data-leave-balance-line]:has-text('עוד 14 ימי עבודה ליום החופשה הבא')"
+          "selector": "[data-leave-balance-line]:has-text('עוד 12 ימי עבודה ליום החופשה הבא')"
         },
         { "id": "open-explain", "action": "click", "selector": "[data-leave-explain-open]" },
         {
@@ -576,6 +576,12 @@
           "description": "The change is listed with its reason",
           "action": "waitForSelector",
           "selector": "[data-balance-event]:has-text('העברה מהשנה הקודמת'):has-text('מעבר מהמערכת הקודמת')"
+        },
+        {
+          "id": "assert-history-shows-who",
+          "description": "The line under the reason says who made the change and when (name, or the email when the account has no name)",
+          "action": "waitForSelector",
+          "selector": "[data-balance-event] span.text-slate-500"
         }
       ]
     },

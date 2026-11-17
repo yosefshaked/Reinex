@@ -35,6 +35,8 @@ import {
   needsDaysWorked,
 } from '../_shared/leave-entitlement.js';
 import { loadWorkedDates } from '../_shared/pay-calculation.js';
+import { buildAccountDisplayName } from '../_shared/account-profile.js';
+import { getAuthUsersByIds } from '../_shared/auth-users.js';
 import { OFFERED_BALANCE_EVENT_TYPES, readBalanceReason } from '../_shared/leave-balance-reason.js';
 
 const MAX_BODY_BYTES = 64 * 1024;
@@ -147,14 +149,31 @@ async function fetchBalanceEvents(client, orgId, employeeId) {
     throw error;
   }
 
-  // Who made a manual change: the name of the employee row of the user who created it, when there is one.
+  // Who made a manual change: the name on the creator's account profile (one query for all rows);
+  // for an account with no name, the email (looked up only for those accounts).
   const rows = data || [];
   const creatorIds = Array.from(new Set(rows.map((row) => row.created_by).filter(Boolean)));
   if (creatorIds.length === 0) return rows;
-  const { data: people } = await withOrgScope(client, 'Employees', orgId)
-    .select('user_id, first_name, last_name')
-    .in('user_id', creatorIds);
-  const nameByUser = new Map((people || []).map((person) => [person.user_id, [person.first_name, person.last_name].filter(Boolean).join(' ')]));
+  const { data: profiles } = await client.from('profiles').select('id, first_name, last_name').in('id', creatorIds);
+  const profileById = new Map((profiles || []).map((profile) => [profile.id, profile]));
+  const nameByUser = new Map();
+  const unnamed = [];
+  for (const id of creatorIds) {
+    const name = buildAccountDisplayName({ profile: profileById.get(id) });
+    if (name) nameByUser.set(id, name);
+    else unnamed.push(id);
+  }
+  if (unnamed.length > 0) {
+    try {
+      const authUsers = await getAuthUsersByIds(client, unnamed);
+      for (const id of unnamed) {
+        const name = buildAccountDisplayName({ authUser: authUsers.get(id) });
+        if (name) nameByUser.set(id, name);
+      }
+    } catch {
+      // Best effort: the history still shows what, why and when.
+    }
+  }
   return rows.map((row) => ({ ...row, created_by_name: nameByUser.get(row.created_by) || null }));
 }
 
