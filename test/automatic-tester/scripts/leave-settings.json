@@ -137,6 +137,12 @@
           "selector": "[data-leave-balance-line]:has-text('מגיעים 0 ימי חופשה השנה · נוצלו 0 · נשארו 0')"
         },
         {
+          "id": "assert-days-to-next",
+          "description": "Seniority year 7 (21 gross days, 200 days): the 10th counted work day gives the first leave day",
+          "action": "waitForSelector",
+          "selector": "[data-leave-balance-line]:has-text('עוד 10 ימי עבודה ליום החופשה הבא')"
+        },
+        {
           "id": "assert-row-defaults",
           "description": "The \"חופשה\" row reads first: both choices follow the organisation",
           "action": "waitForSelector",

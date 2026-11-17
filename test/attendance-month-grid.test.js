@@ -144,6 +144,12 @@ describe('attendance month grid', () => {
       assert.equal(text.details.length, 5);
       assert.ok(text.details.includes('צבירה משנה קודמת: 2'));
       assert.ok(text.details.includes('לפי הזכאות: 12'));
+      assert.equal(
+        leaveBalanceText(summary, { status: 'ok', days_to_next_leave_day: 10 }, 2026).line,
+        'מגיעים 13 ימי חופשה השנה · נוצלו 3.5 · נשארו 9.5 · עוד 10 ימי עבודה ליום החופשה הבא',
+      );
+      assert.match(leaveBalanceText(summary, { status: 'ok', days_to_next_leave_day: 1 }, 2026).line, /עוד יום עבודה אחד ליום החופשה הבא$/);
+      assert.doesNotMatch(leaveBalanceText(summary, { status: 'ok', days_to_next_leave_day: null }, 2026).line, /עוד/);
       assert.equal(leaveBalanceText(summary, null, 2027).line, 'מגיעים 13 ימי חופשה ב-2026 · נוצלו 3.5 · נשארו 9.5');
       assert.equal(
         leaveBalanceText({ ...summary, quota: 0 }, { status: 'manual_needed', reason: 'before_75_days' }, 2026).line,

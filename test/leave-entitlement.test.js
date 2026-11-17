@@ -13,6 +13,7 @@ import {
   daysWorkedRange,
   entitlementPolicyDateForYear,
   grossToNet,
+  daysToNextLeaveDay,
   legalShareOfYear,
   legalYearEntitlement,
   manualLeaveDays,
@@ -445,5 +446,42 @@ describe('"הסבר מלא"', () => {
     const manual = computeLeaveEntitlement({ employee: employee('2025-02-01', null, 20), policy: LEGAL, year: 2026, today: '2026-11-16' });
     assert.equal(leaveEntitlementExplanation(manual)[0], 'נקבע ידנית לעובד/ת: 20 ימי חופשה בשנה.');
     assert.equal(leaveEntitlementExplanation(manual).length, 2, 'no legal assumptions for a manual number');
+  });
+});
+
+describe('days to the next leave day', () => {
+  // Year 1 on a 5-day week: 12 days a year, 16 gross, 200 days for the whole year.
+  const base = { seniorityYear: 1, weekDays: 5, employedWholeYear: true };
+
+  it('3 days worked: 0 days now; the 13th worked day (13 x 16 / 200 = 1.04) gives the first, so 10 more', () => {
+    assert.equal(legalShareOfYear({ ...base, daysCounted: 3 }).net, 0);
+    assert.equal(legalShareOfYear({ ...base, daysCounted: 12 }).net, 0);
+    assert.equal(legalShareOfYear({ ...base, daysCounted: 13 }).net, 1);
+    assert.equal(daysToNextLeaveDay({ ...base, daysCounted: 3 }), 10);
+  });
+
+  it('counts from the days worked, whatever the day is worth: 13 worked -> 1 day, the 2nd is at 25 (12 more)', () => {
+    assert.equal(legalShareOfYear({ ...base, daysCounted: 25 }).net, 2);
+    assert.equal(daysToNextLeaveDay({ ...base, daysCounted: 13 }), 12);
+  });
+
+  it('stops at the full year when that comes first', () => {
+    assert.equal(legalShareOfYear({ ...base, daysCounted: 195 }).net, 11);
+    assert.equal(daysToNextLeaveDay({ ...base, daysCounted: 195 }), 5);
+    assert.equal(daysToNextLeaveDay({ ...base, daysCounted: 199 }), 1);
+    assert.equal(daysToNextLeaveDay({ ...base, daysCounted: 200 }), null);
+    assert.equal(daysToNextLeaveDay({ ...base, employedWholeYear: false, daysCounted: 239 }), 1);
+  });
+
+  it('is returned with the entitlement only while the year is growing', () => {
+    const growing = computeLeaveEntitlement({ employee: employee('2020-01-01'), policy: LEGAL, year: 2026, today: '2026-11-16', daysWorked: 30 });
+    assert.equal(growing.days_to_next_leave_day, daysToNextLeaveDay({ seniorityYear: 7, weekDays: 5, employedWholeYear: true, daysCounted: 30 }));
+    assert.ok(growing.days_to_next_leave_day > 0);
+    const full = computeLeaveEntitlement({ employee: employee('2020-01-01'), policy: LEGAL, year: 2026, today: '2026-11-16', daysWorked: 200 });
+    assert.equal(full.days_to_next_leave_day, null);
+    const past = computeLeaveEntitlement({ employee: employee('2020-01-01'), policy: LEGAL, year: 2024, today: '2026-11-16', daysWorked: 30 });
+    assert.equal(past.days_to_next_leave_day, null);
+    const manual = computeLeaveEntitlement({ employee: employee('2020-01-01', null, 20), policy: LEGAL, year: 2026, today: '2026-11-16' });
+    assert.equal(manual.days_to_next_leave_day, undefined);
   });
 });

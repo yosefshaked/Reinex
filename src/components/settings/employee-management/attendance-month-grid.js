@@ -135,8 +135,12 @@ export function leaveBalanceText(summary, entitlement = null, currentYear = null
   const line = manualNeeded
     ? `ימי החופשה ${when} עדיין לא נקבעו · נוצלו ${days(summary.used)} · נשארו ${days(summary.remaining)}`
     : `מגיעים ${days(summary.available ?? (Number(summary.remaining) + Number(summary.used)))} ימי חופשה ${when} · נוצלו ${days(summary.used)} · נשארו ${days(summary.remaining)}`;
+  const toNext = Number(entitlement?.days_to_next_leave_day);
+  const nextPart = !manualNeeded && Number.isInteger(toNext) && toNext > 0
+    ? ` · ${toNext === 1 ? 'עוד יום עבודה אחד' : `עוד ${toNext} ימי עבודה`} ליום החופשה הבא`
+    : '';
   return {
-    line,
+    line: `${line}${nextPart}`,
     details: [
       `לפי הזכאות: ${days(summary.quota)}`,
       `צבירה משנה קודמת: ${days(summary.carryIn)}`,
