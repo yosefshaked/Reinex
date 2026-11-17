@@ -36,6 +36,16 @@ export const LEAVE_PORTION_OPTIONS = [
   { value: 'second_half', label: 'חצי יום שני' },
 ];
 
+// A half-day leave (a day portion other than a full day, or the older half_day type): the day is
+// shared with work, so hours and lessons may be recorded on it.
+export function isHalfDayLeave(leave) {
+  if (!leave) return false;
+  return (Boolean(leave.day_portion) && leave.day_portion !== 'full_day')
+    || leave.entry?.duration_mode === 'half_day'
+    || leave.entry?.leave_type === 'half_day'
+    || leave.leave_type === 'half_day';
+}
+
 export function leaveTypeLabel(value) {
   if (value === 'half_day') return 'חצי יום';
   return LEAVE_TYPE_OPTIONS.find((option) => option.value === value)?.label || 'חופשה';
@@ -44,9 +54,8 @@ export function leaveTypeLabel(value) {
 // One leave day of the attendance read (employee_leave_days row with its entry).
 export function describeLeaveDay(leave) {
   if (!leave) return null;
-  const half = leave.day_portion === 'first_half' || leave.day_portion === 'second_half';
   const type = leave.entry?.leave_type || leave.leave_type;
-  const parts = ['חופשה', half && type !== 'half_day' ? 'חצי יום' : null, leaveTypeLabel(type)];
+  const parts = ['חופשה', isHalfDayLeave(leave) && type !== 'half_day' ? 'חצי יום' : null, leaveTypeLabel(type)];
   return parts.filter(Boolean).join(' · ');
 }
 
@@ -89,8 +98,8 @@ export function buildLeaveRequestBody(form, { orgId, employeeId, startDate }) {
 }
 
 const LEAVE_SAVE_ERRORS = {
-  leave_conflicts_with_lessons: 'יש שיעורים בימים האלה. יש להזיז או לבטל אותם לפני רישום חופשה.',
-  leave_conflicts_with_attendance: 'יש רישום שעות בימים האלה. יש להסיר אותו לפני רישום חופשה.',
+  leave_conflicts_with_lessons: 'יש שיעורים בימים האלה. אפשר לרשום חצי יום חופשה, או להזיז או לבטל את השיעורים לפני רישום חופשה של יום מלא.',
+  leave_conflicts_with_attendance: 'יש רישום שעות בימים האלה. אפשר לרשום חצי יום חופשה, או להסיר את השעות לפני רישום חופשה של יום מלא.',
   leave_conflicts_with_existing_leave: 'כבר רשומה חופשה בחלק מהימים האלה.',
 };
 

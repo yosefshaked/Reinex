@@ -777,45 +777,66 @@ export async function fetchLessonConflicts(tenantClient, orgId, { employeeId, st
   ));
 }
 
-export async function assertNoLeaveForAttendance(tenantClient, orgId, { employeeId, date, excludeEntryId = '' }) {
+/**
+ * A half-day leave row: the day is split between leave and work, so it does not conflict with hours or
+ * lessons. Reads the day's own portion, the entry's duration mode, and the legacy "half_day" type.
+ */
+export function isHalfDayLeaveRow(row) {
+  if (!row) return false;
+  const portion = row.day_portion;
+  if (portion && portion !== 'full_day') return true;
+  return row.entry?.duration_mode === 'half_day'
+    || row.leave_type === 'half_day'
+    || row.entry?.leave_type === 'half_day';
+}
+
+async function findFullDayLeaveRow(tenantClient, orgId, { employeeId, date, excludeEntryId }) {
   const rows = await fetchApprovedLeaveDays(tenantClient, orgId, {
     employeeId,
     startDate: date,
     endDate: date,
     excludeEntryId,
   });
+  return rows.find((row) => !isHalfDayLeaveRow(row)) || null;
+}
 
-  if (rows.length === 0) {
+/** Hours cannot be recorded on a full leave day; a half-day leave allows them. */
+export async function assertNoLeaveForAttendance(tenantClient, orgId, { employeeId, date, excludeEntryId = '' }) {
+  const leave = await findFullDayLeaveRow(tenantClient, orgId, { employeeId, date, excludeEntryId });
+  if (!leave) {
     return null;
   }
 
   return {
     code: 'leave_conflict',
-    leave: rows[0],
+    leave,
     message: 'attendance_conflicts_with_leave',
   };
 }
 
+/** A lesson cannot be scheduled on a full leave day; a half-day leave allows it. */
 export async function assertNoLeaveForLesson(tenantClient, orgId, { employeeId, date, excludeEntryId = '' }) {
-  const rows = await fetchApprovedLeaveDays(tenantClient, orgId, {
-    employeeId,
-    startDate: date,
-    endDate: date,
-    excludeEntryId,
-  });
-
-  if (rows.length === 0) {
+  const leave = await findFullDayLeaveRow(tenantClient, orgId, { employeeId, date, excludeEntryId });
+  if (!leave) {
     return null;
   }
 
   return {
     code: 'leave_conflict',
-    leave: rows[0],
+    leave,
     message: 'lesson_conflicts_with_leave',
   };
 }
 
-export async function assertNoOperationalConflictsForLeave(tenantClient, orgId, { employeeId, startDate, endDate, excludeEntryId = '' }) {
+/**
+ * A full-day leave cannot cover a day with hours or lessons. A half-day leave (`halfDay: true`) can
+ * share the day with work, so it never conflicts.
+ */
+export async function assertNoOperationalConflictsForLeave(tenantClient, orgId, { employeeId, startDate, endDate, excludeEntryId = '', halfDay = false }) {
+  if (halfDay) {
+    return null;
+  }
+
   const [attendanceRecords, lessonConflicts] = await Promise.all([
     fetchAttendanceRecords(tenantClient, orgId, { employeeId, startDate, endDate }),
     fetchLessonConflicts(tenantClient, orgId, { employeeId, startDate, endDate }),

@@ -14,6 +14,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { cn } from '@/lib/utils';
 import {
   LEAVE_PORTION_OPTIONS,
+  isHalfDayLeave,
   LEAVE_TYPE_OPTIONS,
   attendanceTotals,
   buildLeaveRequestBody,
@@ -231,13 +232,14 @@ export default function EmployeeAttendancePanel({ employee, orgId, session, onEm
   const leaveIsHalf = leaveForm.portion !== 'full_day';
   // Leave cannot sit on a day that already has hours; say so before the save is refused. Lessons
   // on the leave days are checked by the server, which also covers the rest of a range.
-  const leaveBlockedReason = !editingLeave && selectedRecord
-    ? 'יש ביום הזה שעות עבודה רשומות. יש להסיר אותן לפני רישום חופשה.'
+  const selectedLeaveIsHalf = isHalfDayLeave(selectedLeave);
+  const leaveBlockedReason = !editingLeave && !leaveIsHalf && selectedRecord
+    ? 'יש ביום הזה שעות עבודה רשומות. אפשר לרשום חצי יום חופשה, או להסיר את השעות לפני רישום חופשה של יום מלא.'
     : null;
 
   async function handleSave() {
     if (!employee?.id || !orgId) return;
-    if (selectedLeave) {
+    if (selectedLeave && !selectedLeaveIsHalf) {
       toast.error('היום מסומן כחופשה. יש להסיר או לערוך את החופשה לפני הזנת שעות.');
       return;
     }
@@ -481,6 +483,12 @@ export default function EmployeeAttendancePanel({ employee, orgId, session, onEm
               הסרת החופשה
             </Button>
           </div>
+          {selectedLeaveIsHalf ? (
+            <div className="space-y-2 border-t border-slate-100 pt-3" data-half-day-work>
+              <p className="text-xs font-semibold text-slate-600">שעות עבודה באותו יום</p>
+              {renderWorkForm()}
+            </div>
+          ) : null}
         </div>
       );
     }

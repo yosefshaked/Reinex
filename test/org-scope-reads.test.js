@@ -9,6 +9,7 @@ import {
   DEFAULT_INSTRUCTOR_EARNINGS_POLICY,
   DEFAULT_LEAVE_PAY_POLICY,
   assertNoLeaveForAttendance,
+  assertNoLeaveForLesson,
   assertNoOperationalConflictsForLeave,
   checkInstructorRateForLesson,
   fetchApprovedLeaveDays,
@@ -325,5 +326,66 @@ describe('client, student and billing helpers read one organisation', () => {
       && JSON.stringify(write).includes(EMP_B));
     assert.equal(touchedB, false);
     assert.ok((await ensureInstructorColors(client, { table: 'Employees' })).error);
+  });
+});
+
+describe('a half-day leave shares the day with work; a full-day leave does not', () => {
+  const DAY = '2026-10-06';
+  const tablesWithLeave = ({ dayPortion, entryDuration = 'full_day', leaveType = 'employee_paid', payFraction = 1 }) => twoOrgTables({
+    employee_leave_days: [
+      { id: 'ld', org_id: ORG_A, employee_id: EMP_A, leave_entry_id: 'le', leave_date: DAY, day_portion: dayPortion, leave_type: leaveType, pay_fraction: payFraction },
+    ],
+    employee_leave_entries: [
+      { id: 'le', org_id: ORG_A, employee_id: EMP_A, status: 'approved', duration_mode: entryDuration, leave_type: leaveType },
+    ],
+    employee_attendance_records: [
+      { id: 'att-a', org_id: ORG_A, employee_id: EMP_A, attendance_date: DAY, status: 'present', other_minutes: 240 },
+    ],
+    lesson_instances: [
+      { id: 'lesson-a', org_id: ORG_A, instructor_employee_id: EMP_A, service_id: 'riding-b', datetime_start: '2026-10-06T08:00:00Z', duration_minutes: 60, status: 'scheduled' },
+    ],
+  });
+
+  it('a full leave day refuses hours and lessons', async () => {
+    const client = createFakeClient(tablesWithLeave({ dayPortion: 'full_day' }));
+    assert.equal((await assertNoLeaveForAttendance(client, ORG_A, { employeeId: EMP_A, date: DAY })).code, 'leave_conflict');
+    assert.equal((await assertNoLeaveForLesson(client, ORG_A, { employeeId: EMP_A, date: DAY })).message, 'lesson_conflicts_with_leave');
+  });
+
+  it('a half leave day (day portion, entry mode or legacy type) allows hours and lessons', async () => {
+    for (const tables of [
+      tablesWithLeave({ dayPortion: 'first_half', entryDuration: 'half_day', payFraction: 0.5 }),
+      tablesWithLeave({ dayPortion: 'full_day', entryDuration: 'half_day' }),
+      tablesWithLeave({ dayPortion: 'full_day', leaveType: 'half_day', payFraction: 0.5 }),
+    ]) {
+      const client = createFakeClient(tables);
+      assert.equal(await assertNoLeaveForAttendance(client, ORG_A, { employeeId: EMP_A, date: DAY }), null);
+      assert.equal(await assertNoLeaveForLesson(client, ORG_A, { employeeId: EMP_A, date: DAY }), null);
+    }
+  });
+
+  it('a full leave over a day with hours or lessons is refused; a half leave there is allowed', async () => {
+    const client = createFakeClient(tablesWithLeave({ dayPortion: 'full_day' }));
+    const range = { employeeId: EMP_A, startDate: DAY, endDate: DAY };
+    assert.equal((await assertNoOperationalConflictsForLeave(client, ORG_A, range)).code, 'attendance_conflict');
+    assert.equal(await assertNoOperationalConflictsForLeave(client, ORG_A, { ...range, halfDay: true }), null);
+    const lessonsOnly = createFakeClient({ ...tablesWithLeave({ dayPortion: 'full_day' }), employee_attendance_records: [] });
+    assert.equal((await assertNoOperationalConflictsForLeave(lessonsOnly, ORG_A, range)).code, 'lesson_conflict');
+    assert.equal(await assertNoOperationalConflictsForLeave(lessonsOnly, ORG_A, { ...range, halfDay: true }), null);
+  });
+
+  it('the day counts as worked and pay includes both the half leave and the hours', async () => {
+    const client = createFakeClient(tablesWithLeave({ dayPortion: 'first_half', entryDuration: 'half_day', payFraction: 0.5 }));
+    const worked = await loadWorkedDates(client, ORG_A, { employeeId: EMP_A, startDate: '2026-10-01', endDate: '2026-10-31' });
+    assert.deepEqual(worked, [DAY]);
+    const pay = await computeEmployeePay(client, ORG_A, {
+      employee: { id: EMP_A, working_days: { days: [0, 1, 2, 3, 4] } },
+      startDate: '2026-10-01',
+      endDate: '2026-10-31',
+      policies: POLICIES,
+      now: new Date('2026-11-01T00:00:00Z'),
+    });
+    assert.equal(pay.attendance_minutes, 240);
+    assert.equal(pay.leave_breakdown.employee_paid_days, 1);
   });
 });

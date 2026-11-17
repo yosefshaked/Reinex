@@ -5,6 +5,7 @@ import {
   buildLeaveRequestBody,
   buildMonthWeeks,
   describeLeaveDay,
+  isHalfDayLeave,
   emptyLeaveForm,
   formatMinutes,
   leaveBalanceText,
@@ -112,6 +113,14 @@ describe('attendance month grid', () => {
       assert.equal(describeLeaveDay({ leave_type: 'system_paid', day_portion: 'full_day', entry: { leave_type: 'system_paid' } }), 'חופשה · על חשבון המערכת');
       assert.equal(describeLeaveDay({ leave_type: 'employee_paid', day_portion: 'first_half' }), 'חופשה · חצי יום · על חשבון העובד');
       assert.equal(describeLeaveDay({ leave_type: 'half_day', day_portion: 'first_half' }), 'חופשה · חצי יום');
+    });
+
+    it('tells a half-day leave (shares the day with work) from a full one', () => {
+      assert.equal(isHalfDayLeave(null), false);
+      assert.equal(isHalfDayLeave({ day_portion: 'full_day', entry: { duration_mode: 'full_day', leave_type: 'unpaid' } }), false);
+      assert.equal(isHalfDayLeave({ day_portion: 'first_half' }), true);
+      assert.equal(isHalfDayLeave({ day_portion: 'full_day', entry: { duration_mode: 'half_day' } }), true);
+      assert.equal(isHalfDayLeave({ day_portion: 'full_day', leave_type: 'half_day' }), true);
     });
 
     it('turns the save refusals into Hebrew guidance', () => {

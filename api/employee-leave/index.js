@@ -470,6 +470,7 @@ async function handleUpsert(context, client, orgId, body, userId, method) {
     startDate,
     endDate,
     excludeEntryId: existingEntry?.id || '',
+    halfDay: durationMode === 'half_day' || leaveType === 'half_day',
   });
 
   if (operationalConflict) {

@@ -1124,6 +1124,69 @@
           "action": "waitForSelector",
           "selector": "button[data-date$='-02']:has-text('חופשה')",
           "state": "hidden"
+        },
+        {
+          "id": "pick-day-with-hours",
+          "description": "The 1st of this month has 45 minutes of hours (entered earlier in this run)",
+          "action": "click",
+          "selector": "button[data-date$='-01']"
+        },
+        {
+          "id": "choose-leave-on-hours-day",
+          "action": "click",
+          "selector": "[data-day-editor] [role='radio']:has-text('חופשה')"
+        },
+        {
+          "id": "assert-full-day-blocked",
+          "description": "A full-day leave is refused over a day with hours, and the screen says a half day is allowed",
+          "action": "assert",
+          "type": "visible",
+          "selector": "[data-leave-form]:has-text('אפשר לרשום חצי יום חופשה')"
+        },
+        { "id": "open-portion", "action": "click", "selector": "#leave-portion" },
+        { "id": "choose-half-day", "action": "click", "selector": "[role='option']:has-text('חצי יום')" },
+        {
+          "id": "assert-one-half-option",
+          "description": "There is one half-day choice, not first and second halves",
+          "action": "assert",
+          "type": "count",
+          "selector": "[role='option']:has-text('חצי יום ראשון')",
+          "value": "0"
+        },
+        {
+          "id": "save-half-leave",
+          "description": "A half-day leave on the same day as the hours is saved",
+          "action": "click",
+          "selector": "[data-day-editor] button:has-text('שמירת חופשה')"
+        },
+        {
+          "id": "assert-half-leave-with-hours",
+          "description": "The day shows both the half-day leave and the 45 minutes of work",
+          "action": "waitForSelector",
+          "selector": "button[data-date$='-01']:has-text('חופשה · חצי יום · על חשבון העובד'):has-text('0:45')"
+        },
+        {
+          "id": "assert-work-form-on-half-day",
+          "description": "The day editor still offers the hours of that day",
+          "action": "assert",
+          "type": "visible",
+          "selector": "[data-half-day-work]"
+        },
+        {
+          "id": "remove-half-leave",
+          "action": "click",
+          "selector": "[data-day-leave] button:has-text('הסרת החופשה')"
+        },
+        {
+          "id": "confirm-remove-half",
+          "action": "click",
+          "selector": "[role='alertdialog'] button:has-text('הסרה')"
+        },
+        {
+          "id": "assert-half-leave-removed",
+          "action": "waitForSelector",
+          "selector": "button[data-date$='-01']:has-text('חופשה')",
+          "state": "hidden"
         }
       ]
     },
