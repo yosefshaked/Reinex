@@ -6,6 +6,7 @@ import {
   buildMonthWeeks,
   describeLeaveDay,
   isHalfDayLeave,
+  LEAVE_PORTION_OPTIONS,
   emptyLeaveForm,
   formatMinutes,
   leaveBalanceText,
@@ -85,9 +86,9 @@ describe('attendance month grid', () => {
       assert.equal(body.end_date, '2026-11-12');
       assert.equal(body.reason, 'חופשה משפחתית');
       assert.equal(buildLeaveRequestBody({ ...range, endDate: '2026-11-01' }, { ...ids, startDate: '2026-11-10' }).end_date, '2026-11-10');
-      const half = buildLeaveRequestBody({ ...range, portion: 'second_half', leaveType: 'unpaid' }, { ...ids, startDate: '2026-11-10' });
+      const half = buildLeaveRequestBody({ ...range, portion: 'half_day', leaveType: 'unpaid' }, { ...ids, startDate: '2026-11-10' });
       assert.equal(half.duration_mode, 'half_day');
-      assert.equal(half.half_day_part, 'second_half');
+      assert.equal(half.half_day_part, 'first_half');
       assert.equal(half.end_date, '2026-11-10');
       assert.equal(half.leave_type, 'unpaid');
     });
@@ -103,7 +104,7 @@ describe('attendance month grid', () => {
     it('reads the older half_day type as half a day on the employee', () => {
       const form = leaveFormFromEntry({ id: 'L2', leave_type: 'half_day', duration_mode: 'half_day', half_day_part: 'second_half', start_date: '2026-11-04', end_date: '2026-11-04' });
       assert.equal(form.leaveType, 'employee_paid');
-      assert.equal(form.portion, 'second_half');
+      assert.equal(form.portion, 'half_day');
       assert.equal(leaveTypeLabel('half_day'), 'חצי יום');
       assert.equal(leaveTypeLabel('anything'), 'חופשה');
     });
@@ -113,6 +114,10 @@ describe('attendance month grid', () => {
       assert.equal(describeLeaveDay({ leave_type: 'system_paid', day_portion: 'full_day', entry: { leave_type: 'system_paid' } }), 'חופשה · על חשבון המערכת');
       assert.equal(describeLeaveDay({ leave_type: 'employee_paid', day_portion: 'first_half' }), 'חופשה · חצי יום · על חשבון העובד');
       assert.equal(describeLeaveDay({ leave_type: 'half_day', day_portion: 'first_half' }), 'חופשה · חצי יום');
+    });
+
+    it('offers one half-day choice, not first and second halves', () => {
+      assert.deepEqual(LEAVE_PORTION_OPTIONS.map((option) => option.label), ['יום מלא', 'חצי יום']);
     });
 
     it('tells a half-day leave (shares the day with work) from a full one', () => {

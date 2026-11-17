@@ -32,9 +32,12 @@ export const LEAVE_TYPE_OPTIONS = [
 
 export const LEAVE_PORTION_OPTIONS = [
   { value: 'full_day', label: 'יום מלא' },
-  { value: 'first_half', label: 'חצי יום ראשון' },
-  { value: 'second_half', label: 'חצי יום שני' },
+  { value: 'half_day', label: 'חצי יום' },
 ];
+
+// The server keeps a part for a half day (first_half / second_half; older rows use either). The
+// screen offers one "חצי יום", always saved as the first half.
+const HALF_DAY_PART_SAVED = 'first_half';
 
 // A half-day leave (a day portion other than a full day, or the older half_day type): the day is
 // shared with work, so hours and lessons may be recorded on it.
@@ -71,7 +74,7 @@ export function leaveFormFromEntry(entry) {
   return {
     id: entry?.id || '',
     leaveType: type,
-    portion: half ? (entry?.half_day_part === 'second_half' ? 'second_half' : 'first_half') : 'full_day',
+    portion: half ? 'half_day' : 'full_day',
     endDate: entry?.end_date || entry?.start_date || '',
     reason: entry?.reason || '',
     notes: entry?.notes || '',
@@ -81,7 +84,7 @@ export function leaveFormFromEntry(entry) {
 // Body for POST/PUT /api/employee-leave. A new leave starts on the day picked in the grid; an edited
 // one keeps its own start. Half a day is always a single date.
 export function buildLeaveRequestBody(form, { orgId, employeeId, startDate }) {
-  const half = form.portion === 'first_half' || form.portion === 'second_half';
+  const half = form.portion !== 'full_day';
   const endDate = half || !form.endDate || form.endDate < startDate ? startDate : form.endDate;
   return {
     id: form.id || undefined,
@@ -89,7 +92,7 @@ export function buildLeaveRequestBody(form, { orgId, employeeId, startDate }) {
     employee_id: employeeId,
     leave_type: form.leaveType,
     duration_mode: half ? 'half_day' : 'full_day',
-    half_day_part: half ? form.portion : null,
+    half_day_part: half ? HALF_DAY_PART_SAVED : null,
     start_date: startDate,
     end_date: endDate,
     reason: form.reason?.trim() || null,
