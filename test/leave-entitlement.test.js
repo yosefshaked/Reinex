@@ -346,6 +346,17 @@ describe('days worked and the balance', () => {
     );
   });
 
+  it('nothing caps a carry-over: an old leave_policy cap is ignored', () => {
+    const summary = computeLeaveSummary({
+      entitlement: { days: 12 },
+      year: 2026,
+      leavePolicy: { carryover_enabled: true, carryover_cap_days: 2 },
+      balanceEvents: [{ event_type: 'carryover', quantity_days: 8, effective_date: '2026-01-01' }],
+    });
+    assert.equal(summary.remaining, 20);
+    assert.equal(summary.available, 20);
+  });
+
   it('the balance takes the entitlement as its quota and adds the manual movements', () => {
     const summary = computeLeaveSummary({
       entitlement: { days: 12 },

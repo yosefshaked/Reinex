@@ -2808,7 +2808,7 @@ SELECT
 FROM public.organizations org
 CROSS JOIN (
   VALUES
-    ('leave_policy', '{"carryover_enabled":false,"carryover_cap_days":null,"holiday_rules":[]}'::jsonb),
+    ('leave_policy', '{"holiday_rules":[]}'::jsonb),
     ('billing_consumption_policy', '{"attended":true,"no_show":false,"cancelled_student":false,"cancelled_clinic":false}'::jsonb)
 ) AS seed(key, settings_value)
 ON CONFLICT ("org_id", "key") DO NOTHING;

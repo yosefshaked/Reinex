@@ -26,8 +26,6 @@ import { isDatedSettingKey, loadDatedSettingRows, resolveSettingOnDate } from '.
 import { LEAVE_ENTITLEMENT_POLICY_KEY, normalizeLeaveEntitlementPolicy } from './leave-entitlement.js';
 
 export const DEFAULT_LEAVE_POLICY = Object.freeze({
-  carryover_enabled: false,
-  carryover_cap_days: null,
   holiday_rules: [],
 });
 
@@ -117,8 +115,6 @@ function normalizeLeavePolicy(raw) {
   const parsed = parseJsonValue(raw, DEFAULT_LEAVE_POLICY);
   const source = isPlainObject(parsed) ? parsed : DEFAULT_LEAVE_POLICY;
   return {
-    carryover_enabled: Boolean(source.carryover_enabled),
-    carryover_cap_days: source.carryover_cap_days == null ? null : Number(source.carryover_cap_days),
     holiday_rules: Array.isArray(source.holiday_rules) ? source.holiday_rules : [],
   };
 }
@@ -916,10 +912,11 @@ export async function deleteLeaveArtifacts(tenantClient, orgId, leaveEntryId) {
  * The leave balance of one calendar year. The year's entitlement (`quota`) comes from
  * computeLeaveEntitlement (leave-entitlement.js) and is passed in; this adds the manual balance
  * movements and subtracts usage. An entitlement the system cannot compute (it asks for a manual
- * number) counts as 0. `leave_policy.carryover_cap_days`, when set, caps how many carried-over days
- * count; nothing is carried over automatically.
+ * number) counts as 0. Nothing is carried over automatically and nothing caps a carry-over: a
+ * carry-over is a manual movement entered by the office. (Old `leave_policy` rows may still hold
+ * `carryover_enabled` / `carryover_cap_days`; they are ignored.)
  */
-export function computeLeaveSummary({ entitlement = null, balanceEvents = [], year: requestedYear, leavePolicy = DEFAULT_LEAVE_POLICY }) {
+export function computeLeaveSummary({ entitlement = null, balanceEvents = [], year: requestedYear }) {
   const year = Number.isInteger(requestedYear) ? requestedYear : Number(todayKey().slice(0, 4));
   const yearStart = `${year}-01-01`;
   const yearEnd = `${year}-12-31`;
@@ -949,10 +946,7 @@ export function computeLeaveSummary({ entitlement = null, balanceEvents = [], ye
     }
   }
 
-  const rawRemaining = quota + carryIn + allocations + adjustments - used;
-  const remaining = leavePolicy.carryover_cap_days != null
-    ? Math.min(rawRemaining, quota + Number(leavePolicy.carryover_cap_days || 0) + allocations + adjustments)
-    : rawRemaining;
+  const remaining = quota + carryIn + allocations + adjustments - used;
 
   return {
     year,

@@ -380,7 +380,6 @@ async function handleGet(context, req, client, orgId, userId, canManageAll) {
     entitlement,
     balanceEvents,
     year,
-    leavePolicy: policies.leavePolicy,
   });
 
   return respond(context, 200, {
