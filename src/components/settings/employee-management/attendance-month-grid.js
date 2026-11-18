@@ -199,7 +199,8 @@ export function buildBalanceEventBody(form, { orgId, employeeId, effectiveDate }
   };
 }
 
-// One manual change in the history: date, action, amount, reason (with its text), who and when.
+// One manual change in the history: the date it takes effect ("מתאריך"), action, amount, reason (with
+// its text), and a small record line: when it was made and by whom.
 export function describeBalanceEvent(entry, formatDate = (value) => value) {
   const quantity = Number(entry?.quantity_days);
   const reasonLabel = BALANCE_REASON_OPTIONS.find((option) => option.value === entry?.metadata?.reason)?.label || '';
@@ -207,9 +208,9 @@ export function describeBalanceEvent(entry, formatDate = (value) => value) {
   if (reasonLabel === 'אחר') reason = `אחר: ${entry?.notes || ''}`;
   if (!reasonLabel) reason = entry?.notes || '';
   const created = entry?.created_at ? formatDate(String(entry.created_at).slice(0, 10)) : '';
-  const who = [entry?.created_by_name, created].filter(Boolean).join(' · ');
+  const who = [created ? `נרשם ב-${created}` : 'נרשם', entry?.created_by_name ? `ע"י ${entry.created_by_name}` : ''].filter(Boolean).join(' ');
   return {
-    title: `${formatDate(entry?.effective_date)} · ${balanceEventLabel(entry?.event_type)} · ${quantity > 0 ? '+' : ''}${quantity}`,
+    title: `מתאריך ${formatDate(entry?.effective_date)} · ${balanceEventLabel(entry?.event_type)} · ${quantity > 0 ? '+' : ''}${quantity}`,
     reason,
     who,
   };

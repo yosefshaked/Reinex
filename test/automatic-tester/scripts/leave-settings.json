@@ -599,13 +599,13 @@
           "id": "assert-history-shows-reason",
           "description": "The change is listed with its reason",
           "action": "waitForSelector",
-          "selector": "[data-balance-event]:has-text('העברה מהשנה הקודמת'):has-text('מעבר מהמערכת הקודמת')"
+          "selector": "[data-balance-event]:has-text('מתאריך'):has-text('העברה מהשנה הקודמת'):has-text('מעבר מהמערכת הקודמת')"
         },
         {
           "id": "assert-history-shows-who",
           "description": "The line under the reason says who made the change and when (name, or the email when the account has no name)",
           "action": "waitForSelector",
-          "selector": "[data-balance-event] span.text-slate-500"
+          "selector": "[data-balance-event] span.text-slate-500:has-text('נרשם ב-'):has-text('ע\"י')"
         }
       ]
     },

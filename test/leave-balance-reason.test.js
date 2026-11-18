@@ -60,11 +60,11 @@ describe('a manual leave-balance change needs a reason', () => {
       event_type: 'adjustment', quantity_days: -2, effective_date: '2026-03-01', created_at: '2026-03-02T08:00:00Z',
       created_by_name: 'דנה כהן', notes: 'סיכום בעל פה', metadata: { reason: 'other' },
     });
-    assert.equal(line.title, '2026-03-01 · הוספה או הורדה · -2');
+    assert.equal(line.title, 'מתאריך 2026-03-01 · הוספה או הורדה · -2');
     assert.equal(line.reason, 'אחר: סיכום בעל פה');
-    assert.equal(line.who, 'דנה כהן · 2026-03-02');
+    assert.equal(line.who, 'נרשם ב-2026-03-02 ע"י דנה כהן');
     const old = describeBalanceEvent({ event_type: 'allocation', quantity_days: 3, effective_date: '2026-01-01', notes: 'ישן', metadata: {} });
-    assert.equal(old.title, '2026-01-01 · הקצאה · +3');
+    assert.equal(old.title, 'מתאריך 2026-01-01 · הקצאה · +3');
     assert.equal(old.reason, 'ישן');
     const picked = describeBalanceEvent({ event_type: 'carryover', quantity_days: 4, effective_date: '2026-01-01', metadata: { reason: 'previous_system' } });
     assert.equal(picked.reason, 'מעבר מהמערכת הקודמת');

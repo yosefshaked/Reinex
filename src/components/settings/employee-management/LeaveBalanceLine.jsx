@@ -133,7 +133,7 @@ export default function LeaveBalanceLine({ summary, entitlement, balanceEvents, 
                 return (
                 <li key={entry.id} className="flex items-center justify-between gap-2 text-xs" data-balance-event>
                   <span>
-                    <bdi dir="ltr">{line.title}</bdi>
+                    <bdi dir="rtl">{line.title}</bdi>
                     {line.reason ? <span className="block text-slate-600">{line.reason}</span> : null}
                     {line.who ? <span className="block text-[11px] text-slate-500">{line.who}</span> : null}
                   </span>
