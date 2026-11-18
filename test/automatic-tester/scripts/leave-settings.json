@@ -499,9 +499,9 @@
         { "id": "open-attendance-tab", "action": "click", "selector": "[role='tab']:has-text('נוכחות')" },
         {
           "id": "assert-one-day-counted",
-          "description": "One counted work day (the leave day). The instructor has 6 working days by now, so year 7 is 18 days a year: 0.09 earned, 12 more reach 1.17",
+          "description": "One counted work day (the leave day). The instructor has 6 working days by now, so year 7 is 18 days a year: 0.09 earned; 1 needs ceil(200/18) = 12 counted days, so 11 more",
           "action": "waitForSelector",
-          "selector": "[data-leave-balance-line]:has-text('עוד 12 ימי עבודה ליום החופשה הבא')"
+          "selector": "[data-leave-balance-line]:has-text('עוד 11 ימי עבודה ליום החופשה הבא')"
         },
         { "id": "open-explain", "action": "click", "selector": "[data-leave-explain-open]" },
         {

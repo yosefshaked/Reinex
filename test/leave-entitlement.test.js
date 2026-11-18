@@ -477,17 +477,19 @@ describe('days to the next leave day', () => {
   // 12 / 200 = 0.06 of a leave day.
   const base = { seniorityYear: 1, weekDays: 5, employedWholeYear: true };
 
-  it('3 days worked: 12 x 3 / 200 = 0.18 now; 1.18 is reached at 20 worked days (1.2), so 17 more', () => {
-    assert.equal(legalShareOfYear({ ...base, daysCounted: 3 }).net, 0.18);
-    assert.equal(legalShareOfYear({ ...base, daysCounted: 19 }).net, 1.14);
-    assert.equal(legalShareOfYear({ ...base, daysCounted: 20 }).net, 1.2);
-    assert.equal(daysToNextLeaveDay({ ...base, daysCounted: 3 }), 17);
+  it('counts down to the next whole number: 0.36 (6 days) -> 11 more, 1.02 is reached at 17 days', () => {
+    assert.equal(legalShareOfYear({ ...base, daysCounted: 6 }).net, 0.36);
+    assert.equal(legalShareOfYear({ ...base, daysCounted: 17 }).net, 1.02);
+    assert.equal(daysToNextLeaveDay({ ...base, daysCounted: 0 }), 17);
+    assert.equal(daysToNextLeaveDay({ ...base, daysCounted: 3 }), 14);
+    assert.equal(daysToNextLeaveDay({ ...base, daysCounted: 6 }), 11);
+    assert.equal(daysToNextLeaveDay({ ...base, daysCounted: 16 }), 1);
   });
 
-  it('13 worked days: 0.78; 1.78 is reached at 30 days (1.8), so 17 more', () => {
-    assert.equal(legalShareOfYear({ ...base, daysCounted: 13 }).net, 0.78);
-    assert.equal(legalShareOfYear({ ...base, daysCounted: 30 }).net, 1.8);
-    assert.equal(daysToNextLeaveDay({ ...base, daysCounted: 13 }), 17);
+  it('past a whole number the target is the next one: 17 days (1.02) -> 2 is at 34 days', () => {
+    assert.equal(legalShareOfYear({ ...base, daysCounted: 34 }).net, 2.04);
+    assert.equal(daysToNextLeaveDay({ ...base, daysCounted: 17 }), 17);
+    assert.equal(daysToNextLeaveDay({ ...base, daysCounted: 30 }), 4);
   });
 
   it('stops at the full year when that comes first', () => {
@@ -498,10 +500,10 @@ describe('days to the next leave day', () => {
     assert.equal(daysToNextLeaveDay({ ...base, employedWholeYear: false, daysCounted: 239 }), 1);
   });
 
-  it('seniority year 7 (15 days a year): 0 days worked -> 14 (14 x 15 / 200 = 1.05); 1 day worked -> 14 more', () => {
+  it('seniority year 7 (15 days a year): 0 days worked -> 14 (14 x 15 / 200 = 1.05); 1 day worked -> 13 more', () => {
     const year7 = { seniorityYear: 7, weekDays: 5, employedWholeYear: true };
     assert.equal(daysToNextLeaveDay({ ...year7, daysCounted: 0 }), 14);
-    assert.equal(daysToNextLeaveDay({ ...year7, daysCounted: 1 }), 14);
+    assert.equal(daysToNextLeaveDay({ ...year7, daysCounted: 1 }), 13);
   });
 
   it('is returned with the entitlement only while the year is growing', () => {

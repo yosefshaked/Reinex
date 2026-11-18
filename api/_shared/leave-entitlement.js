@@ -320,8 +320,9 @@ export function computeLeaveEntitlement({ employee, policy = null, year, today, 
 }
 
 /**
- * How many more counted work days it takes for the entitlement to grow by one whole leave day, or
- * to reach the full year when that comes first (200 / 240 days). Found with the same calculation
+ * How many more counted work days it takes for the entitlement to reach the NEXT WHOLE NUMBER
+ * (floor(current) + 1), or the full year when that comes first (200 / 240 days). It counts down as
+ * days are worked: 0.36 of a 12-day year -> 1 needs 17 counted days, so 11 more. Found with the same calculation
  * that gives the days (legalShareOfYear), so the two always agree. Null once the year is full.
  *
  * @param {{ seniorityYear: number, weekDays: number, employedWholeYear: boolean, daysCounted: number }} params
@@ -330,9 +331,10 @@ export function daysToNextLeaveDay({ seniorityYear, weekDays, employedWholeYear,
   const counted = Math.max(0, Math.floor(Number(daysCounted) || 0));
   const now = legalShareOfYear({ seniorityYear, weekDays, employedWholeYear, daysCounted: counted });
   if (now.reached_full) return null;
+  const target = Math.floor(now.net + 1e-9) + 1;
   for (let more = 1; counted + more <= now.threshold_days; more += 1) {
     const next = legalShareOfYear({ seniorityYear, weekDays, employedWholeYear, daysCounted: counted + more });
-    if (next.reached_full || next.net >= now.net + 1 - 1e-9) return more;
+    if (next.reached_full || next.net >= target - 1e-9) return more;
   }
   return null;
 }
