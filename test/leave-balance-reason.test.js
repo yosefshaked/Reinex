@@ -6,6 +6,7 @@ import {
   BALANCE_REASON_OPTIONS,
   balanceFormError,
   buildBalanceEventBody,
+  defaultBalanceDate,
   describeBalanceEvent,
   emptyBalanceForm,
 } from '../src/components/settings/employee-management/attendance-month-grid.js';
@@ -66,5 +67,13 @@ describe('a manual leave-balance change needs a reason', () => {
     assert.equal(old.reason, 'ישן');
     const picked = describeBalanceEvent({ event_type: 'carryover', quantity_days: 4, effective_date: '2026-01-01', metadata: { reason: 'previous_system' } });
     assert.equal(picked.reason, 'מעבר מהמערכת הקודמת');
+  });
+});
+
+describe('the default date of a balance change', () => {
+  it('is today when today is in the year shown, otherwise 1 January of that year', () => {
+    assert.equal(defaultBalanceDate(2026, '2026-11-18'), '2026-11-18');
+    assert.equal(defaultBalanceDate(2025, '2026-11-18'), '2025-01-01');
+    assert.equal(defaultBalanceDate(2026, ''), '2026-01-01');
   });
 });

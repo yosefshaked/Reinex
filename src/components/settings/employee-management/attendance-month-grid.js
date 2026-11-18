@@ -156,6 +156,12 @@ export function emptyBalanceForm() {
   return { eventType: 'carryover', quantityDays: '', effectiveDate: '', reason: '', notes: '' };
 }
 
+// The date a new balance change takes effect unless the office picks one: today, when today falls in
+// the year shown; otherwise 1 January of that year (the list only shows that year's changes).
+export function defaultBalanceDate(year, today) {
+  return String(today || '').startsWith(`${year}-`) ? today : `${year}-01-01`;
+}
+
 // What is missing before a balance change can be saved; '' when it can.
 export function balanceFormError(form) {
   const quantity = Number(form?.quantityDays);

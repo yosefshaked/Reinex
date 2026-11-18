@@ -561,6 +561,14 @@
           }
         },
         { "id": "open-balance-change", "action": "click", "selector": "button:has-text('שינוי יתרה')" },
+        {
+          "id": "assert-balance-date-defaults-to-today",
+          "description": "The date of a new balance change starts as today, not 1 January",
+          "action": "assert",
+          "type": "value",
+          "selector": "#balance-date",
+          "value": "{{TODAY}}"
+        },
         { "id": "fill-quantity", "action": "fill", "selector": "#balance-quantity", "value": "2" },
         {
           "id": "assert-add-disabled-without-reason",

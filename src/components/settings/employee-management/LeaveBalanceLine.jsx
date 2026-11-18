@@ -21,6 +21,7 @@ import {
   BALANCE_REASON_OPTIONS,
   balanceFormError,
   buildBalanceEventBody,
+  defaultBalanceDate,
   describeBalanceEvent,
   emptyBalanceForm,
   entitlementManualReason,
@@ -52,7 +53,7 @@ export default function LeaveBalanceLine({ summary, entitlement, balanceEvents, 
   const yearPrefix = `${summary.year}-`;
   const manualEvents = (balanceEvents || [])
     .filter((entry) => isManualBalanceEvent(entry) && String(entry.effective_date || '').startsWith(yearPrefix));
-  const effectiveDate = form.effectiveDate || `${summary.year}-01-01`;
+  const effectiveDate = form.effectiveDate || defaultBalanceDate(summary.year, todayKey());
   const formError = balanceFormError(form);
   const actionHint = BALANCE_ACTIONS.find((option) => option.value === form.eventType)?.hint || '';
 
