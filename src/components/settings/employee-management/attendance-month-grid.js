@@ -266,6 +266,32 @@ export const EMPLOYEE_LEAVE_PAY_CHOICES = [
   { value: 'fixed_rate', label: 'ערך קבוע ליום' },
 ];
 
+/**
+ * The fixed value per leave day chosen in the same dialog as the pay method. "ערך קבוע ליום" needs a
+ * positive value. Returns { required, error, rate, effectiveDate, needsSave }: `rate` in agorot, and
+ * `needsSave` when the dated leave_day rate has to be written (no current value, or a different one).
+ * `currentRate` is the leave_day rate row in force today, or null.
+ */
+export function planLeaveDayValue({ payMethod, dayValue, dayValueDate }, currentRate = null) {
+  if (payMethod !== 'fixed_rate') return { required: false, error: '', rate: null, effectiveDate: null, needsSave: false };
+  const text = String(dayValue ?? '').trim();
+  const amount = Number(text);
+  const rate = Math.round(amount * 100);
+  if (text === '' || !Number.isFinite(amount) || rate <= 0) {
+    return { required: true, error: 'יש להזין ערך ליום חופשה גדול מאפס.', rate: null, effectiveDate: null, needsSave: false };
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(dayValueDate || ''))) {
+    return { required: true, error: 'יש לבחור מאיזה תאריך הערך בתוקף.', rate: null, effectiveDate: null, needsSave: false };
+  }
+  return {
+    required: true,
+    error: '',
+    rate,
+    effectiveDate: dayValueDate,
+    needsSave: !currentRate || Number(currentRate.rate) !== rate,
+  };
+}
+
 /** Body of PUT /api/instructors for the days choice alone; refuses a bad manual number (null). */
 export function buildEntitlementChoiceBody({ choice, manualDays }, { orgId, employeeId }) {
   if (choice === 'default') {

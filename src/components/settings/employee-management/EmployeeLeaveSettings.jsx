@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -6,11 +6,13 @@ import { Label } from '@/components/ui/label';
 import { toast } from '@/lib/toast.jsx';
 import { authenticatedFetch } from '@/lib/api-client.js';
 import StepReveal from '@/features/finance/components/StepReveal.jsx';
-import { LeaveDayRateEditor } from './EmployeeRatesPanel.jsx';
+import { todayKey } from '@/lib/local-time.js';
+import { toShekel } from '@/lib/currency.js';
 import {
   EMPLOYEE_LEAVE_PAY_CHOICES,
   ENTITLEMENT_CHOICES,
   buildEmployeeLeaveBody,
+  planLeaveDayValue,
   describeEmployeeLeavePayChoice,
   employeeLeaveSummaryText,
 } from './attendance-month-grid.js';
@@ -32,9 +34,11 @@ function ChoiceButton({ selected, onSelect, disabled, label, description, ...res
   );
 }
 
-function draftFrom(current) {
+function draftFrom(current, leaveDayRate) {
   const storedDays = current?.annual_leave_days;
   return {
+    dayValue: leaveDayRate ? String(toShekel(leaveDayRate.rate)) : '',
+    dayValueDate: todayKey(),
     daysChoice: storedDays == null ? 'default' : 'manual',
     manualDays: storedDays == null ? '' : String(storedDays),
     payMethod: current?.leave_pay_method || '',
@@ -46,22 +50,72 @@ function draftFrom(current) {
  * תשלום: ..."), and one "שינוי" that opens the same two steps as the organisation's "חופשה" settings.
  * Step 1: the organisation default or a fixed number of days a year (Employees.annual_leave_days).
  * Step 2: the organisation default, one of the averages, or a fixed value per day
- * (Employees.leave_pay_method; the value itself is the dated leave_day rate, set here with
- * LeaveDayRateEditor). Both fields are saved together through PUT /api/instructors.
+ * (Employees.leave_pay_method). The fixed value is an input in the same dialog (the dated leave_day
+ * rate in RateHistory, written through api/employee-rates) and is required for that method. One save:
+ * the value first, then both fields together through PUT /api/instructors (which refuses
+ * "fixed_rate" without a value).
  */
 export default function EmployeeLeaveSettings({ employeeId, orgId, session, current, orgPayPolicy, onChanged }) {
   const [draft, setDraft] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [leaveDayRate, setLeaveDayRate] = useState(null);
   const open = draft !== null;
   const result = open ? buildEmployeeLeaveBody(draft, { orgId, employeeId }, current) : null;
+  const plan = open ? planLeaveDayValue(draft, leaveDayRate) : null;
+  const canSave = Boolean(result) && !plan?.error && (result.changed || plan?.needsSave);
+
+  // The leave_day rate in force today, to prefill the value.
+  const loadLeaveDayRate = useCallback(async () => {
+    if (!employeeId || !orgId) return null;
+    try {
+      const payload = await authenticatedFetch('employee-rates', { session, params: { org_id: orgId, employee_id: employeeId } });
+      const today = todayKey();
+      const row = (Array.isArray(payload?.rates) ? payload.rates : [])
+        .filter((rate) => rate.pay_basis === 'leave_day' && !rate.service_id && rate.effective_date <= today)
+        .sort((left, right) => right.effective_date.localeCompare(left.effective_date))[0] || null;
+      setLeaveDayRate(row);
+      return row;
+    } catch (error) {
+      console.error('Failed to load the leave day value', error);
+      return null;
+    }
+  }, [employeeId, orgId, session]);
+
+  useEffect(() => {
+    void loadLeaveDayRate();
+  }, [loadLeaveDayRate]);
+
+  // The value arrives after the dialog was opened: prefill it, unless something was typed already.
+  useEffect(() => {
+    if (!leaveDayRate) return;
+    setDraft((value) => (value && value.dayValue === '' ? { ...value, dayValue: String(toShekel(leaveDayRate.rate)) } : value));
+  }, [leaveDayRate]);
 
   async function handleSave() {
-    if (!result?.changed) return;
+    if (!canSave) return;
     setSaving(true);
     try {
-      await authenticatedFetch('instructors', { session, method: 'PUT', body: result.body });
+      if (plan.needsSave) {
+        await authenticatedFetch('employee-rates', {
+          session,
+          method: 'POST',
+          body: {
+            org_id: orgId,
+            employee_id: employeeId,
+            pay_basis: 'leave_day',
+            service_id: null,
+            rate: plan.rate,
+            effective_date: plan.effectiveDate,
+            replace_existing: true,
+          },
+        });
+      }
+      if (result.changed) {
+        await authenticatedFetch('instructors', { session, method: 'PUT', body: result.body });
+      }
       toast.success('הגדרות החופשה של העובד/ת נשמרו.');
       setDraft(null);
+      await loadLeaveDayRate();
       await onChanged?.();
     } catch (error) {
       console.error('Failed to save the employee leave settings', error);
@@ -82,7 +136,7 @@ export default function EmployeeLeaveSettings({ employeeId, orgId, session, curr
           variant="ghost"
           className="h-7 px-2 text-xs"
           aria-expanded={open}
-          onClick={() => setDraft(open ? null : draftFrom(current))}
+          onClick={() => setDraft(open ? null : draftFrom(current, leaveDayRate))}
           disabled={saving}
           data-leave-settings-change
         >
@@ -141,9 +195,35 @@ export default function EmployeeLeaveSettings({ employeeId, orgId, session, curr
                 ))}
               </div>
               {draft.payMethod === 'fixed_rate' ? (
-                <div className="flex flex-wrap items-start gap-2" data-leave-day-rate>
-                  <span className="pt-1.5 text-sm text-slate-600">ערך ליום</span>
-                  <LeaveDayRateEditor employeeId={employeeId} orgId={orgId} session={session} onSaved={onChanged} />
+                <div className="space-y-1" data-leave-day-rate>
+                  <div className="flex flex-wrap items-end gap-3">
+                    <div className="space-y-1">
+                      <Label htmlFor="leave-day-value" className="text-xs text-slate-600">ערך ליום (בשקלים)</Label>
+                      <Input
+                        id="leave-day-value"
+                        className="h-8 w-28"
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={draft.dayValue}
+                        onChange={(event) => setDraft((value) => ({ ...value, dayValue: event.target.value }))}
+                        disabled={saving}
+                        aria-invalid={plan?.error ? true : undefined}
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="leave-day-value-date" className="text-xs text-slate-600">בתוקף מ-</Label>
+                      <Input
+                        id="leave-day-value-date"
+                        className="h-8 w-40"
+                        type="date"
+                        value={draft.dayValueDate}
+                        onChange={(event) => setDraft((value) => ({ ...value, dayValueDate: event.target.value }))}
+                        disabled={saving}
+                      />
+                    </div>
+                  </div>
+                  {plan?.error ? <p className="text-xs text-red-600" data-leave-day-value-error>{plan.error}</p> : null}
                 </div>
               ) : null}
             </div>
@@ -154,7 +234,7 @@ export default function EmployeeLeaveSettings({ employeeId, orgId, session, curr
           ) : null}
 
           <div className="flex items-center gap-2" data-leave-settings-actions>
-            <Button type="button" size="sm" onClick={handleSave} disabled={saving || !result?.changed}>
+            <Button type="button" size="sm" onClick={handleSave} disabled={saving || !canSave}>
               {saving ? <Loader2 className="me-2 h-4 w-4 animate-spin" /> : null}
               שמירה
             </Button>

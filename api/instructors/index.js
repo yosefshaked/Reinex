@@ -13,6 +13,7 @@ import {
 } from '../_shared/org-bff.js';
 import { parseJsonBodyWithLimit, validateInstructorCreate, validateInstructorUpdate } from '../_shared/validation.js';
 import { ensureInstructorColors } from '../_shared/instructor-colors.js';
+import { PAY_BASIS, hasPositiveLeaveDayRate, loadRateHistoryRows } from '../_shared/rate-history.js';
 import { AUDIT_ACTIONS, AUDIT_CATEGORIES, logAuditEvent } from '../_shared/audit-log.js';
 import { normalizeAvailabilityWindows, hasConfiguredAvailability } from '../_shared/instructor-availability.js';
 import { logTenantAuditEvent, TENANT_AUDIT_RETENTION } from '../_shared/tenant-audit.js';
@@ -704,6 +705,19 @@ export default async function (context, req) {
         if (disallowed.length > 0 || !isSelf) {
           return respond(context, 403, { message: 'forbidden' });
         }
+      }
+    }
+
+    // "ערך קבוע ליום" pays nothing without a value: the leave-day rate must be set (above zero) first.
+    if (updates.leave_pay_method === 'fixed_rate') {
+      try {
+        const leaveRates = await loadRateHistoryRows(supabase, orgId, { employeeIds: [instructorId], payBases: [PAY_BASIS.LEAVE_DAY] });
+        if (!hasPositiveLeaveDayRate(leaveRates, instructorId)) {
+          return respond(context, 400, { message: 'leave_day_value_required' });
+        }
+      } catch (rateError) {
+        context.log?.error?.('instructors failed to load leave day rates', { message: rateError?.message, instructorId });
+        return respond(context, 500, { message: 'failed_to_update_instructor' });
       }
     }
 

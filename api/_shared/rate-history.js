@@ -31,6 +31,13 @@ export const PAY_BASIS = Object.freeze({
 export const PAY_BASES = Object.freeze(new Set(Object.values(PAY_BASIS)));
 export const LESSON_PAY_BASES = Object.freeze(new Set([PAY_BASIS.LESSON_HOURLY, PAY_BASIS.LESSON_FLAT]));
 
+/** Whether the employee has a leave-day value above zero: what "ערך קבוע ליום" needs to pay anything. */
+export function hasPositiveLeaveDayRate(rows, employeeId) {
+  return (Array.isArray(rows) ? rows : [])
+    .map(normalizeRateRow)
+    .some((row) => row && row.employee_id === employeeId && row.pay_basis === PAY_BASIS.LEAVE_DAY && Number(row.rate) > 0);
+}
+
 /** Whether the employee has any rate of this kind — what decides if that part of their pay exists. */
 export function hasRateKind(rows, { employeeId, payBasis, onOrBefore = null } = {}) {
   const basis = normalizeString(payBasis).toLowerCase();
@@ -136,6 +143,8 @@ export function validateRateInput({ employeeId, payBasis, serviceId = null, rate
 
   const numericRate = Number(rate);
   if (!Number.isFinite(numericRate) || !Number.isInteger(numericRate) || numericRate < 0) return { error: 'invalid_rate' };
+  // A leave day's fixed value is a positive amount: 0 would pay nothing for a day of leave.
+  if (normalizedBasis === PAY_BASIS.LEAVE_DAY && numericRate <= 0) return { error: 'invalid_leave_day_rate' };
 
   const normalizedDate = normalizeString(effectiveDate);
   if (!isDateKey(normalizedDate)) return { error: 'invalid_effective_date' };

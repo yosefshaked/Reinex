@@ -10,6 +10,7 @@ import {
   emptyLeaveForm,
   formatMinutes,
   leaveBalanceText,
+  planLeaveDayValue,
   leaveFormFromEntry,
   leaveSaveErrorMessage,
   leaveTypeLabel,
@@ -156,5 +157,30 @@ describe('attendance month grid', () => {
         'ימי החופשה השנה עדיין לא נקבעו · נוצלו 3.5 · נשארו 9.5',
       );
     });
+  });
+});
+
+describe('the fixed leave-day value in the employee leave dialog', () => {
+  const fixed = { payMethod: 'fixed_rate', dayValue: '250', dayValueDate: '2026-11-18' };
+
+  it('is not needed for the other methods', () => {
+    assert.equal(planLeaveDayValue({ ...fixed, payMethod: 'legal', dayValue: '' }).required, false);
+    assert.equal(planLeaveDayValue({ ...fixed, payMethod: '', dayValue: '' }).error, '');
+  });
+
+  it('"ערך קבוע ליום" needs a positive value', () => {
+    for (const dayValue of ['', '0', '-5', 'abc']) {
+      const plan = planLeaveDayValue({ ...fixed, dayValue });
+      assert.match(plan.error, /גדול מאפס/, dayValue);
+      assert.equal(plan.needsSave, false);
+    }
+    assert.match(planLeaveDayValue({ ...fixed, dayValueDate: '' }).error, /תאריך/);
+  });
+
+  it('writes the dated rate in agorot when there is none or it differs, not when it is unchanged', () => {
+    const plan = planLeaveDayValue(fixed, null);
+    assert.deepEqual([plan.error, plan.rate, plan.effectiveDate, plan.needsSave], ['', 25000, '2026-11-18', true]);
+    assert.equal(planLeaveDayValue(fixed, { rate: 25000 }).needsSave, false);
+    assert.equal(planLeaveDayValue(fixed, { rate: 20000 }).needsSave, true);
   });
 });

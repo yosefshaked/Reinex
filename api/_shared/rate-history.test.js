@@ -4,12 +4,25 @@ import assert from 'node:assert/strict';
 import {
   PAY_BASIS,
   buildRateChangeWarnings,
+  hasPositiveLeaveDayRate,
   normalizeRateRow,
   resolveLessonRateOnDate,
   resolveRateOnDate,
   validateRateInput,
 } from './rate-history.js';
 import { localDateKey } from './local-time.js';
+
+test('a leave-day value must be above zero, and "fixed value" needs one', () => {
+  const input = { employeeId: DANA, payBasis: PAY_BASIS.LEAVE_DAY, rate: 0, effectiveDate: '2026-10-01' };
+  assert.equal(validateRateInput(input).error, 'invalid_leave_day_rate');
+  assert.equal(validateRateInput({ ...input, rate: 25000 }).value.rate, 25000);
+  const row = (rate, basis = 'leave_day', employee = DANA) => ({ id: 'r', employee_id: employee, pay_basis: basis, rate, effective_date: '2026-01-01' });
+  assert.equal(hasPositiveLeaveDayRate([], DANA), false);
+  assert.equal(hasPositiveLeaveDayRate([row(25000)], DANA), true);
+  assert.equal(hasPositiveLeaveDayRate([row(0)], DANA), false);
+  assert.equal(hasPositiveLeaveDayRate([row(25000, 'attendance_hourly')], DANA), false);
+  assert.equal(hasPositiveLeaveDayRate([row(25000, 'leave_day', 'omer')], DANA), false);
+});
 
 const DANA = 'employee-dana';
 const OMER = 'employee-omer';

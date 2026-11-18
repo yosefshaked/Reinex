@@ -143,6 +143,38 @@
           "action": "apiCall",
           "method": "GET",
           "endpoint": "/api/employee-rates?org_id={{TEST_ORG_ID}}&employee_id={{RATE_INSTRUCTOR_ID}}"
+        },
+        {
+          "id": "refuse-fixed-method-without-value",
+          "description": "\"ערך קבוע ליום\" without a leave-day value is refused (400 leave_day_value_required)",
+          "action": "apiCall",
+          "method": "PUT",
+          "endpoint": "/api/instructors",
+          "ignoreStatus": [
+            400
+          ],
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "instructor_id": "{{RATE_INSTRUCTOR_ID}}",
+            "leave_pay_method": "fixed_rate"
+          }
+        },
+        {
+          "id": "refuse-zero-leave-day-rate",
+          "description": "A leave-day value of 0 is refused (400 invalid_leave_day_rate)",
+          "action": "apiCall",
+          "method": "POST",
+          "endpoint": "/api/employee-rates",
+          "ignoreStatus": [
+            400
+          ],
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "employee_id": "{{RATE_INSTRUCTOR_ID}}",
+            "pay_basis": "leave_day",
+            "rate": 0,
+            "effective_date": "2000-01-01"
+          }
         }
       ]
     },
@@ -855,9 +887,34 @@
         },
         {
           "id": "assert-no-value-yet",
-          "description": "The fixed method shows its value row: no leave-day value has been set yet",
+          "description": "The fixed method shows its value input, empty, and the save button is off until a positive value is typed",
           "action": "waitForSelector",
-          "selector": "[data-leave-day-rate]:has-text('לא הוגדר ערך ליום')"
+          "selector": "[data-leave-day-rate] #leave-day-value"
+        },
+        {
+          "id": "assert-save-disabled-without-value",
+          "action": "assert",
+          "type": "visible",
+          "selector": "[data-leave-settings-actions] button:text-is('שמירה')[disabled]"
+        },
+        {
+          "id": "fill-zero-value",
+          "action": "fill",
+          "selector": "#leave-day-value",
+          "value": "0"
+        },
+        {
+          "id": "assert-zero-refused",
+          "description": "0 gets an inline reason and no save",
+          "action": "waitForSelector",
+          "selector": "[data-leave-day-value-error]:has-text('גדול מאפס')"
+        },
+        {
+          "id": "fill-leave-day",
+          "description": "The value is typed in the same dialog: one save",
+          "action": "fill",
+          "selector": "#leave-day-value",
+          "value": "250"
         },
         {
           "id": "save-method",
@@ -891,26 +948,12 @@
           "selector": "[data-leave-settings-change]"
         },
         {
-          "id": "open-leave-day-form",
-          "action": "click",
-          "selector": "[data-leave-day-rate] button:text-is('הגדרה')"
-        },
-        {
-          "id": "fill-leave-day",
-          "action": "fill",
-          "selector": "#rate-amount-leave-day",
+          "id": "assert-leave-day-prefilled",
+          "description": "The saved value (250) is in the input, taken from the dated leave_day rate",
+          "action": "assert",
+          "type": "value",
+          "selector": "#leave-day-value",
           "value": "250"
-        },
-        {
-          "id": "save-leave-day",
-          "action": "click",
-          "selector": "[data-leave-day-rate] button:text-is('שמירה')"
-        },
-        {
-          "id": "assert-leave-day-shown",
-          "description": "The value is shown per day next to the fixed method",
-          "action": "waitForSelector",
-          "selector": "[data-leave-day-rate]:has-text('₪250.00 ליום')"
         },
         {
           "id": "screenshot-leave-day",
@@ -1143,8 +1186,16 @@
           "type": "visible",
           "selector": "[data-leave-form]:has-text('אפשר לרשום חצי יום חופשה')"
         },
-        { "id": "open-portion", "action": "click", "selector": "#leave-portion" },
-        { "id": "choose-half-day", "action": "click", "selector": "[role='option']:has-text('חצי יום')" },
+        {
+          "id": "open-portion",
+          "action": "click",
+          "selector": "#leave-portion"
+        },
+        {
+          "id": "choose-half-day",
+          "action": "click",
+          "selector": "[role='option']:has-text('חצי יום')"
+        },
         {
           "id": "assert-one-half-option",
           "description": "There is one half-day choice, not first and second halves",
