@@ -12,6 +12,8 @@ import { normalizeString, withOrgScope } from './org-bff.js';
 import { coerceAgorot } from './currency.js';
 import { extractScheduleSlotFromIso } from './instructor-availability.js';
 import {
+  addDays,
+  addMonths,
   dateKeyFromParts,
   enumerateDateKeys,
   firstDayOfMonth,
@@ -22,17 +24,22 @@ import {
   weekdayOfDateKey,
 } from './local-time.js';
 import {
+  LEGAL_LEAVE_MAX_DEPTH,
+  LEGAL_LEAVE_SEARCH_MONTHS,
+  collectWorkedDates,
   combinePayComponents,
   countWorkingDaysInRange,
+  createLeaveDayValuer,
   fetchApprovedLeaveDays,
   financePoliciesOnDate,
   fetchAttendanceRecords,
+  legalLeaveHistoryStart,
   listFinanceCorrections,
   loadFinancePolicies,
   loadGraceCancellationParticipantIds,
+  priceAttendanceRecords,
   resolveCompensationEligibleParticipants,
   resolveEmployeeWorkingDays,
-  resolveLeaveDayValue,
   resolveLessonInstructorPayout,
 } from './employee-finance.js';
 import {
@@ -43,6 +50,9 @@ import {
   resolveLessonRateOnDate,
   resolveRateOnDate,
 } from './rate-history.js';
+
+// The days an employee worked live next to the leave-day value that also counts them.
+export { collectWorkedDates };
 
 const PAGE_SIZE = 1000;
 const ID_CHUNK_SIZE = 100;
@@ -361,8 +371,6 @@ export async function loadCountedLessons(client, orgId, {
     .sort((left, right) => String(left.datetime_start).localeCompare(String(right.datetime_start)));
 }
 
-const PAID_LEAVE_TYPES = new Set(['employee_paid', 'system_paid', 'half_day']);
-
 /**
  * The paid leave days of a period as one line: how many (0.5 per half day) and what one day is worth
  * when all of them are worth the same (within 2 agorot, the rounding of a half day), otherwise null.
@@ -373,28 +381,6 @@ export function summarizePaidLeave(leaveAmounts = []) {
   const values = paid.map((row) => Math.round(Number(row.amount) / Number(row.pay_fraction)));
   const same = values.length > 0 && Math.max(...values) - Math.min(...values) <= 2;
   return { days, dayValue: same ? values[0] : null };
-}
-
-/**
- * The local dates an employee worked: a day with a counted lesson (summarizeLessonsByDate) or with
- * office minutes on the attendance record, or a day of paid leave. Each date counts once, whatever happened on it. The leave
- * entitlement (leave-entitlement.js) counts these days; there is no other count of days worked.
- */
-export function collectWorkedDates({ lessons = [], attendanceRecords = [], leaveDays = [] } = {}) {
-  const dates = new Set(summarizeLessonsByDate(lessons).keys());
-  // A day of paid leave (employee_paid, system_paid, or the older half_day) counts as a work day;
-  // unpaid leave does not. Any part of a day is a day, so a half-day leave with no work on it counts
-  // as a whole day. A date counts once, even when it also has work.
-  for (const leaveDay of leaveDays || []) {
-    const dateKey = localDateKey(leaveDay?.leave_date);
-    const leaveType = leaveDay?.leave_type || leaveDay?.entry?.leave_type;
-    if (dateKey && PAID_LEAVE_TYPES.has(leaveType)) dates.add(dateKey);
-  }
-  for (const record of attendanceRecords || []) {
-    const dateKey = localDateKey(record?.attendance_date);
-    if (dateKey && Number(record?.other_minutes) > 0) dates.add(dateKey);
-  }
-  return Array.from(dates).sort();
 }
 
 /**
@@ -444,9 +430,22 @@ export async function computeEmployeePay(client, orgId, {
     listFinanceCorrections(client, orgId, { employeeId, startDate, endDate }),
   ]);
 
-  // A leave day can be valued by the average of the days before it, so history is read only when
-  // the period has leave in it.
-  const historyStart = leaveDays.length > 0 ? shiftMonths(startDate, -12) : startDate;
+  // A leave day can be valued by the pay of the months before it, so history is read only when the
+  // period has leave in it. The "legal" value reaches back through the leave inside its window (see
+  // LEGAL_LEAVE_MAX_DEPTH), so the earlier leave days are read first and decide how far back to go.
+  const startKey = localDateKey(startDate);
+  const historyLeaveDays = leaveDays.length > 0
+    ? await fetchApprovedLeaveDays(client, orgId, {
+      employeeId,
+      startDate: addMonths(firstDayOfMonth(startKey), -LEGAL_LEAVE_SEARCH_MONTHS * (LEGAL_LEAVE_MAX_DEPTH + 1)),
+      endDate: addDays(startKey, -1),
+    })
+    : [];
+  const legalStart = legalLeaveHistoryStart(leaveDays.map((row) => row.leave_date), historyLeaveDays);
+  const averageStart = shiftMonths(startDate, -12);
+  const historyStart = leaveDays.length > 0
+    ? [legalStart, averageStart].filter(Boolean).sort()[0]
+    : startDate;
   const [attendanceHistory, lessonHistory] = await Promise.all([
     fetchAttendanceRecords(client, orgId, { employeeId, startDate: historyStart, endDate }),
     loadCountedLessons(client, orgId, {
@@ -463,18 +462,24 @@ export async function computeEmployeePay(client, orgId, {
   const attendance = attendanceHistory.filter((row) => inRange(localDateKey(row?.attendance_date), startDate, endDate));
   const lessonTotals = summarizeLessons(lessons);
 
-  const leaveAmounts = leaveDays.map((leaveDay) => ({
-    ...leaveDay,
-    amount: coerceAgorot(resolveLeaveDayValue({
-      employee,
-      targetDate: leaveDay.leave_date,
-      lessonHistory,
-      attendanceRecords: attendanceHistory,
-      // The leave-pay policy in force on the leave day.
-      leavePayPolicy: financePoliciesOnDate(resolvedPolicies, leaveDay.leave_date).leavePayPolicy,
-      rateRows: resolvedRateRows,
-    }) * Number(leaveDay.pay_fraction || 0)),
-  }));
+  const leaveValuer = createLeaveDayValuer({
+    employee,
+    lessonHistory,
+    attendanceRecords: attendanceHistory,
+    leaveDays: [...historyLeaveDays, ...leaveDays],
+    // The leave-pay policy in force on each leave day.
+    leavePayPolicyOn: (dateKey) => financePoliciesOnDate(resolvedPolicies, dateKey)?.leavePayPolicy,
+    rateRows: resolvedRateRows,
+  });
+  const leaveAmounts = leaveDays.map((leaveDay) => {
+    const detail = leaveValuer.detailOf(leaveDay.leave_date);
+    return {
+      ...leaveDay,
+      day_value: detail.value,
+      basis: detail.basis,
+      amount: coerceAgorot(detail.value * Number(leaveDay.pay_fraction || 0)),
+    };
+  });
   const paidLeaveTotal = coerceAgorot(leaveAmounts.reduce((sum, row) => sum + row.amount, 0));
   const paidLeaveSummary = summarizePaidLeave(leaveAmounts);
   const correctionTotal = coerceAgorot((corrections || []).reduce((sum, row) => sum + coerceAgorot(row.amount), 0));
@@ -485,21 +490,7 @@ export async function computeEmployeePay(client, orgId, {
     onOrBefore: endDate,
   });
 
-  const attendanceRows = attendance.map((row) => {
-    const dateKey = localDateKey(row?.attendance_date);
-    const rate = resolveRateOnDate(resolvedRateRows, {
-      employeeId,
-      payBasis: PAY_BASIS.ATTENDANCE_HOURLY,
-      date: dateKey,
-    })?.rate ?? 0;
-    const minutes = Math.max(0, Number(row?.other_minutes) || 0);
-    return {
-      attendance_date: dateKey,
-      other_minutes: minutes,
-      rate_used: rate > 0 ? rate : null,
-      amount: rate > 0 ? (minutes / 60) * rate : 0,
-    };
-  });
+  const attendanceRows = priceAttendanceRecords(attendance, resolvedRateRows, employeeId);
   const attendanceAmount = coerceAgorot(attendanceRows.reduce((sum, row) => sum + row.amount, 0));
 
   const workingDays = resolveEmployeeWorkingDays(employee);
@@ -567,6 +558,9 @@ export async function computeEmployeePay(client, orgId, {
         leave_type: row.leave_type,
         day_portion: row.day_portion,
         pay_fraction: row.pay_fraction,
+        day_value: row.day_value,
+        // For "ממוצע מומלץ": the months the day value comes from, their pay and what it is divided by.
+        basis: row.basis || null,
         amount: row.amount,
       })),
     };

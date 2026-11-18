@@ -431,7 +431,7 @@ describe('the settings dialog and the employee choice', () => {
   });
 
   it('the "חופשה" row reads first as one short line', () => {
-    const orgPolicy = { default_method: 'legal', lookback_months: 3, legal_allow_12m_if_better: true };
+    const orgPolicy = { default_method: 'legal', lookback_months: 3 };
     assert.equal(employeeLeaveSummaryText({ annual_leave_days: null, leave_pay_method: null }, orgPolicy), 'ימים: לפי ברירת המחדל · תשלום: לפי ברירת המחדל (ממוצע מומלץ)');
     assert.equal(employeeLeaveSummaryText({ annual_leave_days: 14.5, leave_pay_method: 'fixed_rate' }, orgPolicy), 'ימים: 14.5 בשנה · תשלום: ערך קבוע ליום');
     assert.equal(
@@ -441,9 +441,11 @@ describe('the settings dialog and the employee choice', () => {
   });
 
   it('step 2 explains each choice with the organisation months', () => {
-    const orgPolicy = { default_method: 'legal', lookback_months: 6, legal_allow_12m_if_better: true };
+    const orgPolicy = { default_method: 'legal', lookback_months: 6 };
     assert.equal(describeEmployeeLeavePayChoice('', orgPolicy), 'כמו שאר העובדים בארגון. כרגע: "ממוצע מומלץ".');
-    assert.match(describeEmployeeLeavePayChoice('legal', orgPolicy), /ב-6 החודשים האחרונים, או ב-12 החודשים האחרונים/);
+    assert.equal(describeEmployeeLeavePayChoice('legal', orgPolicy), 'השכר של 3 החודשים האחרונים (או 3 החודשים המלאים ביותר בשנה האחרונה), לפי ימים קלנדריים.');
+    // An old stored 12-month flag changes nothing.
+    assert.equal(describeEmployeeLeavePayChoice('', { ...orgPolicy, legal_allow_12m_if_better: false }), 'כמו שאר העובדים בארגון. כרגע: "ממוצע מומלץ".');
     assert.match(describeEmployeeLeavePayChoice('avg_hourly_x_avg_day_hours', orgPolicy), /ב-6 החודשים האחרונים בלבד/);
     assert.match(describeEmployeeLeavePayChoice('fixed_rate', orgPolicy), /סכום קבוע/);
   });

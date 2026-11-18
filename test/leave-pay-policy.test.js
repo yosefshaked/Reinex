@@ -24,7 +24,7 @@ import {
   validateLeaveSettingsDraft,
 } from '../src/features/finance/lib/leave-settings.js';
 
-const SEEDED = { default_method: 'legal', lookback_months: 3, legal_allow_12m_if_better: true, fixed_rate_default: 0 };
+const SEEDED = { default_method: 'legal', lookback_months: 3, fixed_rate_default: 0 };
 
 describe('readLeavePayPolicy', () => {
   it('uses the seeded defaults when nothing is stored', () => {
@@ -36,10 +36,10 @@ describe('readLeavePayPolicy', () => {
     assert.deepEqual(readLeavePayPolicy(null), { ...DEFAULT_LEAVE_PAY_POLICY });
   });
 
-  it('reads a stored JSON string and falls back on unknown values', () => {
+  it('reads a stored JSON string and falls back on unknown values; the old 12-month flag is dropped', () => {
     assert.deepEqual(
       readLeavePayPolicy('{"default_method":"avg_hourly_x_avg_day_hours","lookback_months":6,"legal_allow_12m_if_better":false}'),
-      { default_method: 'avg_hourly_x_avg_day_hours', lookback_months: 6, legal_allow_12m_if_better: false, fixed_rate_default: 0 },
+      { default_method: 'avg_hourly_x_avg_day_hours', lookback_months: 6, fixed_rate_default: 0 },
     );
     assert.equal(readLeavePayPolicy({ default_method: 'weird' }).default_method, 'legal');
     assert.equal(readLeavePayPolicy({ lookback_months: -2 }).lookback_months, 3);
@@ -47,15 +47,11 @@ describe('readLeavePayPolicy', () => {
 });
 
 describe('describeLeavePayMethod', () => {
-  it('describes the legal average with the 12-month comparison', () => {
-    assert.equal(
-      describeLeavePayMethod('legal', { lookbackMonths: 3 }),
-      'השכר היומי הממוצע בימים שעבד/ה ב-3 החודשים האחרונים, או ב-12 החודשים האחרונים אם שם הממוצע גבוה יותר.',
-    );
-    assert.equal(
-      describeLeavePayMethod('legal', { lookbackMonths: 1 }),
-      'השכר היומי הממוצע בימים שעבד/ה בחודש האחרון, או ב-12 החודשים האחרונים אם שם הממוצע גבוה יותר.',
-    );
+  it('describes "ממוצע מומלץ" in plain words, whatever the months, with no 12-month comparison', () => {
+    const text = 'השכר של 3 החודשים האחרונים (או 3 החודשים המלאים ביותר בשנה האחרונה), לפי ימים קלנדריים.';
+    assert.equal(describeLeavePayMethod('legal', { lookbackMonths: 3 }), text);
+    assert.equal(describeLeavePayMethod('legal', { lookbackMonths: 1 }), text);
+    assert.doesNotMatch(text, /12 החודשים|לפי החוק/);
   });
 
   it('describes the historic average for N months only', () => {
@@ -77,14 +73,13 @@ describe('the edit draft', () => {
     assert.deepEqual(buildLeavePayDraft(SEEDED), { method: 'legal', lookbackMonths: '3' });
   });
 
-  it('shows legal with the 12-month comparison off as the historic average', () => {
+  it('ignores an old stored 12-month flag: "legal" is shown as "ממוצע מומלץ" either way', () => {
     const old = { ...SEEDED, legal_allow_12m_if_better: false };
-    assert.equal(getEffectiveDefaultMethod(old), 'avg_hourly_x_avg_day_hours');
+    assert.equal(getEffectiveDefaultMethod(old), 'legal');
     assert.equal(getEffectiveDefaultMethod(SEEDED), 'legal');
     const draft = buildLeavePayDraft(old);
-    assert.equal(draft.method, 'avg_hourly_x_avg_day_hours');
+    assert.equal(draft.method, 'legal');
     assert.equal(isLeavePayDraftChanged(old, draft), false);
-    assert.equal(isLeavePayDraftChanged(old, { ...draft, method: 'legal' }), true);
   });
 
   it('starts with no method when the stored default is a fixed value', () => {
@@ -106,16 +101,19 @@ describe('the edit draft', () => {
     const draft = buildLeavePayDraft(SEEDED);
     assert.equal(isLeavePayDraftChanged(SEEDED, draft), false);
     assert.equal(isLeavePayDraftChanged(SEEDED, { ...draft, method: 'avg_hourly_x_avg_day_hours' }), true);
-    assert.equal(isLeavePayDraftChanged(SEEDED, { ...draft, lookbackMonths: '4' }), true);
+    // "ממוצע מומלץ" does not use the months, so changing them alone is no change.
+    assert.equal(isLeavePayDraftChanged(SEEDED, { ...draft, lookbackMonths: '4' }), false);
+    const historic = { ...SEEDED, default_method: 'avg_hourly_x_avg_day_hours' };
+    assert.equal(isLeavePayDraftChanged(historic, { method: 'avg_hourly_x_avg_day_hours', lookbackMonths: '4' }), true);
   });
 
-  it('builds the stored value, always with the 12-month flag on, and keeps the fields it does not edit', () => {
+  it('builds the stored value without the old 12-month flag, and keeps the fields it does not edit', () => {
     const stored = { ...SEEDED, legal_allow_12m_if_better: false, fixed_rate_default: 30000 };
     assert.deepEqual(
       buildLeavePayPolicyPayload(stored, { method: 'avg_hourly_x_avg_day_hours', lookbackMonths: ' 6 ' }),
-      { default_method: 'avg_hourly_x_avg_day_hours', lookback_months: 6, legal_allow_12m_if_better: true, fixed_rate_default: 30000 },
+      { default_method: 'avg_hourly_x_avg_day_hours', lookback_months: 6, fixed_rate_default: 30000 },
     );
-    assert.equal(buildLeavePayPolicyPayload(stored, { method: 'legal', lookbackMonths: '3' }).legal_allow_12m_if_better, true);
+    assert.equal('legal_allow_12m_if_better' in buildLeavePayPolicyPayload(stored, { method: 'legal', lookbackMonths: '3' }), false);
   });
 });
 
@@ -140,7 +138,8 @@ describe('validateLeavePayPolicyInput (server, settings write)', () => {
         String(months),
       );
     }
-    assert.deepEqual(validateLeavePayPolicyInput({ ...SEEDED, legal_allow_12m_if_better: 'yes' }), { error: 'invalid_leave_pay_12m_flag' });
+    // The retired 12-month flag is no longer read, so any value of it is dropped, not refused.
+    assert.deepEqual(validateLeavePayPolicyInput({ ...SEEDED, legal_allow_12m_if_better: 'yes' }), { value: { ...SEEDED } });
     assert.deepEqual(validateLeavePayPolicyInput({ ...SEEDED, fixed_rate_default: -1 }), { error: 'invalid_leave_pay_fixed_rate_default' });
   });
 
@@ -193,7 +192,7 @@ describe('the "חופשה" dialog: two steps, one save', () => {
   });
 
   it('describes a stored pay version for the shared history', () => {
-    assert.equal(describeLeavePayVersion({ settings_value: SEEDED }), 'ממוצע מומלץ · 3 חודשים');
+    assert.equal(describeLeavePayVersion({ settings_value: SEEDED }), 'ממוצע מומלץ', '"ממוצע מומלץ" does not use the months');
     assert.equal(describeLeavePayVersion({ settings_value: { ...SEEDED, default_method: 'avg_hourly_x_avg_day_hours', lookback_months: 6 } }), 'ממוצע היסטורי · 6 חודשים');
   });
 });

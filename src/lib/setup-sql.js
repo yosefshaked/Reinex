@@ -2852,7 +2852,7 @@ SELECT
 FROM public.organizations org
 CROSS JOIN (
   VALUES
-    ('leave_pay_policy', '{"default_method":"legal","lookback_months":3,"legal_allow_12m_if_better":true,"fixed_rate_default":0}'::jsonb),
+    ('leave_pay_policy', '{"default_method":"legal","lookback_months":3,"fixed_rate_default":0}'::jsonb),
     ('instructor_earnings_policy', '{"attended":true,"no_show":true,"cancelled_student":false,"cancelled_clinic":false}'::jsonb)
 ) AS seed(key, settings_value)
 WHERE NOT EXISTS (

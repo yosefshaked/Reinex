@@ -2,9 +2,9 @@
   "meta": {
     "id": "leave-settings",
     "name": "Leave — the organisation's \"חופשה\" settings and the employee's \"חופשה\" row",
-    "description": "Leave is set in one place per level. Settings page: one tile \"חופשה\" opens one dialog with two steps — step 1 \"כמה ימי חופשה מגיעים בשנה?\" (leave_entitlement_policy: \"מומלץ: לפי ותק וימי עבודה\" or \"כמות קבועה\" with a table per seniority year) and, once step 1 has a choice, step 2 \"כמה משלמים על יום חופשה?\" (leave_pay_policy: \"ממוצע מומלץ\" / \"ממוצע היסטורי\" and the months). Both are dated settings: one \"בתוקף מ-\", one save that writes a version of each key that changed, and one \"היסטוריה\" that lists both, labelled. Per employee: the \"נוכחות\" tab has a \"חופשה\" row next to the balance (\"ימים: ... · תשלום: ...\") with one \"שינוי\" that opens the same two steps (Employees.annual_leave_days, Employees.leave_pay_method); the \"פיננסים\" tab has no leave box. The run resets both defaults through the API (and checks the server refuses bad values), creates an instructor who started on 2020-01-01 with no lessons (the recommended count gives 0 days so far), switches the organisation to \"כמות קבועה\" + \"ממוצע היסטורי\" in one save and reads the history, sees the instructor follow it, sets 9 days and \"ממוצע מומלץ\" for the instructor, goes back to the defaults, and restores the organisation defaults in the dialog. The words \"לפי החוק\" appear nowhere.",
+    "description": "Leave is set in one place per level. Settings page: one tile \"חופשה\" opens one dialog with two steps — step 1 \"כמה ימי חופשה מגיעים בשנה?\" (leave_entitlement_policy: \"מומלץ: לפי ותק וימי עבודה\" or \"כמות קבועה\" with a table per seniority year) and, once step 1 has a choice, step 2 \"כמה משלמים על יום חופשה?\" (leave_pay_policy: \"ממוצע מומלץ\" — 3 months by calendar days, no months to set — or \"ממוצע היסטורי\" with its months). Both are dated settings: one \"בתוקף מ-\", one save that writes a version of each key that changed, and one \"היסטוריה\" that lists both, labelled. Per employee: the \"נוכחות\" tab has a \"חופשה\" row next to the balance (\"ימים: ... · תשלום: ...\") with one \"שינוי\" that opens the same two steps (Employees.annual_leave_days, Employees.leave_pay_method); the \"פיננסים\" tab has no leave box. The run resets both defaults through the API (and checks the server refuses bad values), creates an instructor who started on 2020-01-01 with no lessons (the recommended count gives 0 days so far), switches the organisation to \"כמות קבועה\" + \"ממוצע היסטורי\" in one save and reads the history, sees the instructor follow it, sets 9 days and \"ממוצע מומלץ\" for the instructor, goes back to the defaults, and restores the organisation defaults in the dialog. The words \"לפי החוק\" appear nowhere.",
     "version": "2.0.0",
-    "last_validated_at": "2026-11-17T12:00:00Z",
+    "last_validated_at": "2026-11-18T13:00:00Z",
     "author": "claude-ai",
     "dependencies": {
       "routes": [
@@ -67,7 +67,6 @@
                 "value": {
                   "default_method": "legal",
                   "lookback_months": 3,
-                  "legal_allow_12m_if_better": true,
                   "fixed_rate_default": 0
                 },
                 "effective_date": "{{TODAY}}"
@@ -89,8 +88,7 @@
             "settings": {
               "leave_pay_policy": {
                 "default_method": "avg_hourly_x_avg_day_hours",
-                "lookback_months": 3,
-                "legal_allow_12m_if_better": true
+                "lookback_months": 3
               }
             }
           }
@@ -110,8 +108,7 @@
               "leave_pay_policy": {
                 "value": {
                   "default_method": "legal",
-                  "lookback_months": 13,
-                  "legal_allow_12m_if_better": true
+                  "lookback_months": 13
                 },
                 "effective_date": "{{TODAY}}"
               }
@@ -415,9 +412,25 @@
           "selector": "[role='dialog'] [data-leave-step='2'][data-shown='true']:has-text('כמה משלמים על יום חופשה?') #leave-pay-method-legal:checked"
         },
         {
-          "id": "assert-months-3",
+          "id": "assert-recommended-pay-meaning",
+          "description": "\"ממוצע מומלץ\" in plain words, with no 12-month comparison",
           "action": "waitForSelector",
-          "selector": "[role='dialog'] #leave-pay-lookback-months[value='3']"
+          "selector": "[role='dialog'] label[for='leave-pay-method-legal']:has-text('השכר של 3 החודשים האחרונים (או 3 החודשים המלאים ביותר בשנה האחרונה), לפי ימים קלנדריים.')"
+        },
+        {
+          "id": "assert-no-12-months",
+          "action": "assert",
+          "type": "count",
+          "selector": "[role='dialog'] :text('12 החודשים')",
+          "value": "0"
+        },
+        {
+          "id": "assert-no-months-for-recommended",
+          "description": "\"ממוצע מומלץ\" uses no number of months, so the months field is not shown",
+          "action": "assert",
+          "type": "count",
+          "selector": "[role='dialog'] #leave-pay-lookback-months",
+          "value": "0"
         },
         {
           "id": "assert-pay-meaning",
@@ -460,6 +473,12 @@
           "id": "choose-historic",
           "action": "click",
           "selector": "[role='dialog'] label[for='leave-pay-method-avg_hourly_x_avg_day_hours']"
+        },
+        {
+          "id": "assert-months-3",
+          "description": "\"ממוצע היסטורי\" shows its months, the stored 3 (the 13-month write was refused)",
+          "action": "waitForSelector",
+          "selector": "[role='dialog'] #leave-pay-lookback-months[value='3']"
         },
         {
           "id": "assert-replace-warnings",
@@ -856,7 +875,6 @@
                 "value": {
                   "default_method": "avg_hourly_x_avg_day_hours",
                   "lookback_months": 3,
-                  "legal_allow_12m_if_better": true,
                   "fixed_rate_default": 0
                 },
                 "effective_date": "2099-01-01"

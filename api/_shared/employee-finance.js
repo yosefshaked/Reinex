@@ -4,12 +4,17 @@ import { isAdminOrOffice, normalizeString, withOrgScope } from './org-bff.js';
 import { coerceAgorot } from './currency.js';
 import { shouldParticipantTriggerInstructorCompensation } from './calendar-workflow-decisions.js';
 import {
+  addMonths,
   dateKeyFromParts,
+  diffDays,
   enumerateDateKeys,
   firstDayOfMonth,
+  isDateKey,
   lastDayOfMonth,
   localDateKey,
   localDateRangeUtc,
+  monthKeyOfDateKey,
+  normalizeDateKey,
   parseDateKey,
   todayKey,
   weekdayOfDateKey,
@@ -23,7 +28,7 @@ import {
   resolveRateOnDate,
 } from './rate-history.js';
 import { isDatedSettingKey, loadDatedSettingRows, resolveSettingOnDate } from './dated-settings.js';
-import { LEAVE_ENTITLEMENT_POLICY_KEY, normalizeLeaveEntitlementPolicy } from './leave-entitlement.js';
+import { LEAVE_ENTITLEMENT_POLICY_KEY, normalizeLeaveEntitlementPolicy, workWeekDays } from './leave-entitlement.js';
 
 export const DEFAULT_LEAVE_POLICY = Object.freeze({
   holiday_rules: [],
@@ -32,7 +37,6 @@ export const DEFAULT_LEAVE_POLICY = Object.freeze({
 export const DEFAULT_LEAVE_PAY_POLICY = Object.freeze({
   default_method: 'legal',
   lookback_months: 3,
-  legal_allow_12m_if_better: true,
   fixed_rate_default: 0,
 });
 
@@ -128,7 +132,6 @@ function normalizeLeavePayPolicy(raw) {
     lookback_months: Number.isFinite(Number(source.lookback_months)) && Number(source.lookback_months) > 0
       ? Math.round(Number(source.lookback_months))
       : DEFAULT_LEAVE_PAY_POLICY.lookback_months,
-    legal_allow_12m_if_better: Boolean(source.legal_allow_12m_if_better),
     fixed_rate_default: Number.isFinite(Number(source.fixed_rate_default)) && Number(source.fixed_rate_default) >= 0
       ? Number(source.fixed_rate_default)
       : DEFAULT_LEAVE_PAY_POLICY.fixed_rate_default,
@@ -141,8 +144,9 @@ export const LEAVE_PAY_LOOKBACK_MONTHS_MAX = 12;
 /**
  * Checks a leave_pay_policy written through the settings API. Unlike the lenient read-side
  * normalizer, a bad value is refused instead of silently replaced: an unknown method, a number of
- * months that is not a whole number from 1 to 12, a non-boolean 12-month switch or a negative fixed
- * default. Fields left out take the defaults. Returns { value } (normalized) or { error }.
+ * months that is not a whole number from 1 to 12 or a negative fixed default. Fields left out take the
+ * defaults; unknown fields (such as the retired legal_allow_12m_if_better) are dropped.
+ * Returns { value } (normalized) or { error }.
  */
 export function validateLeavePayPolicyInput(raw) {
   const parsed = parseJsonValue(raw, null);
@@ -166,9 +170,6 @@ export function validateLeavePayPolicyInput(raw) {
     ) {
       return { error: 'invalid_leave_pay_lookback_months' };
     }
-  }
-  if (parsed.legal_allow_12m_if_better !== undefined && typeof parsed.legal_allow_12m_if_better !== 'boolean') {
-    return { error: 'invalid_leave_pay_12m_flag' };
   }
   if (parsed.fixed_rate_default !== undefined) {
     const fixed = Number(parsed.fixed_rate_default);
@@ -534,72 +535,310 @@ export function resolveLeavePayMethod(employee, leavePayPolicy) {
   return leavePayPolicy.default_method || DEFAULT_LEAVE_PAY_POLICY.default_method;
 }
 
-export function resolveLeaveDayValue({
+const PAID_LEAVE_TYPES = new Set(['employee_paid', 'system_paid', 'half_day']);
+
+function leaveTypeOf(leaveDay) {
+  return leaveDay?.leave_type || leaveDay?.entry?.leave_type;
+}
+
+/**
+ * The local dates an employee worked: a day with a counted lesson or with office minutes on the
+ * attendance record, or a day of paid leave. Each date counts once, whatever happened on it. The
+ * leave entitlement (leave-entitlement.js) and the choice of the "legal" leave-pay window count
+ * these days; there is no other count of days worked.
+ */
+export function collectWorkedDates({ lessons = [], attendanceRecords = [], leaveDays = [] } = {}) {
+  const dates = new Set();
+  for (const lesson of lessons || []) {
+    if (lesson?.counted && lesson.lesson_date) dates.add(lesson.lesson_date);
+  }
+  // A day of paid leave (employee_paid, system_paid, or the older half_day) counts as a work day;
+  // unpaid leave does not. Any part of a day is a day, so a half-day leave with no work on it counts
+  // as a whole day. A date counts once, even when it also has work.
+  for (const leaveDay of leaveDays || []) {
+    const dateKey = localDateKey(leaveDay?.leave_date);
+    if (dateKey && PAID_LEAVE_TYPES.has(leaveTypeOf(leaveDay))) dates.add(dateKey);
+  }
+  for (const record of attendanceRecords || []) {
+    const dateKey = localDateKey(record?.attendance_date);
+    if (dateKey && Number(record?.other_minutes) > 0) dates.add(dateKey);
+  }
+  return Array.from(dates).sort();
+}
+
+/**
+ * Office hours priced at the hourly rate in force on each date. `amount` is not rounded: a period's
+ * total is rounded once (coerceAgorot), as the monthly summary shows it.
+ */
+export function priceAttendanceRecords(attendanceRecords = [], rateRows = [], employeeId = null) {
+  return (attendanceRecords || []).map((row) => {
+    const dateKey = localDateKey(row?.attendance_date);
+    const rate = resolveRateOnDate(rateRows, {
+      employeeId,
+      payBasis: PAY_BASIS.ATTENDANCE_HOURLY,
+      date: dateKey,
+    })?.rate ?? 0;
+    const minutes = Math.max(0, Number(row?.other_minutes) || 0);
+    return {
+      attendance_date: dateKey,
+      other_minutes: minutes,
+      rate_used: rate > 0 ? rate : null,
+      amount: rate > 0 ? (minutes / 60) * rate : 0,
+    };
+  });
+}
+
+// The "legal" leave-day value (method 'legal', shown as "ממוצע מומלץ"), after the Annual Leave Law,
+// section 10: the gross wages of the 3 months before the leave ÷ 90 is the value of one calendar
+// day; if those months were not full, the 3 consecutive months of the last 12 with the most days
+// worked are used.
+export const LEGAL_LEAVE_WINDOW_MONTHS = 3;
+export const LEGAL_LEAVE_WINDOW_DAYS = 90;
+export const LEGAL_LEAVE_SEARCH_MONTHS = 12;
+/**
+ * The wage base of a window includes the paid leave inside it, and that leave is itself valued by
+ * a window further back. The chain is followed by recursion with this depth bound: the leave day
+ * being paid is depth 0, a leave day inside its window is depth 1 (valued by the same function),
+ * one inside that day's window is depth 2, and a leave day deeper than that adds nothing to its
+ * window's base. Every step goes back at least one whole month, so the recursion always ends, and
+ * the result depends only on the data, never on the period being shown, as long as the caller
+ * loads history back to legalLeaveHistoryStart(). The bound (rather than walking every month since
+ * the employee started) keeps the history read to at most 36 months; a leave day three windows
+ * deep changes the value only marginally. Each leave day is counted once, in its own month.
+ */
+export const LEGAL_LEAVE_MAX_DEPTH = 2;
+
+/**
+ * The candidate windows for a leave day: every 3 consecutive whole calendar months (org-local) that
+ * end before the leave day's month and start within the 12 months before it, most recent first.
+ */
+export function legalLeaveWindows(targetDate) {
+  const leaveMonth = firstDayOfMonth(localDateKey(targetDate));
+  if (!leaveMonth) return [];
+  const windows = [];
+  for (let endOffset = 1; endOffset + LEGAL_LEAVE_WINDOW_MONTHS - 1 <= LEGAL_LEAVE_SEARCH_MONTHS; endOffset += 1) {
+    const start = addMonths(leaveMonth, -(endOffset + LEGAL_LEAVE_WINDOW_MONTHS - 1));
+    const end = lastDayOfMonth(addMonths(leaveMonth, -endOffset));
+    windows.push({ start, end, start_month: monthKeyOfDateKey(start), end_month: monthKeyOfDateKey(end) });
+  }
+  return windows;
+}
+
+/**
+ * The window to use: the most recent one, unless another has strictly more days worked; the one
+ * with the most days wins, and a tie goes to the more recent window. Expects windows most recent first.
+ */
+export function chooseLegalLeaveWindow(windows = [], workedDates = []) {
+  let chosen = null;
+  for (const window of windows || []) {
+    const workedDays = (workedDates || []).filter((dateKey) => dateKey >= window.start && dateKey <= window.end).length;
+    if (!chosen || workedDays > chosen.worked_days) {
+      chosen = { ...window, worked_days: workedDays };
+    }
+  }
+  return chosen;
+}
+
+/**
+ * What the window's wages are divided by: 90. Assumption (owner-approved): an employee whose
+ * start_date falls inside the window is divided by the calendar days employed in it (start_date to
+ * the window's end), capped at 90, so a short first quarter is not diluted by days before they
+ * started. An employee with no start_date is divided by 90. 0 when they started after the window.
+ */
+export function legalLeaveDivisor(employee, window) {
+  const startDate = normalizeDateKey(employee?.start_date);
+  if (!window || !isDateKey(startDate) || startDate <= window.start) return LEGAL_LEAVE_WINDOW_DAYS;
+  if (startDate > window.end) return 0;
+  return Math.min(LEGAL_LEAVE_WINDOW_DAYS, diffDays(startDate, window.end) + 1);
+}
+
+/**
+ * The value of one NET leave day (our leave days are working days, the law's are calendar days):
+ * (wage base ÷ divisor) is a calendar day, and a week of W working days holds 7 calendar days, so
+ * one working day is (wage base ÷ divisor) × 7 ÷ W, W = 6 for a six-day week, else 5. Rounded once,
+ * to the agora.
+ */
+export function legalLeaveDayValue({ wageBase, divisor, weekDays }) {
+  const base = coerceAgorot(wageBase);
+  const week = weekDays === 6 ? 6 : 5;
+  if (base <= 0 || !(divisor > 0)) return 0;
+  return Math.round((base * 7) / (divisor * week));
+}
+
+/**
+ * The first day the history must start at so that every window the valuer may evaluate, down to
+ * LEGAL_LEAVE_MAX_DEPTH, is complete: 12 months before the earliest leave month reached.
+ * `leaveDates` are the period's leave days; `historyLeaveDays` the approved leave days before them
+ * (read back at least 12 × (LEGAL_LEAVE_MAX_DEPTH + 1) months). '' when there is no leave.
+ */
+export function legalLeaveHistoryStart(leaveDates = [], historyLeaveDays = [], maxDepth = LEGAL_LEAVE_MAX_DEPTH) {
+  const monthsOf = (dates) => new Set(dates.map((date) => firstDayOfMonth(localDateKey(date))).filter(Boolean));
+  let level = monthsOf(leaveDates || []);
+  if (level.size === 0) return '';
+  const paidHistory = (historyLeaveDays || [])
+    .filter((day) => PAID_LEAVE_TYPES.has(leaveTypeOf(day)) && Number(day?.pay_fraction) > 0)
+    .map((day) => localDateKey(day.leave_date))
+    .filter(Boolean);
+  let earliest = [...level].sort()[0];
+  for (let depth = 1; depth <= maxDepth && level.size > 0; depth += 1) {
+    const ranges = [...level].map((month) => ({ from: addMonths(month, -LEGAL_LEAVE_SEARCH_MONTHS), before: month }));
+    level = monthsOf(paidHistory.filter((dateKey) => ranges.some((range) => dateKey >= range.from && dateKey < range.before)));
+    for (const month of level) if (month < earliest) earliest = month;
+  }
+  return addMonths(earliest, -LEGAL_LEAVE_SEARCH_MONTHS);
+}
+
+/**
+ * Values leave days from the facts. One valuer serves every leave day of a period, so the windows
+ * and the leave inside them are computed once.
+ *
+ * - `lessonHistory`: the counted lessons (loadCountedLessons) with lesson_date and payout_amount.
+ * - `attendanceRecords`: office hours (other_minutes), priced at the dated hourly rate.
+ * - `leaveDays`: the approved leave days of the history, for the days worked and for the paid leave
+ *   inside a window.
+ * - `leavePayPolicyOn(date)`: the leave-pay policy in force on a date; without it `leavePayPolicy`.
+ *
+ * detailOf(date) returns { value, method, basis }: value is one full leave day in agorot; basis
+ * (for "legal") gives the window, its wage base, the divisor and the work-week days.
+ */
+export function createLeaveDayValuer({
   employee,
-  targetDate,
   lessonHistory = [],
   attendanceRecords = [],
+  leaveDays = [],
   leavePayPolicy = DEFAULT_LEAVE_PAY_POLICY,
+  leavePayPolicyOn = null,
   rateRows = [],
-}) {
-  const method = resolveLeavePayMethod(employee, leavePayPolicy);
-  const targetKey = localDateKey(targetDate);
+} = {}) {
   const employeeId = employee?.id || null;
+  const policyOn = (dateKey) => (typeof leavePayPolicyOn === 'function' ? leavePayPolicyOn(dateKey) : null)
+    || leavePayPolicy
+    || DEFAULT_LEAVE_PAY_POLICY;
+  const lessons = (lessonHistory || [])
+    .filter((row) => row && row.counted !== false)
+    .map((row) => ({ ...row, counted: true, lesson_date: localDateKey(row.lesson_date || row.datetime_start) }))
+    .filter((row) => row.lesson_date);
+  const pricedAttendance = priceAttendanceRecords(attendanceRecords, rateRows, employeeId);
+  const paidLeave = (leaveDays || [])
+    .filter((day) => PAID_LEAVE_TYPES.has(leaveTypeOf(day)) && Number(day?.pay_fraction) > 0)
+    .map((day) => ({ date: localDateKey(day.leave_date), fraction: Number(day.pay_fraction) }))
+    .filter((day) => day.date);
+  const workedDates = collectWorkedDates({ lessons, attendanceRecords, leaveDays });
+  let averageRecords = null;
+  const memo = new Map();
+  const monthMemo = new Map();
 
-  if (method === 'fixed_rate') {
-    // The fixed leave-day value is a dated rate (pay_basis leave_day); without one, the farm default applies.
-    const leaveDayRate = resolveRateOnDate(rateRows, { employeeId, payBasis: PAY_BASIS.LEAVE_DAY, date: targetKey });
-    if (leaveDayRate) {
-      return leaveDayRate.rate;
-    }
-    return coerceAgorot(leavePayPolicy.fixed_rate_default);
+  // The pay of one calendar month as the monthly summary computes it: lesson pay, office hours
+  // (rounded once for the month) and paid leave (each day rounded). Leave is valued at `leaveDepth`.
+  function monthWageBase(monthKey, leaveDepth) {
+    const key = `${monthKey}|${leaveDepth}`;
+    if (monthMemo.has(key)) return monthMemo.get(key);
+    const inMonth = (dateKey) => monthKeyOfDateKey(dateKey) === monthKey;
+    const lessonAmount = lessons
+      .filter((row) => inMonth(row.lesson_date))
+      .reduce((sum, row) => sum + coerceAgorot(row.payout_amount), 0);
+    const attendanceAmount = coerceAgorot(pricedAttendance
+      .filter((row) => inMonth(row.attendance_date))
+      .reduce((sum, row) => sum + row.amount, 0));
+    const leaveAmount = leaveDepth > LEGAL_LEAVE_MAX_DEPTH
+      ? 0
+      : paidLeave
+        .filter((day) => inMonth(day.date))
+        .reduce((sum, day) => sum + coerceAgorot(detailOf(day.date, leaveDepth).value * day.fraction), 0);
+    const total = coerceAgorot(lessonAmount + attendanceAmount + leaveAmount);
+    monthMemo.set(key, total);
+    return total;
   }
 
-  // A salaried employee's leave day is worth a day of salary. This follows the rate, not the label
-  // on the employee, so someone who is salaried and also teaches is still valued as salaried here.
-  if (hasRateKind(rateRows, { employeeId, payBasis: PAY_BASIS.MONTHLY_SALARY, onOrBefore: targetKey })) {
-    const monthStart = firstDayOfMonth(localDateKey(targetDate));
-    const monthEnd = lastDayOfMonth(localDateKey(targetDate));
-    const workingDays = countWorkingDaysInRange(resolveEmployeeWorkingDays(employee), monthStart, monthEnd);
-    const monthlySalary = resolveRateOnDate(rateRows, { employeeId, payBasis: PAY_BASIS.MONTHLY_SALARY, date: targetKey })?.rate ?? 0;
-    if (monthlySalary > 0 && workingDays > 0) {
+  function legalDetail(targetKey, depth) {
+    const chosen = chooseLegalLeaveWindow(legalLeaveWindows(targetKey), workedDates);
+    if (!chosen) return { value: 0, method: 'legal', basis: null };
+    const wageBase = Array.from({ length: LEGAL_LEAVE_WINDOW_MONTHS }, (_, index) => (
+      monthKeyOfDateKey(addMonths(chosen.start, index))
+    )).reduce((sum, monthKey) => sum + monthWageBase(monthKey, depth + 1), 0);
+    const divisor = legalLeaveDivisor(employee, chosen);
+    const weekDays = workWeekDays(employee?.working_days);
+    return {
+      value: legalLeaveDayValue({ wageBase, divisor, weekDays }),
+      method: 'legal',
+      basis: {
+        start_month: chosen.start_month,
+        end_month: chosen.end_month,
+        worked_days: chosen.worked_days,
+        wage_base: coerceAgorot(wageBase),
+        divisor,
+        week_days: weekDays,
+      },
+    };
+  }
+
+  function computeDetail(targetKey, depth) {
+    const policy = policyOn(targetKey);
+    const method = resolveLeavePayMethod(employee, policy);
+
+    if (method === 'fixed_rate') {
+      // The fixed leave-day value is a dated rate (pay_basis leave_day); without one, the farm default applies.
+      const leaveDayRate = resolveRateOnDate(rateRows, { employeeId, payBasis: PAY_BASIS.LEAVE_DAY, date: targetKey });
+      return { value: leaveDayRate ? leaveDayRate.rate : coerceAgorot(policy.fixed_rate_default), method, basis: null };
+    }
+
+    // A salaried employee's leave day is worth a day of salary. This follows the rate, not the label
+    // on the employee, so someone who is salaried and also teaches is still valued as salaried here.
+    // combinePayComponents adds no leave on top of a salary: the salary keeps running during leave.
+    if (hasRateKind(rateRows, { employeeId, payBasis: PAY_BASIS.MONTHLY_SALARY, onOrBefore: targetKey })) {
+      const workingDays = countWorkingDaysInRange(resolveEmployeeWorkingDays(employee), firstDayOfMonth(targetKey), lastDayOfMonth(targetKey));
+      const monthlySalary = resolveRateOnDate(rateRows, { employeeId, payBasis: PAY_BASIS.MONTHLY_SALARY, date: targetKey })?.rate ?? 0;
       // Both values are in agorot — round to nearest agora for per-day rate
-      return Math.round(monthlySalary / workingDays);
+      const value = monthlySalary > 0 && workingDays > 0 ? Math.round(monthlySalary / workingDays) : 0;
+      return { value, method: 'monthly_salary', basis: null };
     }
-    return 0;
+
+    if (method === 'legal') {
+      return legalDetail(targetKey, depth);
+    }
+
+    // "ממוצע היסטורי": the average pay of a worked day over the policy's lookback months.
+    if (!averageRecords) {
+      averageRecords = [
+        ...(lessonHistory || []).map((row) => ({
+          date: row.lesson_date || row.created_at || row.datetime_start,
+          amount: row.payout_amount,
+          hours: row.duration_minutes ? Number(row.duration_minutes) / 60 : 0,
+        })),
+        // Attendance records hold only work that is not a lesson, so nothing is counted twice.
+        ...pricedAttendance.map((row) => ({
+          date: row.attendance_date,
+          amount: Math.round(row.amount),
+          hours: row.other_minutes ? row.other_minutes / 60 : 0,
+        })),
+      ];
+    }
+    return {
+      value: Math.round(computeAverageDayValue(averageRecords, targetKey, policy.lookback_months || 3)),
+      method,
+      basis: null,
+    };
   }
 
-  const historicalRecords = [
-    ...(lessonHistory || []).map((row) => ({
-      date: row.lesson_date || row.created_at || row.datetime_start,
-      amount: row.payout_amount,
-      hours: row.duration_minutes ? Number(row.duration_minutes) / 60 : 0,
-    })),
-    // Attendance records hold only work that is not a lesson, so nothing is counted twice.
-    ...(attendanceRecords || []).map((row) => {
-      const hourlyRate = resolveRateOnDate(rateRows, {
-        employeeId,
-        payBasis: PAY_BASIS.ATTENDANCE_HOURLY,
-        date: localDateKey(row.attendance_date),
-      });
-      const otherMinutes = Math.max(0, Number(row?.other_minutes) || 0);
-      return {
-        date: row.attendance_date,
-        amount: otherMinutes && hourlyRate
-          ? Math.round((otherMinutes / 60) * hourlyRate.rate)
-          : 0,
-        hours: otherMinutes ? otherMinutes / 60 : 0,
-      };
-    }),
-  ];
-
-  const baseValue = computeAverageDayValue(historicalRecords, targetDate, leavePayPolicy.lookback_months || 3);
-  if (method !== 'legal' || !leavePayPolicy.legal_allow_12m_if_better) {
-    return Math.round(baseValue);
+  function detailOf(targetDate, depth = 0) {
+    const targetKey = localDateKey(targetDate);
+    if (!targetKey) return { value: 0, method: null, basis: null };
+    const key = `${targetKey}|${depth}`;
+    if (!memo.has(key)) memo.set(key, computeDetail(targetKey, depth));
+    return memo.get(key);
   }
 
-  const twelveMonth = computeAverageDayValue(historicalRecords, targetDate, 12);
-  return Math.round(Math.max(baseValue, twelveMonth));
+  return { detailOf, valueOf: (targetDate) => detailOf(targetDate).value };
+}
+
+/** The value of one full leave day on `targetDate`, with how it was found (see createLeaveDayValuer). */
+export function resolveLeaveDayDetail({ targetDate, ...facts }) {
+  return createLeaveDayValuer(facts).detailOf(targetDate);
+}
+
+/** The value of one full leave day on `targetDate`, in agorot (see createLeaveDayValuer). */
+export function resolveLeaveDayValue(params) {
+  return resolveLeaveDayDetail(params).value;
 }
 
 /**

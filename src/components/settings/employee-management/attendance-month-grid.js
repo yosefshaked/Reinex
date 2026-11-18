@@ -325,12 +325,9 @@ function payPolicyMonths(orgPolicy) {
   return Number.isFinite(months) && months > 0 ? Math.round(months) : 3;
 }
 
-// The organisation's default method as the screen names it ("legal" without the 12-month
-// comparison calculates like the historic average).
+// The organisation's default method as the screen names it.
 function orgPayMethod(orgPolicy) {
-  const method = String(orgPolicy?.default_method || 'legal');
-  if (method === 'legal' && orgPolicy?.legal_allow_12m_if_better === false) return 'avg_hourly_x_avg_day_hours';
-  return method;
+  return String(orgPolicy?.default_method || 'legal');
 }
 
 function payMethodLabel(method) {
@@ -341,11 +338,7 @@ function payMethodLabel(method) {
 export function describeEmployeeLeavePayChoice(method, orgPolicy) {
   const months = payPolicyMonths(orgPolicy);
   const period = months === 1 ? 'בחודש האחרון' : `ב-${months} החודשים האחרונים`;
-  if (method === 'legal') {
-    return orgPolicy?.legal_allow_12m_if_better === false
-      ? `השכר היומי הממוצע בימים שעבד/ה ${period}.`
-      : `השכר היומי הממוצע בימים שעבד/ה ${period}, או ב-12 החודשים האחרונים אם שם הממוצע גבוה יותר.`;
-  }
+  if (method === 'legal') return 'השכר של 3 החודשים האחרונים (או 3 החודשים המלאים ביותר בשנה האחרונה), לפי ימים קלנדריים.';
   if (method === 'avg_hourly_x_avg_day_hours') return `השכר היומי הממוצע בימים שעבד/ה ${period} בלבד.`;
   if (method === 'fixed_rate') return 'סכום קבוע ליום חופשה, מהתאריך שנקבע לו.';
   return `כמו שאר העובדים בארגון. כרגע: "${payMethodLabel(orgPayMethod(orgPolicy))}".`;

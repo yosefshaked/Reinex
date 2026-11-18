@@ -26,6 +26,7 @@ import {
   describeLeavePayMethod,
   isLeavePayDraftChanged,
   readLeavePayPolicy,
+  usesLookbackMonths,
 } from '@/features/finance/lib/leave-pay-policy.js';
 import {
   LEAVE_SETTING_LABELS,
@@ -305,21 +306,24 @@ export default function LeaveDefaultSettings({ session, orgId, canEdit, onClose 
               description={describeLeavePayMethod(option.value, { lookbackMonths: draftMonths })}
             />
           ))}
-          <div className="flex flex-wrap items-center gap-3 pt-1">
-            <Label htmlFor="leave-pay-lookback-months" className="text-sm font-semibold text-slate-700">מספר חודשים לממוצע</Label>
-            <Input
-              id="leave-pay-lookback-months"
-              type="number"
-              inputMode="numeric"
-              min={LOOKBACK_MONTHS_MIN}
-              max={LOOKBACK_MONTHS_MAX}
-              step={1}
-              className="w-20"
-              value={payDraft.lookbackMonths}
-              onChange={(event) => setPayDraft((current) => ({ ...current, lookbackMonths: event.target.value }))}
-              disabled={disabled}
-            />
-          </div>
+          {/* Only "ממוצע היסטורי" uses a number of months; "ממוצע מומלץ" always looks at 3 months. */}
+          {usesLookbackMonths(payDraft.method) ? (
+            <div className="flex flex-wrap items-center gap-3 pt-1">
+              <Label htmlFor="leave-pay-lookback-months" className="text-sm font-semibold text-slate-700">מספר חודשים לממוצע</Label>
+              <Input
+                id="leave-pay-lookback-months"
+                type="number"
+                inputMode="numeric"
+                min={LOOKBACK_MONTHS_MIN}
+                max={LOOKBACK_MONTHS_MAX}
+                step={1}
+                className="w-20"
+                value={payDraft.lookbackMonths}
+                onChange={(event) => setPayDraft((current) => ({ ...current, lookbackMonths: event.target.value }))}
+                disabled={disabled}
+              />
+            </div>
+          ) : null}
         </fieldset>
       </StepReveal>
 

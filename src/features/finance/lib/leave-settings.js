@@ -17,6 +17,7 @@ import {
   getLeavePayMethodLabel,
   isLeavePayDraftChanged,
   readLeavePayPolicy,
+  usesLookbackMonths,
   validateLeavePayDraft,
 } from './leave-pay-policy.js';
 
@@ -28,7 +29,9 @@ export const LEAVE_SETTING_LABELS = Object.freeze({
 /** One stored leave-pay version in a few words, for the history list. */
 export function describeLeavePayVersion(version) {
   const policy = readLeavePayPolicy(version?.settings_value);
-  return `${getLeavePayMethodLabel(getEffectiveDefaultMethod(policy))} · ${policy.lookback_months} חודשים`;
+  const method = getEffectiveDefaultMethod(policy);
+  const label = getLeavePayMethodLabel(method);
+  return usesLookbackMonths(method) ? `${label} · ${policy.lookback_months} חודשים` : label;
 }
 
 export { describeEntitlementVersion };

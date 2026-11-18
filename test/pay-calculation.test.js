@@ -519,8 +519,8 @@ describe('policies read as of the date they apply to (dated settings)', () => {
     });
     const tables = baseTables({
       SettingsHistory: [
-        leavePolicy('l-start', '2000-01-01', { default_method: 'fixed_rate', lookback_months: 3, legal_allow_12m_if_better: true, fixed_rate_default: 30000 }),
-        leavePolicy('l-nov', '2026-11-15', { default_method: 'legal', lookback_months: 3, legal_allow_12m_if_better: true, fixed_rate_default: 0 }),
+        leavePolicy('l-start', '2000-01-01', { default_method: 'fixed_rate', lookback_months: 3, fixed_rate_default: 30000 }),
+        leavePolicy('l-nov', '2026-11-15', { default_method: 'legal', lookback_months: 3, fixed_rate_default: 0 }),
       ],
       // One worked day in the months before: 20.10, one hour at 120 ₪.
       lesson_instances: [lesson('oct', 'dana', '2026-10-20T08:00:00Z')],
@@ -535,8 +535,10 @@ describe('policies read as of the date they apply to (dated settings)', () => {
     const november = await payFor(tables, '2026-11-01', '2026-11-30', { includeDetails: true });
     const byDate = Object.fromEntries(november.details.leave.map((row) => [row.leave_date, row.amount]));
     assert.equal(byDate['2026-11-10'], 30000, 'the fixed value in force on 10.11');
-    assert.equal(byDate['2026-11-20'], 12000, 'the legal average in force on 20.11');
-    assert.equal(november.paid_leave_amount, 42000);
+    // 20.11 is legal: the window is 08–10.2026 (the only worked day is 20.10, 120 ₪), no start_date so ÷ 90:
+    // 12000 ÷ 90 × 7 / 5 = 186.67 → 187 agorot. The fixed day on 10.11 is in November, outside the window.
+    assert.equal(byDate['2026-11-20'], 187, 'the legal value in force on 20.11');
+    assert.equal(november.paid_leave_amount, 30187);
     assert.equal(november.leave_breakdown.paid_days, 2);
     assert.equal(november.leave_breakdown.day_value, null, 'the two days are worth different amounts, so no single day value');
   });
@@ -548,6 +550,59 @@ describe('policies read as of the date they apply to (dated settings)', () => {
     ]);
     assert.deepEqual(same, { days: 1.5, dayValue: 30000 });
     assert.equal(summarizePaidLeave([{ pay_fraction: 1, amount: 30000 }, { pay_fraction: 1, amount: 12000 }]).dayValue, null);
+  });
+});
+
+describe('PAY-G1 the "ממוצע מומלץ" leave value through the monthly pay', () => {
+  const GAL_RATES = [rateRow('gal-office', 'gal', null, PAY_BASIS.ATTENDANCE_HOURLY, 10000, '2025-01-01')];
+  const office = (date, minutes) => ({ id: `att-${date}`, org_id: ORG, employee_id: 'gal', attendance_date: date, other_minutes: minutes });
+  const leaveDay = (id, date, fraction, leaveType = 'employee_paid') => ({
+    id, org_id: ORG, leave_entry_id: `entry-${id}`, employee_id: 'gal', leave_date: date,
+    day_portion: fraction < 1 ? 'first_half' : 'full_day', leave_type: leaveType, balance_days_delta: -fraction, pay_fraction: fraction,
+  });
+  const entry = (id) => ({ id: `entry-${id}`, org_id: ORG, employee_id: 'gal', status: 'approved' });
+  const payFor = (tables) => computeEmployeePay(createFakeClient(tables), ORG, {
+    employee: { id: 'gal', working_days: [0, 1, 2, 3, 4] }, startDate: '2026-10-01', endDate: '2026-10-31',
+    policies: POLICIES, rateRows: GAL_RATES, now: new Date('2026-11-05T12:00:00Z'), includeDetails: true,
+  });
+
+  it('values October leave by 07–09 (with the paid leave day inside), a full day and a half day', async () => {
+    // 07–09.2026: 18 days × 5 h × ₪100 a month = ₪27,000. 25.8 is a paid leave day: its own window
+    // 05–07 holds ₪9,000 → 900,000 ÷ 90 × 7 ÷ 5 = 14,000. October's base: 2,714,000 ÷ 90 × 7 ÷ 5
+    // = 42,217.78 → 42,218 a day; 14.10 full = 42,218, 15.10 half = 21,109; total 63,327.
+    // October's own office hours are paid as hours and are not part of the October leave value.
+    const attendance = ['2026-07', '2026-08', '2026-09'].flatMap((month) => Array.from({ length: 18 }, (_, index) => (
+      office(`${month}-${String(index + 1).padStart(2, '0')}`, 300)
+    )));
+    const pay = await payFor(baseTables({
+      employee_attendance_records: [...attendance, office('2026-10-05', 600)],
+      employee_leave_days: [leaveDay('aug', '2026-08-25', 1), leaveDay('full', '2026-10-14', 1), leaveDay('half', '2026-10-15', 0.5)],
+      employee_leave_entries: [entry('aug'), entry('full'), entry('half')],
+    }));
+    const byDate = Object.fromEntries(pay.details.leave.map((row) => [row.leave_date, row]));
+    assert.equal(byDate['2026-10-14'].amount, 42218);
+    assert.equal(byDate['2026-10-15'].amount, 21109);
+    assert.equal(pay.paid_leave_amount, 63327);
+    assert.equal(pay.attendance_amount, 100000, 'October: 10 h × ₪100');
+    assert.equal(pay.total_amount, 163327);
+    assert.deepEqual(pay.leave_breakdown.paid_days, 1.5);
+    assert.equal(pay.leave_breakdown.day_value, 42218);
+    assert.deepEqual(byDate['2026-10-14'].basis, {
+      start_month: '2026-07', end_month: '2026-09', worked_days: 55, wage_base: 2714000, divisor: 90, week_days: 5,
+    });
+    assert.equal(byDate['2026-10-14'].day_value, 42218);
+  });
+
+  it('with no pay before the leave the day is worth 0 and the leave is still listed', async () => {
+    const pay = await payFor(baseTables({
+      employee_leave_days: [leaveDay('only', '2026-10-14', 1)],
+      employee_leave_entries: [entry('only')],
+    }));
+    assert.equal(pay.paid_leave_amount, 0);
+    assert.equal(pay.leave_breakdown.paid_days, 1);
+    assert.equal(pay.details.leave.length, 1);
+    assert.equal(pay.details.leave[0].amount, 0);
+    assert.equal(pay.details.leave[0].basis.wage_base, 0);
   });
 });
 

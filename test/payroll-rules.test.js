@@ -8,11 +8,15 @@ import { describe, it } from 'node:test';
 
 import {
   DEFAULT_INSTRUCTOR_EARNINGS_POLICY,
+  LEGAL_LEAVE_MAX_DEPTH,
   buildFinancePolicies,
   buildLeaveDayRows,
   combinePayComponents,
   describeMissingLessonRate,
+  legalLeaveDivisor,
+  legalLeaveHistoryStart,
   resolveCompensationEligibleParticipants,
+  resolveLeaveDayDetail,
   resolveLeaveDayValue,
   resolveLessonInstructorPayout,
 } from '../api/_shared/employee-finance.js';
@@ -294,17 +298,21 @@ describe('PAY-E hours', () => {
     const rateRows = [rateRow('dana-office', 'dana', null, PAY_BASIS.ATTENDANCE_HOURLY, 6000, '2026-01-01')];
     const lessonHistory = [{ lesson_date: '2026-09-10', payout_amount: 30000, duration_minutes: 120 }];
     const officeOnly = resolveLeaveDayValue({
-      employee, targetDate: '2026-09-20', lessonHistory: [], rateRows,
+      employee, targetDate: '2026-10-20', lessonHistory: [], rateRows,
       attendanceRecords: [{ attendance_date: '2026-09-10', source_type: 'manual', other_minutes: 90 }],
     });
     const mixedDay = resolveLeaveDayValue({
-      employee, targetDate: '2026-09-20', lessonHistory, rateRows,
+      employee, targetDate: '2026-10-20', lessonHistory, rateRows,
       attendanceRecords: [{ attendance_date: '2026-09-10', source_type: 'manual', other_minutes: 90 }],
     });
     const lessonsOnly = resolveLeaveDayValue({
-      employee, targetDate: '2026-09-20', lessonHistory, attendanceRecords: [], rateRows,
+      employee, targetDate: '2026-10-20', lessonHistory, attendanceRecords: [], rateRows,
     });
-    assert.ok(officeOnly > 0, 'the 90 office minutes are paid by the hour');
+    // Leave on 20.10 looks at 07–09.2026. Office: 90 min × 60 ₪ = ₪90 → 9000 ÷ 90 × 7 / 5 = 140;
+    // lessons: 30000 → 467; both: 39000 → 607.
+    assert.equal(officeOnly, 140, 'the 90 office minutes are paid by the hour');
+    assert.equal(mixedDay, 607);
+    assert.equal(lessonsOnly, 467);
     assert.ok(mixedDay > lessonsOnly, 'office work is added on top of the lesson pay');
   });
 
@@ -319,10 +327,10 @@ describe('PAY-E hours', () => {
     }];
 
     const withAttendance = resolveLeaveDayValue({
-      employee, targetDate: '2026-09-20', lessonHistory, attendanceRecords, rateRows,
+      employee, targetDate: '2026-10-20', lessonHistory, attendanceRecords, rateRows,
     });
     const lessonsOnly = resolveLeaveDayValue({
-      employee, targetDate: '2026-09-20', lessonHistory, attendanceRecords: [], rateRows,
+      employee, targetDate: '2026-10-20', lessonHistory, attendanceRecords: [], rateRows,
     });
 
     assert.equal(withAttendance, lessonsOnly, 'a day record with no other work adds nothing on top of the lesson');
@@ -358,10 +366,159 @@ describe('PAY-G annual leave', () => {
     assert.equal(resolveLeaveDayValue({ employee, targetDate: '2026-10-10', rateRows }), 28000);
   });
 
-  // Today's "legal" method averages over *worked* days; the law is 3 months' gross ÷ 90 (see the spec).
-  it.todo('PAY-G1 hourly / per-lesson leave day = gross wages of the last 3 months ÷ 90, leave days counted including weekends');
-  it.todo('PAY-G1 if the last 3 months were not full, the fullest 3 consecutive months of the last 12 are used');
-  it.todo('PAY-G1 monthly-salary employees keep their regular salary during leave');
+  // "ממוצע מומלץ" (method 'legal'), Annual Leave Law section 10. One NET leave day =
+  // (wage base of the chosen 3 months ÷ 90) × 7 ÷ W, W = 6 for a six-day week, else 5.
+  describe('PAY-G1 the legal leave-day value', () => {
+    const OFFICE_100 = [rateRow('gal-office', 'gal', null, PAY_BASIS.ATTENDANCE_HOURLY, 10000, '2025-01-01')];
+    // `count` office days from the 1st of `month`, `minutes` each.
+    const officeDays = (month, count, minutes) => Array.from({ length: count }, (_, index) => ({
+      attendance_date: `${month}-${String(index + 1).padStart(2, '0')}`,
+      other_minutes: minutes,
+    }));
+    // July, August and September 2026: 18 days × 5 hours × ₪100 = ₪9,000 a month, ₪27,000 in all.
+    const FULL_QUARTER = [...officeDays('2026-07', 18, 300), ...officeDays('2026-08', 18, 300), ...officeDays('2026-09', 18, 300)];
+    const gal = { id: 'gal', leave_pay_method: 'legal' };
+    const valueOf = (facts) => resolveLeaveDayDetail({ employee: gal, targetDate: '2026-10-15', rateRows: OFFICE_100, ...facts });
+
+    it('(a) a full quarter of hourly pay: ₪27,000 ÷ 90 × 7/5 = ₪420.00 a day; a six-day week ₪350.00', () => {
+      const detail = valueOf({ attendanceRecords: FULL_QUARTER });
+      // 2,700,000 agorot ÷ 90 = 30,000 a calendar day; × 7 ÷ 5 = 42,000.
+      assert.equal(detail.value, 42000);
+      assert.deepEqual(detail.basis, {
+        start_month: '2026-07', end_month: '2026-09', worked_days: 54, wage_base: 2700000, divisor: 90, week_days: 5,
+      });
+      // Six working days (Sunday to Friday): 30,000 × 7 ÷ 6 = 35,000.
+      const sixDays = valueOf({ employee: { ...gal, working_days: [0, 1, 2, 3, 4, 5] }, attendanceRecords: FULL_QUARTER });
+      assert.equal(sixDays.value, 35000);
+      assert.equal(sixDays.basis.week_days, 6);
+      // Every day of October has the same value: the window follows the leave month, not the day.
+      assert.equal(valueOf({ targetDate: '2026-10-01', attendanceRecords: FULL_QUARTER }).value, 42000);
+      assert.equal(valueOf({ targetDate: '2026-10-31', attendanceRecords: FULL_QUARTER }).value, 42000);
+    });
+
+    it('(b) the last quarter is not full and an earlier one of the last 12 months has more days: the earlier one is used', () => {
+      // 07–09.2026: 5 days × 8 h × ₪100 = ₪4,000. 02–04.2026: 20 days a month × 5 h × ₪100 = ₪30,000 (60 days).
+      const attendanceRecords = [
+        ...officeDays('2026-09', 5, 480),
+        ...officeDays('2026-02', 20, 300), ...officeDays('2026-03', 20, 300), ...officeDays('2026-04', 20, 300),
+      ];
+      const detail = valueOf({ attendanceRecords });
+      // 3,000,000 ÷ 90 × 7 ÷ 5 = 46,666.67 → 46,667.
+      assert.equal(detail.value, 46667);
+      assert.equal(detail.basis.start_month, '2026-02');
+      assert.equal(detail.basis.end_month, '2026-04');
+      assert.equal(detail.basis.worked_days, 60);
+      // A quarter older than 12 months is never used: 02–04.2025 is out of reach for a leave in 10.2026.
+      const tooOld = valueOf({ attendanceRecords: [...officeDays('2026-09', 5, 480), ...officeDays('2025-03', 28, 300)] });
+      assert.equal(tooOld.basis.end_month, '2026-09');
+      // 400,000 ÷ 90 × 7 ÷ 5 = 6,222.22 → 6,222.
+      assert.equal(tooOld.value, 6222);
+    });
+
+    it('(c) a tie in days worked goes to the more recent quarter', () => {
+      // 07–09.2026: 10 days a month × 6 h × ₪100 = ₪18,000 (30 days). 01–03.2026: 10 days a month × 8 h = ₪24,000 (30 days).
+      const attendanceRecords = [
+        ...officeDays('2026-07', 10, 360), ...officeDays('2026-08', 10, 360), ...officeDays('2026-09', 10, 360),
+        ...officeDays('2026-01', 10, 480), ...officeDays('2026-02', 10, 480), ...officeDays('2026-03', 10, 480),
+      ];
+      const detail = valueOf({ attendanceRecords });
+      assert.equal(detail.basis.start_month, '2026-07');
+      // 1,800,000 ÷ 90 × 7 ÷ 5 = 28,000 (the older, better-paid quarter would give 37,333).
+      assert.equal(detail.value, 28000);
+    });
+
+    it('(d) a new employee is divided by the calendar days employed in the window, not by 90', () => {
+      // Started 22.8.2026: 22.8–30.9 is 10 + 30 = 40 days. 20 days × 6 h × ₪100 = ₪12,000.
+      const attendanceRecords = officeDays('2026-09', 20, 360);
+      const detail = valueOf({ employee: { ...gal, start_date: '2026-08-22' }, attendanceRecords });
+      // 1,200,000 ÷ 40 = 30,000 a calendar day; × 7 ÷ 5 = 42,000.
+      assert.equal(detail.basis.divisor, 40);
+      assert.equal(detail.value, 42000);
+      // Assumption: no start_date → ÷ 90. 1,200,000 ÷ 90 × 7 ÷ 5 = 18,666.67 → 18,667.
+      assert.equal(valueOf({ attendanceRecords }).value, 18667);
+      // Employed since before the window: ÷ 90 too.
+      assert.equal(valueOf({ employee: { ...gal, start_date: '2020-01-01' }, attendanceRecords }).basis.divisor, 90);
+      assert.equal(legalLeaveDivisor({ start_date: '2026-07-02' }, { start: '2026-07-01', end: '2026-09-30' }), 90, 'never more than 90');
+    });
+
+    it('(e) a per-lesson instructor: lesson pay is the wage base', () => {
+      // Tal is paid ₪150 a lesson (lesson_flat): 20 lessons a month in 07–09.2026 → 60 × ₪150 = ₪9,000.
+      const rows = [rateRow('tal-flat', 'tal', 'riding', PAY_BASIS.LESSON_FLAT, 15000, '2026-01-01')];
+      const lessonHistory = ['2026-07', '2026-08', '2026-09'].flatMap((month) => Array.from({ length: 20 }, (_, index) => {
+        const date = `${month}-${String(index + 1).padStart(2, '0')}`;
+        return { lesson_date: date, counted: true, payout_amount: lessonPay({ employeeId: 'tal', date, rows }) };
+      }));
+      assert.equal(lessonHistory[0].payout_amount, 15000);
+      const detail = resolveLeaveDayDetail({ employee: { id: 'tal' }, targetDate: '2026-10-15', lessonHistory, rateRows: rows });
+      // The organisation default is "legal". 900,000 ÷ 90 × 7 ÷ 5 = 14,000.
+      assert.equal(detail.method, 'legal');
+      assert.equal(detail.basis.wage_base, 900000);
+      assert.equal(detail.value, 14000);
+    });
+
+    it('(f) a paid leave day inside the window adds its own value to the wage base, once', () => {
+      // 25.8.2026 is a paid leave day (no work that day). Its value: 08.2026 looks at 05–07.2026, which
+      // holds only July's ₪9,000: 900,000 ÷ 90 × 7 ÷ 5 = 14,000.
+      const leaveDays = [{ leave_date: '2026-08-25', leave_type: 'employee_paid', pay_fraction: 1 }];
+      const august = valueOf({ targetDate: '2026-08-25', attendanceRecords: FULL_QUARTER, leaveDays });
+      assert.equal(august.value, 14000);
+      assert.equal(august.basis.end_month, '2026-07');
+      // October: 2,700,000 + 14,000 = 2,714,000 ÷ 90 × 7 ÷ 5 = 42,217.78 → 42,218 (54 + 1 days worked).
+      const october = valueOf({ attendanceRecords: FULL_QUARTER, leaveDays });
+      assert.equal(october.basis.wage_base, 2714000);
+      assert.equal(october.basis.worked_days, 55);
+      assert.equal(october.value, 42218);
+      // Unpaid leave adds nothing and is not a day worked.
+      const unpaid = valueOf({ attendanceRecords: FULL_QUARTER, leaveDays: [{ leave_date: '2026-08-25', leave_type: 'unpaid', pay_fraction: 0 }] });
+      assert.equal(unpaid.value, 42000);
+      assert.equal(unpaid.basis.worked_days, 54);
+    });
+
+    it('(f) leave inside a window is followed back at most LEGAL_LEAVE_MAX_DEPTH windows, and history is read that far', () => {
+      assert.equal(LEGAL_LEAVE_MAX_DEPTH, 2);
+      // October 2026 leave → 03.2026 leave (within its 12 months) → 06.2025 leave → its window starts 06.2024.
+      const history = [
+        { leave_date: '2026-03-10', leave_type: 'employee_paid', pay_fraction: 1 },
+        { leave_date: '2025-06-10', leave_type: 'system_paid', pay_fraction: 1 },
+        { leave_date: '2025-09-10', leave_type: 'unpaid', pay_fraction: 0 },
+      ];
+      assert.equal(legalLeaveHistoryStart(['2026-10-15'], history), '2024-06-01');
+      assert.equal(legalLeaveHistoryStart(['2026-10-15'], []), '2025-10-01');
+      assert.equal(legalLeaveHistoryStart([], history), '');
+    });
+
+    it('(g) a monthly salary is unchanged: the salary keeps running and no leave pay is added', () => {
+      const rows = [rateRow('gal-salary', 'gal', null, PAY_BASIS.MONTHLY_SALARY, 1000000, '2026-01-01'), ...OFFICE_100];
+      const detail = resolveLeaveDayDetail({ employee: gal, targetDate: '2026-10-15', rateRows: rows, attendanceRecords: FULL_QUARTER });
+      assert.equal(detail.method, 'monthly_salary', 'a salary is not valued by the 3-month rule');
+      assert.equal(detail.basis, null);
+      const pay = combinePayComponents({ monthlySalaryAmount: 1000000, paidLeaveTotal: detail.value, paysMonthlySalary: true });
+      assert.equal(pay.paidLeaveAmount, 0);
+      assert.equal(pay.totalAmount, 1000000);
+    });
+
+    it('(h) a half day is half the day value', () => {
+      const [halfDay] = buildLeaveDayRows({ employeeId: 'gal', leaveEntryId: 'l1', leaveType: 'employee_paid', startDate: '2026-10-15', endDate: '2026-10-15', durationMode: 'half_day' });
+      assert.equal(halfDay.pay_fraction, 0.5);
+      // 42,000 × 0.5 = 21,000 (computeEmployeePay multiplies the day value by pay_fraction).
+      assert.equal(valueOf({ attendanceRecords: FULL_QUARTER }).value * halfDay.pay_fraction, 21000);
+    });
+
+    it('(i) no pay in the last 12 months: the day is worth 0 and the summary still shows the leave row', () => {
+      const detail = valueOf({});
+      assert.equal(detail.value, 0);
+      assert.equal(detail.basis.wage_base, 0);
+      assert.equal(detail.basis.end_month, '2026-09', 'no days anywhere: the most recent quarter');
+      const { rows } = buildSummaryRows({
+        paid_leave_amount: 0, total_amount: 0,
+        leave_breakdown: { paid_days: 1, day_value: 0, paid_leave_total: 0 },
+      });
+      const leave = rows.find((row) => row.key === 'leave');
+      assert.ok(leave, 'the leave row is there');
+      assert.equal(leave.label, 'חופשה: יום אחד');
+      assert.equal(leave.amount, 0);
+    });
+  });
   it('PAY-G3 paid leave days are their own line in the monthly review: days x day value, with the total', () => {
     const { rows } = buildSummaryRows({
       lesson_amount: 10000, lesson_count: 1, attendance_amount: 5000, attendance_minutes: 60,
