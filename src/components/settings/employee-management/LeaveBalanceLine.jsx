@@ -22,7 +22,8 @@ import {
   balanceFormError,
   balanceQuantityError,
   buildBalanceEventBody,
-  defaultBalanceDate,
+  balanceEventDate,
+  balanceYearOptions,
   describeBalanceEvent,
   emptyBalanceForm,
   entitlementManualReason,
@@ -54,7 +55,10 @@ export default function LeaveBalanceLine({ summary, entitlement, balanceEvents, 
   const yearPrefix = `${summary.year}-`;
   const manualEvents = (balanceEvents || [])
     .filter((entry) => isManualBalanceEvent(entry) && String(entry.effective_date || '').startsWith(yearPrefix));
-  const effectiveDate = form.effectiveDate || defaultBalanceDate(summary.year, todayKey());
+  const today = todayKey();
+  const currentYear = Number(today.slice(0, 4));
+  const chosenYear = Number(form.year) || currentYear;
+  const effectiveDate = balanceEventDate(form.eventType, chosenYear, today);
   const formError = balanceFormError(form);
   const quantityError = balanceQuantityError(form);
   const actionHint = BALANCE_ACTIONS.find((option) => option.value === form.eventType)?.hint || '';
@@ -133,7 +137,7 @@ export default function LeaveBalanceLine({ summary, entitlement, balanceEvents, 
                 return (
                 <li key={entry.id} className="flex items-center justify-between gap-2 text-xs" data-balance-event>
                   <span>
-                    <bdi dir="rtl">{line.title}</bdi>
+                    <bdi dir="ltr">{line.title}</bdi>
                     {line.reason ? <span className="block text-slate-600">{line.reason}</span> : null}
                     {line.who ? <span className="block text-[11px] text-slate-500">{line.who}</span> : null}
                   </span>
@@ -160,8 +164,15 @@ export default function LeaveBalanceLine({ summary, entitlement, balanceEvents, 
               <Input id="balance-quantity" className="h-8" type="number" step="0.5" value={form.quantityDays} onChange={(event) => setForm((current) => ({ ...current, quantityDays: event.target.value }))} disabled={saving} aria-invalid={quantityError ? true : undefined} aria-describedby={quantityError ? 'balance-quantity-error' : undefined} />
             </div>
             <div className="space-y-1">
-              <Label htmlFor="balance-date" className="text-xs text-slate-600">תאריך</Label>
-              <Input id="balance-date" className="h-8" type="date" value={effectiveDate} onChange={(event) => setForm((current) => ({ ...current, effectiveDate: event.target.value }))} disabled={saving} />
+              <Label htmlFor="balance-year" className="text-xs text-slate-600">לשנת</Label>
+              <Select value={String(chosenYear)} onValueChange={(value) => setForm((current) => ({ ...current, year: value }))} disabled={saving}>
+                <SelectTrigger id="balance-year" className="h-8"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {balanceYearOptions(today).map((year) => (
+                    <SelectItem key={year} value={String(year)}>{year}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div className="space-y-1">
               <Label htmlFor="balance-reason" className="text-xs text-slate-600">סיבה (חובה)</Label>

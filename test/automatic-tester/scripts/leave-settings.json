@@ -562,12 +562,12 @@
         },
         { "id": "open-balance-change", "action": "click", "selector": "button:has-text('שינוי יתרה')" },
         {
-          "id": "assert-balance-date-defaults-to-today",
-          "description": "The date of a new balance change starts as today, not 1 January",
+          "id": "assert-balance-year-defaults-to-this-year",
+          "description": "A balance change is for a year (last, this or next), this year by default; there is no date field",
           "action": "assert",
-          "type": "value",
-          "selector": "#balance-date",
-          "value": "{{TODAY}}"
+          "type": "text",
+          "selector": "#balance-year",
+          "value": "{{CURRENT_YEAR}}"
         },
         { "id": "fill-negative-carryover", "action": "fill", "selector": "#balance-quantity", "value": "-1" },
         {
@@ -599,7 +599,7 @@
           "id": "assert-history-shows-reason",
           "description": "The change is listed with its reason",
           "action": "waitForSelector",
-          "selector": "[data-balance-event]:has-text('מתאריך'):has-text('העברה מהשנה הקודמת'):has-text('מעבר מהמערכת הקודמת')"
+          "selector": "[data-balance-event]:has-text('העברה מהשנה הקודמת'):has-text('מעבר מהמערכת הקודמת')"
         },
         {
           "id": "assert-history-shows-who",

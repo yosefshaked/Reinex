@@ -208,6 +208,7 @@ function buildDynamicVars() {
     CURRENT_MONTH_FIRST_DAY: `${y}-${String(m + 1).padStart(2, '0')}-01`,
     // Today and the first day of next month in the org's zone, as date keys (dated settings).
     TODAY: todayKey(),
+    CURRENT_YEAR: todayKey().slice(0, 4),
     TODAY_DISPLAY: todayKey().split('-').reverse().join('.'),
     NEXT_MONTH_FIRST_DAY: addMonths(firstDayOfMonth(todayKey()), 1),
     RUN_ID:              `run-${runNumericId}`,

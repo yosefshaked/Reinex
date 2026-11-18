@@ -153,13 +153,22 @@ export function balanceEventLabel(value) {
 }
 
 export function emptyBalanceForm() {
-  return { eventType: 'carryover', quantityDays: '', effectiveDate: '', reason: '', notes: '' };
+  return { eventType: 'carryover', quantityDays: '', year: '', reason: '', notes: '' };
 }
 
-// The date a new balance change takes effect unless the office picks one: today, when today falls in
-// the year shown; otherwise 1 January of that year (the list only shows that year's changes).
-export function defaultBalanceDate(year, today) {
-  return String(today || '').startsWith(`${year}-`) ? today : `${year}-01-01`;
+// The years a balance change can be made for: last year, this year and next year.
+export function balanceYearOptions(today) {
+  const current = Number(String(today || '').slice(0, 4));
+  return [current - 1, current, current + 1];
+}
+
+// The date a balance change takes effect for the chosen year (the balance is grouped by the year of
+// this date): a carry-over is from 1 January; an add-or-remove is today in the current year, and
+// 1 January in any other year.
+export function balanceEventDate(eventType, year, today) {
+  const yearStart = `${year}-01-01`;
+  if (eventType === 'adjustment' && String(today || '').startsWith(`${year}-`)) return today;
+  return yearStart;
 }
 
 // Why the number of days is wrong, shown under the field; '' while it is empty or fine.
@@ -199,8 +208,8 @@ export function buildBalanceEventBody(form, { orgId, employeeId, effectiveDate }
   };
 }
 
-// One manual change in the history: the date it takes effect ("מתאריך"), action, amount, reason (with
-// its text), and a small record line: when it was made and by whom.
+// One manual change in the history: date, action, amount, reason (with its text), and a small record
+// line: when it was made and by whom.
 export function describeBalanceEvent(entry, formatDate = (value) => value) {
   const quantity = Number(entry?.quantity_days);
   const reasonLabel = BALANCE_REASON_OPTIONS.find((option) => option.value === entry?.metadata?.reason)?.label || '';
@@ -210,7 +219,7 @@ export function describeBalanceEvent(entry, formatDate = (value) => value) {
   const created = entry?.created_at ? formatDate(String(entry.created_at).slice(0, 10)) : '';
   const who = [created ? `נרשם ב-${created}` : 'נרשם', entry?.created_by_name ? `ע"י ${entry.created_by_name}` : ''].filter(Boolean).join(' ');
   return {
-    title: `מתאריך ${formatDate(entry?.effective_date)} · ${balanceEventLabel(entry?.event_type)} · ${quantity > 0 ? '+' : ''}${quantity}`,
+    title: `${formatDate(entry?.effective_date)} · ${balanceEventLabel(entry?.event_type)} · ${quantity > 0 ? '+' : ''}${quantity}`,
     reason,
     who,
   };
