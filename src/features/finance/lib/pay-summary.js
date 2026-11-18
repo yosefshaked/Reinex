@@ -232,14 +232,14 @@ export function groupAttendanceByRate(rows = []) {
 }
 
 /** The paid leave days, each with its value. */
-export function buildLeaveLines(leave = []) {
+export function buildLeaveLines(leave = [], { withAmount = true } = {}) {
   return (leave || [])
     .filter((row) => Number(row?.pay_fraction) > 0)
     .map((row) => ({
       key: row.leave_date,
       dateLabel: formatDayMonth(row.leave_date),
       portionLabel: Number(row.pay_fraction) < 1 ? 'חצי יום' : 'יום מלא',
-      amount: toAmount(row.amount),
+      amount: withAmount ? toAmount(row.amount) : null,
     }));
 }
 
@@ -297,14 +297,22 @@ export function buildSummaryRows(pay) {
   if (toAmount(pay.monthly_salary_amount) !== 0) {
     rows.push({ key: 'salary', label: 'שכר חודשי', amount: toAmount(pay.monthly_salary_amount) });
   }
-  if (toAmount(pay.paid_leave_amount) !== 0) {
-    const leaveLines = details ? buildLeaveLines(details.leave) : null;
-    const paidDays = (details?.leave || []).reduce((sum, row) => sum + (Number(row?.pay_fraction) || 0), 0);
+  // Paid leave is its own line, apart from the lessons and the hours: "חופשה: 1.5 ימים × ₪300.00" and
+  // its total. A monthly salary already covers its leave days, so they are listed with no amount.
+  const breakdown = pay.leave_breakdown || {};
+  const detailDays = (details?.leave || []).reduce((sum, row) => sum + (Number(row?.pay_fraction) || 0), 0);
+  const leaveDays = Number(breakdown.paid_days) > 0 ? Number(breakdown.paid_days) : detailDays;
+  const leaveAmount = toAmount(pay.paid_leave_amount);
+  if (leaveDays > 0 || leaveAmount !== 0) {
+    const includedInSalary = leaveAmount === 0 && toAmount(pay.monthly_salary_amount) !== 0;
+    const dayValue = Number(breakdown.day_value) > 0 ? toAmount(breakdown.day_value) : 0;
+    const times = !includedInSalary && dayValue > 0 ? ` × ${formatCurrency(dayValue)}` : '';
     rows.push({
       key: 'leave',
-      label: details ? `חופשה בתשלום · ${formatDays(paidDays)}` : 'חופשה בתשלום',
-      amount: toAmount(pay.paid_leave_amount),
-      leaveLines,
+      label: leaveDays > 0 ? `חופשה: ${formatDays(leaveDays)}${times}` : 'חופשה',
+      amount: includedInSalary ? null : leaveAmount,
+      note: includedInSalary ? 'כלול במשכורת' : '',
+      leaveLines: details ? buildLeaveLines(details.leave, { withAmount: !includedInSalary }) : null,
     });
   }
   const corrections = pay.corrections || [];

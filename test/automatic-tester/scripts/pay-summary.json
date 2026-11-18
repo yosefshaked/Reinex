@@ -596,8 +596,14 @@
             ]
           },
           "stores": [
-            { "variable": "NO_SHOW_LESSON_ID", "field": "id" },
-            { "variable": "NO_SHOW_PARTICIPANT_ID", "field": "participants.0.id" }
+            {
+              "variable": "NO_SHOW_LESSON_ID",
+              "field": "id"
+            },
+            {
+              "variable": "NO_SHOW_PARTICIPANT_ID",
+              "field": "participants.0.id"
+            }
           ]
         },
         {
@@ -660,7 +666,12 @@
             "org_id": "{{TEST_ORG_ID}}",
             "settings": {
               "instructor_earnings_policy": {
-                "value": { "attended": true, "no_show": false, "cancelled_student": false, "cancelled_clinic": false },
+                "value": {
+                  "attended": true,
+                  "no_show": false,
+                  "cancelled_student": false,
+                  "cancelled_clinic": false
+                },
                 "effective_date": "{{NEXT_MONTH_FIRST_DAY}}"
               }
             }
@@ -681,7 +692,11 @@
           "action": "navigate",
           "url": "{{BASE_URL}}/#/dashboard"
         },
-        { "id": "wait-dashboard", "action": "waitForURL", "pattern": "#/dashboard" },
+        {
+          "id": "wait-dashboard",
+          "action": "waitForURL",
+          "pattern": "#/dashboard"
+        },
         {
           "id": "navigate-employees-after",
           "action": "navigate",
@@ -734,11 +749,153 @@
             "org_id": "{{TEST_ORG_ID}}",
             "settings": {
               "instructor_earnings_policy": {
-                "value": { "attended": true, "no_show": true, "cancelled_student": false, "cancelled_clinic": false },
+                "value": {
+                  "attended": true,
+                  "no_show": true,
+                  "cancelled_student": false,
+                  "cancelled_clinic": false
+                },
                 "effective_date": "{{NEXT_MONTH_FIRST_DAY}}"
               }
             }
           }
+        }
+      ]
+    },
+    {
+      "id": "ui-paid-leave-line",
+      "name": "API + UI – Paid leave is its own line: \"חופשה: 1.5 ימים × ₪300.00\", apart from the lessons and the hours (PAY-G3)",
+      "steps": [
+        {
+          "id": "leave-day-value",
+          "description": "A fixed value of 300 ₪ per leave day, from long ago",
+          "action": "apiCall",
+          "method": "POST",
+          "endpoint": "/api/employee-rates",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "employee_id": "{{PAY_INSTRUCTOR_ID}}",
+            "pay_basis": "leave_day",
+            "rate": 30000,
+            "effective_date": "2000-01-01",
+            "replace_existing": true
+          }
+        },
+        {
+          "id": "leave-method-fixed",
+          "description": "The employee is paid a fixed value per leave day",
+          "action": "apiCall",
+          "method": "PUT",
+          "endpoint": "/api/instructors",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "instructor_id": "{{PAY_INSTRUCTOR_ID}}",
+            "leave_pay_method": "fixed_rate"
+          }
+        },
+        {
+          "id": "full-leave-day",
+          "description": "A full day of paid leave on the fifth day of last month",
+          "action": "apiCall",
+          "method": "POST",
+          "endpoint": "/api/employee-leave",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "employee_id": "{{PAY_INSTRUCTOR_ID}}",
+            "leave_type": "employee_paid",
+            "duration_mode": "full_day",
+            "start_date": "{{PREV_MONTH_FIFTH_DAY}}",
+            "end_date": "{{PREV_MONTH_FIFTH_DAY}}"
+          }
+        },
+        {
+          "id": "half-leave-day",
+          "description": "Half a day of paid leave on the sixth day of last month",
+          "action": "apiCall",
+          "method": "POST",
+          "endpoint": "/api/employee-leave",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "employee_id": "{{PAY_INSTRUCTOR_ID}}",
+            "leave_type": "employee_paid",
+            "duration_mode": "half_day",
+            "half_day_part": "first_half",
+            "start_date": "{{PREV_MONTH_SIXTH_DAY}}",
+            "end_date": "{{PREV_MONTH_SIXTH_DAY}}"
+          }
+        },
+        {
+          "id": "leave-page",
+          "description": "Leave the employees page so the month is read again",
+          "action": "navigate",
+          "url": "{{BASE_URL}}/#/dashboard"
+        },
+        {
+          "id": "wait-dashboard",
+          "action": "waitForURL",
+          "pattern": "#/dashboard"
+        },
+        {
+          "id": "navigate-employees",
+          "action": "navigate",
+          "url": "{{BASE_URL}}/#/employees"
+        },
+        {
+          "id": "wait-main",
+          "action": "waitForSelector",
+          "selector": "main, [role='main']"
+        },
+        {
+          "id": "open-employee",
+          "action": "click",
+          "selector": "button:has-text('שכר {{RUN_NUMERIC_ID}}')",
+          "first": true
+        },
+        {
+          "id": "open-finance-tab",
+          "action": "click",
+          "selector": "[role='tab']:has-text('פיננסים')"
+        },
+        {
+          "id": "wait-summary",
+          "action": "waitForSelector",
+          "selector": "[data-pay-summary] [data-pay-total]"
+        },
+        {
+          "id": "previous-month",
+          "action": "click",
+          "selector": "[data-pay-summary] button:has-text('הקודם')"
+        },
+        {
+          "id": "assert-leave-line",
+          "description": "Its own line: days x the value of one day, and the total of the leave",
+          "action": "waitForSelector",
+          "selector": "[data-pay-row='leave']:has-text('חופשה: 1.5 ימים × ₪300.00'):has-text('₪450.00')"
+        },
+        {
+          "id": "assert-hours-line-separate",
+          "description": "The leave is not mixed into the lessons line",
+          "action": "assert",
+          "type": "text",
+          "not": true,
+          "selector": "[data-pay-row='lessons']",
+          "value": "חופשה"
+        },
+        {
+          "id": "open-leave-line",
+          "action": "click",
+          "selector": "[data-pay-row='leave'] > button[aria-expanded='false']"
+        },
+        {
+          "id": "assert-leave-days",
+          "description": "Each day with its portion",
+          "action": "waitForSelector",
+          "selector": "[data-pay-row='leave']:has-text('יום מלא'):has-text('חצי יום')"
+        },
+        {
+          "id": "screenshot-leave-line",
+          "action": "screenshot",
+          "name": "pay-summary-leave-line"
         }
       ]
     },

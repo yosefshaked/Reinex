@@ -154,11 +154,37 @@ describe('the overview', () => {
     const salary = rows.find((row) => row.key === 'salary');
     const leave = rows.find((row) => row.key === 'leave');
     assert.equal(salary.amount, 800000);
-    assert.equal(leave.label, 'חופשה בתשלום · 1.5 ימים');
+    assert.equal(leave.label, 'חופשה: 1.5 ימים');
     assert.deepEqual(leave.leaveLines.map((line) => [line.dateLabel, line.portionLabel, line.amount]), [
       ['12.10', 'יום מלא', 30000],
       ['13.10', 'חצי יום', 15000],
     ]);
+  });
+
+  it('paid leave is its own line: days x the day value, with its total, apart from the hours and lessons (PAY-G3)', () => {
+    const { rows, total } = buildSummaryRows({
+      ...PAY,
+      paid_leave_amount: 45000,
+      total_amount: 65500,
+      leave_breakdown: { paid_days: 1.5, day_value: 30000, paid_leave_total: 45000 },
+    });
+    const leave = rows.find((row) => row.key === 'leave');
+    assert.equal(leave.label, 'חופשה: 1.5 ימים × ₪300.00');
+    assert.equal(leave.amount, 45000);
+    assert.deepEqual(rows.map((row) => row.key), ['lessons', 'attendance', 'leave', 'corrections']);
+    assert.equal(rows.find((row) => row.key === 'attendance').amount, 7500, 'the hours stay their own amount');
+    assert.equal(total, 65500);
+    const varied = buildSummaryRows({ ...PAY, paid_leave_amount: 45000, leave_breakdown: { paid_days: 2, day_value: null } }).rows.find((row) => row.key === 'leave');
+    assert.equal(varied.label, 'חופשה: 2 ימים', 'no "× value" when the days are not all worth the same');
+  });
+
+  it('a monthly salary covers its leave days: they are listed, with no amount', () => {
+    const leave = buildSummaryRows({
+      ...PAY, monthly_salary_amount: 800000, paid_leave_amount: 0, leave_breakdown: { paid_days: 2, day_value: 30000 },
+    }).rows.find((row) => row.key === 'leave');
+    assert.equal(leave.label, 'חופשה: 2 ימים');
+    assert.equal(leave.amount, null);
+    assert.equal(leave.note, 'כלול במשכורת');
   });
 
   it('lists each correction with its date, kind, note and signed amount', () => {

@@ -20,6 +20,7 @@ import {
   resolveExplicitInstructorCompensationDecision,
   shouldParticipantTriggerInstructorCompensation,
 } from '../api/_shared/calendar-workflow-decisions.js';
+import { buildSummaryRows } from '../src/features/finance/lib/pay-summary.js';
 import { PAY_BASIS, hasRateKind, resolveLessonRateOnDate, resolveRateOnDate } from '../api/_shared/rate-history.js';
 
 function rateRow(id, employeeId, serviceId, payBasis, rate, effectiveDate) {
@@ -361,7 +362,17 @@ describe('PAY-G annual leave', () => {
   it.todo('PAY-G1 hourly / per-lesson leave day = gross wages of the last 3 months ÷ 90, leave days counted including weekends');
   it.todo('PAY-G1 if the last 3 months were not full, the fullest 3 consecutive months of the last 12 are used');
   it.todo('PAY-G1 monthly-salary employees keep their regular salary during leave');
-  it.todo('PAY-G3 paid leave days are their own line in the monthly review');
+  it('PAY-G3 paid leave days are their own line in the monthly review: days x day value, with the total', () => {
+    const { rows } = buildSummaryRows({
+      lesson_amount: 10000, lesson_count: 1, attendance_amount: 5000, attendance_minutes: 60,
+      paid_leave_amount: 60000, total_amount: 75000,
+      leave_breakdown: { paid_days: 2, day_value: 30000, paid_leave_total: 60000 },
+    });
+    assert.deepEqual(rows.map((row) => row.key), ['lessons', 'attendance', 'leave']);
+    const leave = rows.find((row) => row.key === 'leave');
+    assert.equal(leave.label, 'חופשה: 2 ימים × ₪300.00');
+    assert.equal(leave.amount, 60000);
+  });
 });
 
 describe('PAY-H monthly cycle', () => {

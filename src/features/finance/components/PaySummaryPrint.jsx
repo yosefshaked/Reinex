@@ -237,7 +237,7 @@ export function PaySummaryPrintSheet({ pay, orgName, monthLabel, detailed }) {
                   {row.label}
                   <UnmarkedFlag label={row.unmarkedLabel} />
                 </td>
-                <td>{formatCurrency(row.amount)}</td>
+                <td>{row.amount === null || row.amount === undefined ? row.note : formatCurrency(row.amount)}</td>
               </tr>
               {detailed && row.groups ? row.groups.map((group) => (
                 <React.Fragment key={group.key}>
@@ -260,7 +260,7 @@ export function PaySummaryPrintSheet({ pay, orgName, monthLabel, detailed }) {
               {detailed && row.leaveLines ? row.leaveLines.map((line) => (
                 <tr key={line.key} className="pay-print-sub">
                   <td>{line.dateLabel} · {line.portionLabel}</td>
-                  <td>{formatCurrency(line.amount)}</td>
+                  <td>{line.amount === null ? '' : formatCurrency(line.amount)}</td>
                 </tr>
               )) : null}
               {detailed && row.correctionLines ? row.correctionLines.map((line) => (

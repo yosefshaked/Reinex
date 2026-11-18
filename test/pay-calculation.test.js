@@ -21,6 +21,7 @@ import {
   loadCountedLessons,
   resolveCountedLesson,
   summarizeLessonsByDate,
+  summarizePaidLeave,
 } from '../api/_shared/pay-calculation.js';
 import { PAY_BASIS } from '../api/_shared/rate-history.js';
 
@@ -536,6 +537,17 @@ describe('policies read as of the date they apply to (dated settings)', () => {
     assert.equal(byDate['2026-11-10'], 30000, 'the fixed value in force on 10.11');
     assert.equal(byDate['2026-11-20'], 12000, 'the legal average in force on 20.11');
     assert.equal(november.paid_leave_amount, 42000);
+    assert.equal(november.leave_breakdown.paid_days, 2);
+    assert.equal(november.leave_breakdown.day_value, null, 'the two days are worth different amounts, so no single day value');
+  });
+
+  it('the leave line counts paid days and gives the day value when every day is worth the same', () => {
+    assert.deepEqual(summarizePaidLeave([]), { days: 0, dayValue: null });
+    const same = summarizePaidLeave([
+      { pay_fraction: 1, amount: 30000 }, { pay_fraction: 0.5, amount: 15001 }, { pay_fraction: 0, amount: 0 },
+    ]);
+    assert.deepEqual(same, { days: 1.5, dayValue: 30000 });
+    assert.equal(summarizePaidLeave([{ pay_fraction: 1, amount: 30000 }, { pay_fraction: 1, amount: 12000 }]).dayValue, null);
   });
 });
 

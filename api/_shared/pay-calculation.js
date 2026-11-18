@@ -364,6 +364,18 @@ export async function loadCountedLessons(client, orgId, {
 const PAID_LEAVE_TYPES = new Set(['employee_paid', 'system_paid', 'half_day']);
 
 /**
+ * The paid leave days of a period as one line: how many (0.5 per half day) and what one day is worth
+ * when all of them are worth the same (within 2 agorot, the rounding of a half day), otherwise null.
+ */
+export function summarizePaidLeave(leaveAmounts = []) {
+  const paid = (leaveAmounts || []).filter((row) => Number(row?.pay_fraction) > 0);
+  const days = Math.round(paid.reduce((sum, row) => sum + Number(row.pay_fraction), 0) * 100) / 100;
+  const values = paid.map((row) => Math.round(Number(row.amount) / Number(row.pay_fraction)));
+  const same = values.length > 0 && Math.max(...values) - Math.min(...values) <= 2;
+  return { days, dayValue: same ? values[0] : null };
+}
+
+/**
  * The local dates an employee worked: a day with a counted lesson (summarizeLessonsByDate) or with
  * office minutes on the attendance record, or a day of paid leave. Each date counts once, whatever happened on it. The leave
  * entitlement (leave-entitlement.js) counts these days; there is no other count of days worked.
@@ -464,6 +476,7 @@ export async function computeEmployeePay(client, orgId, {
     }) * Number(leaveDay.pay_fraction || 0)),
   }));
   const paidLeaveTotal = coerceAgorot(leaveAmounts.reduce((sum, row) => sum + row.amount, 0));
+  const paidLeaveSummary = summarizePaidLeave(leaveAmounts);
   const correctionTotal = coerceAgorot((corrections || []).reduce((sum, row) => sum + coerceAgorot(row.amount), 0));
 
   const paysMonthlySalary = hasRateKind(resolvedRateRows, {
@@ -537,6 +550,10 @@ export async function computeEmployeePay(client, orgId, {
       unpaid_days: leaveDays.filter((row) => row.leave_type === 'unpaid').length,
       half_days: leaveDays.filter((row) => row.leave_type === 'half_day').length,
       paid_leave_total: paidLeaveTotal,
+      // The leave line of the monthly summary: days counted (a half day is 0.5) and the value of one
+      // day when every paid day has the same one (null when it varies).
+      paid_days: paidLeaveSummary.days,
+      day_value: paidLeaveSummary.dayValue,
     },
     corrections,
   };

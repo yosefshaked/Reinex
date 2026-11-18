@@ -82,7 +82,7 @@ Customer billing for the same cases is S4.4–S4.5 in the map. A cancellation be
 |---|---|---|
 | PAY-G1 | **Monthly-salary employees** keep their regular salary during leave. **Hourly and per-lesson employees** are paid (gross wages of the last 3 months ÷ 90) × the number of leave days counted *including* weekends. If those 3 months weren't full, the fullest 3 consecutive months of the last 12 are used. The wage base includes paid absence days (leave, sick, holiday). | ❌ The code averages over *worked* days (3 or 12 months), which doesn't match the law |
 | PAY-G2 | A half day is paid at half the day's value. Unpaid leave pays nothing. | ✅ |
-| PAY-G3 | Paid leave days appear as their own line in the monthly review. | 🟡 They appear in the employee preview |
+| PAY-G3 | Paid leave days appear as their own line in the monthly review. | ✅ "חופשה: N ימים × ₪X" and its total, apart from lessons and hours; on screen and in the print |
 
 ## H — The monthly cycle
 

@@ -333,6 +333,7 @@ export default function EmployeePaySummary({
                   label={row.label}
                   badge={row.unmarkedLabel}
                   amount={row.amount}
+                  note={row.note}
                   open={openRow === row.key}
                   onToggle={() => toggleRow(row.key)}
                 >
