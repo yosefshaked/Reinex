@@ -4,9 +4,9 @@ import { toast } from '@/lib/toast.jsx';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { fetchDatedSetting, saveDatedSettings } from '@/features/settings/api/settings.js';
+import { cancelDatedSettingVersion, fetchDatedSetting, saveDatedSettings } from '@/features/settings/api/settings.js';
 import DatedSettingFields from '@/features/settings/components/DatedSettingFields.jsx';
-import { versionInForce } from '@/features/settings/lib/dated-setting.js';
+import { futureChangeNote, versionInForce } from '@/features/settings/lib/dated-setting.js';
 import { todayKey } from '@/lib/local-time.js';
 import StepReveal from './StepReveal.jsx';
 import {
@@ -81,6 +81,7 @@ export default function LeaveDefaultSettings({ session, orgId, canEdit, onClose 
   const [effectiveDate, setEffectiveDate] = useState(() => todayKey());
   const [formError, setFormError] = useState('');
   const [saving, setSaving] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
 
   const load = useCallback(async (signal) => {
     if (!session || !orgId) return;
@@ -143,6 +144,18 @@ export default function LeaveDefaultSettings({ session, orgId, canEdit, onClose 
     },
   ], [entitlementVersions, payVersions, entitlementChanged, payChanged]);
 
+  // Cancels a version that has not started yet, then reads the settings again.
+  const handleCancelVersion = async ({ key, version }) => {
+    try {
+      await cancelDatedSettingVersion({ session, orgId, key, effectiveDate: version.effective_date });
+      toast.success('ההגדרה העתידית בוטלה.');
+      await load();
+    } catch (error) {
+      console.error('Failed to cancel the future leave setting', error);
+      toast.error('ביטול ההגדרה נכשל. נסו שוב.');
+    }
+  };
+
   const handleSave = async () => {
     const problem = validateLeaveSettingsDraft({ entitlementDraft, payDraft });
     if (problem) {
@@ -183,6 +196,19 @@ export default function LeaveDefaultSettings({ session, orgId, canEdit, onClose 
   }
 
   const disabled = saving || !canEdit;
+  const today = todayKey();
+  const entitlementFutureNote = futureChangeNote(entitlementVersions, today);
+  const payFutureNote = futureChangeNote(payVersions, today);
+  const futureNote = (note) => (note ? (
+    <button
+      type="button"
+      className="ms-2 text-xs font-normal text-amber-700 underline decoration-dotted underline-offset-4"
+      onClick={() => setHistoryOpen(true)}
+      data-future-change
+    >
+      {note}
+    </button>
+  ) : null);
   const stepOneDone = Boolean(entitlementDraft.mode);
   const draftProblem = stepOneDone ? validateLeaveSettingsDraft({ entitlementDraft, payDraft }) : '';
   const anyChange = entitlementChanged || payChanged;
@@ -197,7 +223,7 @@ export default function LeaveDefaultSettings({ session, orgId, canEdit, onClose 
       <p className="text-sm text-slate-600 leading-relaxed" data-leave-entitlement-disclaimer>{ENTITLEMENT_DISCLAIMER}</p>
 
       <fieldset className="space-y-2" data-leave-step="1">
-        <legend className="mb-1 text-sm font-semibold text-slate-700">כמה ימי חופשה מגיעים בשנה?</legend>
+        <legend className="mb-1 text-sm font-semibold text-slate-700">כמה ימי חופשה מגיעים בשנה?{futureNote(entitlementFutureNote)}</legend>
         {ENTITLEMENT_DEFAULT_OPTIONS.map((option) => (
           <OptionCard
             key={option.value}
@@ -265,7 +291,7 @@ export default function LeaveDefaultSettings({ session, orgId, canEdit, onClose 
 
       <StepReveal shown={stepOneDone} data-leave-step="2">
         <fieldset className="space-y-2">
-          <legend className="mb-1 text-sm font-semibold text-slate-700">כמה משלמים על יום חופשה?</legend>
+          <legend className="mb-1 text-sm font-semibold text-slate-700">כמה משלמים על יום חופשה?{futureNote(payFutureNote)}</legend>
           {LEAVE_PAY_DEFAULT_METHODS.map((option) => (
             <OptionCard
               key={option.value}
@@ -303,6 +329,9 @@ export default function LeaveDefaultSettings({ session, orgId, canEdit, onClose 
         onEffectiveDateChange={setEffectiveDate}
         parts={parts}
         disabled={disabled}
+        onCancelVersion={canEdit ? handleCancelVersion : undefined}
+        historyOpen={historyOpen}
+        onHistoryOpenChange={setHistoryOpen}
       />
 
       {formError || draftProblem ? (

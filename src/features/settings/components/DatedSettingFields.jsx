@@ -17,6 +17,10 @@ import { buildDatedSettingsWarnings, mergeVersionHistory, versionFromLabel } fro
  * ([{ key, label, versions, describeVersion, changed, pastDateWarning }]): one date, the warnings of
  * each part that will get a new version (each with its own past-date wording), and one history list
  * of all their versions, each labelled.
+ *
+ * A version that has not started yet (effective date after today) can be cancelled from the history
+ * when `onCancelVersion({ key, version })` is passed. The history can be controlled from outside
+ * (`historyOpen` / `onHistoryOpenChange`), so a note elsewhere ("ישתנה ב-...") can open it.
  */
 export default function DatedSettingFields({
   idPrefix,
@@ -28,8 +32,19 @@ export default function DatedSettingFields({
   disabled = false,
   pastDateWarning,
   parts,
+  onCancelVersion,
+  historyOpen,
+  onHistoryOpenChange,
 }) {
-  const [showHistory, setShowHistory] = useState(false);
+  const [ownShowHistory, setOwnShowHistory] = useState(false);
+  const showHistory = historyOpen ?? ownShowHistory;
+  const setShowHistory = (next) => {
+    const value = typeof next === 'function' ? next(showHistory) : next;
+    setOwnShowHistory(value);
+    onHistoryOpenChange?.(value);
+  };
+  const [confirming, setConfirming] = useState('');
+  const [cancelling, setCancelling] = useState(false);
   const today = todayKey();
   const allParts = useMemo(() => (
     Array.isArray(parts) && parts.length
@@ -41,6 +56,15 @@ export default function DatedSettingFields({
     () => buildDatedSettingsWarnings({ parts: allParts, effectiveDate, today }),
     [allParts, effectiveDate, today],
   );
+  async function cancelVersion(row) {
+    setCancelling(true);
+    try {
+      await onCancelVersion({ key: row.key, version: row.version });
+    } finally {
+      setCancelling(false);
+      setConfirming('');
+    }
+  }
   const dateId = `${idPrefix}-effective-date`;
   const historyId = `${idPrefix}-history`;
 
@@ -85,7 +109,10 @@ export default function DatedSettingFields({
 
       {showHistory && history.length > 0 ? (
         <ol id={historyId} className="divide-y divide-slate-100 rounded-xl border border-slate-200 bg-white">
-          {history.map(({ key, label, text, version }) => (
+          {history.map(({ key, label, text, version }) => {
+            const rowId = `${key}-${version.effective_date}`;
+            const cancellable = Boolean(onCancelVersion) && version.effective_date > today;
+            return (
             <li
               key={`${key}-${version.effective_date}-${version.created_at || ''}`}
               className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 text-sm"
@@ -95,13 +122,28 @@ export default function DatedSettingFields({
                 {label ? <span className="text-slate-500">{label} · </span> : null}
                 <span className="font-semibold">{text}</span>
               </span>
-              <span className="text-xs text-slate-500">
-                {versionFromLabel(version)}
-                {version.effective_date > today ? ' (עתידי)' : ''}
-                {version.notes ? ` · ${version.notes}` : ''}
+              <span className="flex items-center gap-2 text-xs text-slate-500">
+                <span>
+                  {versionFromLabel(version)}
+                  {version.effective_date > today ? ' (עתידי)' : ''}
+                  {version.notes ? ` · ${version.notes}` : ''}
+                </span>
+                {cancellable && confirming !== rowId ? (
+                  <Button type="button" size="sm" variant="ghost" className="h-6 px-2 text-xs" onClick={() => setConfirming(rowId)} disabled={disabled || cancelling} data-cancel-version>
+                    ביטול ההגדרה העתידית
+                  </Button>
+                ) : null}
+                {cancellable && confirming === rowId ? (
+                  <span className="flex items-center gap-1" data-cancel-version-confirm>
+                    <span className="font-medium text-slate-700">לבטל?</span>
+                    <Button type="button" size="sm" variant="destructive" className="h-6 px-2 text-xs" onClick={() => void cancelVersion({ key, version })} disabled={cancelling}>כן, לבטל</Button>
+                    <Button type="button" size="sm" variant="ghost" className="h-6 px-2 text-xs" onClick={() => setConfirming('')} disabled={cancelling}>לא</Button>
+                  </span>
+                ) : null}
               </span>
             </li>
-          ))}
+            );
+          })}
         </ol>
       ) : null}
     </div>

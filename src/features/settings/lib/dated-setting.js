@@ -24,6 +24,22 @@ export function versionFromLabel(version) {
   return version.effective_date <= SINCE_THE_BEGINNING ? 'מאז ההתחלה' : `מ-${formatDateKey(version.effective_date)}`;
 }
 
+/** The next version that has not started yet (effective date after `today`), or null. */
+export function nextFutureVersion(versions, today) {
+  let best = null;
+  for (const version of Array.isArray(versions) ? versions : []) {
+    if (!version?.effective_date || version.effective_date <= today) continue;
+    if (!best || version.effective_date < best.effective_date) best = version;
+  }
+  return best;
+}
+
+/** "ישתנה ב-15.12.2026" for a setting that has a future version; '' when it has none. */
+export function futureChangeNote(versions, today) {
+  const next = nextFutureVersion(versions, today);
+  return next ? `ישתנה ב-${formatDateKey(next.effective_date)}` : '';
+}
+
 const PAST_DATE_WARNING = 'ההגדרה תחול על ימים שכבר עברו. השכר על מפגשים וימי חופשה שכבר היו מהתאריך הזה יחושב מחדש לפיה.';
 
 /**

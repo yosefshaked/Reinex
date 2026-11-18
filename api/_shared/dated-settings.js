@@ -131,6 +131,42 @@ export function validateSettingEffectiveDate(effectiveDate) {
 }
 
 /**
+ * Which version may be cancelled: only one that has not started yet (effective date after today).
+ * Past and current versions stay: months were computed by them. Generic for every dated key.
+ * Returns { value: { key, effectiveDate } } or { error } (invalid_setting_key, missing_effective_date,
+ * invalid_effective_date, dated_version_not_in_future).
+ */
+export function checkCancelableVersion({ key, effectiveDate, today }) {
+  const normalizedKey = normalizeString(key);
+  if (!isDatedSettingKey(normalizedKey)) return { error: 'invalid_setting_key' };
+  const date = validateSettingEffectiveDate(effectiveDate);
+  if (date.error) return { error: date.error };
+  if (!(date.value > normalizeDateKey(today))) return { error: 'dated_version_not_in_future' };
+  return { value: { key: normalizedKey, effectiveDate: date.value } };
+}
+
+/**
+ * Cancels (deletes) one future version of a dated setting. Only `api/settings` calls this.
+ * Returns { deleted: 1 } or { error, status }.
+ *
+ * @param {any} client
+ * @param {string} orgId
+ * @param {{ key: string, effectiveDate: string, today: string }} params
+ */
+export async function cancelDatedSettingVersion(client, orgId, { key, effectiveDate, today }) {
+  const checked = checkCancelableVersion({ key, effectiveDate, today });
+  if (checked.error) return { error: checked.error, status: 400 };
+  const { data, error } = await withOrgScope(client, 'SettingsHistory', orgId)
+    .delete()
+    .eq('key', checked.value.key)
+    .eq('effective_date', checked.value.effectiveDate)
+    .select('id');
+  if (error) return { error: 'failed_to_cancel_version', status: 500, cause: error };
+  if (!data || data.length === 0) return { error: 'version_not_found', status: 404 };
+  return { deleted: data.length, key: checked.value.key, effectiveDate: checked.value.effectiveDate };
+}
+
+/**
  * Writes versions of dated settings. A version on a date that already has one replaces it (the
  * unique index is org, key, date). Only `api/settings` calls this.
  *

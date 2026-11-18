@@ -810,6 +810,128 @@
       ]
     },
     {
+      "id": "future-version-note-and-cancel",
+      "name": "A future version shows \"ישתנה ב-...\" and can be cancelled from the history; a current or past one cannot",
+      "steps": [
+        {
+          "id": "refuse-cancel-current-version",
+          "description": "The version in force today cannot be cancelled (400 dated_version_not_in_future)",
+          "action": "apiCall",
+          "method": "DELETE",
+          "endpoint": "/api/settings",
+          "ignoreStatus": [
+            400
+          ],
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "key": "leave_pay_policy",
+            "effective_date": "{{TODAY}}"
+          }
+        },
+        {
+          "id": "refuse-cancel-first-version",
+          "description": "The first version (since the beginning) cannot be cancelled (400)",
+          "action": "apiCall",
+          "method": "DELETE",
+          "endpoint": "/api/settings",
+          "ignoreStatus": [
+            400
+          ],
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "key": "leave_pay_policy",
+            "effective_date": "2000-01-01"
+          }
+        },
+        {
+          "id": "add-future-version",
+          "description": "A future version of the pay setting, far ahead (2099) so other future versions in the test org do not matter",
+          "action": "apiCall",
+          "method": "POST",
+          "endpoint": "/api/settings",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "settings": {
+              "leave_pay_policy": {
+                "value": {
+                  "default_method": "avg_hourly_x_avg_day_hours",
+                  "lookback_months": 3,
+                  "legal_allow_12m_if_better": true,
+                  "fixed_rate_default": 0
+                },
+                "effective_date": "2099-01-01"
+              }
+            }
+          }
+        },
+        {
+          "id": "navigate",
+          "action": "navigate",
+          "url": "{{BASE_URL}}/#/Settings"
+        },
+        {
+          "id": "open-dialog",
+          "action": "click",
+          "selector": "button:has-text('פתיחת הגדרות חופשה')"
+        },
+        {
+          "id": "assert-future-note",
+          "description": "A small note by the pay question says it will change",
+          "action": "waitForSelector",
+          "selector": "[role='dialog'] fieldset:has-text('כמה משלמים על יום חופשה?') [data-future-change]:has-text('ישתנה ב-')"
+        },
+        {
+          "id": "assert-no-note-on-days-question",
+          "description": "The days question has no future version, so no note",
+          "action": "assert",
+          "type": "count",
+          "selector": "[role='dialog'] fieldset:has-text('כמה ימי חופשה מגיעים בשנה?') [data-future-change]",
+          "value": "0"
+        },
+        {
+          "id": "open-history-from-note",
+          "description": "The note opens the history",
+          "action": "click",
+          "selector": "[role='dialog'] [data-future-change]"
+        },
+        {
+          "id": "assert-future-row",
+          "action": "waitForSelector",
+          "selector": "[role='dialog'] [data-history-key='leave_pay_policy']:has-text('(עתידי)') [data-cancel-version]"
+        },
+        {
+          "id": "assert-no-cancel-on-started-rows",
+          "description": "A version that has started has no cancel button: only future rows do",
+          "action": "assert",
+          "type": "count",
+          "selector": "[role='dialog'] [data-history-key]:not(:has-text('(עתידי)')) [data-cancel-version]",
+          "value": "0"
+        },
+        {
+          "id": "cancel-future-version",
+          "action": "click",
+          "selector": "[role='dialog'] [data-history-key='leave_pay_policy']:has-text('01.01.2099') [data-cancel-version]"
+        },
+        {
+          "id": "confirm-cancel",
+          "action": "click",
+          "selector": "[role='dialog'] [data-cancel-version-confirm] button:has-text('כן, לבטל')"
+        },
+        {
+          "id": "assert-version-gone",
+          "description": "The cancelled version is no longer in the history",
+          "action": "assert",
+          "type": "hidden",
+          "selector": "[role='dialog'] [data-history-key]:has-text('01.01.2099')"
+        },
+        {
+          "id": "close-dialog",
+          "action": "pressKey",
+          "key": "Escape"
+        }
+      ]
+    },
+    {
       "id": "api-check",
       "name": "API – The instructor follows the organisation default again",
       "steps": [

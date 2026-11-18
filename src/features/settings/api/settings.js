@@ -150,6 +150,24 @@ export async function saveDatedSettings({ session, orgId, versions, effectiveDat
   return upsertSettings({ session, orgId, signal, settings });
 }
 
+/**
+ * Cancels a version of a dated setting that has not started yet. The server refuses a version that is
+ * in force or in the past.
+ */
+export async function cancelDatedSettingVersion({ session, orgId, key, effectiveDate, signal } = {}) {
+  const validatedSession = ensureSession(session);
+  const normalizedOrgId = normalizeOrgId(orgId);
+  if (!normalizedOrgId) {
+    throw new Error('יש לבחור ארגון פעיל לפני ביצוע הפעולה.');
+  }
+  return authenticatedFetch('settings', {
+    session: validatedSession,
+    method: 'DELETE',
+    body: { org_id: normalizedOrgId, key, effective_date: effectiveDate },
+    signal,
+  });
+}
+
 /** Saves a new version of a dated setting, in force from `effectiveDate` ('YYYY-MM-DD'). */
 export async function saveDatedSetting({ session, orgId, key, value, effectiveDate, notes = null, signal } = {}) {
   const normalizedKey = typeof key === 'string' ? key.trim() : '';

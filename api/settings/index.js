@@ -21,6 +21,7 @@ import {
   listSettingVersions,
   loadDatedSettingRows,
   resolveSettingOnDate,
+  cancelDatedSettingVersion,
   saveDatedSettingVersions,
   validateSettingEffectiveDate,
 } from '../_shared/dated-settings.js';
@@ -835,6 +836,30 @@ export default async function (context, req) {
     });
 
     return respond(context, 200, { updated: true, count: payload.length + datedVersions.length });
+  }
+
+  if (method === 'DELETE' && (body?.effective_date !== undefined || query.effective_date !== undefined)) {
+    // Cancel one future version of a dated setting: { key, effective_date }. Past and current
+    // versions are refused (checkCancelableVersion).
+    const cancelKey = normalizeString(body?.key ?? query.key);
+    const cancelDate = body?.effective_date ?? query.effective_date;
+    const cancelled = await cancelDatedSettingVersion(supabase, orgId, { key: cancelKey, effectiveDate: cancelDate, today: todayKey() });
+    if (cancelled.error) {
+      if (cancelled.cause) context.log?.error?.('settings cancel version failed', { message: cancelled.cause.message });
+      return respond(context, cancelled.status || 400, { message: cancelled.error });
+    }
+    await logAuditEvent(supabase, {
+      orgId,
+      userId,
+      userEmail: authResult.data.user.email,
+      userRole: role,
+      actionType: AUDIT_ACTIONS.SETTINGS_UPDATED,
+      actionCategory: AUDIT_CATEGORIES.SETTINGS,
+      resourceType: 'settings',
+      resourceId: orgId,
+      details: { operation: 'cancel_version', key: cancelled.key, effective_date: cancelled.effectiveDate },
+    });
+    return respond(context, 200, { cancelled: true, key: cancelled.key, effective_date: cancelled.effectiveDate });
   }
 
   if (method === 'DELETE') {
