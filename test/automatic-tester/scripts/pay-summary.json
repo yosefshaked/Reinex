@@ -893,6 +893,12 @@
           "selector": "[data-pay-row='leave']:has-text('יום מלא'):has-text('חצי יום')"
         },
         {
+          "id": "click-date-field",
+          "description": "A click on the day part of a date field asks the browser for its picker (showPicker) without raising an error",
+          "action": "click",
+          "selector": "#finance-date"
+        },
+        {
           "id": "screenshot-leave-line",
           "action": "screenshot",
           "name": "pay-summary-leave-line"
