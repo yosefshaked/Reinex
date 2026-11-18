@@ -162,11 +162,25 @@ export function defaultBalanceDate(year, today) {
   return String(today || '').startsWith(`${year}-`) ? today : `${year}-01-01`;
 }
 
+// Why the number of days is wrong, shown under the field; '' while it is empty or fine.
+export function balanceQuantityError(form) {
+  if (form?.quantityDays === '' || form?.quantityDays == null) return '';
+  const quantity = Number(form.quantityDays);
+  if (!Number.isFinite(quantity)) return 'יש להזין מספר ימים.';
+  if (form.eventType === 'carryover' && quantity <= 0) {
+    return 'העברה מהשנה הקודמת היא רק מספר חיובי. להורדת ימים בחרו "הוספה או הורדה".';
+  }
+  if (form.eventType === 'adjustment' && quantity === 0) {
+    return 'הוספה או הורדה לא יכולה להיות 0. הזינו מספר חיובי להוספה או שלילי להורדה.';
+  }
+  return '';
+}
+
 // What is missing before a balance change can be saved; '' when it can.
 export function balanceFormError(form) {
-  const quantity = Number(form?.quantityDays);
-  if (form?.quantityDays === '' || !Number.isFinite(quantity) || quantity === 0) return 'יש להזין מספר ימים שאינו אפס.';
-  if (form.eventType === 'carryover' && quantity < 0) return 'העברה מהשנה הקודמת היא מספר חיובי.';
+  if (form?.quantityDays === '' || !Number.isFinite(Number(form?.quantityDays))) return 'יש להזין מספר ימים.';
+  const quantityError = balanceQuantityError(form);
+  if (quantityError) return quantityError;
   if (!BALANCE_REASON_OPTIONS.some((option) => option.value === form.reason)) return 'יש לבחור סיבה.';
   if (form.reason === 'other' && !String(form.notes || '').trim()) return 'כשהסיבה היא "אחר" יש לכתוב אותה.';
   return '';

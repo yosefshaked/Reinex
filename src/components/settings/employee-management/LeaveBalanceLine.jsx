@@ -20,6 +20,7 @@ import {
   BALANCE_ACTIONS,
   BALANCE_REASON_OPTIONS,
   balanceFormError,
+  balanceQuantityError,
   buildBalanceEventBody,
   defaultBalanceDate,
   describeBalanceEvent,
@@ -55,6 +56,7 @@ export default function LeaveBalanceLine({ summary, entitlement, balanceEvents, 
     .filter((entry) => isManualBalanceEvent(entry) && String(entry.effective_date || '').startsWith(yearPrefix));
   const effectiveDate = form.effectiveDate || defaultBalanceDate(summary.year, todayKey());
   const formError = balanceFormError(form);
+  const quantityError = balanceQuantityError(form);
   const actionHint = BALANCE_ACTIONS.find((option) => option.value === form.eventType)?.hint || '';
 
   async function handleAdd() {
@@ -155,7 +157,7 @@ export default function LeaveBalanceLine({ summary, entitlement, balanceEvents, 
             </div>
             <div className="space-y-1">
               <Label htmlFor="balance-quantity" className="text-xs text-slate-600">ימים · {actionHint}</Label>
-              <Input id="balance-quantity" className="h-8" type="number" step="0.5" value={form.quantityDays} onChange={(event) => setForm((current) => ({ ...current, quantityDays: event.target.value }))} disabled={saving} />
+              <Input id="balance-quantity" className="h-8" type="number" step="0.5" value={form.quantityDays} onChange={(event) => setForm((current) => ({ ...current, quantityDays: event.target.value }))} disabled={saving} aria-invalid={quantityError ? true : undefined} aria-describedby={quantityError ? 'balance-quantity-error' : undefined} />
             </div>
             <div className="space-y-1">
               <Label htmlFor="balance-date" className="text-xs text-slate-600">תאריך</Label>
@@ -179,6 +181,7 @@ export default function LeaveBalanceLine({ summary, entitlement, balanceEvents, 
               </div>
             ) : null}
           </div>
+          {quantityError ? <p id="balance-quantity-error" className="text-xs text-red-600" data-balance-quantity-error>{quantityError}</p> : null}
           <Button type="button" size="sm" onClick={handleAdd} disabled={saving || Boolean(formError)} title={formError || undefined}>
             {saving ? <Loader2 className="me-2 h-4 w-4 animate-spin" /> : null}
             הוספה

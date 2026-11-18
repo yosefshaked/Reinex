@@ -5,6 +5,7 @@ import {
   BALANCE_ACTIONS,
   BALANCE_REASON_OPTIONS,
   balanceFormError,
+  balanceQuantityError,
   buildBalanceEventBody,
   defaultBalanceDate,
   describeBalanceEvent,
@@ -67,6 +68,21 @@ describe('a manual leave-balance change needs a reason', () => {
     assert.equal(old.reason, 'ישן');
     const picked = describeBalanceEvent({ event_type: 'carryover', quantity_days: 4, effective_date: '2026-01-01', metadata: { reason: 'previous_system' } });
     assert.equal(picked.reason, 'מעבר מהמערכת הקודמת');
+  });
+});
+
+describe('the reason shown under the number of days', () => {
+  it('a negative carry-over and a zero add-or-remove say why, and point to the other action', () => {
+    const form = { ...emptyBalanceForm(), reason: 'previous_system' };
+    assert.equal(balanceQuantityError({ ...form, quantityDays: '' }), '');
+    assert.equal(balanceQuantityError({ ...form, quantityDays: '2' }), '');
+    assert.equal(
+      balanceQuantityError({ ...form, quantityDays: '-1' }),
+      'העברה מהשנה הקודמת היא רק מספר חיובי. להורדת ימים בחרו "הוספה או הורדה".',
+    );
+    assert.equal(balanceFormError({ ...form, quantityDays: '-1' }), balanceQuantityError({ ...form, quantityDays: '-1' }));
+    assert.match(balanceQuantityError({ ...form, eventType: 'adjustment', quantityDays: '0' }), /לא יכולה להיות 0/);
+    assert.equal(balanceQuantityError({ ...form, eventType: 'adjustment', quantityDays: '-1' }), '');
   });
 });
 

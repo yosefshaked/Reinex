@@ -569,7 +569,23 @@
           "selector": "#balance-date",
           "value": "{{TODAY}}"
         },
+        { "id": "fill-negative-carryover", "action": "fill", "selector": "#balance-quantity", "value": "-1" },
+        {
+          "id": "assert-negative-carryover-reason",
+          "description": "A negative carry-over says why it cannot be saved, under the field",
+          "action": "assert",
+          "type": "text",
+          "selector": "[data-balance-quantity-error]",
+          "value": "העברה מהשנה הקודמת היא רק מספר חיובי"
+        },
         { "id": "fill-quantity", "action": "fill", "selector": "#balance-quantity", "value": "2" },
+        {
+          "id": "assert-reason-gone",
+          "action": "assert",
+          "type": "exists",
+          "not": true,
+          "selector": "[data-balance-quantity-error]"
+        },
         {
           "id": "assert-add-disabled-without-reason",
           "action": "assert",
