@@ -243,6 +243,35 @@ export function buildLeaveLines(leave = [], { withAmount = true } = {}) {
     }));
 }
 
+/** "2026-07", "2026-09" → "07–09.2026"; across a year end "11.2025–01.2026". */
+export function formatMonthRange(startMonth, endMonth) {
+  const start = /^(\d{4})-(\d{2})$/.exec(String(startMonth || ''));
+  const end = /^(\d{4})-(\d{2})$/.exec(String(endMonth || ''));
+  if (!start || !end) return '';
+  if (start[1] === end[1]) return `${start[2]}–${end[2]}.${end[1]}`;
+  return `${start[2]}.${start[1]}–${end[2]}.${end[1]}`;
+}
+
+/**
+ * How a "ממוצע מומלץ" leave day was valued, one line per distinct calculation (usually one):
+ * "לפי 07–09.2026: ₪27,000.00 ÷ 90 × 7/5 = ₪420.00 ליום". The server chose the months and computed
+ * the value (api/_shared/employee-finance.js); this only words it.
+ */
+export function buildLeaveBasisLines(leave = []) {
+  const lines = new Map();
+  for (const row of leave || []) {
+    const basis = row?.basis;
+    if (!basis || !(Number(row?.pay_fraction) > 0)) continue;
+    const key = `${basis.start_month}|${basis.end_month}|${basis.wage_base}|${basis.divisor}|${basis.week_days}|${row.day_value}`;
+    if (lines.has(key)) continue;
+    const monthsLabel = formatMonthRange(basis.start_month, basis.end_month);
+    // The months and the formula are shown left to right inside the Hebrew line (see EmployeePaySummary).
+    const formula = `${formatCurrency(toAmount(basis.wage_base))} ÷ ${basis.divisor} × 7/${basis.week_days} = ${formatCurrency(toAmount(row.day_value))}`;
+    lines.set(key, { key, monthsLabel, formula, text: `לפי ${monthsLabel}: ${formula} ליום` });
+  }
+  return Array.from(lines.values());
+}
+
 /** Each hand-entered correction: date, kind, note and its signed amount. */
 export function buildCorrectionLines(corrections = []) {
   return [...(corrections || [])]
@@ -313,6 +342,7 @@ export function buildSummaryRows(pay) {
       amount: includedInSalary ? null : leaveAmount,
       note: includedInSalary ? 'כלול במשכורת' : '',
       leaveLines: details ? buildLeaveLines(details.leave, { withAmount: !includedInSalary }) : null,
+      basisLines: details && !includedInSalary ? buildLeaveBasisLines(details.leave) : [],
     });
   }
   const corrections = pay.corrections || [];

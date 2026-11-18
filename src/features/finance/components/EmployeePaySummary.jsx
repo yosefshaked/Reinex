@@ -235,9 +235,16 @@ export default function EmployeePaySummary({
     }
     if (row.leaveLines) {
       return (
-        <ul>
-          {row.leaveLines.map((line) => <DetailLine key={line.key} text={`${line.dateLabel} · ${line.portionLabel}`} amount={line.amount} />)}
-        </ul>
+        <>
+          {(row.basisLines || []).map((line) => (
+            <p key={line.key} className="py-1 text-xs text-slate-500" data-leave-basis>
+              לפי <bdi dir="ltr">{line.monthsLabel}</bdi>: <bdi dir="ltr">{line.formula}</bdi> ליום
+            </p>
+          ))}
+          <ul>
+            {row.leaveLines.map((line) => <DetailLine key={line.key} text={`${line.dateLabel} · ${line.portionLabel}`} amount={line.amount} />)}
+          </ul>
+        </>
       );
     }
     if (row.correctionLines) {

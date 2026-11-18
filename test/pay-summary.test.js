@@ -10,6 +10,7 @@ import {
   describeLessonState,
   formatDays,
   formatMinutes,
+  formatMonthRange,
   formatUnmarkedCount,
   groupAttendanceByRate,
   groupLessonsByService,
@@ -185,6 +186,29 @@ describe('the overview', () => {
     assert.equal(leave.label, 'חופשה: 2 ימים');
     assert.equal(leave.amount, null);
     assert.equal(leave.note, 'כלול במשכורת');
+  });
+
+  it('a "ממוצע מומלץ" leave row says which months the day value comes from (PAY-G1)', () => {
+    const basis = { start_month: '2026-07', end_month: '2026-09', worked_days: 55, wage_base: 2714000, divisor: 90, week_days: 5 };
+    const leave = buildSummaryRows({
+      ...PAY,
+      paid_leave_amount: 63327,
+      leave_breakdown: { paid_days: 1.5, day_value: 42218 },
+      details: { ...PAY.details, leave: [
+        { leave_date: '2026-10-14', pay_fraction: 1, amount: 42218, day_value: 42218, basis },
+        { leave_date: '2026-10-15', pay_fraction: 0.5, amount: 21109, day_value: 42218, basis },
+      ] },
+    }).rows.find((row) => row.key === 'leave');
+    assert.equal(leave.label, 'חופשה: 1.5 ימים × ₪422.18');
+    assert.deepEqual(leave.basisLines.map((line) => line.text), ['לפי 07–09.2026: ₪27,140.00 ÷ 90 × 7/5 = ₪422.18 ליום']);
+    assert.equal(leave.basisLines[0].monthsLabel, '07–09.2026');
+    assert.equal(leave.basisLines[0].formula, '₪27,140.00 ÷ 90 × 7/5 = ₪422.18');
+    assert.equal(formatMonthRange('2025-11', '2026-01'), '11.2025–01.2026');
+    // Other methods carry no basis, so there is no line.
+    const fixed = buildSummaryRows({
+      ...PAY, paid_leave_amount: 30000, details: { ...PAY.details, leave: [{ leave_date: '2026-10-14', pay_fraction: 1, amount: 30000 }] },
+    }).rows.find((row) => row.key === 'leave');
+    assert.deepEqual(fixed.basisLines, []);
   });
 
   it('lists each correction with its date, kind, note and signed amount', () => {

@@ -2,9 +2,9 @@
   "meta": {
     "id": "pay-summary",
     "name": "Monthly pay summary — finance tab and the \"כספים\" page",
-    "description": "Payroll stage 6. An instructor with a lesson rate teaches two lessons last month: one marked attended, one nobody marked. Pay counts the unmarked one as attended and flags it. The finance tab shows the month total and the lessons row with the amber \"1 לא סומן\" badge (the unmarked lesson is listed once, under \"מפגשים\", not in a separate section); the lessons row opens by service with the calculation (hours × hourly rate) and the same count, and the unmarked lesson is marked \"לא סומן\" in its service with a link to the lesson in the calendar, which opens it. The \"כספים\" page lists the employee with the total and the \"לא סומן: 1\" tag, the total row for everyone, and opens the employee's summary under the row. Nothing is stored: everything is read from GET /api/payroll.",
+    "description": "Payroll stage 6. An instructor with a lesson rate teaches two lessons last month: one marked attended, one nobody marked. Pay counts the unmarked one as attended and flags it. The finance tab shows the month total and the lessons row with the amber \"1 לא סומן\" badge (the unmarked lesson is listed once, under \"מפגשים\", not in a separate section); the lessons row opens by service with the calculation (hours × hourly rate) and the same count, and the unmarked lesson is marked \"לא סומן\" in its service with a link to the lesson in the calendar, which opens it. The \"כספים\" page lists the employee with the total and the \"לא סומן: 1\" tag, the total row for everyone, and opens the employee's summary under the row. Nothing is stored: everything is read from GET /api/payroll. A last workflow checks a \"ממוצע מומלץ\" leave day: the pay of the 3 months before ÷ 90 × 7/5, with the months and the calculation in the leave row (PAY-G1).",
     "version": "1.0.0",
-    "last_validated_at": "2026-11-17T12:00:00Z",
+    "last_validated_at": "2026-11-18T13:00:00Z",
     "author": "claude-ai",
     "dependencies": {
       "routes": [
@@ -22,7 +22,9 @@
         "GET /api/payroll",
         "GET /api/settings",
         "POST /api/settings",
-        "GET /api/employee-rates"
+        "GET /api/employee-rates",
+        "POST /api/employee-leave",
+        "PUT /api/instructors"
       ]
     }
   },
@@ -902,6 +904,163 @@
           "id": "screenshot-leave-line",
           "action": "screenshot",
           "name": "pay-summary-leave-line"
+        }
+      ]
+    },
+    {
+      "id": "ui-legal-leave-value",
+      "name": "API + UI – \"ממוצע מומלץ\": a leave day is worth the pay of the 3 months before ÷ 90 × 7/5 (PAY-G1)",
+      "description": "A new instructor (started 2020) teaches one 3-hour lesson at 300 ₪/hour on the first day of last month: ₪900 in the 3 months before this month. A paid day off on the first of this month is worth 90,000 ÷ 90 × 7 ÷ 5 = 1,400 agorot, ₪14.00. The leave row says so and names the months.",
+      "steps": [
+        {
+          "id": "create-instructor",
+          "action": "apiCall",
+          "method": "POST",
+          "endpoint": "/api/instructors",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "first_name": "חופשה",
+            "last_name": "מומלצת {{RUN_NUMERIC_ID}}",
+            "employee_id": "TEST-PAYL-{{RUN_NUMERIC_ID}}",
+            "employee_type": "instructor",
+            "start_date": "2020-01-01"
+          },
+          "store": "LEGAL_INSTRUCTOR_ID",
+          "storeField": "id"
+        },
+        {
+          "id": "seed-rate",
+          "description": "300 ₪ per lesson hour for the service, from long ago",
+          "action": "apiCall",
+          "method": "POST",
+          "endpoint": "/api/employee-rates",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "employee_id": "{{LEGAL_INSTRUCTOR_ID}}",
+            "service_id": "{{SERVICE_ID}}",
+            "pay_basis": "lesson_hourly",
+            "rate": 30000,
+            "effective_date": "2000-01-01",
+            "replace_existing": true
+          }
+        },
+        {
+          "id": "leave-method-legal",
+          "description": "This employee is paid \"ממוצע מומלץ\", whatever the organisation default is",
+          "action": "apiCall",
+          "method": "PUT",
+          "endpoint": "/api/instructors",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "instructor_id": "{{LEGAL_INSTRUCTOR_ID}}",
+            "leave_pay_method": "legal"
+          }
+        },
+        {
+          "id": "create-rider",
+          "action": "apiCall",
+          "method": "POST",
+          "endpoint": "/api/students-list",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "first_name": "רוכב",
+            "last_name": "חופשה {{RUN_NUMERIC_ID}}",
+            "identity_number": "997{{RUN_NUMERIC_ID}}",
+            "phone": "0501234517"
+          },
+          "store": "LEGAL_RIDER_ID",
+          "storeField": "id"
+        },
+        {
+          "id": "create-lesson",
+          "description": "One 3-hour lesson on the first day of last month (it has ended, so it pays as attended): ₪900",
+          "action": "apiCall",
+          "method": "POST",
+          "endpoint": "/api/lesson-instances",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "datetime_start": "{{PREV_MONTH_START}}",
+            "duration_minutes": 180,
+            "instructor_employee_id": "{{LEGAL_INSTRUCTOR_ID}}",
+            "service_id": "{{SERVICE_ID}}",
+            "student_ids": [
+              "{{LEGAL_RIDER_ID}}"
+            ]
+          }
+        },
+        {
+          "id": "leave-day",
+          "description": "A full day off paid by the farm on the first day of this month",
+          "action": "apiCall",
+          "method": "POST",
+          "endpoint": "/api/employee-leave",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "employee_id": "{{LEGAL_INSTRUCTOR_ID}}",
+            "leave_type": "system_paid",
+            "duration_mode": "full_day",
+            "start_date": "{{CURRENT_MONTH_FIRST_DAY}}",
+            "end_date": "{{CURRENT_MONTH_FIRST_DAY}}"
+          }
+        },
+        {
+          "id": "leave-page",
+          "description": "Leave the page so the month is read again",
+          "action": "navigate",
+          "url": "{{BASE_URL}}/#/dashboard"
+        },
+        {
+          "id": "wait-dashboard",
+          "action": "waitForURL",
+          "pattern": "#/dashboard"
+        },
+        {
+          "id": "navigate-employees",
+          "action": "navigate",
+          "url": "{{BASE_URL}}/#/employees"
+        },
+        {
+          "id": "wait-main",
+          "action": "waitForSelector",
+          "selector": "main, [role='main']"
+        },
+        {
+          "id": "open-employee",
+          "action": "click",
+          "selector": "button:has-text('מומלצת {{RUN_NUMERIC_ID}}')",
+          "first": true
+        },
+        {
+          "id": "open-finance-tab",
+          "action": "click",
+          "selector": "[role='tab']:has-text('פיננסים')"
+        },
+        {
+          "id": "wait-summary",
+          "action": "waitForSelector",
+          "selector": "[data-pay-summary] [data-pay-total]"
+        },
+        {
+          "id": "assert-leave-line",
+          "description": "This month: one day × ₪14.00 = ₪14.00 (90,000 ÷ 90 × 7 ÷ 5 = 1,400 agorot)",
+          "action": "waitForSelector",
+          "selector": "[data-pay-row='leave']:has-text('חופשה: יום אחד × ₪14.00'):has-text('₪14.00')"
+        },
+        {
+          "id": "open-leave-line",
+          "action": "click",
+          "selector": "[data-pay-row='leave'] > button[aria-expanded='false']"
+        },
+        {
+          "id": "assert-leave-basis",
+          "description": "The row names the 3 months and shows the calculation",
+          "action": "waitForSelector",
+          "selector": "[data-pay-row='leave'] [data-leave-basis]:has-text('לפי '):has-text('₪900.00 ÷ 90 × 7/5 = ₪14.00 ליום')"
+        },
+        {
+          "id": "screenshot-legal-leave",
+          "action": "screenshot",
+          "name": "pay-summary-legal-leave"
         }
       ]
     },
