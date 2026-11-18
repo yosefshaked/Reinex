@@ -43,6 +43,7 @@ import InstructorDocumentsSection from '../InstructorDocumentsSection.jsx';
 import { getAvailabilitySummary } from '@/lib/instructor-availability.js';
 import { getServiceCompensationBasisLabel } from '@/lib/instructor-compensation.js';
 import { calendarDateFromDateKey, dateKeyFromCalendarDate, firstDayOfMonth, todayKey } from '@/lib/local-time.js';
+import { availabilityFacts } from './employee-overview.js';
 
 const REQUEST = { idle: 'idle', loading: 'loading' };
 const TAB_KEYS = {
@@ -65,8 +66,6 @@ const FILTERS = [
   { key: FILTER_OFFICE, label: 'משרד' },
   { key: FILTER_NO_USER, label: 'ללא משתמש' },
 ];
-
-const DAY_LABELS = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת'];
 
 function shiftDate(dateString, deltaDays) {
   const date = new Date(`${dateString}T00:00:00`);
@@ -166,16 +165,6 @@ function getStudentName(instance) {
 
 function getServiceName(services, serviceId, fallbackName) {
   return fallbackName || services.find((service) => service.id === serviceId)?.name || 'שירות';
-}
-
-function getWorkingDaysSummary(employee) {
-  const workingDays = Array.isArray(employee?.working_days) ? employee.working_days : [];
-  if (!Array.isArray(workingDays) || workingDays.length === 0) return 'לא הוגדרו ימי עבודה';
-  return workingDays
-    .slice()
-    .sort((a, b) => a - b)
-    .map((day) => DAY_LABELS[day] || day)
-    .join(', ');
 }
 
 function getInstanceOutcomeStatus(instance) {
@@ -1032,7 +1021,6 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
                         <Row label="טלפון" value={currentEmployee.phone} />
                         <Row label="דוא״ל" value={currentEmployee.email} />
                         <Row label="תאריך התחלה" value={formatDate(currentEmployee.start_date)} />
-                        {getEmployeeType(currentEmployee) === 'office' ? <Row label="היקף העסקה" value={currentEmployee.employment_scope} /> : null}
                         <Row label="מספר עובד" value={currentEmployee.employee_id} />
                         <Row label="סוג עובד" value={getEmployeeTypeLabel(currentEmployee)} />
                       </div>
@@ -1183,12 +1171,12 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
                             <EmptyState title="אין שירותים מוגדרים" body="הוסף שירותים כדי לנהל זמינות לפי שירות." />
                           )}
                         </div>
-                      ) : (
-                        <div className="space-y-0">
-                          <Row label="ימי עבודה" value={getWorkingDaysSummary(currentEmployee)} />
-                          <Row label="מקור הנתונים" value="Employees.working_days" muted />
+                      ) : null}
+                      {availabilityFacts(currentEmployee).length > 0 ? (
+                        <div className="space-y-0" data-employee-availability-facts>
+                          {availabilityFacts(currentEmployee).map((fact) => <Row key={fact.key} label={fact.label} value={fact.value} />)}
                         </div>
-                      )}
+                      ) : null}
                     </SectionCard>
 
                     <SectionCard
