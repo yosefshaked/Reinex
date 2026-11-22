@@ -125,13 +125,13 @@ export default function LeaveBalanceLine({ summary, entitlement, balanceEvents, 
         <PopoverTrigger asChild>
           <Button type="button" size="sm" variant="ghost" className="h-7 px-2 text-xs">שינוי יתרה</Button>
         </PopoverTrigger>
-        <PopoverContent dir="rtl" align="start" className="w-80 max-w-[calc(100vw-2rem)] space-y-3">
-          <div>
+        <PopoverContent dir="rtl" align="start" collisionPadding={8} className="flex w-80 max-w-[calc(100vw-2rem)] flex-col gap-3 overflow-hidden max-h-[min(85vh,var(--radix-popover-content-available-height))]" data-balance-popover>
+          <div className="shrink-0">
             <p className="text-sm font-bold text-slate-900">שינויי יתרה ידניים · {summary.year}</p>
             <p className="text-xs text-slate-500">העברה מהשנה הקודמת, או הוספה והורדה של ימים. כל שינוי נרשם עם סיבה.</p>
           </div>
           {manualEvents.length ? (
-            <ul className="space-y-2">
+            <ul className="min-h-[5rem] space-y-2 overflow-y-auto" data-balance-history>
               {manualEvents.map((entry, index) => {
                 const line = describeBalanceEvent(entry, formatDateKey);
                 return (
@@ -150,7 +150,7 @@ export default function LeaveBalanceLine({ summary, entitlement, balanceEvents, 
               })}
             </ul>
           ) : null}
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid shrink-0 grid-cols-2 gap-2">
             <div className="space-y-1">
               <Label htmlFor="balance-action" className="text-xs text-slate-600">פעולה</Label>
               <Select value={form.eventType} onValueChange={(value) => setForm((current) => ({ ...current, eventType: value }))} disabled={saving}>
@@ -195,8 +195,8 @@ export default function LeaveBalanceLine({ summary, entitlement, balanceEvents, 
               </div>
             ) : null}
           </div>
-          {quantityError ? <p id="balance-quantity-error" className="text-xs text-red-600" data-balance-quantity-error>{quantityError}</p> : null}
-          <Button type="button" size="sm" onClick={handleAdd} disabled={saving || Boolean(formError)} title={formError || undefined}>
+          {quantityError ? <p id="balance-quantity-error" className="shrink-0 text-xs text-red-600" data-balance-quantity-error>{quantityError}</p> : null}
+          <Button type="button" size="sm" className="shrink-0" onClick={handleAdd} disabled={saving || Boolean(formError)} title={formError || undefined}>
             {saving ? <Loader2 className="me-2 h-4 w-4 animate-spin" /> : null}
             הוספה
           </Button>

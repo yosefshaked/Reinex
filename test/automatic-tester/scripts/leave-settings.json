@@ -196,6 +196,22 @@
           "selector": "[data-leave-balance-line]:has-text('עוד 14 ימי עבודה ליום החופשה הבא')"
         },
         {
+          "id": "open-balance-popover",
+          "description": "The balance-change popover is kept inside the screen: it has a max height, so a long history scrolls inside it",
+          "action": "click",
+          "selector": "button:has-text('שינוי יתרה')"
+        },
+        {
+          "id": "assert-balance-popover-bounded",
+          "action": "waitForSelector",
+          "selector": "[data-balance-popover][class*='max-h-']"
+        },
+        {
+          "id": "close-balance-popover",
+          "action": "pressKey",
+          "key": "Escape"
+        },
+        {
           "id": "assert-row-defaults",
           "description": "The \"חופשה\" row reads first: both choices follow the organisation",
           "action": "waitForSelector",
