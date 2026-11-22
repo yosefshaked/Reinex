@@ -15,8 +15,8 @@ export { LEAVE_ENTITLEMENT_POLICY_KEY, MAX_FIXED_TABLE_ROWS };
 export const ENTITLEMENT_RECOMMENDED_LABEL = 'מומלץ: לפי ותק וימי עבודה';
 
 export const ENTITLEMENT_DEFAULT_OPTIONS = [
-  { value: 'legal', label: ENTITLEMENT_RECOMMENDED_LABEL, description: 'המערכת מחשבת לבד לפי הוותק וימי העבודה של כל עובד.' },
   { value: 'fixed', label: 'כמות קבועה', description: 'אתם קובעים כמה ימי חופשה מגיעים בכל שנת ותק.' },
+  { value: 'legal', label: ENTITLEMENT_RECOMMENDED_LABEL, description: 'המערכת מחשבת לבד לפי הוותק וימי העבודה של כל עובד.' },
 ];
 
 export const ENTITLEMENT_DISCLAIMER = 'מומלץ לקבוע לכל עובד את ימי החופשה לפי חוזה ההעסקה שלו ובהתייעצות עם רואה החשבון, כדי לוודא עמידה מלאה בזכויות החוקיות.';

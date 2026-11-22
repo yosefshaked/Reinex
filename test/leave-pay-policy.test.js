@@ -153,11 +153,12 @@ describe('the "חופשה" dialog: two steps, one save', () => {
   const entitlementDraft = (mode, rows = ['12', '12']) => ({ mode, rows });
   const payDraft = (method, lookbackMonths = '3') => ({ method, lookbackMonths });
 
-  it('starts step 1 with nothing chosen only when the organisation never chose', () => {
-    assert.equal(buildEntitlementStepDraft(null, false).mode, '');
+  it('starts step 1 on "כמות קבועה" when the organisation never chose, and keeps a saved choice', () => {
+    assert.equal(buildEntitlementStepDraft(null, false).mode, 'fixed');
     assert.equal(buildEntitlementStepDraft(null, false).rows.length, 14, 'the table is still prefilled');
     assert.equal(buildEntitlementStepDraft({ mode: 'fixed', fixed_days_by_year: [10] }, true).mode, 'fixed');
-    assert.equal(buildEntitlementStepDraft(null, true).mode, 'legal');
+    assert.equal(buildEntitlementStepDraft(null, true).mode, 'fixed', 'a version with no readable mode is the default');
+    assert.equal(buildEntitlementStepDraft({ mode: 'legal' }, true).mode, 'legal');
   });
 
   it('asks for step 1 before anything else, then checks the table and the months', () => {

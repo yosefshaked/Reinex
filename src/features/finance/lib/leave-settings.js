@@ -38,11 +38,11 @@ export { describeEntitlementVersion };
 
 /**
  * Step 1's starting state. An organisation that never chose (no version in force today) starts with
- * nothing chosen, so step 2 waits for the choice; the table is prefilled either way.
+ * "כמות קבועה" preselected (the default) and the table prefilled; its first save still writes a version.
  */
 export function buildEntitlementStepDraft(storedValue, hasVersion) {
   const draft = buildEntitlementDraft(storedValue);
-  return hasVersion ? draft : { ...draft, mode: '' };
+  return hasVersion ? draft : { ...draft, mode: 'fixed' };
 }
 
 /**

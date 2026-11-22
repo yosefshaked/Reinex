@@ -72,7 +72,7 @@ export const MAX_FIXED_TABLE_ROWS = 40;
 export const MAX_DAYS_PER_YEAR = 365;
 
 export const DEFAULT_LEAVE_ENTITLEMENT_POLICY = Object.freeze({
-  mode: 'legal',
+  mode: 'fixed',
   fixed_days_by_year: DEFAULT_FIXED_DAYS_BY_YEAR,
 });
 
@@ -139,7 +139,7 @@ function readFixedTable(raw) {
   return table.every((value) => Number.isFinite(value) && value >= 0) ? table : null;
 }
 
-/** The stored setting as the calculation reads it; anything unreadable is the default (the law). */
+/** The stored setting as the calculation reads it; anything unreadable is the default (the organisation's fixed table). */
 export function normalizeLeaveEntitlementPolicy(raw) {
   const parsed = parseJsonValue(raw);
   const source = isPlainObject(parsed) ? parsed : {};

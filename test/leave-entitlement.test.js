@@ -28,6 +28,7 @@ import * as frontendModule from '../src/lib/leave-entitlement.js';
 import { buildFinancePolicies, computeLeaveSummary } from '../api/_shared/employee-finance.js';
 import { collectWorkedDates } from '../api/_shared/pay-calculation.js';
 import {
+  ENTITLEMENT_DEFAULT_OPTIONS,
   buildEntitlementDraft,
   buildEntitlementPayload,
   describeEntitlementVersion,
@@ -240,6 +241,7 @@ describe('when the system does not compute', () => {
     assert.equal(needsDaysWorked({ ...base, employee: employee('2020-01-01'), policy: { mode: 'fixed' } }), false);
     assert.equal(needsDaysWorked({ ...base, employee: employee('2020-01-01', null, 10), policy: LEGAL }), false);
     assert.equal(needsDaysWorked({ ...base, employee: employee('2026-10-01'), policy: LEGAL }), false);
+    assert.equal(needsDaysWorked({ ...base, employee: employee('2020-01-01'), policy: null }), false, 'no saved version means the fixed table, which needs no days worked');
     assert.equal(needsDaysWorked({ ...base, employee: employee(null), policy: null }), false);
   });
 
@@ -280,8 +282,10 @@ describe('the fixed table and a manual number', () => {
 });
 
 describe('the organisation setting', () => {
-  it('reads anything unreadable as the law with the default table', () => {
-    assert.deepEqual(normalizeLeaveEntitlementPolicy(null), { mode: 'legal', fixed_days_by_year: [...DEFAULT_FIXED_DAYS_BY_YEAR] });
+  it('reads anything unreadable as the fixed table, the default', () => {
+    assert.deepEqual(normalizeLeaveEntitlementPolicy(null), { mode: 'fixed', fixed_days_by_year: [...DEFAULT_FIXED_DAYS_BY_YEAR] });
+    assert.equal(normalizeLeaveEntitlementPolicy('nope').mode, 'fixed');
+    assert.equal(normalizeLeaveEntitlementPolicy({ mode: 'legal' }).mode, 'legal', 'a saved "legal" version keeps the law');
     assert.equal(normalizeLeaveEntitlementPolicy('{"mode":"fixed","fixed_days_by_year":[9]}').mode, 'fixed');
   });
 
@@ -308,8 +312,8 @@ describe('the organisation setting', () => {
       { key: 'leave_entitlement_policy', effective_date: '2026-12-01', settings_value: { mode: 'legal' } },
     ];
     const policies = buildFinancePolicies({ datedRows: rows, asOf: '2026-11-16' });
-    // 2024: no version yet -> the law.
-    assert.equal(policies.onDate(entitlementPolicyDateForYear(2024, '2026-11-16')).leaveEntitlementPolicy.mode, 'legal');
+    // 2024: no version yet -> the default, the fixed table.
+    assert.equal(policies.onDate(entitlementPolicyDateForYear(2024, '2026-11-16')).leaveEntitlementPolicy.mode, 'fixed');
     // 2025: the version from 1 July 2025 decides the whole year.
     const in2025 = policies.onDate(entitlementPolicyDateForYear(2025, '2026-11-16'));
     assert.equal(in2025.leaveEntitlementPolicy.mode, 'fixed');
@@ -379,12 +383,15 @@ describe('days worked and the balance', () => {
 describe('the settings dialog and the employee choice', () => {
   it('builds, checks and compares the draft of the organisation default', () => {
     const draft = buildEntitlementDraft(null);
-    assert.equal(draft.mode, 'legal');
+    assert.equal(draft.mode, 'fixed');
     assert.equal(draft.rows.length, 14);
     assert.equal(isEntitlementDraftChanged(null, draft), false);
-    const fixed = { ...draft, mode: 'fixed' };
-    assert.equal(isEntitlementDraftChanged(null, fixed), true);
-    assert.equal(validateEntitlementDraft(fixed), '');
+    const legal = { ...draft, mode: 'legal' };
+    assert.equal(isEntitlementDraftChanged(null, legal), true);
+    assert.equal(validateEntitlementDraft(draft), '');
+    assert.deepEqual(ENTITLEMENT_DEFAULT_OPTIONS.map((option) => option.value), ['fixed', 'legal'], '"כמות קבועה" is listed first');
+    assert.equal(ENTITLEMENT_DEFAULT_OPTIONS[0].label, 'כמות קבועה');
+    assert.equal(ENTITLEMENT_DEFAULT_OPTIONS[1].label, 'מומלץ: לפי ותק וימי עבודה');
     assert.deepEqual(buildEntitlementPayload({ mode: 'fixed', rows: ['10', '12'] }), { mode: 'fixed', fixed_days_by_year: [10, 12] });
     assert.notEqual(validateEntitlementDraft({ mode: 'fixed', rows: ['10', ''] }), '');
     assert.equal(isEntitlementDraftChanged({ mode: 'fixed', fixed_days_by_year: [10, 12] }, { mode: 'fixed', rows: ['10', '12'] }), false);
