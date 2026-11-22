@@ -11,6 +11,7 @@ import {
   formatMinutes,
   leaveBalanceText,
   planLeaveDayValue,
+  leaveDayRateTimeline,
   leaveFormFromEntry,
   leaveSaveErrorMessage,
   leaveTypeLabel,
@@ -187,5 +188,28 @@ describe('the fixed leave-day value in the employee leave dialog', () => {
     assert.deepEqual([plan.error, plan.rate, plan.effectiveDate, plan.needsSave], ['', 25000, '2026-11-18', true]);
     assert.equal(planLeaveDayValue(fixed, { rate: 25000 }).needsSave, false);
     assert.equal(planLeaveDayValue(fixed, { rate: 20000 }).needsSave, true);
+  });
+});
+
+describe('the history of the employee fixed leave-day value', () => {
+  const rows = [
+    { id: 'a', pay_basis: 'leave_day', service_id: null, effective_date: '2026-01-01', rate: 20000 },
+    { id: 'b', pay_basis: 'leave_day', service_id: null, effective_date: '2026-12-01', rate: 25050 },
+    { id: 'c', pay_basis: 'leave_day', service_id: null, effective_date: '2027-03-01', rate: 30000 },
+    { id: 'd', pay_basis: 'hourly', service_id: null, effective_date: '2026-02-01', rate: 9900 },
+  ];
+
+  it('lists the leave_day rows newest first and notes the nearest future one', () => {
+    const timeline = leaveDayRateTimeline(rows, '2026-11-22');
+    assert.deepEqual(timeline.entries.map((entry) => entry.id), ['c', 'b', 'a']);
+    assert.equal(timeline.current.id, 'a');
+    assert.equal(timeline.entries.find((entry) => entry.id === 'a').isCurrent, true);
+    assert.equal(timeline.next.id, 'b');
+    assert.match(timeline.note, /^ישתנה ב-.*01.*12.*2026.*: ₪250\.5/);
+  });
+
+  it('has no note when nothing is in the future', () => {
+    assert.equal(leaveDayRateTimeline(rows, '2027-06-01').note, '');
+    assert.equal(leaveDayRateTimeline([], '2026-11-22').entries.length, 0);
   });
 });

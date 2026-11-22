@@ -1,5 +1,6 @@
 // Presentation only: lessons come from the calendar, other work from manual records.
-import { toAgorot } from '../../../lib/currency.js';
+import { toAgorot, toShekel } from '../../../lib/currency.js';
+import { formatDateKey } from '../../../lib/date-key-format.js';
 
 function minutes(value) {
   const number = Number(value);
@@ -292,6 +293,33 @@ export function planLeaveDayValue({ payMethod, dayValue, dayValueDate }, current
     effectiveDate: dayValueDate,
     needsSave: !currentRate || Number(currentRate.rate) !== rate,
   };
+}
+
+/**
+ * The employee's fixed leave-day values from the RateHistory rows (dated `leave_day` rows without a
+ * service), newest first, for the history under the leave row. `current` is the row in force on `today`,
+ * `next` the earliest one that has not started yet (or null), `note` the short "ישתנה ב-<date>: ₪X".
+ */
+export function leaveDayRateTimeline(rates, today) {
+  const rows = (Array.isArray(rates) ? rates : [])
+    .filter((row) => row?.pay_basis === 'leave_day' && !row.service_id && row.effective_date)
+    .sort((left, right) => String(right.effective_date).localeCompare(String(left.effective_date)));
+  const current = rows.find((row) => row.effective_date <= today) || null;
+  const next = rows.filter((row) => row.effective_date > today).pop() || null;
+  const entries = rows.map((row) => ({
+    id: row.id || row.effective_date,
+    date: row.effective_date,
+    rate: row.rate,
+    isFuture: row.effective_date > today,
+    isCurrent: row === current,
+  }));
+  const note = next ? `ישתנה ב-${formatDateKey(next.effective_date)}: ${formatShekelAmount(next.rate)}` : '';
+  return { entries, current, next, note };
+}
+
+function formatShekelAmount(agorot) {
+  const value = toShekel(agorot);
+  return `₪${value.toLocaleString('he-IL', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
 }
 
 /** Body of PUT /api/instructors for the days choice alone; refuses a bad manual number (null). */

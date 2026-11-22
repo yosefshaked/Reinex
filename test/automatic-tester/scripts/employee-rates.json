@@ -966,6 +966,92 @@
           "selector": "[data-leave-settings-actions] button:text-is('ביטול')"
         },
         {
+          "id": "future-leave-day-rate",
+          "description": "A leave_day rate that starts next month (300) is set through the rates API",
+          "action": "apiCall",
+          "method": "POST",
+          "endpoint": "/api/employee-rates",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "employee_id": "{{RATE_INSTRUCTOR_ID}}",
+            "pay_basis": "leave_day",
+            "service_id": null,
+            "rate": 30000,
+            "effective_date": "{{NEXT_MONTH_FIRST_DAY}}"
+          }
+        },
+        {
+          "id": "leave-tab-for-future",
+          "action": "click",
+          "selector": "[role='tab']:has-text('סקירה')"
+        },
+        {
+          "id": "return-tab-for-future",
+          "action": "click",
+          "selector": "[role='tab']:has-text('נוכחות')"
+        },
+        {
+          "id": "assert-future-note",
+          "description": "Beside the row: a short note with the date and the new value",
+          "action": "waitForSelector",
+          "selector": "[data-leave-future-note]:has-text('ישתנה ב-'):has-text('₪300')"
+        },
+        {
+          "id": "assert-history-closed",
+          "action": "assert",
+          "type": "count",
+          "selector": "[data-leave-day-history]",
+          "value": "0"
+        },
+        {
+          "id": "open-history-from-note",
+          "action": "click",
+          "selector": "[data-leave-future-note]"
+        },
+        {
+          "id": "assert-history-entries",
+          "description": "Two entries (the future 300 and the current 250), one thin separator between them, none after the last",
+          "action": "assert",
+          "type": "count",
+          "selector": "[data-leave-day-history] [data-leave-day-entry]",
+          "value": "2"
+        },
+        {
+          "id": "assert-history-separator",
+          "action": "assert",
+          "type": "count",
+          "selector": "[data-leave-day-history] [data-leave-day-separator]",
+          "value": "1"
+        },
+        {
+          "id": "assert-history-future-row",
+          "action": "waitForSelector",
+          "selector": "[data-leave-day-entry]:has-text('(עתידי)'):has-text('₪300')"
+        },
+        {
+          "id": "assert-history-current-row",
+          "action": "waitForSelector",
+          "selector": "[data-leave-day-entry]:has-text('(בתוקף)'):has-text('₪250')"
+        },
+        {
+          "id": "assert-no-cancel",
+          "description": "The rates API has no delete, so a future value cannot be cancelled here",
+          "action": "assert",
+          "type": "count",
+          "selector": "[data-leave-day-history] button",
+          "value": "0"
+        },
+        {
+          "id": "screenshot-leave-day-history",
+          "action": "screenshot",
+          "name": "05c-leave-day-history"
+        },
+        {
+          "id": "close-history",
+          "action": "click",
+          "selector": "[data-leave-day-history-toggle]"
+        },
+        {
           "id": "back-to-finance",
           "action": "click",
           "selector": "[role='tab']:has-text('פיננסים')"

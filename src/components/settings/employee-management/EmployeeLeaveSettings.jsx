@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Loader2 } from 'lucide-react';
+import { ChevronDown, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -8,11 +8,13 @@ import { authenticatedFetch } from '@/lib/api-client.js';
 import StepReveal from '@/features/finance/components/StepReveal.jsx';
 import { todayKey } from '@/lib/local-time.js';
 import { toShekel } from '@/lib/currency.js';
+import { formatDateKey } from '@/lib/date-key-format.js';
 import {
   EMPLOYEE_LEAVE_PAY_CHOICES,
   ENTITLEMENT_CHOICES,
   buildEmployeeLeaveBody,
   planLeaveDayValue,
+  leaveDayRateTimeline,
   describeEmployeeLeavePayChoice,
   employeeLeaveSummaryText,
 } from './attendance-month-grid.js';
@@ -59,9 +61,12 @@ export default function EmployeeLeaveSettings({ employeeId, orgId, session, curr
   const [draft, setDraft] = useState(null);
   const [saving, setSaving] = useState(false);
   const [leaveDayRate, setLeaveDayRate] = useState(null);
+  const [leaveDayRates, setLeaveDayRates] = useState([]);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const open = draft !== null;
   const result = open ? buildEmployeeLeaveBody(draft, { orgId, employeeId }, current) : null;
   const plan = open ? planLeaveDayValue(draft, leaveDayRate) : null;
+  const timeline = leaveDayRateTimeline(leaveDayRates, todayKey());
   const canSave = Boolean(result) && !plan?.error && (result.changed || plan?.needsSave);
 
   // The leave_day rate in force today, to prefill the value.
@@ -70,7 +75,9 @@ export default function EmployeeLeaveSettings({ employeeId, orgId, session, curr
     try {
       const payload = await authenticatedFetch('employee-rates', { session, params: { org_id: orgId, employee_id: employeeId } });
       const today = todayKey();
-      const row = (Array.isArray(payload?.rates) ? payload.rates : [])
+      const rates = Array.isArray(payload?.rates) ? payload.rates : [];
+      setLeaveDayRates(rates);
+      const row = rates
         .filter((rate) => rate.pay_basis === 'leave_day' && !rate.service_id && rate.effective_date <= today)
         .sort((left, right) => right.effective_date.localeCompare(left.effective_date))[0] || null;
       setLeaveDayRate(row);
@@ -142,7 +149,49 @@ export default function EmployeeLeaveSettings({ employeeId, orgId, session, curr
         >
           שינוי
         </Button>
+        {timeline.note ? (
+          <button
+            type="button"
+            className="text-xs font-medium text-blue-700 hover:underline"
+            aria-expanded={historyOpen}
+            onClick={() => setHistoryOpen((value) => !value)}
+            data-leave-future-note
+          >
+            {timeline.note}
+          </button>
+        ) : null}
+        {timeline.entries.length > 0 ? (
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            className="h-7 gap-1 px-2 text-xs"
+            aria-expanded={historyOpen}
+            onClick={() => setHistoryOpen((value) => !value)}
+            data-leave-day-history-toggle
+          >
+            היסטוריה ({timeline.entries.length})
+            <ChevronDown className={`h-3.5 w-3.5 transition-transform ${historyOpen ? 'rotate-180' : ''}`} />
+          </Button>
+        ) : null}
       </div>
+
+      {historyOpen && timeline.entries.length > 0 ? (
+        <div className="rounded-xl border border-slate-200 bg-white px-3 py-2" data-leave-day-history>
+          <p className="mb-1 text-xs text-slate-500">ערך קבוע ליום חופשה</p>
+          <ul className="space-y-2">
+            {timeline.entries.map((entry, index) => (
+              <React.Fragment key={entry.id}>
+                {index > 0 ? <li role="separator" aria-hidden="true" className="mx-auto h-px w-2/3 bg-slate-200" data-leave-day-separator /> : null}
+                <li className="flex items-center justify-between gap-2 text-sm" data-leave-day-entry>
+                  <span className="font-semibold text-slate-900"><bdi dir="ltr">{formatDateKey(entry.date)}</bdi>{entry.isFuture ? <span className="ms-1 text-xs font-normal text-slate-500">(עתידי)</span> : null}{entry.isCurrent ? <span className="ms-1 text-xs font-normal text-slate-500">(בתוקף)</span> : null}</span>
+                  <span className="text-slate-700">₪{toShekel(entry.rate).toLocaleString('he-IL', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</span>
+                </li>
+              </React.Fragment>
+            ))}
+          </ul>
+        </div>
+      ) : null}
 
       {open ? (
         <div className="space-y-3 rounded-xl border border-dashed border-slate-300 bg-white p-3" data-leave-settings-form>
