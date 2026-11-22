@@ -1,6 +1,6 @@
 import React from 'react';
 import { Input } from '@/components/ui/input';
-import { formatCurrency, toAgorot } from '@/lib/currency.js';
+import { formatCurrency, toAgorot, toShekel } from '@/lib/currency.js';
 
 const MAX_AGOROT_DEFAULT = 10_000_000; // ₪100,000
 
@@ -61,7 +61,7 @@ export default function CurrencyInput({
       ) : null}
       {tooHigh ? (
         <p className="text-xs text-destructive">
-          הסכום חורג מהמקסימום המותר (₪{(max / 100).toLocaleString('he-IL', { maximumFractionDigits: 0 })})
+          הסכום חורג מהמקסימום המותר (₪{toShekel(max).toLocaleString('he-IL', { maximumFractionDigits: 0 })})
         </p>
       ) : null}
     </div>

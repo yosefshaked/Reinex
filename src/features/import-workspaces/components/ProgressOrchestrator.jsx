@@ -9,6 +9,7 @@ const PHASE_COPY = {
 };
 
 export function ProgressOrchestrator({ processing, onRetry }) {
+  // eslint-disable-next-line no-restricted-syntax -- not money: import progress percentage
   const pct = Math.round((processing.progress || 0) * 100);
   const isRunning = processing.status === 'running';
   const isDone = processing.status === 'done' && processing.phase === 'done';

@@ -35,6 +35,7 @@
 ### Frontend (src/**)
 - Currency values are stored in **agorot** (integers). Use `toAgorot()` / `toShekel()` from `src/lib/currency.js`
 - API calls go through `authenticatedFetch()` from `src/lib/api-client.js`
+- ESLint (`no-restricted-syntax`, run by `npm run lint` and `npm run lint:api`) rejects a hand-written `* 100` / `/ 100` in `src/**` and `api/**`; use the currency helpers, or for non-money use `roundTo2()` (`src/lib/round.js`) or a `// eslint-disable-next-line no-restricted-syntax -- not money: <why>` comment
 
 ## Project structure
 - `api/` — Azure Functions (Node.js, ESM)

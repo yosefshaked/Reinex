@@ -11,6 +11,7 @@
 import { normalizeString, withOrgScope } from './org-bff.js';
 import { chunkArray, selectInChunks } from './query-chunks.js';
 import { coerceAgorot } from './currency.js';
+import { roundTo2 } from './round.js';
 import { extractScheduleSlotFromIso } from './instructor-availability.js';
 import {
   addDays,
@@ -370,7 +371,7 @@ export async function loadCountedLessons(client, orgId, {
  */
 export function summarizePaidLeave(leaveAmounts = []) {
   const paid = (leaveAmounts || []).filter((row) => Number(row?.pay_fraction) > 0);
-  const days = Math.round(paid.reduce((sum, row) => sum + Number(row.pay_fraction), 0) * 100) / 100;
+  const days = roundTo2(paid.reduce((sum, row) => sum + Number(row.pay_fraction), 0));
   const values = paid.map((row) => Math.round(Number(row.amount) / Number(row.pay_fraction)));
   const same = values.length > 0 && Math.max(...values) - Math.min(...values) <= 2;
   return { days, dayValue: same ? values[0] : null };

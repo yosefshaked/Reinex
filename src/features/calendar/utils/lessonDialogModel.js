@@ -1,5 +1,6 @@
 // Pure helpers for the calendar lesson dialog (LessonInstanceDialog and its sub-components).
 // Keep this module free of React and '@/...' path aliases so node:test can import it directly.
+import { toShekel } from '../../../lib/currency.js';
 import { formatDateDisplay, formatTimeDisplay } from './timeGrid.js';
 import { buildSchedulingOverrideReasonDetails } from './schedulingOverride.js';
 import { getParticipantDisplayName } from './participantDisplay.js';
@@ -417,7 +418,7 @@ export function formatAgorotPreview(value) {
     currency: 'ILS',
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
-  }).format(amount / 100);
+  }).format(toShekel(amount));
 }
 
 export function getPreviewImpactClass(severity) {
@@ -557,7 +558,7 @@ export function formatAgorotCompact(value) {
     currency: 'ILS',
     minimumFractionDigits: 0,
     maximumFractionDigits: 2,
-  }).format(Math.abs(amount) / 100);
+  }).format(toShekel(Math.abs(amount)));
 }
 
 const STRIP_DETAIL_EXCLUDED_TYPES = new Set(['participant_status', 'lesson_status']);

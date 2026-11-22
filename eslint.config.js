@@ -35,6 +35,16 @@ const DATE_AND_TIME_ZONE_RESTRICTIONS = [
   },
 ]
 
+// Money: stored in agorot, converted only through the currency helpers.
+// api/_shared/round.js is the non-money rounding helper (roundTo2), which also needs * 100.
+const CURRENCY_HELPER_FILES = ['src/lib/currency.js', 'api/_shared/currency.js', 'api/_shared/round.js']
+const MONEY_CONVERSION_RESTRICTION = {
+  selector:
+    "BinaryExpression:matches([operator='*'], [operator='/']):matches([left.type='Literal'][left.value=100], [right.type='Literal'][right.value=100])",
+  message:
+    'Money is converted only with toAgorot()/toShekel() (src/lib/currency.js) or the api/_shared/currency.js helpers. If this * or / 100 is not money (a percentage, a day count), add `// eslint-disable-next-line no-restricted-syntax -- not money: <why>`.',
+}
+
 export default defineConfig([
   progress.configs.recommended,
   globalIgnores(['dist']),
@@ -168,10 +178,23 @@ export default defineConfig([
     },
   },
   {
+    files: ['src/**/*.{js,jsx}', 'api/**/*.{js,jsx,mjs}'],
+    rules: {
+      'no-restricted-syntax': ['error', NO_NAME_ASSIGNMENT, ...DATE_AND_TIME_ZONE_RESTRICTIONS, MONEY_CONVERSION_RESTRICTION],
+    },
+  },
+  {
     // The one module allowed to name the zone and to read UTC dates.
     files: LOCAL_TIME_MODULE_FILES,
     rules: {
       'no-restricted-syntax': ['error', NO_NAME_ASSIGNMENT],
+    },
+  },
+  {
+    // The currency helpers themselves do the * / 100 conversion.
+    files: CURRENCY_HELPER_FILES,
+    rules: {
+      'no-restricted-syntax': ['error', NO_NAME_ASSIGNMENT, ...DATE_AND_TIME_ZONE_RESTRICTIONS],
     },
   },
   {

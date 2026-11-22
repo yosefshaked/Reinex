@@ -39,6 +39,7 @@ export default function AccessibilityButton() {
               <Button type="button" size="icon" variant="outline" className="h-8 w-8" onClick={decreaseFont} aria-label="הקטן טקסט">
                 <Minus className="h-4 w-4" />
               </Button>
+              {/* eslint-disable-next-line no-restricted-syntax -- not money: font scale shown as a percentage */}
               <span className="w-10 text-center text-sm tabular-nums">{Math.round((fontScale || 1) * 100)}%</span>
               <Button type="button" size="icon" variant="outline" className="h-8 w-8" onClick={increaseFont} aria-label="הגדל טקסט">
                 <Plus className="h-4 w-4" />

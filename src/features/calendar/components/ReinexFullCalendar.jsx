@@ -381,6 +381,7 @@ function rgbToHsl({ red, green, blue }) {
     return {
       hue: 0,
       saturation: 0,
+      // eslint-disable-next-line no-restricted-syntax -- not money: HSL lightness 0-1 to a 0-100 percentage
       lightness: lightness * 100,
     };
   }
@@ -405,7 +406,9 @@ function rgbToHsl({ red, green, blue }) {
 
   return {
     hue: hue * 60,
+    // eslint-disable-next-line no-restricted-syntax -- not money: HSL saturation 0-1 to a 0-100 percentage
     saturation: saturation * 100,
+    // eslint-disable-next-line no-restricted-syntax -- not money: HSL lightness 0-1 to a 0-100 percentage
     lightness: lightness * 100,
   };
 }

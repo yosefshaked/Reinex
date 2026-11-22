@@ -893,6 +893,7 @@ function CommitStep({ workspaceId, sourceReference, onBackToReview }) {
   }
 
   if (phase === 'running') {
+    // eslint-disable-next-line no-restricted-syntax -- not money: import progress percentage
     const pct = progress.total > 0 ? Math.round((progress.done / progress.total) * 100) : 0;
     return (
       <div className="py-8 space-y-4">
