@@ -11,6 +11,7 @@ import {
   resolveOrgId,
   withOrgScope,
 } from '../_shared/org-bff.js';
+import { selectInChunks } from '../_shared/query-chunks.js';
 import { parseJsonBodyWithLimit, validateInstructorCreate, validateInstructorUpdate } from '../_shared/validation.js';
 import { ensureInstructorColors } from '../_shared/instructor-colors.js';
 import { PAY_BASIS, hasPositiveLeaveDayRate, loadRateHistoryRows } from '../_shared/rate-history.js';
@@ -133,12 +134,17 @@ async function enrichEmployees({ client, orgId, employees }) {
 
   const employeeIds = employees.map((employee) => employee.id);
   const [{ data: profiles }, { data: capabilities }] = await Promise.all([
-    withOrgScope(client, 'instructor_profiles', orgId)
-      .select('employee_id, break_time_minutes, metadata')
-      .in('employee_id', employeeIds),
-    withOrgScope(client, 'instructor_service_capabilities', orgId)
-      .select('employee_id, service_id, max_students, availability_windows, metadata')
-      .in('employee_id', employeeIds),
+    selectInChunks(
+      () => withOrgScope(client, 'instructor_profiles', orgId).select('employee_id, break_time_minutes, metadata'),
+      'employee_id',
+      employeeIds,
+    ),
+    selectInChunks(
+      () => withOrgScope(client, 'instructor_service_capabilities', orgId)
+        .select('employee_id, service_id, max_students, availability_windows, metadata'),
+      'employee_id',
+      employeeIds,
+    ),
   ]);
 
   const profileMap = new Map((profiles || []).map((profile) => [profile.employee_id, profile]));

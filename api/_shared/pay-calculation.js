@@ -9,6 +9,7 @@
  * never disagree and there is no copy to keep in step.
  */
 import { normalizeString, withOrgScope } from './org-bff.js';
+import { chunkArray, selectInChunks } from './query-chunks.js';
 import { coerceAgorot } from './currency.js';
 import { extractScheduleSlotFromIso } from './instructor-availability.js';
 import {
@@ -58,14 +59,6 @@ const PAGE_SIZE = 1000;
 const ID_CHUNK_SIZE = 100;
 const LESSON_COLUMNS = 'id, org_id, instructor_employee_id, service_id, datetime_start, duration_minutes, status';
 const PARTICIPANT_COLUMNS = 'id, lesson_instance_id, student_id, participant_status, metadata';
-
-function chunk(values, size) {
-  const chunks = [];
-  for (let index = 0; index < values.length; index += size) {
-    chunks.push(values.slice(index, index + size));
-  }
-  return chunks;
-}
 
 /** Reads every row of a query, a page at a time; one request returns at most 1000 rows. */
 async function fetchAllRows(buildQuery, { ignoreMissingTable = false } = {}) {
@@ -261,14 +254,14 @@ async function loadLatestAppliedCorrections(client, orgId) {
 }
 
 async function loadRowsByIds(client, orgId, table, columns, column, ids) {
-  const rows = [];
-  for (const idChunk of chunk(ids, ID_CHUNK_SIZE)) {
-    rows.push(...await fetchAllRows(() => withOrgScope(client, table, orgId)
-      .select(columns)
-      .in(column, idChunk)
-      .order('id', { ascending: true })));
-  }
-  return rows;
+  const { data, error } = await selectInChunks(
+    () => withOrgScope(client, table, orgId).select(columns).order('id', { ascending: true }),
+    column,
+    ids,
+    { size: ID_CHUNK_SIZE, pageSize: PAGE_SIZE },
+  );
+  if (error) throw error;
+  return data;
 }
 
 /**
@@ -338,7 +331,7 @@ export async function loadCountedLessons(client, orgId, {
 
   const participantIds = effectiveLessons.flatMap((lesson) => lesson.participants.map((row) => row?.id)).filter(Boolean);
   const graceParticipantIds = new Set();
-  for (const idChunk of chunk(participantIds, ID_CHUNK_SIZE)) {
+  for (const idChunk of chunkArray(participantIds, ID_CHUNK_SIZE)) {
     for (const id of await loadGraceCancellationParticipantIds(client, orgId, idChunk)) graceParticipantIds.add(id);
   }
 

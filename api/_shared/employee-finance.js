@@ -1,6 +1,7 @@
 // @ts-check
 /* eslint-env node */
 import { isAdminOrOffice, normalizeString, withOrgScope } from './org-bff.js';
+import { selectInChunks } from './query-chunks.js';
 import { coerceAgorot } from './currency.js';
 import { shouldParticipantTriggerInstructorCompensation } from './calendar-workflow-decisions.js';
 import {
@@ -362,9 +363,12 @@ export async function loadInstructorProfilesMap(tenantClient, orgId, employeeIds
     return new Map();
   }
 
-  const { data, error } = await withOrgScope(tenantClient, 'instructor_profiles', scopedOrgId)
-    .select('employee_id, break_time_minutes, metadata')
-    .in('employee_id', ids);
+  const { data, error } = await selectInChunks(
+    () => withOrgScope(tenantClient, 'instructor_profiles', scopedOrgId)
+      .select('employee_id, break_time_minutes, metadata'),
+    'employee_id',
+    ids,
+  );
 
   if (error && error.code !== '42P01') {
     throw error;

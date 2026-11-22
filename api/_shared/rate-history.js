@@ -17,6 +17,7 @@
  * at 00:30 on 1.10 Israel time.
  */
 import { normalizeString, withOrgScope } from './org-bff.js';
+import { selectInChunks } from './query-chunks.js';
 import { coerceAgorot } from './currency.js';
 import { isDateKey, normalizeDateKey } from './local-time.js';
 
@@ -202,15 +203,11 @@ export async function loadRateHistoryRows(tenantClient, orgId, { employeeIds = [
   const ids = Array.from(new Set((employeeIds || []).map((id) => normalizeString(id)).filter(Boolean)));
   if (ids.length === 0 || !normalizeString(orgId)) return [];
 
-  let query = withOrgScope(tenantClient, 'RateHistory', orgId)
-    .select(RATE_HISTORY_COLUMNS)
-    .in('employee_id', ids);
   const bases = Array.isArray(payBases) ? payBases.filter((basis) => PAY_BASES.has(basis)) : null;
-  if (bases && bases.length > 0) {
-    query = query.in('pay_basis', bases);
-  }
-
-  const { data, error } = await query;
+  const { data, error } = await selectInChunks(() => {
+    const query = withOrgScope(tenantClient, 'RateHistory', orgId).select(RATE_HISTORY_COLUMNS);
+    return bases && bases.length > 0 ? query.in('pay_basis', bases) : query;
+  }, 'employee_id', ids);
   if (error) {
     throw error;
   }
