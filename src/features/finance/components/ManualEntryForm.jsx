@@ -5,7 +5,7 @@ import { Input } from '@/components/ui/input.jsx';
 import { Label } from '@/components/ui/label.jsx';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select.jsx';
 import CurrencyInput from '@/components/ui/CurrencyInput.jsx';
-import { coerceAgorot, formatCurrency, isValidCurrencyInput } from '@/lib/currency.js';
+import { coerceAgorot, formatCurrency, isValidCurrencyInput, toShekel } from '@/lib/currency.js';
 import { clearSheetDraft, readSheetDraft, writeSheetDraft } from '@/features/finance/utils/sheetDraftStorage.js';
 import { todayKey } from '@/lib/local-time.js';
 
@@ -166,7 +166,7 @@ export default function ManualEntryForm({
     setErrors((current) => ({ ...current, calculator: '', amount: '' }));
     setForm((current) => ({
       ...current,
-      amount: (calculatorAmountAgorot / 100).toFixed(2),
+      amount: toShekel(calculatorAmountAgorot).toFixed(2),
       notes: current.notes.trim() ? current.notes : suggestedNote,
     }));
   }

@@ -1,4 +1,6 @@
 // Presentation only: lessons come from the calendar, other work from manual records.
+import { toAgorot } from '../../../lib/currency.js';
+
 function minutes(value) {
   const number = Number(value);
   return Number.isFinite(number) ? Math.max(0, Math.round(number)) : 0;
@@ -276,7 +278,7 @@ export function planLeaveDayValue({ payMethod, dayValue, dayValueDate }, current
   if (payMethod !== 'fixed_rate') return { required: false, error: '', rate: null, effectiveDate: null, needsSave: false };
   const text = String(dayValue ?? '').trim();
   const amount = Number(text);
-  const rate = Math.round(amount * 100);
+  const rate = toAgorot(amount);
   if (text === '' || !Number.isFinite(amount) || rate <= 0) {
     return { required: true, error: 'יש להזין ערך ליום חופשה גדול מאפס.', rate: null, effectiveDate: null, needsSave: false };
   }

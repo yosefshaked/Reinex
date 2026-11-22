@@ -177,6 +177,11 @@ describe('the fixed leave-day value in the employee leave dialog', () => {
     assert.match(planLeaveDayValue({ ...fixed, dayValueDate: '' }).error, /תאריך/);
   });
 
+  it('converts a decimal shekel value to agorot through the shared helper', () => {
+    assert.equal(planLeaveDayValue({ ...fixed, dayValue: '250.5' }).rate, 25050);
+    assert.equal(planLeaveDayValue({ ...fixed, dayValue: '250' }).rate, 25000);
+  });
+
   it('writes the dated rate in agorot when there is none or it differs, not when it is unchanged', () => {
     const plan = planLeaveDayValue(fixed, null);
     assert.deepEqual([plan.error, plan.rate, plan.effectiveDate, plan.needsSave], ['', 25000, '2026-11-18', true]);
