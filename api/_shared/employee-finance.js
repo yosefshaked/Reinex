@@ -816,6 +816,7 @@ export function createLeaveDayValuer({
     return {
       value: Math.round(computeAverageDayValue(averageRecords, targetKey, policy.lookback_months || 3)),
       method,
+      lookback_months: policy.lookback_months || 3,
       basis: null,
     };
   }

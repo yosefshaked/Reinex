@@ -258,8 +258,8 @@ export function PaySummaryPrintSheet({ pay, orgName, monthLabel, detailed }) {
                 </tr>
               )) : null}
               {detailed && row.basisLines ? row.basisLines.map((line) => (
-                <tr key={line.key} className="pay-print-sub">
-                  <td colSpan={2}>לפי <bdi dir="ltr">{line.monthsLabel}</bdi>: <bdi dir="ltr">{line.formula}</bdi> ליום</td>
+                <tr key={line.key} className="pay-print-note">
+                  <td colSpan={2}>{line.lines.map((text) => <div key={text}>{text}</div>)}</td>
                 </tr>
               )) : null}
               {detailed && row.leaveLines ? row.leaveLines.map((line) => (

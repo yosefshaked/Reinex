@@ -57,6 +57,8 @@ body {
 .pay-print-table-flat .pay-print-main td { background: transparent; border-top: 1px solid #e5e7eb; font-weight: 600; }
 .pay-print-table-flat .pay-print-main:nth-child(even) td { background: #f9fafb; }
 .pay-print-sub td:first-child { padding-inline-start: 8mm; }
+.pay-print-note td { font-size: 8.5pt; color: #6b7280; padding-block: 0.8mm; border-top: 0; }
+.pay-print-table .pay-print-note td:last-child { text-align: start; white-space: normal; width: auto; padding-inline-start: 8mm; font-variant-numeric: normal; }
 .pay-print-sub2 td { font-size: 9.5pt; color: #333; }
 .pay-print-sub2 td:first-child { padding-inline-start: 14mm; }
 .pay-print-total td {

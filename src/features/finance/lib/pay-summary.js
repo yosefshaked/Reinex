@@ -243,33 +243,52 @@ export function buildLeaveLines(leave = [], { withAmount = true } = {}) {
     }));
 }
 
-/** "2026-07", "2026-09" → "07–09.2026"; across a year end "11.2025–01.2026". */
+const HEBREW_MONTHS = ['ינואר', 'פברואר', 'מרץ', 'אפריל', 'מאי', 'יוני', 'יולי', 'אוגוסט', 'ספטמבר', 'אוקטובר', 'נובמבר', 'דצמבר'];
+
+/** "2026-08", "2026-10" → "אוגוסט–אוקטובר 2026"; across a year end "נובמבר 2025–ינואר 2026". */
 export function formatMonthRange(startMonth, endMonth) {
   const start = /^(\d{4})-(\d{2})$/.exec(String(startMonth || ''));
   const end = /^(\d{4})-(\d{2})$/.exec(String(endMonth || ''));
-  if (!start || !end) return '';
-  if (start[1] === end[1]) return `${start[2]}–${end[2]}.${end[1]}`;
-  return `${start[2]}.${start[1]}–${end[2]}.${end[1]}`;
+  const startName = start ? HEBREW_MONTHS[Number(start[2]) - 1] : null;
+  const endName = end ? HEBREW_MONTHS[Number(end[2]) - 1] : null;
+  if (!startName || !endName) return '';
+  if (start[1] === end[1]) return `${startName}–${endName} ${end[1]}`;
+  return `${startName} ${start[1]}–${endName} ${end[1]}`;
 }
 
 /**
- * How a "ממוצע מומלץ" leave day was valued, one line per distinct calculation (usually one):
- * "לפי 07–09.2026: ₪27,000.00 ÷ 90 × 7/5 = ₪420.00 ליום". The server chose the months and computed
- * the value (api/_shared/employee-finance.js); this only words it.
+ * How a leave day was valued, as 1-3 short plain lines for the "איך חושב" note, one group per
+ * distinct calculation (usually one). "ממוצע מומלץ": the day value, the months it comes from and the
+ * sum behind it; "ממוצע היסטורי" and a fixed value say just that. The server chose the months and
+ * computed the value (api/_shared/employee-finance.js); this only words it. A salary has no note.
  */
 export function buildLeaveBasisLines(leave = []) {
-  const lines = new Map();
+  const groups = new Map();
   for (const row of leave || []) {
-    const basis = row?.basis;
-    if (!basis || !(Number(row?.pay_fraction) > 0)) continue;
-    const key = `${basis.start_month}|${basis.end_month}|${basis.wage_base}|${basis.divisor}|${basis.week_days}|${row.day_value}`;
-    if (lines.has(key)) continue;
-    const monthsLabel = formatMonthRange(basis.start_month, basis.end_month);
-    // The months and the formula are shown left to right inside the Hebrew line (see EmployeePaySummary).
-    const formula = `${formatCurrency(toAmount(basis.wage_base))} ÷ ${basis.divisor} × 7/${basis.week_days} = ${formatCurrency(toAmount(row.day_value))}`;
-    lines.set(key, { key, monthsLabel, formula, text: `לפי ${monthsLabel}: ${formula} ליום` });
+    if (!(Number(row?.pay_fraction) > 0)) continue;
+    const basis = row.basis;
+    let key = '';
+    let lines = null;
+    if (basis) {
+      key = `${basis.start_month}|${basis.end_month}|${basis.wage_base}|${basis.divisor}|${basis.week_days}|${row.day_value}`;
+      const months = formatMonthRange(basis.start_month, basis.end_month);
+      const base = formatCurrency(toAmount(basis.wage_base));
+      lines = [
+        `שווי יום חופשה: ${formatCurrency(toAmount(row.day_value))}`,
+        `לפי השכר ב${months}: ${base}`,
+        `${base} ÷ ${basis.divisor} ימים × 7 ÷ ${basis.week_days} ימי עבודה בשבוע`,
+      ];
+    } else if (row.method === 'fixed_rate') {
+      key = 'fixed_rate';
+      lines = ['ערך קבוע ליום'];
+    } else if (row.method === 'avg_hourly_x_avg_day_hours') {
+      const months = Number(row.lookback_months) || 3;
+      key = `avg|${months}`;
+      lines = [months === 1 ? 'ממוצע החודש האחרון' : `ממוצע ${months} החודשים האחרונים`];
+    }
+    if (lines && !groups.has(key)) groups.set(key, { key, lines, text: lines.join(' · ') });
   }
-  return Array.from(lines.values());
+  return Array.from(groups.values());
 }
 
 /** Each hand-entered correction: date, kind, note and its signed amount. */

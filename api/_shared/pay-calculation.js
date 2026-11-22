@@ -476,6 +476,8 @@ export async function computeEmployeePay(client, orgId, {
     return {
       ...leaveDay,
       day_value: detail.value,
+      method: detail.method || null,
+      lookback_months: detail.lookback_months || null,
       basis: detail.basis,
       amount: coerceAgorot(detail.value * Number(leaveDay.pay_fraction || 0)),
     };
@@ -561,6 +563,9 @@ export async function computeEmployeePay(client, orgId, {
         day_value: row.day_value,
         // For "ממוצע מומלץ": the months the day value comes from, their pay and what it is divided by.
         basis: row.basis || null,
+        // How the day value was chosen, for the "איך חושב" note: the method and, for the average, its months.
+        method: row.method || null,
+        lookback_months: row.lookback_months || null,
         amount: row.amount,
       })),
     };

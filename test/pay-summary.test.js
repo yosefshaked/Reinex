@@ -200,15 +200,31 @@ describe('the overview', () => {
       ] },
     }).rows.find((row) => row.key === 'leave');
     assert.equal(leave.label, 'חופשה: 1.5 ימים × ₪422.18');
-    assert.deepEqual(leave.basisLines.map((line) => line.text), ['לפי 07–09.2026: ₪27,140.00 ÷ 90 × 7/5 = ₪422.18 ליום']);
-    assert.equal(leave.basisLines[0].monthsLabel, '07–09.2026');
-    assert.equal(leave.basisLines[0].formula, '₪27,140.00 ÷ 90 × 7/5 = ₪422.18');
-    assert.equal(formatMonthRange('2025-11', '2026-01'), '11.2025–01.2026');
-    // Other methods carry no basis, so there is no line.
+    // The row itself stays light; the how-calculated note is 3 short plain lines, no slashes, no law.
+    assert.equal(leave.label, 'חופשה: 1.5 ימים × ₪422.18');
+    assert.equal(leave.basisLines.length, 1);
+    assert.deepEqual(leave.basisLines[0].lines, [
+      'שווי יום חופשה: ₪422.18',
+      'לפי השכר ביולי–ספטמבר 2026: ₪27,140.00',
+      '₪27,140.00 ÷ 90 ימים × 7 ÷ 5 ימי עבודה בשבוע',
+    ]);
+    assert.ok(!leave.basisLines[0].lines.join(' ').includes('/'));
+    assert.equal(formatMonthRange('2025-11', '2026-01'), 'נובמבר 2025–ינואר 2026');
+    assert.equal(formatMonthRange('2026-08', '2026-10'), 'אוגוסט–אוקטובר 2026');
+    // A fixed value and the historical average say just that, in one line.
     const fixed = buildSummaryRows({
+      ...PAY, paid_leave_amount: 30000, details: { ...PAY.details, leave: [{ leave_date: '2026-10-14', pay_fraction: 1, amount: 30000, method: 'fixed_rate' }] },
+    }).rows.find((row) => row.key === 'leave');
+    assert.deepEqual(fixed.basisLines.map((line) => line.lines), [['ערך קבוע ליום']]);
+    const average = buildSummaryRows({
+      ...PAY, paid_leave_amount: 30000, details: { ...PAY.details, leave: [{ leave_date: '2026-10-14', pay_fraction: 1, amount: 30000, method: 'avg_hourly_x_avg_day_hours', lookback_months: 3 }] },
+    }).rows.find((row) => row.key === 'leave');
+    assert.deepEqual(average.basisLines.map((line) => line.lines), [['ממוצע 3 החודשים האחרונים']]);
+    // No method and no basis (older data), or a salary: no note.
+    const plain = buildSummaryRows({
       ...PAY, paid_leave_amount: 30000, details: { ...PAY.details, leave: [{ leave_date: '2026-10-14', pay_fraction: 1, amount: 30000 }] },
     }).rows.find((row) => row.key === 'leave');
-    assert.deepEqual(fixed.basisLines, []);
+    assert.deepEqual(plain.basisLines, []);
   });
 
   it('lists each correction with its date, kind, note and signed amount', () => {

@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { AlertTriangle, BanknoteX, ChevronDown, Loader2, Plus, Printer } from 'lucide-react';
+import { AlertTriangle, BanknoteX, ChevronDown, Info, Loader2, Plus, Printer } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { useOrg } from '@/org/OrgContext.jsx';
 import { authenticatedFetch } from '@/lib/api-client.js';
 import { formatCurrency } from '@/lib/currency.js';
@@ -42,18 +43,44 @@ function UnmarkedBadge({ label }) {
   );
 }
 
-function ExpandableRow({ label, badge, amount, amountLabel, note, tone, open, onToggle, children, dataKey, nested = false }) {
+// The small "איך חושב" icon beside a row: a popover with a few plain lines about how the row was worked out.
+function HowCalculated({ groups }) {
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          aria-label="איך חושב"
+          data-pay-how
+          className="flex h-6 w-6 items-center justify-center rounded-full text-slate-400 transition hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+        >
+          <Info aria-hidden="true" className="h-4 w-4" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-auto max-w-xs space-y-2 p-3 text-sm text-slate-700" data-pay-how-content>
+        {groups.map((group) => (
+          <div key={group.key} className="space-y-0.5">
+            {group.lines.map((line) => <p key={line}>{line}</p>)}
+          </div>
+        ))}
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+function ExpandableRow({ label, badge, amount, amountLabel, note, tone, open, onToggle, children, dataKey, info = null, infoGutter = false, nested = false }) {
   const contentId = useId();
   const toneStyle = tone ? EXCEPTION_TONES[tone] : null;
   const ToneIcon = toneStyle?.Icon;
   return (
     <li data-pay-row={dataKey} data-pay-tone={tone || undefined} className={toneStyle ? toneStyle.row : ''}>
+      <div className="flex items-center">
       <button
         type="button"
         aria-expanded={open}
         aria-controls={contentId}
         onClick={onToggle}
-        className={`grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-xl px-2 text-start transition hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${nested ? 'py-1.5 text-sm' : 'py-2'} ${toneStyle ? toneStyle.hover : ''}`}
+        className={`grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-xl px-2 text-start transition hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${nested ? 'py-1.5 text-sm' : 'py-2'} ${toneStyle ? toneStyle.hover : ''}`}
       >
         <span className="flex min-w-0 items-center gap-1.5">
           <ChevronDown aria-hidden="true" className={`h-4 w-4 shrink-0 text-slate-400 transition-transform ${open ? '' : 'rotate-90'}`} />
@@ -70,6 +97,8 @@ function ExpandableRow({ label, badge, amount, amountLabel, note, tone, open, on
           {note ? <span className={`text-xs font-medium ${toneStyle ? toneStyle.note : 'text-amber-800'}`}>{note}</span> : null}
         </span>
       </button>
+      {infoGutter ? <span className="flex w-7 shrink-0 justify-center">{info}</span> : null}
+      </div>
       {open ? (
         <div id={contentId} className="pb-2 ps-7 pe-2">
           {children}
@@ -235,16 +264,9 @@ export default function EmployeePaySummary({
     }
     if (row.leaveLines) {
       return (
-        <>
-          {(row.basisLines || []).map((line) => (
-            <p key={line.key} className="py-1 text-xs text-slate-500" data-leave-basis>
-              לפי <bdi dir="ltr">{line.monthsLabel}</bdi>: <bdi dir="ltr">{line.formula}</bdi> ליום
-            </p>
-          ))}
-          <ul>
-            {row.leaveLines.map((line) => <DetailLine key={line.key} text={`${line.dateLabel} · ${line.portionLabel}`} amount={line.amount} />)}
-          </ul>
-        </>
+        <ul>
+          {row.leaveLines.map((line) => <DetailLine key={line.key} text={`${line.dateLabel} · ${line.portionLabel}`} amount={line.amount} />)}
+        </ul>
       );
     }
     if (row.correctionLines) {
@@ -295,6 +317,8 @@ export default function EmployeePaySummary({
   }
 
   const hasContent = summary.rows.length > 0 || summary.exceptions.length > 0;
+  // One narrow column for the "איך חושב" icon, kept on every top row so the amounts stay aligned.
+  const hasHowCalculated = summary.rows.some((row) => row.basisLines?.length > 0);
 
   return (
     <section className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm" data-pay-summary="">
@@ -341,6 +365,8 @@ export default function EmployeePaySummary({
                   badge={row.unmarkedLabel}
                   amount={row.amount}
                   note={row.note}
+                  info={row.basisLines?.length ? <HowCalculated groups={row.basisLines} /> : null}
+                  infoGutter={hasHowCalculated}
                   open={openRow === row.key}
                   onToggle={() => toggleRow(row.key)}
                 >

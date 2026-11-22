@@ -2,7 +2,7 @@
   "meta": {
     "id": "pay-summary",
     "name": "Monthly pay summary — finance tab and the \"כספים\" page",
-    "description": "Payroll stage 6. An instructor with a lesson rate teaches two lessons last month: one marked attended, one nobody marked. Pay counts the unmarked one as attended and flags it. The finance tab shows the month total and the lessons row with the amber \"1 לא סומן\" badge (the unmarked lesson is listed once, under \"מפגשים\", not in a separate section); the lessons row opens by service with the calculation (hours × hourly rate) and the same count, and the unmarked lesson is marked \"לא סומן\" in its service with a link to the lesson in the calendar, which opens it. The \"כספים\" page lists the employee with the total and the \"לא סומן: 1\" tag, the total row for everyone, and opens the employee's summary under the row. Nothing is stored: everything is read from GET /api/payroll. A last workflow checks a \"ממוצע מומלץ\" leave day: the pay of the 3 months before ÷ 90 × 7/5, with the months and the calculation in the leave row (PAY-G1).",
+    "description": "Payroll stage 6. An instructor with a lesson rate teaches two lessons last month: one marked attended, one nobody marked. Pay counts the unmarked one as attended and flags it. The finance tab shows the month total and the lessons row with the amber \"1 לא סומן\" badge (the unmarked lesson is listed once, under \"מפגשים\", not in a separate section); the lessons row opens by service with the calculation (hours × hourly rate) and the same count, and the unmarked lesson is marked \"לא סומן\" in its service with a link to the lesson in the calendar, which opens it. The \"כספים\" page lists the employee with the total and the \"לא סומן: 1\" tag, the total row for everyone, and opens the employee's summary under the row. Nothing is stored: everything is read from GET /api/payroll. A last workflow checks a \"ממוצע מומלץ\" leave day: the pay of the 3 months before ÷ 90 × 7 ÷ 5; the leave row stays light and its \"איך חושב\" icon opens the months and the calculation (PAY-G1).",
     "version": "1.0.0",
     "last_validated_at": "2026-11-18T13:00:00Z",
     "author": "claude-ai",
@@ -229,7 +229,7 @@
           "id": "assert-unmarked-badge",
           "description": "The lessons row carries the count of unmarked lessons; they stay in its total",
           "action": "waitForSelector",
-          "selector": "[data-pay-row='lessons'] > button [data-pay-unmarked-badge]:has-text('1 לא סומן')"
+          "selector": "[data-pay-row='lessons'] > div > button [data-pay-unmarked-badge]:has-text('1 לא סומן')"
         },
         {
           "id": "assert-no-unmarked-section",
@@ -257,7 +257,7 @@
         {
           "id": "open-lessons",
           "action": "click",
-          "selector": "[data-pay-row='lessons'] > button[aria-expanded='false']"
+          "selector": "[data-pay-row='lessons'] > div > button[aria-expanded='false']"
         },
         {
           "id": "assert-service-line",
@@ -268,12 +268,12 @@
         {
           "id": "assert-service-unmarked-count",
           "action": "waitForSelector",
-          "selector": "[data-pay-row='service-{{SERVICE_ID}}'] > button [data-pay-unmarked-badge]:has-text('1 לא סומן')"
+          "selector": "[data-pay-row='service-{{SERVICE_ID}}'] > div > button [data-pay-unmarked-badge]:has-text('1 לא סומן')"
         },
         {
           "id": "open-service",
           "action": "click",
-          "selector": "[data-pay-row='service-{{SERVICE_ID}}'] > button"
+          "selector": "[data-pay-row='service-{{SERVICE_ID}}'] > div > button"
         },
         {
           "id": "assert-lesson-states",
@@ -512,7 +512,7 @@
         {
           "id": "open-missing-row",
           "action": "click",
-          "selector": "[data-pay-row='missing_rate'] > button"
+          "selector": "[data-pay-row='missing_rate'] > div > button"
         },
         {
           "id": "open-add-rate",
@@ -886,7 +886,7 @@
         {
           "id": "open-leave-line",
           "action": "click",
-          "selector": "[data-pay-row='leave'] > button[aria-expanded='false']"
+          "selector": "[data-pay-row='leave'] > div > button[aria-expanded='false']"
         },
         {
           "id": "assert-leave-days",
@@ -1047,15 +1047,21 @@
           "selector": "[data-pay-row='leave']:has-text('חופשה: יום אחד × ₪14.00'):has-text('₪14.00')"
         },
         {
-          "id": "open-leave-line",
+          "id": "assert-leave-row-light",
+          "description": "The row stays light: no formula in it, just the \"איך חושב\" icon beside it",
+          "action": "waitForSelector",
+          "selector": "[data-pay-row='leave']:not(:has-text('÷')):has([data-pay-how][aria-label='איך חושב'])"
+        },
+        {
+          "id": "open-leave-how",
           "action": "click",
-          "selector": "[data-pay-row='leave'] > button[aria-expanded='false']"
+          "selector": "[data-pay-row='leave'] [data-pay-how]"
         },
         {
           "id": "assert-leave-basis",
-          "description": "The row names the 3 months and shows the calculation",
+          "description": "The note names the day value, the 3 months' pay and the plain calculation, with no slashes",
           "action": "waitForSelector",
-          "selector": "[data-pay-row='leave'] [data-leave-basis]:has-text('לפי '):has-text('₪900.00 ÷ 90 × 7/5 = ₪14.00 ליום')"
+          "selector": "[data-pay-how-content]:has-text('שווי יום חופשה: ₪14.00'):has-text('לפי השכר ב'):has-text('₪900.00 ÷ 90 ימים × 7 ÷ 5 ימי עבודה בשבוע')"
         },
         {
           "id": "screenshot-legal-leave",
