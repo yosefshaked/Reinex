@@ -131,11 +131,13 @@ export default function LeaveBalanceLine({ summary, entitlement, balanceEvents, 
             <p className="text-xs text-slate-500">העברה מהשנה הקודמת, או הוספה והורדה של ימים. כל שינוי נרשם עם סיבה.</p>
           </div>
           {manualEvents.length ? (
-            <ul className="space-y-1">
-              {manualEvents.map((entry) => {
+            <ul className="space-y-2">
+              {manualEvents.map((entry, index) => {
                 const line = describeBalanceEvent(entry, formatDateKey);
                 return (
-                <li key={entry.id} className="flex items-center justify-between gap-2 text-xs" data-balance-event>
+                <React.Fragment key={entry.id}>
+                {index > 0 ? <li role="separator" aria-hidden="true" className="mx-auto h-px w-2/3 bg-slate-200" data-balance-separator /> : null}
+                <li className="flex items-center justify-between gap-2 text-xs" data-balance-event>
                   <span>
                     <bdi dir="ltr">{line.title}</bdi>
                     {line.reason ? <span className="block text-slate-600">{line.reason}</span> : null}
@@ -143,6 +145,7 @@ export default function LeaveBalanceLine({ summary, entitlement, balanceEvents, 
                   </span>
                   <Button type="button" size="sm" variant="ghost" className="h-6 px-2 text-xs" onClick={() => handleRemove(entry.id)} disabled={saving}>הסרה</Button>
                 </li>
+                </React.Fragment>
                 );
               })}
             </ul>

@@ -1288,6 +1288,52 @@
           "description": "The line under the reason says who made the change and when (name, or the email when the account has no name)",
           "action": "waitForSelector",
           "selector": "[data-balance-event] span.text-slate-500:has-text('נרשם ב-'):has-text('ע\"י')"
+        },
+        {
+          "id": "fill-second-quantity",
+          "action": "fill",
+          "selector": "#balance-quantity",
+          "value": "3"
+        },
+        {
+          "id": "open-second-reason",
+          "action": "click",
+          "selector": "#balance-reason"
+        },
+        {
+          "id": "choose-second-reason",
+          "action": "click",
+          "selector": "[role='option']:has-text('מעבר מהמערכת הקודמת')"
+        },
+        {
+          "id": "add-second-balance-change",
+          "action": "click",
+          "selector": "[role='dialog'] button:has-text('הוספה'):not([disabled])"
+        },
+        {
+          "id": "wait-for-second-change",
+          "action": "waitForSelector",
+          "selector": "[data-balance-event]:has-text('3')"
+        },
+        {
+          "id": "assert-history-separator",
+          "description": "Two changes are listed, with one thin separator between them and none after the last",
+          "action": "assert",
+          "type": "count",
+          "selector": "[data-balance-event]",
+          "value": "2"
+        },
+        {
+          "id": "assert-history-separator-count",
+          "action": "assert",
+          "type": "count",
+          "selector": "[data-balance-separator]",
+          "value": "1"
+        },
+        {
+          "id": "screenshot-balance-history",
+          "action": "screenshot",
+          "name": "leave-balance-history-separator"
         }
       ]
     },
