@@ -4,14 +4,15 @@
 
 Read this block first when you continue this plan in a new conversation.
 
-- **Plan status:** active. The owner approved the plan, Q1, Q3, stage 0, the stage 0 baseline and stage 1, on 2026-11-23. After subtask 2.4, overall status lives only in `docs/plans/index.csv`.
-- **Current stage:** 1 is done; the pilot is commit `415cce4`, with results in the Progress log. Next: joint review of stage 1, then stage 2 (subtask 2.1). Stage 2 must not start before that review.
+- **Plan status:** the overall status of this plan is recorded only in [`docs/plans/index.csv`](../index.csv). Check it with `npm run lint:plans`.
+- **Current stage:** 2 is done (the registry and `lint:plans`); results are in the Progress log. Next: joint review of stage 2, then stage 3 (subtask 3.1). Stage 3 must not start before that review.
 - **Execution branch:** `repository-reconstruction`, based on `origin/staging` `dce8f2e790e939b7f0805803d7d44e71a23346ba`. See [Planning base](#planning-base) and [Q1](#q1-execution-branch).
 - **Repository state:**
   - `test/` is now `tests/`.
-  - The raw evidence is outside the repository, in `$env:TEMP\reinex-restructure\stage0\` and `stage1\`.
-  - Nothing has been pushed.
-- **Last update:** 2026-11-23. Stage 1 done and measured against the baseline.
+  - `docs/plans/index.csv` and `npm run lint:plans` exist.
+  - The raw evidence is outside the repository, in `$env:TEMP\reinex-restructure\stage0\`, `stage1\` and `stage2\`.
+  - Nothing has been pushed; the owner decides on the push together with Claude.
+- **Last update:** 2026-11-23. Stage 2 done.
 
 Each stage appends to the [Progress log](#progress-log), ticks its subtasks and records answers under [Open decisions](#open-decisions). Keep this block at five bullets. It is a pointer, not a history.
 
@@ -616,18 +617,18 @@ Then confirm that the local data is back, using the report count and the `.env` 
 **Depends on:** stage 1 approved.
 
 **Subtasks:**
-- [ ] 2.1 `docs/plans/README.md` (at most 30 lines). It states:
+- [x] 2.1 `docs/plans/README.md` (at most 30 lines). It states:
   - a plan is a `.md` file directly under `docs/plans/<topic>/`;
   - supporting files go in `<topic>/<plan-slug>/` and are not registered;
   - a cross-domain plan lives under the topic that leads the change;
   - status changes only in `index.csv`;
   - a plan keeps its "Resume here" block, checkboxes, Progress log and answered questions.
-- [ ] 2.2 `docs/plans/index.csv`:
+- [x] 2.2 `docs/plans/index.csv`:
   - header `path,title,status`;
   - `path` is relative to `docs/plans/`, uses forward slashes and has no leading `./`;
   - `status` is one of `planned`, `active`, `completed`, `canceled`;
   - fields follow standard CSV quoting (RFC 4180): a field containing a comma, a double quote or a line break is wrapped in double quotes, and an inner double quote is written twice.
-- [ ] 2.3 `scripts/validate-plans-index.js`, run as the npm script `lint:plans`. It uses a small built-in quoted-CSV parser and adds no new dependency. It checks:
+- [x] 2.3 `scripts/validate-plans-index.js`, run as the npm script `lint:plans`. It uses a small built-in quoted-CSV parser and adds no new dependency. It checks:
   - the header is exact;
   - each record has exactly 3 fields after quote handling;
   - no quote is left unterminated;
@@ -637,8 +638,8 @@ Then confirm that the local data is back, using the report count and the `.env` 
   - no row points outside that pattern.
 
   On failure it exits 1 and names the record number and the reason.
-- [ ] 2.4 Register this plan with `repository/directory-restructure.md,Repository directory restructure,active`. The "Resume here" status line then points to `index.csv`.
-- [ ] 2.5 `tests/validate-plans-index.test.js` runs the validator on fixtures in a temp directory.
+- [x] 2.4 Register this plan with `repository/directory-restructure.md,Repository directory restructure,active`. The "Resume here" status line then points to `index.csv`.
+- [x] 2.5 `tests/validate-plans-index.test.js` runs the validator on fixtures in a temp directory.
   - **Must pass:**
     - a title with a comma (`"Payroll, leave and rates"`);
     - a title with escaped quotes (`"The ""no month close"" decision"`).
@@ -649,7 +650,7 @@ Then confirm that the local data is back, using the report count and the `.env` 
     - a duplicate path;
     - a missing file;
     - a plan with no row.
-- [ ] 2.6 Joining `lint:plans` to `npm run build` is [Q9](#q9-plan-lint-in-build). The default is no.
+- [x] 2.6 Joining `lint:plans` to `npm run build` is [Q9](#q9-plan-lint-in-build). The default is no.
 
 **Affected paths:**
 - `docs/plans/README.md`;
@@ -1215,6 +1216,7 @@ These are the questions whose answers change the plan. Record each answer direct
 - **Missing:** whether that is wanted.
 - **Who:** the owner.
 - **When:** stage 2. The default is no.
+- **Answer (2026-11-23, owner):** for this stage, `lint:plans` stays a standalone command. It is not part of `npm run build`, and CI does not run it.
 
 ### Q10 Co-authored-by trailer
 - **Known:** the owner decided on 2026-11-23 that this question is settled separately from the commit policy (stage 3.3). Claude currently appends a `Co-Authored-By:` trailer by default.
@@ -1440,6 +1442,55 @@ Append one entry per stage. Newest last.
     - Nothing is pushed.
     - Stage 1 is a local commit on `repository-reconstruction`.
     - The 5 files that were renamed and edited show `R088`–`R099`, as expected.
+  - **Joint review pending.**
+- **2026-11-23, stage 1 review outcome.** Passed the joint review; the owner approved stage 2 only.
+  - **Out-of-repo follow-ups done.**
+    - Three memory files (`MEMORY.md`, `keep-tests-current-feedback.md`, `ux-improvement-initiative.md`) now point to `tests/` in their commands and current locations. They hold no historical mentions.
+    - The Functions host started for the pilot (`preview_start api`) was stopped by its own server id.
+    - The Vite server that was already running on `:5173` before the pilot was left untouched.
+- **2026-11-23, stage 2: plan registry and `lint:plans`.**
+  - **Added:**
+    - `docs/plans/README.md` (20 lines);
+    - `docs/plans/index.csv`, with this plan as `active`;
+    - `scripts/validate-plans-index.js`, with a built-in RFC 4180 parser and no new dependency;
+    - the npm script `lint:plans`;
+    - `tests/validate-plans-index.test.js`.
+
+    "Resume here" now points to `index.csv` for the overall status.
+  - **What the validator checks:**
+    - **Both directions:** every `docs/plans/<topic>/<plan>.md` (except `README.md`) has exactly one row, and every row points to an existing file in its topic folder. A `.md` placed directly in `docs/plans/` is also reported.
+    - **Rows:** the exact header; 3 fields per record; a non-empty title; a valid status; paths in the form `<topic>/<plan>.md`; no duplicates.
+    - **Quoting:** an unterminated quote, a quote inside an unquoted field, and text after a closing quote are each reported.
+  - **Real registry:** `npm run lint:plans` exits 0 with "Plans index OK: 1 plan(s) (planned 0, active 1, completed 0, canceled 0)."
+  - **Acceptance tests:** `node --test tests/validate-plans-index.test.js` exits 0; 21 tests, 21 pass.
+    - **Pass cases:**
+      - plain;
+      - a title with a comma;
+      - a title with doubled inner quotes;
+      - a title with a line break inside a quoted field, with CRLF line endings and no final newline;
+      - all four statuses;
+      - supporting files and `README.md` files ignored.
+    - **Fail cases:**
+      - an unterminated quote;
+      - a quote inside an unquoted field;
+      - text after a closing quote;
+      - a wrong field count;
+      - a wrong header;
+      - a bad status;
+      - a duplicate path;
+      - a missing file;
+      - a plan with no row;
+      - 4 invalid path shapes;
+      - a loose plan file in `docs/plans/`;
+      - an empty title or a blank line;
+      - a missing `index.csv`.
+    - **Also covered:** a parser unit test, and two command-line tests (exit 0 with a summary; exit 1 naming the record, line and reason).
+  - **Q9:** the owner decided that `lint:plans` stays a standalone command for now.
+  - **No change to existing behaviour:**
+    - `npm run lint` exits 0 with 0 problems. The scan list is the stage 1 list plus exactly the two new files: 719.
+    - `npm run test:finance-calendar` exits 0, with the identity SHA-256 `4BF71F11…C0CC3E4` unchanged and a diff of 0.
+    - The new test is run directly; it is not added to an npm script.
+  - **Gaps:** nothing is pushed; CI does not run `lint:plans` (Q9).
   - **Joint review pending.**
 
 ---
