@@ -12,7 +12,7 @@ Read this block first when you continue this plan in a new conversation.
   - `docs/plans/index.csv` and `npm run lint:plans` exist.
   - The raw evidence is outside the repository, in `$env:TEMP\reinex-restructure\stage0\`, `stage1\` and `stage2\`.
   - Nothing has been pushed; the owner decides on the push together with Claude.
-- **Last update:** 2026-11-23. Stage 2 done.
+- **Last update:** 2026-11-23. Stage 2 completed after review: checker fixes and the "Plan registry" CI workflow.
 
 Each stage appends to the [Progress log](#progress-log), ticks its subtasks and records answers under [Open decisions](#open-decisions). Keep this block at five bullets. It is a pointer, not a history.
 
@@ -45,7 +45,7 @@ Today that knowledge is spread over seven documentation folders and two instruct
 - adding `npm test`;
 - running the unscripted test files as a whole;
 - widening coverage;
-- changing CI triggers or behaviour;
+- changing CI triggers or behaviour. The one owner-approved exception is the "Plan registry" workflow (Q9);
 - automating migrations in deployment;
 - performance work;
 - moving off Azure;
@@ -74,7 +74,7 @@ Today that knowledge is spread over seven documentation folders and two instruct
   - **Another worktree** exists: `C:\Developement\Repositories\Reinex-attendance-grid`, on `attendance-month-grid` at `616b645`. It is unrelated.
 - **PR #62** (`staging` → `main`) is open by owner decision.
   - Every push to `staging` runs the integrity checks and the SWA build. It also redeploys a preview that uses the production DB.
-  - PRs into `staging` themselves get no CI. Triggers are on `main` only [V].
+  - PRs into `staging` themselves get no CI. Triggers are on `main` only [V]. Since stage 2 the one exception is the "Plan registry" workflow, which also runs on PRs and pushes to `staging`.
 - **Local machine.**
   - Node is `v25.2.1`; CI uses Node 20.
   - `NODE_OPTIONS` accepts `--test-reporter` and `--test-reporter-destination` on the local Node [V].
@@ -650,7 +650,12 @@ Then confirm that the local data is back, using the report count and the `.env` 
     - a duplicate path;
     - a missing file;
     - a plan with no row.
-- [x] 2.6 Joining `lint:plans` to `npm run build` is [Q9](#q9-plan-lint-in-build). The default is no.
+- [x] 2.6 Joining `lint:plans` to `npm run build` is [Q9](#q9-plan-lint-in-build). The owner's final answer: it stays out of `build`, and CI enforces it through its own "Plan registry" workflow.
+- [x] 2.7 `.github/workflows/plan-registry.yml` (owner request after the joint review):
+  - check name "Plan registry";
+  - runs on PRs to and pushes to `staging` and `main`, with no path filter;
+  - Node 20, read-only permissions;
+  - runs `npm run lint:plans` and `node --test tests/validate-plans-index.test.js`, with no dependency install.
 
 **Affected paths:**
 - `docs/plans/README.md`;
@@ -1170,7 +1175,7 @@ These are the questions whose answers change the plan. Record each answer direct
 
 ### Q3 Evidence without CI
 - **Known:**
-  - Stage PRs into `staging` get no CI before merge.
+  - Stage PRs into `staging` get no CI before merge, apart from "Plan registry" since stage 2.
   - PR #62 runs CI after each push to `staging`.
 - **Codex recommendation:** for the pilot, local evidence is enough when before and after record the same environment (Node version, OS), the same commands, and the test identities and results. No CI change is needed before the pilot.
 - **Answer (2026-11-23, owner):** approved. Local evidence is enough for the pilot under the plan's comparison conditions.
@@ -1216,7 +1221,11 @@ These are the questions whose answers change the plan. Record each answer direct
 - **Missing:** whether that is wanted.
 - **Who:** the owner.
 - **When:** stage 2. The default is no.
-- **Answer (2026-11-23, owner):** for this stage, `lint:plans` stays a standalone command. It is not part of `npm run build`, and CI does not run it.
+- **First answer (2026-11-23, owner):** `lint:plans` stays a standalone command, not in `npm run build` and not in CI. *Replaced by the answer below.*
+- **Current answer (2026-11-23, owner, after the stage 2 joint review):**
+  - The registry is enforced in CI on every PR to `staging` or `main` and every push to them, through its own workflow, `.github/workflows/plan-registry.yml`. Its check is "Plan registry".
+  - `npm run lint:plans` stays available locally and separate from `npm run build`.
+  - **Not decided yet:** making "Plan registry" a required check for merging in the branch rules. That needs separate owner approval.
 
 ### Q10 Co-authored-by trailer
 - **Known:** the owner decided on 2026-11-23 that this question is settled separately from the commit policy (stage 3.3). Claude currently appends a `Co-Authored-By:` trailer by default.
@@ -1491,6 +1500,32 @@ Append one entry per stage. Newest last.
     - `npm run test:finance-calendar` exits 0, with the identity SHA-256 `4BF71F11…C0CC3E4` unchanged and a diff of 0.
     - The new test is run directly; it is not added to an npm script.
   - **Gaps:** nothing is pushed; CI does not run `lint:plans` (Q9).
+  - **Joint review pending.**
+- **2026-11-23, stage 2 completion after the joint review.**
+  - **Q9 changed by the owner.** CI enforces the registry; `lint:plans` stays local and outside `build`.
+  - **Two checker bugs reproduced by Codex, fixed:**
+    1. **The header was compared as joined text.** A single quoted field `"path,title,status"` therefore passed. It is now compared field by field, and exactly three fields are required.
+    2. **A row only had to name something that exists.** A folder named `folder.md` therefore counted as a plan. Rows are now matched against the plan files the checker itself discovers under `docs/plans/<topic>/`.
+  - **Confirmed against the previous version** (`8b9454d`), on a copy of the real tree: both cases exited 0. With the fix, both exit 1 with the reason.
+  - **Regression tests added:**
+    - the quoted single-field header;
+    - a header with an extra field;
+    - a row pointing to a folder `payroll/folder.md` that holds a supporting file.
+  - **Workflow added:** `.github/workflows/plan-registry.yml`.
+    - Workflow and job are named "Plan registry".
+    - Triggers: `pull_request` (opened, synchronize, reopened) to `staging` or `main`, and `push` to them. There is no path filter, so documentation-only PRs run it too.
+    - Node 20, the same as `integrity-checks.yml`; `permissions: contents: read`; a 5-minute timeout.
+    - Steps: checkout, setup-node, `npm run lint:plans`, `node --test tests/validate-plans-index.test.js`. Either one failing fails the job, which is the default step behaviour.
+    - No `npm ci`: both commands use only Node built-ins.
+  - **Verified locally (Node v25.2.1):**
+    - `npm run lint:plans` exits 0, "1 plan(s) (planned 0, active 1, …)";
+    - the checker tests exit 0, 24 of 24 passing;
+    - the workflow YAML parses (js-yaml) to the intended triggers, permissions, job name and steps;
+    - `npm run lint` exits 0 with 0 problems, over 719 scanned files (YAML is not linted).
+  - **Not verified yet:**
+    - **On GitHub.** The workflow runs only after a push. The first push to `staging` will also run it on the open PR #62.
+    - **On Node 20 itself.** Its APIs (`node:test` `describe`/`it`/`after`, `fs.mkdtempSync`, `spawnSync`) are available in Node 20, but this was not run under Node 20 locally.
+  - **Branch rules.** Making "Plan registry" a required check is a separate owner decision. No branch settings were changed.
   - **Joint review pending.**
 
 ---
