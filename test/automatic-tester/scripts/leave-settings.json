@@ -911,7 +911,7 @@
         {
           "id": "wait-fixed-value",
           "action": "waitForSelector",
-          "selector": "[data-leave-settings-form] [data-leave-day-rate] #leave-day-value"
+          "selector": "[data-leave-settings-form] [data-leave-day-rate-field] #leave-day-value"
         },
         {
           "id": "assert-still-one-date-field",

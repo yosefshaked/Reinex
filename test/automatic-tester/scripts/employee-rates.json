@@ -891,7 +891,13 @@
           "id": "assert-no-value-yet",
           "description": "The fixed method shows its value input, empty, and the save button is off until a positive value is typed",
           "action": "waitForSelector",
-          "selector": "[data-leave-day-rate] #leave-day-value"
+          "selector": "[data-leave-day-rate-field] #leave-day-value"
+        },
+        {
+          "id": "assert-value-on-date-row",
+          "description": "The value input is on the same row as \"בתוקף מ-\": it sits inside the date row of the dated setting",
+          "action": "waitForSelector",
+          "selector": "[data-dated-setting='leave-pay-method'] > div:first-child > [data-leave-day-rate-field] #leave-day-value"
         },
         {
           "id": "assert-one-date-field",

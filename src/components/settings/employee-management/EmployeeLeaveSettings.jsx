@@ -344,26 +344,26 @@ export default function EmployeeLeaveSettings({ employeeId, orgId, session, curr
                 pastDateWarning="השיטה תחול על ימי חופשה שכבר עברו. השכר על ימי החופשה מהתאריך הזה יחושב מחדש לפיה."
                 onCancelVersion={handleCancelMethodVersion}
                 historyLabel="היסטוריית שיטת תשלום"
+                dateRowExtra={draft.payMethod === 'fixed_rate' ? (
+                  <div className="flex items-center gap-2" data-leave-day-rate-field>
+                    <Label htmlFor="leave-day-value" className="text-sm font-semibold text-slate-700">ערך ליום (בשקלים)</Label>
+                    <Input
+                      id="leave-day-value"
+                      className="h-9 w-28"
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={draft.dayValue}
+                      onChange={(event) => setDraft((value) => ({ ...value, dayValue: event.target.value }))}
+                      disabled={saving}
+                      aria-invalid={plan?.error ? true : undefined}
+                    />
+                  </div>
+                ) : null}
               />
               {methodPlan?.error ? <p className="text-xs text-red-600" data-leave-method-error>{methodPlan.error}</p> : null}
               {draft.payMethod === 'fixed_rate' ? (
                 <div className="space-y-1" data-leave-day-rate>
-                  <div className="flex flex-wrap items-end gap-3">
-                    <div className="space-y-1">
-                      <Label htmlFor="leave-day-value" className="text-xs text-slate-600">ערך ליום (בשקלים)</Label>
-                      <Input
-                        id="leave-day-value"
-                        className="h-8 w-28"
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        value={draft.dayValue}
-                        onChange={(event) => setDraft((value) => ({ ...value, dayValue: event.target.value }))}
-                        disabled={saving}
-                        aria-invalid={plan?.error ? true : undefined}
-                      />
-                    </div>
-                  </div>
                   <p className="text-xs text-slate-500" data-leave-day-value-date-note>הערך בתוקף מאותו תאריך כמו השיטה.</p>
                   {plan?.error ? <p className="text-xs text-red-600" data-leave-day-value-error>{plan.error}</p> : null}
                 </div>

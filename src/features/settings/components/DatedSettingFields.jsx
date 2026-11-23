@@ -22,6 +22,8 @@ import { buildDatedSettingsWarnings, mergeVersionHistory, versionFromLabel } fro
  * when `onCancelVersion({ key, version })` is passed. The history can be controlled from outside
  * (`historyOpen` / `onHistoryOpenChange`), so a note elsewhere ("ישתנה ב-...") can open it.
  * `historyLabel` names the history button when "היסטוריה" alone is not clear enough.
+ * `dateRowExtra` is a field that belongs to the same date (a value starting on it), shown on the
+ * same row as "בתוקף מ-" (it wraps below on a narrow screen).
  */
 export default function DatedSettingFields({
   idPrefix,
@@ -37,6 +39,7 @@ export default function DatedSettingFields({
   historyOpen,
   onHistoryOpenChange,
   historyLabel = 'היסטוריה',
+  dateRowExtra = null,
 }) {
   const [ownShowHistory, setOwnShowHistory] = useState(false);
   const showHistory = historyOpen ?? ownShowHistory;
@@ -82,6 +85,7 @@ export default function DatedSettingFields({
           onChange={(event) => onEffectiveDateChange?.(event.target.value)}
           disabled={disabled}
         />
+        {dateRowExtra}
         {history.length > 0 ? (
           <Button
             type="button"
