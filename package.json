@@ -22,6 +22,7 @@
     "lint:sql:json": "node scripts/validate-setup-sql.js --format=json",
     "lint:sql:github": "node scripts/validate-setup-sql.js --format=github",
     "lint:upsert-conflicts": "node scripts/validate-upsert-conflicts.js",
+    "lint:plans": "node scripts/validate-plans-index.js",
     "lint:error-tracking": "node scripts/validate-error-tracking.js",
     "lint:error-tracking:strict": "node scripts/validate-error-tracking.js --strict",
     "lint:api-responses": "node scripts/validate-api-response-contracts.js",
