@@ -68,7 +68,7 @@ function HowCalculated({ groups }) {
   );
 }
 
-function ExpandableRow({ label, badge, amount, amountLabel, note, tone, open, onToggle, children, dataKey, info = null, infoGutter = false, nested = false }) {
+function ExpandableRow({ label, badge, amount, amountLabel, note, deductionLabel = '', tone, open, onToggle, children, dataKey, info = null, infoGutter = false, nested = false }) {
   const contentId = useId();
   const toneStyle = tone ? EXCEPTION_TONES[tone] : null;
   const ToneIcon = toneStyle?.Icon;
@@ -94,7 +94,13 @@ function ExpandableRow({ label, badge, amount, amountLabel, note, tone, open, on
           ) : amount !== null && amount !== undefined ? (
             <span className={`tabular-nums ${nested ? '' : 'font-semibold'} text-slate-900`}>{formatCurrency(amount)}</span>
           ) : null}
-          {note ? <span className={`text-xs font-medium ${toneStyle ? toneStyle.note : 'text-amber-800'}`}>{note}</span> : null}
+          {note || deductionLabel ? (
+            <span className={`text-xs font-medium ${toneStyle ? toneStyle.note : 'text-amber-800'}`}>
+              {note}
+              {note && deductionLabel ? ' · ' : ''}
+              {deductionLabel ? <bdi dir="ltr" className="font-semibold" data-pay-row-deduction="">{deductionLabel}</bdi> : null}
+            </span>
+          ) : null}
         </span>
       </button>
       {infoGutter ? <span className="flex w-7 shrink-0 justify-center">{info}</span> : null}
@@ -118,9 +124,9 @@ function DetailLine({ text, amount, amountLabel, children, tag = '', amountHint 
     <li
       data-pay-leave-line={dataKey}
       data-pay-tone={warning ? 'warning' : undefined}
-      className={`grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3 py-1 text-sm ${warning ? 'rounded-lg bg-amber-50 px-2' : ''}`}
+      className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 px-2 py-1 text-sm"
     >
-      <span className="min-w-0 break-words text-slate-600">
+      <span className={`min-w-0 break-words ${warning ? 'text-amber-800' : 'text-slate-600'}`}>
         {text}
         {tag ? (
           <span data-pay-line-tag="" className="ms-2 inline-flex items-center gap-1 whitespace-nowrap text-xs font-semibold text-amber-800">
@@ -130,11 +136,11 @@ function DetailLine({ text, amount, amountLabel, children, tag = '', amountHint 
         ) : null}
         {children}
       </span>
-      <span className="flex flex-col items-end">
+      <span className="flex items-center justify-end gap-2">
+        {amountHint ? <span className="text-xs font-medium text-amber-800" data-pay-line-hint="">{amountHint}</span> : null}
         <span className={`tabular-nums ${warning ? 'font-semibold text-amber-800' : 'text-slate-800'}`} dir={amountLabel ? 'ltr' : undefined} data-pay-line-amount="">
           {amountLabel ?? (amount === null || amount === undefined ? '' : formatCurrency(amount))}
         </span>
-        {amountHint ? <span className="text-xs font-medium text-amber-800" data-pay-line-hint="">{amountHint}</span> : null}
       </span>
     </li>
   );
@@ -394,6 +400,7 @@ export default function EmployeePaySummary({
                   badge={row.unmarkedLabel}
                   amount={row.amount}
                   note={row.note}
+                  deductionLabel={row.deductionLabel}
                   info={row.basisLines?.length ? <HowCalculated groups={row.basisLines} /> : null}
                   infoGutter={hasHowCalculated}
                   open={openRow === row.key}

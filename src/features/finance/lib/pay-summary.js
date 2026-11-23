@@ -392,8 +392,14 @@ export function buildSummaryRows(pay) {
     const dayValue = Number(breakdown.day_value) > 0 ? toAmount(breakdown.day_value) : 0;
     const times = !includedInSalary && dayValue > 0 ? ` × ${formatCurrency(dayValue)}` : '';
     const mixedNote = !includedInSalary && coveredDays > 0 ? `כלול במשכורת: ${formatDays(coveredDays)}` : '';
+    // What half days with no work took off the salary, so the header does not say "included" alone.
+    const deduction = (details?.leave || [])
+      .filter((row) => row?.half_leave_without_hours)
+      .reduce((sum, row) => sum + toAmount(row.salary_deduction), 0);
     rows.push({
       key: 'leave',
+      deduction,
+      deductionLabel: deduction > 0 ? formatDeduction(deduction) : '',
       label: shownDays > 0 ? `חופשה: ${formatDays(shownDays)}${times}` : 'חופשה',
       amount: includedInSalary ? null : leaveAmount,
       note: includedInSalary ? 'כלול במשכורת' : mixedNote,

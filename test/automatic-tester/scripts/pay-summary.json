@@ -1214,6 +1214,20 @@
           "value": "0"
         },
         {
+          "id": "assert-header-deduction",
+          "description": "The group header says \"כלול במשכורת\" with the total deduction in amber beside it",
+          "action": "waitForSelector",
+          "selector": "[data-payroll-row='{{SALARIED_INSTRUCTOR_ID}}'] [data-pay-row='leave'] [data-pay-row-deduction]:has-text('−₪')"
+        },
+        {
+          "id": "assert-flagged-line-aligned",
+          "description": "The flagged line is a sibling of the other date lines: no boxed background, same horizontal padding",
+          "action": "assert",
+          "type": "count",
+          "selector": "[data-payroll-row='{{SALARIED_INSTRUCTOR_ID}}'] [data-pay-leave-line][data-pay-tone='warning'].bg-amber-50",
+          "value": "0"
+        },
+        {
           "id": "screenshot-half-leave-tag",
           "action": "screenshot",
           "name": "pay-summary-half-leave-tag"

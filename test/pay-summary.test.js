@@ -240,6 +240,14 @@ describe('the overview', () => {
       ['12.10', 'חצי יום חופשה בלי שעות', '−₪483.87', 'חצי יום לא שולם', 'warning'],
     ]);
     assert.equal(lines[0].amount, null);
+    // The group header says what the flagged days took off the salary, next to "included".
+    const leaveRow = summary.rows.find((row) => row.key === 'leave');
+    assert.equal(leaveRow.note, 'כלול במשכורת');
+    assert.equal(leaveRow.deduction, 96774);
+    assert.equal(leaveRow.deductionLabel, '−₪967.74');
+    // No flagged day, no deduction in the header.
+    const clean = buildSummaryRows({ ...pay, details: { ...pay.details, leave: pay.details.leave.map((day) => ({ ...day, half_leave_without_hours: false, salary_deduction: 0 })) } });
+    assert.equal(clean.rows.find((row) => row.key === 'leave').deductionLabel, '');
     const [row] = buildPayrollTableRows([pay]);
     assert.deepEqual(row.tags.map((tag) => [tag.label, tag.tone]), [
       ['לא סומן: 1', 'warning'], ['חסר תעריף: 1', 'danger'], ['חצי יום חופשה בלי שעות: 2', 'warning'],

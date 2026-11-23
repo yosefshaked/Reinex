@@ -237,7 +237,10 @@ export function PaySummaryPrintSheet({ pay, orgName, monthLabel, detailed }) {
                   {row.label}
                   <UnmarkedFlag label={row.unmarkedLabel} />
                 </td>
-                <td>{row.amount === null || row.amount === undefined ? row.note : formatCurrency(row.amount)}</td>
+                <td>
+                  {row.amount === null || row.amount === undefined ? row.note : formatCurrency(row.amount)}
+                  {row.deductionLabel ? <span className="pay-print-deduction" dir="ltr" data-pay-print-deduction="">{row.deductionLabel}</span> : null}
+                </td>
               </tr>
               {detailed && row.groups ? row.groups.map((group) => (
                 <React.Fragment key={group.key}>
