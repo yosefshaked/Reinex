@@ -1077,7 +1077,7 @@
     {
       "id": "ui-salary-half-leave-tag",
       "name": "API + UI – A paid half day of leave on a salaried date with no work is paid half a day and raises the amber \"חצי יום חופשה בלי שעות\" tag",
-      "description": "A salaried employee works all seven days. A paid half day of leave on the sixth of last month, with no lesson and no hours that day, is paid half a day of salary. The \"כספים\" table shows the amber tag with the count, and the employee's summary lists the date under the same words.",
+      "description": "A salaried employee works all seven days. A paid half day of leave on the sixth of last month, with no lesson and no hours that day, is paid half a day of salary. The \"כספים\" table shows the amber tag with the count; in the employee's summary there is no separate exception section: the half day's own line under \"חופשה\" carries the same words in amber and shows the deduction (\"−₪...\", \"חצי יום לא שולם\") where a covered day says \"כלול במשכורת\".",
       "steps": [
         {
           "id": "create-salaried",
@@ -1146,6 +1146,7 @@
         {
           "id": "wait-table",
           "action": "waitForSelector",
+          "timeout": 90000,
           "selector": "[data-payroll-table]"
         },
         {
@@ -1158,6 +1159,7 @@
           "id": "assert-tag",
           "description": "The amber tag with the count, on the employee's row",
           "action": "waitForSelector",
+          "timeout": 90000,
           "selector": "[data-payroll-row='{{SALARIED_INSTRUCTOR_ID}}'] [data-payroll-tag='half_leave_no_hours']:has-text('חצי יום חופשה בלי שעות: 1')"
         },
         {
@@ -1166,21 +1168,50 @@
           "selector": "[data-payroll-row='{{SALARIED_INSTRUCTOR_ID}}'] > button"
         },
         {
-          "id": "assert-exception-row",
-          "description": "The same words in the employee's summary, as an amber exception",
+          "id": "wait-leave-row",
+          "description": "The employee's summary has a leave row (the day is covered by the salary)",
           "action": "waitForSelector",
-          "selector": "[data-payroll-row='{{SALARIED_INSTRUCTOR_ID}}'] [data-pay-row='half_leave_no_hours'][data-pay-tone='warning']:has-text('חצי יום חופשה בלי שעות: 1')"
-        },
-        {
-          "id": "open-exception",
-          "action": "click",
-          "selector": "[data-payroll-row='{{SALARIED_INSTRUCTOR_ID}}'] [data-pay-row='half_leave_no_hours'] > div > button[aria-expanded='false']"
-        },
-        {
-          "id": "assert-leave-covered",
-          "description": "The leave row says the day is part of the salary",
-          "action": "waitForSelector",
+          "timeout": 90000,
           "selector": "[data-payroll-row='{{SALARIED_INSTRUCTOR_ID}}'] [data-pay-row='leave']:has-text('כלול במשכורת')"
+        },
+        {
+          "id": "assert-no-exception-section",
+          "description": "No separate amber section any more",
+          "action": "assert",
+          "type": "count",
+          "selector": "[data-payroll-row='{{SALARIED_INSTRUCTOR_ID}}'] [data-pay-row='half_leave_no_hours']",
+          "value": "0"
+        },
+        {
+          "id": "open-leave-row",
+          "action": "click",
+          "selector": "[data-payroll-row='{{SALARIED_INSTRUCTOR_ID}}'] [data-pay-row='leave'] > div > button[aria-expanded='false']"
+        },
+        {
+          "id": "assert-inline-label",
+          "description": "The half day's own line carries the label, in amber",
+          "action": "waitForSelector",
+          "timeout": 90000,
+          "selector": "[data-payroll-row='{{SALARIED_INSTRUCTOR_ID}}'] [data-pay-leave-line][data-pay-tone='warning']:has-text('חצי יום חופשה בלי שעות'):has-text('חצי יום')"
+        },
+        {
+          "id": "assert-deduction",
+          "description": "On the amount side: the deduction that happened, with its hint, instead of \"כלול במשכורת\"",
+          "action": "waitForSelector",
+          "selector": "[data-payroll-row='{{SALARIED_INSTRUCTOR_ID}}'] [data-pay-leave-line][data-pay-tone='warning'] [data-pay-line-amount]:has-text('−₪')"
+        },
+        {
+          "id": "assert-deduction-hint",
+          "action": "waitForSelector",
+          "selector": "[data-payroll-row='{{SALARIED_INSTRUCTOR_ID}}'] [data-pay-leave-line][data-pay-tone='warning'] [data-pay-line-hint]:has-text('חצי יום לא שולם')"
+        },
+        {
+          "id": "assert-not-covered-wording",
+          "description": "The flagged line does not say \"כלול במשכורת\"",
+          "action": "assert",
+          "type": "count",
+          "selector": "[data-payroll-row='{{SALARIED_INSTRUCTOR_ID}}'] [data-pay-leave-line][data-pay-tone='warning']:has-text('כלול במשכורת')",
+          "value": "0"
         },
         {
           "id": "screenshot-half-leave-tag",

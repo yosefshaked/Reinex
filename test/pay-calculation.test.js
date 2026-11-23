@@ -769,6 +769,8 @@ describe('monthly salary coverage per date', () => {
     assert.equal(pay.monthly_salary_amount, 2100000);
     assert.equal(pay.half_leave_without_hours_count, 0);
     assert.deepEqual(pay.half_leave_without_hours_dates, []);
+    assert.equal(pay.details.leave[0].half_leave_without_hours, false);
+    assert.equal(pay.details.leave[0].salary_deduction, 0);
   });
 
   it('a paid half day with a counted lesson that day also pays the full day', async () => {
@@ -786,6 +788,9 @@ describe('monthly salary coverage per date', () => {
     assert.equal(pay.total_amount, 2050000);
     assert.equal(pay.half_leave_without_hours_count, 1);
     assert.deepEqual(pay.half_leave_without_hours_dates, ['2026-10-05']);
+    // The leave line carries what the half day took off: half of the 100,000 daily rate.
+    assert.equal(pay.details.leave[0].half_leave_without_hours, true);
+    assert.equal(pay.details.leave[0].salary_deduction, 50000);
   });
 
   it('an unpaid full day on salary takes one daily rate off the salary', async () => {

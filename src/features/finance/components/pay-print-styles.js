@@ -73,6 +73,9 @@ body {
   vertical-align: baseline;
 }
 .pay-print-flag svg { width: 3mm; height: 3mm; }
+/* A paid half day with no hours: the deduction in amber, with its small hint under the amount. */
+.pay-print-warn td { color: #92400e; font-weight: 700; }
+.pay-print-hint { display: block; font-size: 8pt; font-weight: 600; }
 /* "חסר" is told apart by its words and its double border, not by colour alone. */
 .pay-print-exception td { font-weight: 700; }
 .pay-print-exception-danger td { background: #fef2f2; color: #991b1b; border-top: 1.2mm double #991b1b; }

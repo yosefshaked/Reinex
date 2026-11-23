@@ -215,13 +215,31 @@ describe('the overview', () => {
     assert.equal(allCovered.amount, null);
   });
 
-  it('a paid half day with no work on a salaried date is an amber exception in the summary and a tag in the table', () => {
-    const pay = { ...PAY, half_leave_without_hours_count: 2, half_leave_without_hours_dates: ['2026-10-05', '2026-10-12'] };
-    const exception = buildSummaryRows(pay).exceptions.find((row) => row.key === 'half_leave_no_hours');
-    assert.equal(exception.label, 'חצי יום חופשה בלי שעות: 2');
-    assert.equal(exception.tone, 'warning');
-    assert.deepEqual(exception.dateLines.map((line) => line.dateLabel), ['05.10', '12.10']);
-    assert.equal(buildSummaryRows(PAY).exceptions.some((row) => row.key === 'half_leave_no_hours'), false);
+  it('a paid half day with no work on a salaried date is flagged on its own leave line and tagged in the table, with no exception section', () => {
+    const pay = {
+      ...PAY,
+      half_leave_without_hours_count: 2,
+      half_leave_without_hours_dates: ['2026-10-05', '2026-10-12'],
+      monthly_salary_amount: 800000,
+      paid_leave_amount: 0,
+      leave_breakdown: { paid_days: 0, day_value: null, salary_covered_days: 1.5 },
+      details: { ...PAY.details, leave: [
+        { leave_date: '2026-10-05', pay_fraction: 0.5, amount: 0, covered_by_salary: true, half_leave_without_hours: true, salary_deduction: 48387 },
+        { leave_date: '2026-10-08', pay_fraction: 0.5, amount: 0, covered_by_salary: true, half_leave_without_hours: false, salary_deduction: 0 },
+        { leave_date: '2026-10-12', pay_fraction: 0.5, amount: 0, covered_by_salary: true, half_leave_without_hours: true, salary_deduction: 48387 },
+      ] },
+    };
+    const summary = buildSummaryRows(pay);
+    // Not a separate section any more.
+    assert.equal(summary.exceptions.some((row) => row.key === 'half_leave_no_hours'), false);
+    const lines = summary.rows.find((row) => row.key === 'leave').leaveLines;
+    // The flagged days carry the label and the deduction in place of "כלול במשכורת"; the covered day keeps it.
+    assert.deepEqual(lines.map((line) => [line.dateLabel, line.tagLabel, line.amountLabel, line.amountHint, line.tone]), [
+      ['05.10', 'חצי יום חופשה בלי שעות', '−₪483.87', 'חצי יום לא שולם', 'warning'],
+      ['08.10', '', 'כלול במשכורת', '', null],
+      ['12.10', 'חצי יום חופשה בלי שעות', '−₪483.87', 'חצי יום לא שולם', 'warning'],
+    ]);
+    assert.equal(lines[0].amount, null);
     const [row] = buildPayrollTableRows([pay]);
     assert.deepEqual(row.tags.map((tag) => [tag.label, tag.tone]), [
       ['לא סומן: 1', 'warning'], ['חסר תעריף: 1', 'danger'], ['חצי יום חופשה בלי שעות: 2', 'warning'],

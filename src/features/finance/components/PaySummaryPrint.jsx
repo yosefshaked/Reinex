@@ -263,9 +263,15 @@ export function PaySummaryPrintSheet({ pay, orgName, monthLabel, detailed }) {
                 </tr>
               )) : null}
               {detailed && row.leaveLines ? row.leaveLines.map((line) => (
-                <tr key={line.key} className="pay-print-sub">
-                  <td>{line.dateLabel} · {line.portionLabel}</td>
-                  <td>{line.amountLabel || (line.amount === null ? '' : formatCurrency(line.amount))}</td>
+                <tr key={line.key} className={line.tone === 'warning' ? 'pay-print-sub pay-print-warn' : 'pay-print-sub'} data-pay-print-leave-line={line.key}>
+                  <td>
+                    {line.dateLabel} · {line.portionLabel}
+                    {line.tagLabel ? <span className="pay-print-flag" data-pay-print-half-leave=""><AlertTriangle aria-hidden="true" />{line.tagLabel}</span> : null}
+                  </td>
+                  <td>
+                    {line.tone === 'warning' ? <span dir="ltr">{line.amountLabel}</span> : (line.amountLabel || (line.amount === null ? '' : formatCurrency(line.amount)))}
+                    {line.amountHint ? <span className="pay-print-hint">{line.amountHint}</span> : null}
+                  </td>
                 </tr>
               )) : null}
               {detailed && row.correctionLines ? row.correctionLines.map((line) => (
@@ -286,13 +292,7 @@ export function PaySummaryPrintSheet({ pay, orgName, monthLabel, detailed }) {
                 <td>{row.key === 'missing_rate' ? 'חסר: ' : ''}{row.label} ({row.note})</td>
                 <td>{row.amountLabel || (row.amount === null ? '' : formatCurrency(row.amount))}</td>
               </tr>
-              {detailed && row.dateLines ? row.dateLines.map((line) => (
-                <tr key={line.key} className="pay-print-sub">
-                  <td>{line.dateLabel}</td>
-                  <td />
-                </tr>
-              )) : null}
-              {detailed && !row.dateLines ? <LessonLines lines={row.lessons} /> : null}
+              {detailed ? <LessonLines lines={row.lessons} /> : null}
             </React.Fragment>
           ))}
         </tbody>

@@ -231,18 +231,43 @@ export function groupAttendanceByRate(rows = []) {
   }));
 }
 
-/** The paid leave days, each with its value. */
+/** Said where a paid half day on a salaried date with no work recorded is listed, and in the "כספים" table. */
+export const HALF_LEAVE_NO_HOURS_LABEL = 'חצי יום חופשה בלי שעות';
+
+/** A deduction with its minus sign: "−₪483.87" (a real minus, not a hyphen). */
+function formatDeduction(amount) {
+  return `−${formatCurrency(Math.abs(toAmount(amount)))}`;
+}
+
+/**
+ * The paid leave days, each with its value. A paid half day on a salaried date with no work that day
+ * is flagged on its own line (`tagLabel`, `tone: 'warning'`) and shows what it took off the salary
+ * ("−₪X", with "חצי יום לא שולם") where a fully covered day says "כלול במשכורת".
+ */
 export function buildLeaveLines(leave = [], { withAmount = true } = {}) {
   return (leave || [])
     .filter((row) => Number(row?.pay_fraction) > 0)
-    .map((row) => ({
-      key: row.leave_date,
-      dateLabel: formatDayMonth(row.leave_date),
-      portionLabel: Number(row.pay_fraction) < 1 ? 'חצי יום' : 'יום מלא',
-      // A day a monthly salary in force on it covers has no amount of its own.
-      amount: withAmount && !row.covered_by_salary ? toAmount(row.amount) : null,
-      amountLabel: row.covered_by_salary ? 'כלול במשכורת' : null,
-    }));
+    .map((row) => {
+      const line = {
+        key: row.leave_date,
+        dateLabel: formatDayMonth(row.leave_date),
+        portionLabel: Number(row.pay_fraction) < 1 ? 'חצי יום' : 'יום מלא',
+        // A day a monthly salary in force on it covers has no amount of its own.
+        amount: withAmount && !row.covered_by_salary ? toAmount(row.amount) : null,
+        amountLabel: row.covered_by_salary ? 'כלול במשכורת' : null,
+        tagLabel: '',
+        amountHint: '',
+        tone: null,
+      };
+      if (row.half_leave_without_hours) {
+        line.tagLabel = HALF_LEAVE_NO_HOURS_LABEL;
+        line.amount = null;
+        line.amountLabel = formatDeduction(row.salary_deduction);
+        line.amountHint = 'חצי יום לא שולם';
+        line.tone = 'warning';
+      }
+      return line;
+    });
 }
 
 const HEBREW_MONTHS = ['ינואר', 'פברואר', 'מרץ', 'אפריל', 'מאי', 'יוני', 'יולי', 'אוגוסט', 'ספטמבר', 'אוקטובר', 'נובמבר', 'דצמבר'];
@@ -309,7 +334,8 @@ export function buildCorrectionLines(corrections = []) {
 
 /**
  * The overview of one employee's month: the total, one row per pay part that has something, and
- * the missing-rate exception when it is not zero. Unmarked lessons are not a separate section: the
+ * the missing-rate exception when it is not zero (a paid half day with no hours is flagged on its
+ * leave line, not here). Unmarked lessons are not a separate section: the
  * lessons row, its service lines and the lesson lines carry them. With details, each row carries
  * what it opens to.
  */
@@ -399,26 +425,8 @@ export function buildSummaryRows(pay) {
     });
   }
 
-  // A paid half day of leave on a salaried date with no work recorded is paid half a day: worth a look.
-  const halfLeaveDates = Array.isArray(pay.half_leave_without_hours_dates) ? pay.half_leave_without_hours_dates : [];
-  const halfLeaveCount = Number(pay.half_leave_without_hours_count) || halfLeaveDates.length;
-  if (halfLeaveCount > 0) {
-    exceptions.push({
-      key: 'half_leave_no_hours',
-      label: `${HALF_LEAVE_NO_HOURS_LABEL}: ${halfLeaveCount}`,
-      amount: null,
-      amountLabel: '',
-      tone: 'warning',
-      note: 'שולם חצי יום',
-      lessons: null,
-      dateLines: halfLeaveDates.map((date) => ({ key: date, dateLabel: formatDayMonth(date) })),
-    });
-  }
-
   return { total: toAmount(pay.total_amount), rows, exceptions };
 }
-
-const HALF_LEAVE_NO_HOURS_LABEL = 'חצי יום חופשה בלי שעות';
 
 /** The all-employees table: one row per employee, with exception tags only when present. */
 export function buildPayrollTableRows(employees = []) {

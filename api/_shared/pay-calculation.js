@@ -519,6 +519,8 @@ export async function computeEmployeePay(client, orgId, {
   // day (a counted lesson, or office minutes: the same test as collectWorkedDates) and half otherwise.
   const workedDates = new Set(collectWorkedDates({ lessons, attendanceRecords: attendance }));
   const halfLeaveWithoutHoursDates = [];
+  // What those days took off the salary (the unpaid half of each), in agorot by date, for the leave lines.
+  const halfLeaveDeductionByDate = new Map();
   const monthlySalaryAmount = coerceAgorot(enumerateDateKeys(localDateKey(startDate), localDateKey(endDate))
     .filter((dateKey) => workingDaySet.has(weekdayOfDateKey(dateKey)))
     .reduce((sum, dateKey) => {
@@ -531,7 +533,10 @@ export async function computeEmployeePay(client, orgId, {
       const fraction = Number(leaveDay.pay_fraction || 0);
       const halfPaid = fraction > 0 && fraction < 1;
       if (halfPaid && workedDates.has(dateKey)) return sum + dailyRate;
-      if (halfPaid) halfLeaveWithoutHoursDates.push(dateKey);
+      if (halfPaid) {
+        halfLeaveWithoutHoursDates.push(dateKey);
+        halfLeaveDeductionByDate.set(dateKey, dailyRate * (1 - fraction));
+      }
       return sum + dailyRate * fraction;
     }, 0));
 
@@ -593,6 +598,10 @@ export async function computeEmployeePay(client, orgId, {
         lookback_months: row.lookback_months || null,
         covered_by_salary: Boolean(row.covered_by_salary),
         amount: row.amount,
+        // A paid half day on a salaried date with no work recorded: paid half a day, the other half is
+        // `salary_deduction` agorot taken off the salary (0 on every other day).
+        half_leave_without_hours: halfLeaveDeductionByDate.has(row.leave_date),
+        salary_deduction: coerceAgorot(halfLeaveDeductionByDate.get(row.leave_date) || 0),
       })),
     };
   }

@@ -108,15 +108,33 @@ function ExpandableRow({ label, badge, amount, amountLabel, note, tone, open, on
   );
 }
 
-function DetailLine({ text, amount, amountLabel, children }) {
+/**
+ * One line of an opened row. `tone: 'warning'` makes it an amber line: `tag` is the words beside the
+ * text (icon and words, not colour alone) and `amountHint` a small line under the amount.
+ */
+function DetailLine({ text, amount, amountLabel, children, tag = '', amountHint = '', tone = null, dataKey }) {
+  const warning = tone === 'warning';
   return (
-    <li className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3 py-1 text-sm">
+    <li
+      data-pay-leave-line={dataKey}
+      data-pay-tone={warning ? 'warning' : undefined}
+      className={`grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3 py-1 text-sm ${warning ? 'rounded-lg bg-amber-50 px-2' : ''}`}
+    >
       <span className="min-w-0 break-words text-slate-600">
         {text}
+        {tag ? (
+          <span data-pay-line-tag="" className="ms-2 inline-flex items-center gap-1 whitespace-nowrap text-xs font-semibold text-amber-800">
+            <AlertTriangle aria-hidden="true" className="h-3.5 w-3.5 text-amber-600" />
+            {tag}
+          </span>
+        ) : null}
         {children}
       </span>
-      <span className="tabular-nums text-slate-800" dir={amountLabel ? 'ltr' : undefined}>
-        {amountLabel ?? (amount === null || amount === undefined ? '' : formatCurrency(amount))}
+      <span className="flex flex-col items-end">
+        <span className={`tabular-nums ${warning ? 'font-semibold text-amber-800' : 'text-slate-800'}`} dir={amountLabel ? 'ltr' : undefined} data-pay-line-amount="">
+          {amountLabel ?? (amount === null || amount === undefined ? '' : formatCurrency(amount))}
+        </span>
+        {amountHint ? <span className="text-xs font-medium text-amber-800" data-pay-line-hint="">{amountHint}</span> : null}
       </span>
     </li>
   );
@@ -265,7 +283,18 @@ export default function EmployeePaySummary({
     if (row.leaveLines) {
       return (
         <ul>
-          {row.leaveLines.map((line) => <DetailLine key={line.key} text={`${line.dateLabel} · ${line.portionLabel}`} amount={line.amount} amountLabel={line.amountLabel ?? undefined} />)}
+          {row.leaveLines.map((line) => (
+            <DetailLine
+              key={line.key}
+              dataKey={line.key}
+              text={`${line.dateLabel} · ${line.portionLabel}`}
+              amount={line.amount}
+              amountLabel={line.amountLabel ?? undefined}
+              tag={line.tagLabel}
+              amountHint={line.amountHint}
+              tone={line.tone}
+            />
+          ))}
         </ul>
       );
     }
@@ -286,13 +315,6 @@ export default function EmployeePaySummary({
   }
 
   function renderExceptionContent(row) {
-    if (row.dateLines) {
-      return (
-        <ul>
-          {row.dateLines.map((line) => <DetailLine key={line.key} text={line.dateLabel} amount={null} />)}
-        </ul>
-      );
-    }
     const lines = row.lessons || [];
     return (
       <ul>
