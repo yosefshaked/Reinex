@@ -1,6 +1,7 @@
 // Dated settings (api/_shared/dated-settings.js): the registry, the "as of a date" resolver, the
 // finance policies built on it, and the warnings a settings screen shows before saving a version.
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { describe, it } from 'node:test';
 
 import {
@@ -379,5 +380,22 @@ describe('an employee\'s own leave pay method as a dated setting', () => {
     assert.deepEqual(table.map((r) => r.id), ['b']);
     const past = await cancelEmployeeSettingVersion(client, 'org-1', { employeeId: 'omer', key: 'leave_pay_method', effectiveDate: '2026-11-01', today: '2026-11-18' });
     assert.equal(past.error, 'dated_version_not_in_future');
+  });
+});
+
+describe('migration 0002 copies the legacy rates before dropping them', () => {
+  const sql = readFileSync(new URL('../migrations/0002_remove_legacy_rate_columns.sql', import.meta.url), 'utf8');
+  const dropAt = sql.indexOf('ALTER TABLE public."Employees"\n  DROP COLUMN'.replace(/\n/g, sql.includes('\r\n') ? '\r\n' : '\n'));
+
+  it('copies each legacy column into RateHistory with the pay basis the rate-history change used, before the drop', () => {
+    assert.ok(dropAt > 0);
+    for (const [column, basis] of [['current_rate', 'attendance_hourly'], ['monthly_salary_amount', 'monthly_salary'], ['leave_fixed_day_rate', 'leave_day'], ['base_rate', 'lesson_hourly']]) {
+      const copyAt = sql.indexOf(`'${basis}'`);
+      assert.ok(copyAt > 0 && copyAt < dropAt, `${column} -> ${basis} is copied before the drop`);
+      assert.match(sql, new RegExp(`column_name = '${column}'`), `${column} copy is guarded by an information_schema check`);
+    }
+    assert.match(sql, /'source', 'backfill_2026_09'/);
+    assert.equal((sql.match(/AND NOT EXISTS/g) || []).length, 4, 'a row is added only where no equivalent one exists');
+    assert.doesNotMatch(sql, /No value is moved/);
   });
 });
