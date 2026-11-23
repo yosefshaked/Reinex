@@ -894,6 +894,21 @@
           "selector": "[data-leave-day-rate] #leave-day-value"
         },
         {
+          "id": "assert-one-date-field",
+          "description": "One \"בתוקף מ-\" for the method and its value: no second date beside the value",
+          "action": "assert",
+          "type": "count",
+          "selector": "[data-leave-settings-form] input[type='date']",
+          "value": "1"
+        },
+        {
+          "id": "assert-no-value-date-field",
+          "action": "assert",
+          "type": "count",
+          "selector": "#leave-day-value-date",
+          "value": "0"
+        },
+        {
           "id": "assert-save-disabled-without-value",
           "action": "assert",
           "type": "visible",
@@ -996,7 +1011,7 @@
           "id": "assert-future-note",
           "description": "Beside the row: a short note with the date and the new value",
           "action": "waitForSelector",
-          "selector": "[data-leave-future-note]:has-text('ישתנה ב-'):has-text('₪300')"
+          "selector": "[data-leave-future-note]:has-text('ערך ליום: ישתנה ב-'):has-text('₪300')"
         },
         {
           "id": "assert-history-closed",
@@ -1037,11 +1052,17 @@
         },
         {
           "id": "assert-no-cancel",
-          "description": "The rates API has no delete, so a future value cannot be cancelled here",
+          "description": "The rates API has no delete, so a future value cannot be cancelled here (a future pay method can: leave-settings.json)",
           "action": "assert",
           "type": "count",
           "selector": "[data-leave-day-history] button",
           "value": "0"
+        },
+        {
+          "id": "assert-method-history-toggle",
+          "description": "The pay-method history is a separate, clearly named button",
+          "action": "waitForSelector",
+          "selector": "[data-leave-method-history-toggle]:has-text('היסטוריית שיטת תשלום')"
         },
         {
           "id": "screenshot-leave-day-history",

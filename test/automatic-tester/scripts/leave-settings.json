@@ -713,19 +713,27 @@
         },
         {
           "id": "open-method-history",
-          "description": "The pay method is a dated version: the history lists it with its date, marked as in force",
+          "description": "The pay method is a dated version: its own history, titled so, lists it with its date, marked as in force",
           "action": "click",
-          "selector": "[data-leave-day-history-toggle]"
+          "selector": "[data-leave-method-history-toggle]:has-text('היסטוריית שיטת תשלום')"
         },
         {
           "id": "assert-method-history",
           "action": "waitForSelector",
-          "selector": "[data-leave-method-history] [data-leave-method-entry]:has-text('ממוצע מומלץ'):has-text('(בתוקף)')"
+          "selector": "[data-leave-method-history]:has-text('היסטוריית שיטת תשלום') [data-leave-method-entry]:has-text('ממוצע מומלץ'):has-text('(בתוקף)')"
+        },
+        {
+          "id": "assert-no-fixed-value-history",
+          "description": "The fixed value has its own history, which stays out of sight until the employee has a value",
+          "action": "assert",
+          "type": "count",
+          "selector": "[data-leave-day-history-toggle], [data-leave-day-history]",
+          "value": "0"
         },
         {
           "id": "close-method-history",
           "action": "click",
-          "selector": "[data-leave-day-history-toggle]"
+          "selector": "[data-leave-method-history-toggle]"
         },
         {
           "id": "open-explain",
@@ -789,6 +797,174 @@
           "description": "The line is reread and follows the organisation's table again (no longer 9 days)",
           "action": "waitForSelector",
           "selector": "[data-leave-balance-line]:has-text('ימי חופשה השנה'):not(:has-text('מגיעים 9 ימי'))"
+        }
+      ]
+    },
+    {
+      "id": "ui-employee-pay-method-dating",
+      "name": "UI – One \"בתוקף מ-\" for the pay method, and a future pay method is noted by what it changes to and can be cancelled from its own history",
+      "description": "The employee's step 2 has one date field, also for \"ערך קבוע ליום\" (the same date starts the method and the value). A future method version shows the row note \"תשלום: ישתנה ב-... ל...\", opens \"היסטוריית שיטת תשלום\" and is cancelled with \"כן, לבטל\"; a version already in force has no cancel button.",
+      "steps": [
+        {
+          "id": "add-future-method",
+          "description": "A future version of the employee's own pay method, far ahead (2099), different from the organisation default (the recommended average; the default is the historical one at this point)",
+          "action": "apiCall",
+          "method": "POST",
+          "endpoint": "/api/employee-leave",
+          "body": {
+            "entity_type": "leave_pay_method_version",
+            "org_id": "{{TEST_ORG_ID}}",
+            "employee_id": "{{LEAVE_INSTRUCTOR_ID}}",
+            "method": "legal",
+            "effective_date": "2099-01-01"
+          }
+        },
+        {
+          "id": "leave-page",
+          "description": "Leave the employees page first so it reads the new version from the server",
+          "action": "navigate",
+          "url": "{{BASE_URL}}/#/dashboard"
+        },
+        {
+          "id": "wait-dashboard",
+          "action": "waitForURL",
+          "pattern": "#/dashboard"
+        },
+        {
+          "id": "navigate-employees",
+          "action": "navigate",
+          "url": "{{BASE_URL}}/#/employees"
+        },
+        {
+          "id": "wait-main",
+          "action": "waitForSelector",
+          "selector": "main, [role='main']"
+        },
+        {
+          "id": "open-employee",
+          "action": "click",
+          "selector": "button:has-text('זכאות בדיקה {{RUN_NUMERIC_ID}}')"
+        },
+        {
+          "id": "open-attendance-tab",
+          "action": "click",
+          "selector": "[role='tab']:has-text('נוכחות')"
+        },
+        {
+          "id": "assert-method-note",
+          "description": "The row note says what changes (the pay) and to what",
+          "action": "waitForSelector",
+          "selector": "[data-leave-method-future-note]:has-text('תשלום: ישתנה ב-01.01.2099 ל\"ממוצע מומלץ\"')"
+        },
+        {
+          "id": "assert-history-closed",
+          "action": "assert",
+          "type": "hidden",
+          "selector": "[data-leave-method-history]"
+        },
+        {
+          "id": "open-history-from-note",
+          "action": "click",
+          "selector": "[data-leave-method-future-note]"
+        },
+        {
+          "id": "assert-history-title",
+          "action": "waitForSelector",
+          "selector": "[data-leave-method-history]:has-text('היסטוריית שיטת תשלום')"
+        },
+        {
+          "id": "assert-future-row-cancellable",
+          "action": "waitForSelector",
+          "selector": "[data-leave-method-entry]:has-text('(עתידי)') [data-cancel-version]"
+        },
+        {
+          "id": "assert-current-row-not-cancellable",
+          "description": "The version in force has no cancel button",
+          "action": "assert",
+          "type": "count",
+          "selector": "[data-leave-method-entry]:not(:has-text('(עתידי)')) [data-cancel-version]",
+          "value": "0"
+        },
+        {
+          "id": "screenshot-method-history",
+          "action": "screenshot",
+          "name": "leave-method-history"
+        },
+        {
+          "id": "open-change",
+          "action": "click",
+          "selector": "[data-leave-settings-change]"
+        },
+        {
+          "id": "assert-one-date-field",
+          "description": "Step 2 shows \"בתוקף מ-\" with today's date, once",
+          "action": "assert",
+          "type": "value",
+          "selector": "[data-leave-settings-form] #leave-pay-method-effective-date",
+          "value": "{{TODAY}}"
+        },
+        {
+          "id": "choose-fixed",
+          "action": "click",
+          "selector": "[data-leave-settings-form] [data-pay-choice='fixed_rate']"
+        },
+        {
+          "id": "wait-fixed-value",
+          "action": "waitForSelector",
+          "selector": "[data-leave-settings-form] [data-leave-day-rate] #leave-day-value"
+        },
+        {
+          "id": "assert-still-one-date-field",
+          "description": "\"ערך קבוע ליום\" does not add a second date: the one date starts the method and the value",
+          "action": "assert",
+          "type": "count",
+          "selector": "[data-leave-settings-form] input[type='date']",
+          "value": "1"
+        },
+        {
+          "id": "assert-no-value-date-field",
+          "action": "assert",
+          "type": "count",
+          "selector": "#leave-day-value-date",
+          "value": "0"
+        },
+        {
+          "id": "assert-dialog-history-labelled",
+          "action": "waitForSelector",
+          "selector": "[data-leave-settings-form] [data-dated-setting] button:has-text('היסטוריית שיטת תשלום')"
+        },
+        {
+          "id": "screenshot-one-date",
+          "action": "screenshot",
+          "name": "leave-one-date"
+        },
+        {
+          "id": "close-change",
+          "action": "click",
+          "selector": "[data-leave-settings-actions] button:text-is('ביטול')"
+        },
+        {
+          "id": "cancel-future-method",
+          "action": "click",
+          "selector": "[data-leave-method-history] [data-leave-method-entry]:has-text('(עתידי)') [data-cancel-version]"
+        },
+        {
+          "id": "confirm-cancel",
+          "action": "click",
+          "selector": "[data-leave-method-history] [data-cancel-version-confirm] button:has-text('כן, לבטל')"
+        },
+        {
+          "id": "assert-note-gone",
+          "description": "The future version is gone: no note, and no future row left in the history",
+          "action": "assert",
+          "type": "hidden",
+          "selector": "[data-leave-method-future-note]"
+        },
+        {
+          "id": "assert-future-row-gone",
+          "action": "assert",
+          "type": "hidden",
+          "selector": "[data-leave-method-entry]:has-text('(עתידי)')"
         }
       ]
     },

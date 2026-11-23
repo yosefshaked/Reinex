@@ -315,7 +315,7 @@ export function leaveDayRateTimeline(rates, today) {
     isFuture: row.effective_date > today,
     isCurrent: row === current,
   }));
-  const note = next ? `ישתנה ב-${formatDateKey(next.effective_date)}: ${formatShekelAmount(next.rate)}` : '';
+  const note = next ? `ערך ליום: ישתנה ב-${formatDateKey(next.effective_date)} ל-${formatShekelAmount(next.rate)}` : '';
   return { entries, current, next, note };
 }
 
@@ -387,8 +387,13 @@ export function leavePayMethodTimeline(versions, today, orgPolicy = null) {
     isFuture: row.effective_date > today,
     isCurrent: row === current,
   }));
-  const note = next ? `ישתנה ב-${formatDateKey(next.effective_date)}: ${leavePayMethodVersionText(next, orgPolicy)}` : '';
+  const note = next ? `תשלום: ישתנה ב-${formatDateKey(next.effective_date)} ${leavePayMethodChangeText(next)}` : '';
   return { entries, current, next, note };
+}
+
+/** Where a pay method changes to, for the row note: `ל"ערך קבוע ליום"`, or back to the organisation's default. */
+function leavePayMethodChangeText(version) {
+  return version?.method ? `ל"${payMethodLabel(version.method)}"` : 'לברירת המחדל של הארגון';
 }
 
 /** What a stored version holds, in a few words ("ממוצע היסטורי", or the organisation's default). */

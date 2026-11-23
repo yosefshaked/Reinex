@@ -205,7 +205,7 @@ describe('the history of the employee fixed leave-day value', () => {
     assert.equal(timeline.current.id, 'a');
     assert.equal(timeline.entries.find((entry) => entry.id === 'a').isCurrent, true);
     assert.equal(timeline.next.id, 'b');
-    assert.match(timeline.note, /^ישתנה ב-.*01.*12.*2026.*: ₪250\.5/);
+    assert.match(timeline.note, /^ערך ליום: ישתנה ב-.*01.*12.*2026.* ל-₪250\.5/);
   });
 
   it('has no note when nothing is in the future', () => {

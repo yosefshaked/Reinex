@@ -466,7 +466,11 @@ describe('the settings dialog and the employee choice', () => {
       ['2026-12-01', 'ערך קבוע ליום', true, false],
       ['2000-01-01', 'ממוצע מומלץ', false, true],
     ]);
-    assert.equal(timeline.note, 'ישתנה ב-01.12.2026: ערך קבוע ליום');
+    assert.equal(timeline.note, 'תשלום: ישתנה ב-01.12.2026 ל"ערך קבוע ליום"');
+    assert.equal(
+      leavePayMethodTimeline([{ effective_date: '2026-12-01', method: null }], '2026-11-15').note,
+      'תשלום: ישתנה ב-01.12.2026 לברירת המחדל של הארגון',
+    );
     assert.equal(leavePayMethodTimeline([], '2026-11-15').note, '');
   });
 

@@ -21,6 +21,7 @@ import { buildDatedSettingsWarnings, mergeVersionHistory, versionFromLabel } fro
  * A version that has not started yet (effective date after today) can be cancelled from the history
  * when `onCancelVersion({ key, version })` is passed. The history can be controlled from outside
  * (`historyOpen` / `onHistoryOpenChange`), so a note elsewhere ("ישתנה ב-...") can open it.
+ * `historyLabel` names the history button when "היסטוריה" alone is not clear enough.
  */
 export default function DatedSettingFields({
   idPrefix,
@@ -35,6 +36,7 @@ export default function DatedSettingFields({
   onCancelVersion,
   historyOpen,
   onHistoryOpenChange,
+  historyLabel = 'היסטוריה',
 }) {
   const [ownShowHistory, setOwnShowHistory] = useState(false);
   const showHistory = historyOpen ?? ownShowHistory;
@@ -90,7 +92,7 @@ export default function DatedSettingFields({
             aria-controls={historyId}
             onClick={() => setShowHistory((value) => !value)}
           >
-            היסטוריה ({history.length})
+            {historyLabel} ({history.length})
             <ChevronDown className={`h-3.5 w-3.5 transition-transform ${showHistory ? 'rotate-180' : ''}`} />
           </Button>
         ) : null}

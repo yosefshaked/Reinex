@@ -44,7 +44,6 @@ function draftFrom(current, leaveDayRate) {
   const storedDays = current?.annual_leave_days;
   return {
     dayValue: leaveDayRate ? String(toShekel(leaveDayRate.rate)) : '',
-    dayValueDate: todayKey(),
     daysChoice: storedDays == null ? 'default' : 'manual',
     manualDays: storedDays == null ? '' : String(storedDays),
     payMethod: current?.leave_pay_method || '',
@@ -69,14 +68,17 @@ export default function EmployeeLeaveSettings({ employeeId, orgId, session, curr
   const [saving, setSaving] = useState(false);
   const [leaveDayRate, setLeaveDayRate] = useState(null);
   const [leaveDayRates, setLeaveDayRates] = useState([]);
-  const [historyOpen, setHistoryOpen] = useState(false);
+  const [methodHistoryOpen, setMethodHistoryOpen] = useState(false);
+  const [valueHistoryOpen, setValueHistoryOpen] = useState(false);
+  const [confirming, setConfirming] = useState('');
+  const [cancelling, setCancelling] = useState(false);
   const open = draft !== null;
   const result = open ? buildEmployeeLeaveBody(draft, { orgId, employeeId }, current) : null;
-  const plan = open ? planLeaveDayValue(draft, leaveDayRate) : null;
+  // One "בתוקף מ-" for step 2: the same date starts the pay-method version and the fixed value.
+  const plan = open ? planLeaveDayValue({ ...draft, dayValueDate: draft.methodDate }, leaveDayRate) : null;
   const methodPlan = open ? buildLeavePayMethodVersionBody({ payMethod: draft.payMethod, effectiveDate: draft.methodDate }, { orgId, employeeId }, methodVersions) : null;
   const timeline = leaveDayRateTimeline(leaveDayRates, todayKey());
   const methodTimeline = leavePayMethodTimeline(methodVersions, todayKey(), orgPayPolicy);
-  const historyCount = methodTimeline.entries.length + timeline.entries.length;
   const canSave = Boolean(result) && !plan?.error && !methodPlan?.error && (result.changed || plan?.needsSave || methodPlan?.changed);
 
   // The leave_day rate in force today, to prefill the value.
@@ -146,6 +148,7 @@ export default function EmployeeLeaveSettings({ employeeId, orgId, session, curr
   }
 
   async function handleCancelMethodVersion({ version }) {
+    setCancelling(true);
     try {
       await authenticatedFetch('employee-leave', {
         session,
@@ -157,6 +160,9 @@ export default function EmployeeLeaveSettings({ employeeId, orgId, session, curr
     } catch (error) {
       console.error('Failed to cancel the future leave pay method', error);
       toast.error(error?.message || 'ביטול ההגדרה העתידית נכשל.');
+    } finally {
+      setCancelling(false);
+      setConfirming('');
     }
   }
 
@@ -181,8 +187,8 @@ export default function EmployeeLeaveSettings({ employeeId, orgId, session, curr
           <button
             type="button"
             className="text-xs font-medium text-blue-700 hover:underline"
-            aria-expanded={historyOpen}
-            onClick={() => setHistoryOpen((value) => !value)}
+            aria-expanded={methodHistoryOpen}
+            onClick={() => setMethodHistoryOpen((value) => !value)}
             data-leave-method-future-note
           >
             {methodTimeline.note}
@@ -192,39 +198,67 @@ export default function EmployeeLeaveSettings({ employeeId, orgId, session, curr
           <button
             type="button"
             className="text-xs font-medium text-blue-700 hover:underline"
-            aria-expanded={historyOpen}
-            onClick={() => setHistoryOpen((value) => !value)}
+            aria-expanded={valueHistoryOpen}
+            onClick={() => setValueHistoryOpen((value) => !value)}
             data-leave-future-note
           >
             {timeline.note}
           </button>
         ) : null}
-        {historyCount > 0 ? (
+        {methodTimeline.entries.length > 0 ? (
           <Button
             type="button"
             size="sm"
             variant="ghost"
             className="h-7 gap-1 px-2 text-xs"
-            aria-expanded={historyOpen}
-            onClick={() => setHistoryOpen((value) => !value)}
+            aria-expanded={methodHistoryOpen}
+            onClick={() => setMethodHistoryOpen((value) => !value)}
+            data-leave-method-history-toggle
+          >
+            היסטוריית שיטת תשלום ({methodTimeline.entries.length})
+            <ChevronDown className={`h-3.5 w-3.5 transition-transform ${methodHistoryOpen ? 'rotate-180' : ''}`} />
+          </Button>
+        ) : null}
+        {timeline.entries.length > 0 ? (
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            className="h-7 gap-1 px-2 text-xs"
+            aria-expanded={valueHistoryOpen}
+            onClick={() => setValueHistoryOpen((value) => !value)}
             data-leave-day-history-toggle
           >
-            היסטוריה ({historyCount})
-            <ChevronDown className={`h-3.5 w-3.5 transition-transform ${historyOpen ? 'rotate-180' : ''}`} />
+            היסטוריית ערך קבוע ({timeline.entries.length})
+            <ChevronDown className={`h-3.5 w-3.5 transition-transform ${valueHistoryOpen ? 'rotate-180' : ''}`} />
           </Button>
         ) : null}
       </div>
 
-      {historyOpen && methodTimeline.entries.length > 0 ? (
+      {methodHistoryOpen && methodTimeline.entries.length > 0 ? (
         <div className="rounded-xl border border-slate-200 bg-white px-3 py-2" data-leave-method-history>
-          <p className="mb-1 text-xs text-slate-500">תשלום על יום חופשה</p>
+          <p className="mb-1 text-xs text-slate-500">היסטוריית שיטת תשלום</p>
           <ul className="space-y-2">
             {methodTimeline.entries.map((entry, index) => (
               <React.Fragment key={entry.id}>
                 {index > 0 ? <li role="separator" aria-hidden="true" className="mx-auto h-px w-2/3 bg-slate-200" data-leave-method-separator /> : null}
-                <li className="flex items-center justify-between gap-2 text-sm" data-leave-method-entry>
+                <li className="flex flex-wrap items-center justify-between gap-2 text-sm" data-leave-method-entry>
                   <span className="font-semibold text-slate-900"><bdi dir="ltr">{formatDateKey(entry.date)}</bdi>{entry.isFuture ? <span className="ms-1 text-xs font-normal text-slate-500">(עתידי)</span> : null}{entry.isCurrent ? <span className="ms-1 text-xs font-normal text-slate-500">(בתוקף)</span> : null}</span>
-                  <span className="text-slate-700">{entry.label}</span>
+                  <span className="flex items-center gap-2 text-slate-700">
+                    {entry.label}
+                    {entry.isFuture && confirming !== entry.date ? (
+                      <Button type="button" size="sm" variant="ghost" className="h-6 px-2 text-xs" onClick={() => setConfirming(entry.date)} disabled={cancelling} data-cancel-version>
+                        ביטול ההגדרה העתידית
+                      </Button>
+                    ) : null}
+                    {entry.isFuture && confirming === entry.date ? (
+                      <span className="flex items-center gap-1" data-cancel-version-confirm>
+                        <span className="text-xs font-medium text-slate-700">לבטל?</span>
+                        <Button type="button" size="sm" variant="destructive" className="h-6 px-2 text-xs" onClick={() => void handleCancelMethodVersion({ version: { effective_date: entry.date } })} disabled={cancelling}>כן, לבטל</Button>
+                        <Button type="button" size="sm" variant="ghost" className="h-6 px-2 text-xs" onClick={() => setConfirming('')} disabled={cancelling}>לא</Button>
+                      </span>
+                    ) : null}
+                  </span>
                 </li>
               </React.Fragment>
             ))}
@@ -232,7 +266,7 @@ export default function EmployeeLeaveSettings({ employeeId, orgId, session, curr
         </div>
       ) : null}
 
-      {historyOpen && timeline.entries.length > 0 ? (
+      {valueHistoryOpen && timeline.entries.length > 0 ? (
         <div className="rounded-xl border border-slate-200 bg-white px-3 py-2" data-leave-day-history>
           <p className="mb-1 text-xs text-slate-500">ערך קבוע ליום חופשה</p>
           <ul className="space-y-2">
@@ -309,6 +343,7 @@ export default function EmployeeLeaveSettings({ employeeId, orgId, session, curr
                 disabled={saving}
                 pastDateWarning="השיטה תחול על ימי חופשה שכבר עברו. השכר על ימי החופשה מהתאריך הזה יחושב מחדש לפיה."
                 onCancelVersion={handleCancelMethodVersion}
+                historyLabel="היסטוריית שיטת תשלום"
               />
               {methodPlan?.error ? <p className="text-xs text-red-600" data-leave-method-error>{methodPlan.error}</p> : null}
               {draft.payMethod === 'fixed_rate' ? (
@@ -328,18 +363,8 @@ export default function EmployeeLeaveSettings({ employeeId, orgId, session, curr
                         aria-invalid={plan?.error ? true : undefined}
                       />
                     </div>
-                    <div className="space-y-1">
-                      <Label htmlFor="leave-day-value-date" className="text-xs text-slate-600">בתוקף מ-</Label>
-                      <Input
-                        id="leave-day-value-date"
-                        className="h-8 w-40"
-                        type="date"
-                        value={draft.dayValueDate}
-                        onChange={(event) => setDraft((value) => ({ ...value, dayValueDate: event.target.value }))}
-                        disabled={saving}
-                      />
-                    </div>
                   </div>
+                  <p className="text-xs text-slate-500" data-leave-day-value-date-note>הערך בתוקף מאותו תאריך כמו השיטה.</p>
                   {plan?.error ? <p className="text-xs text-red-600" data-leave-day-value-error>{plan.error}</p> : null}
                 </div>
               ) : null}
