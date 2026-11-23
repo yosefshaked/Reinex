@@ -17,4 +17,6 @@ Work plans for Reinex: what we intend to build or change, in what order, and the
   - subtasks as checkboxes, ticked with their evidence;
   - a Progress log, with one entry per step: date, commit, checks run, gaps;
   - open questions, each with its answer written under it when it is decided.
-- **Check:** `npm run lint:plans`. It verifies that every plan has exactly one row, every row points to an existing plan, and every status is valid.
+- **Check:**
+  - **Locally:** `npm run lint:plans`. It verifies that every plan has exactly one row, every row points to an existing plan file, and every status is valid. It is not part of `npm run build`.
+  - **In CI:** the "Plan registry" check (`.github/workflows/plan-registry.yml`) runs the same command and the checker's tests. It runs on every PR to `staging` or `main` and every push to those branches, including documentation-only changes.
