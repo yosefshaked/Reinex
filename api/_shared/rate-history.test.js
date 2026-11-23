@@ -9,6 +9,8 @@ import {
   resolveLessonRateOnDate,
   resolveRateOnDate,
   validateRateInput,
+  cancelFutureRate,
+  checkCancelableRate,
 } from './rate-history.js';
 import { localDateKey } from './local-time.js';
 
@@ -137,3 +139,70 @@ test('invalid rows and dates are ignored', () => {
   assert.equal(resolveRateOnDate(ROWS, { employeeId: DANA, payBasis: 'bonus', date: '2026-06-01' }), null);
 });
 
+
+test('only a rate that has not started yet can be cancelled', () => {
+  const today = '2026-11-23';
+  assert.equal(checkCancelableRate({ rate: { id: 'r', effective_date: '2026-11-24' }, today }).value.rateId, 'r');
+  assert.equal(checkCancelableRate({ rate: { id: 'r', effective_date: today }, today }).error, 'dated_version_not_in_future');
+  assert.equal(checkCancelableRate({ rate: { id: 'r', effective_date: '2026-01-01' }, today }).error, 'dated_version_not_in_future');
+  assert.equal(checkCancelableRate({ rate: { id: 'r', effective_date: '2000-01-01' }, today }).error, 'dated_version_not_in_future');
+  assert.equal(checkCancelableRate({ rate: { id: 'r' }, today }).error, 'invalid_effective_date');
+});
+
+// A table of RateHistory rows behind withOrgScope(...).select().eq()...maybeSingle() and .delete().eq()...select().
+function fakeRateClient(rows) {
+  const calls = [];
+  return {
+    calls,
+    from() {
+      const filters = {};
+      let mode = 'select';
+      const hit = () => rows.filter((row) => Object.entries(filters).every(([column, value]) => row[column] === value));
+      const chain = {
+        select() {
+          if (mode === 'delete') {
+            const found = hit();
+            for (const row of found) rows.splice(rows.indexOf(row), 1);
+            calls.push(['delete', { ...filters }]);
+            return Promise.resolve({ data: found.map((row) => ({ id: row.id })), error: null });
+          }
+          return chain;
+        },
+        delete() { mode = 'delete'; return chain; },
+        eq(column, value) { filters[column] = value; return chain; },
+        maybeSingle() { return Promise.resolve({ data: hit()[0] || null, error: null }); },
+      };
+      return chain;
+    },
+  };
+}
+
+test('cancelling a rate: a future one goes, a current or past one is refused with 400, a missing one is 404', async () => {
+  const today = '2026-11-23';
+  const row = (id, date, overrides = {}) => ({
+    id, org_id: 'org-1', employee_id: DANA, service_id: null, pay_basis: 'leave_day', rate: 25000, effective_date: date, ...overrides,
+  });
+  const rows = [
+    row('past', '2026-06-01'),
+    row('now', today),
+    row('future', '2026-12-01'),
+    row('other-employee', '2026-12-01', { employee_id: OMER }),
+    row('other-org', '2026-12-01', { org_id: 'org-2' }),
+  ];
+  const client = fakeRateClient(rows);
+  for (const rateId of ['past', 'now']) {
+    const refused = await cancelFutureRate(client, 'org-1', { employeeId: DANA, rateId, today });
+    assert.deepEqual([refused.error, refused.status], ['dated_version_not_in_future', 400]);
+  }
+  assert.equal(client.calls.length, 0, 'nothing was deleted');
+  for (const rateId of ['nope', 'other-employee', 'other-org']) {
+    const missing = await cancelFutureRate(client, 'org-1', { employeeId: DANA, rateId, today });
+    assert.deepEqual([missing.error, missing.status], ['rate_not_found', 404]);
+  }
+  const cancelled = await cancelFutureRate(client, 'org-1', { employeeId: DANA, rateId: 'future', today });
+  assert.equal(cancelled.cancelled, true);
+  assert.equal(cancelled.rate.effective_date, '2026-12-01');
+  assert.deepEqual(rows.map((entry) => entry.id), ['past', 'now', 'other-employee', 'other-org']);
+  assert.deepEqual(client.calls[0][1], { org_id: 'org-1', id: 'future', employee_id: DANA });
+  assert.equal((await cancelFutureRate(client, 'org-1', { employeeId: DANA, rateId: '', today })).error, 'missing_rate_id');
+});

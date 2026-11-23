@@ -4,6 +4,9 @@
  *
  * GET  ?org_id&employee_id            -> { rates, today }
  * POST { org_id, employee_id, pay_basis, service_id?, rate, effective_date, notes?, replace_existing? }
+ * DELETE { org_id, employee_id, rate_id } -> { cancelled: true, rate }: cancels one rate that has not
+ *   started yet (effective date after the org's today). 400 dated_version_not_in_future for a current
+ *   or past rate, 404 rate_not_found.
  *
  * A rate is never edited in place: saving adds a row "from this date on". Saving on a date that already
  * has a rate of that kind is refused unless `replace_existing` is true.
@@ -23,6 +26,7 @@ import { canManageEmployeeOps } from '../_shared/employee-finance.js';
 import { attachErrorTracking, respondTracked } from '../_shared/error-events.js';
 import {
   buildRateChangeWarnings,
+  cancelFutureRate,
   loadRateHistoryRows,
   validateRateInput,
 } from '../_shared/rate-history.js';
@@ -36,7 +40,7 @@ function respondRatesError(context, status, message, error, metadata = {}) {
 
 export default async function employeeRates(context, req) {
   const method = String(req.method || 'GET').toUpperCase();
-  if (method !== 'GET' && method !== 'POST') {
+  if (method !== 'GET' && method !== 'POST' && method !== 'DELETE') {
     return respond(context, 405, { message: 'method_not_allowed' });
   }
 
@@ -89,6 +93,22 @@ export default async function employeeRates(context, req) {
   const employeeId = normalizeString(method === 'GET' ? req?.query?.employee_id : body?.employee_id);
   if (!employeeId) {
     return respond(context, 400, { message: 'missing_employee_id' });
+  }
+
+  if (method === 'DELETE') {
+    const cancelled = await cancelFutureRate(supabase, orgId, {
+      employeeId,
+      rateId: body?.rate_id,
+      today: todayKey(),
+    });
+    if (cancelled.error) {
+      if (cancelled.cause) {
+        context.log?.error?.('employee-rates failed to cancel the rate', { message: cancelled.cause.message, employeeId });
+        return respondRatesError(context, cancelled.status || 500, cancelled.error, cancelled.cause, { action: 'cancel_rate', employee_id: employeeId });
+      }
+      return respond(context, cancelled.status || 400, { message: cancelled.error });
+    }
+    return respond(context, 200, { cancelled: true, rate: cancelled.rate, today: todayKey() });
   }
 
   if (method === 'GET') {

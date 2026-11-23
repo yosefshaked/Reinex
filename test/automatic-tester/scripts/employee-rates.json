@@ -321,6 +321,60 @@
       ]
     },
     {
+      "id": "ui-cancel-future-rate",
+      "name": "UI – A future rate can be cancelled from the rate history; the rate in force cannot",
+      "description": "The rate scheduled from 01.01.2027 shows a cancel button in the card history; the rate in force has none. \"ביטול התעריף העתידי\" asks \"לבטל?\" first; \"כן, לבטל\" removes the scheduled rate and the card goes back to showing only the current one.",
+      "steps": [
+        {
+          "id": "open-history",
+          "action": "click",
+          "selector": "article:has-text('{{SERVICE_NAME}}') button:has-text('היסטוריה')",
+          "first": true
+        },
+        {
+          "id": "assert-cancel-on-future-only",
+          "description": "Only the future row has a cancel button",
+          "action": "waitForSelector",
+          "selector": "article:has-text('{{SERVICE_NAME}}') li:has-text('(עתידי)') [data-cancel-rate]"
+        },
+        {
+          "id": "assert-no-cancel-on-current",
+          "action": "assert",
+          "type": "count",
+          "selector": "article:has-text('{{SERVICE_NAME}}') li:not(:has-text('(עתידי)')) [data-cancel-rate]",
+          "value": "0"
+        },
+        {
+          "id": "cancel-future-rate",
+          "action": "click",
+          "selector": "article:has-text('{{SERVICE_NAME}}') li:has-text('(עתידי)') [data-cancel-rate]"
+        },
+        {
+          "id": "screenshot-cancel-rate-confirm",
+          "action": "screenshot",
+          "name": "02b-cancel-future-rate-confirm"
+        },
+        {
+          "id": "confirm-cancel-rate",
+          "action": "click",
+          "selector": "article:has-text('{{SERVICE_NAME}}') [data-cancel-rate-confirm] button:has-text('כן, לבטל')"
+        },
+        {
+          "id": "assert-scheduled-gone",
+          "description": "The scheduled rate is gone from the card",
+          "action": "assert",
+          "type": "hidden",
+          "selector": "article:has-text('{{SERVICE_NAME}}'):has-text('מ-01.01.2027')"
+        },
+        {
+          "id": "assert-current-stays",
+          "action": "assert",
+          "type": "visible",
+          "selector": "article:has-text('{{SERVICE_NAME}}'):has-text('נוכחי:')"
+        }
+      ]
+    },
+    {
       "id": "ui-add-service-rate",
       "name": "UI – Add a rate for another service through the dialog",
       "description": "A rate always belongs to a service, so the panel opens a dialog that picks the service and sets the rate. The new card says the service is not assigned to the employee yet.",
@@ -1057,12 +1111,83 @@
           "selector": "[data-leave-day-entry]:has-text('(בתוקף)'):has-text('₪250')"
         },
         {
-          "id": "assert-no-cancel",
-          "description": "The rates API has no delete, so a future value cannot be cancelled here (a future pay method can: leave-settings.json)",
+          "id": "restate-current-value",
+          "description": "The value in force (250) is saved again for today (same amount) to learn its id",
+          "action": "apiCall",
+          "method": "POST",
+          "endpoint": "/api/employee-rates",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "employee_id": "{{RATE_INSTRUCTOR_ID}}",
+            "pay_basis": "leave_day",
+            "service_id": null,
+            "rate": 25000,
+            "effective_date": "{{TODAY}}",
+            "replace_existing": true
+          },
+          "store": "CURRENT_LEAVE_RATE_ID",
+          "storeField": "rate.id"
+        },
+        {
+          "id": "refuse-cancel-current-rate",
+          "description": "DELETE /api/employee-rates refuses a rate in force (400 dated_version_not_in_future); the value stays",
+          "action": "apiCall",
+          "method": "DELETE",
+          "endpoint": "/api/employee-rates",
+          "ignoreStatus": [
+            400
+          ],
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "employee_id": "{{RATE_INSTRUCTOR_ID}}",
+            "rate_id": "{{CURRENT_LEAVE_RATE_ID}}"
+          }
+        },
+        {
+          "id": "assert-cancel-on-future-only",
+          "description": "Only the future value has a cancel button; the value in force has none",
+          "action": "waitForSelector",
+          "selector": "[data-leave-day-entry]:has-text('(עתידי)') [data-cancel-value]"
+        },
+        {
+          "id": "assert-no-cancel-on-current",
           "action": "assert",
           "type": "count",
-          "selector": "[data-leave-day-history] button",
+          "selector": "[data-leave-day-entry]:has-text('(בתוקף)') [data-cancel-value]",
           "value": "0"
+        },
+        {
+          "id": "cancel-future-value",
+          "action": "click",
+          "selector": "[data-leave-day-entry]:has-text('(עתידי)') [data-cancel-value]"
+        },
+        {
+          "id": "screenshot-cancel-value-confirm",
+          "action": "screenshot",
+          "name": "05d-cancel-future-value-confirm"
+        },
+        {
+          "id": "confirm-cancel-value",
+          "action": "click",
+          "selector": "[data-cancel-value-confirm] button:has-text('כן, לבטל')"
+        },
+        {
+          "id": "assert-future-value-gone",
+          "description": "The future value and its \"ישתנה ב-\" note are gone; the value in force (250) is still there",
+          "action": "assert",
+          "type": "hidden",
+          "selector": "[data-leave-day-entry]:has-text('(עתידי)')"
+        },
+        {
+          "id": "assert-future-note-gone",
+          "action": "assert",
+          "type": "hidden",
+          "selector": "[data-leave-future-note]"
+        },
+        {
+          "id": "assert-current-value-stays",
+          "action": "waitForSelector",
+          "selector": "[data-leave-day-entry]:has-text('(בתוקף)'):has-text('₪250')"
         },
         {
           "id": "assert-method-history-toggle",

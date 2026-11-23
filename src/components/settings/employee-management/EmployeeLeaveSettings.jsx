@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { toast } from '@/lib/toast.jsx';
+import { cancelEmployeeRate } from '@/lib/employee-rate-cancel.js';
 import { authenticatedFetch } from '@/lib/api-client.js';
 import StepReveal from '@/features/finance/components/StepReveal.jsx';
 import DatedSettingFields from '@/features/settings/components/DatedSettingFields.jsx';
@@ -147,6 +148,24 @@ export default function EmployeeLeaveSettings({ employeeId, orgId, session, curr
     }
   }
 
+  // Cancels a future fixed value. Only the value: a "ערך קבוע ליום" method version on the same date is
+  // its own setting and stays (the history shows what is left).
+  async function handleCancelValue(entry) {
+    setCancelling(true);
+    try {
+      await cancelEmployeeRate({ orgId, employeeId, rateId: entry.id, session });
+      toast.success('הערך העתידי בוטל.');
+      await loadLeaveDayRate();
+      await onChanged?.();
+    } catch (error) {
+      console.error('Failed to cancel the future leave day value', error);
+      toast.error(error?.message || 'ביטול הערך העתידי נכשל.');
+    } finally {
+      setCancelling(false);
+      setConfirming('');
+    }
+  }
+
   async function handleCancelMethodVersion({ version }) {
     setCancelling(true);
     try {
@@ -275,7 +294,21 @@ export default function EmployeeLeaveSettings({ employeeId, orgId, session, curr
                 {index > 0 ? <li role="separator" aria-hidden="true" className="mx-auto h-px w-2/3 bg-slate-200" data-leave-day-separator /> : null}
                 <li className="flex items-center justify-between gap-2 text-sm" data-leave-day-entry>
                   <span className="font-semibold text-slate-900"><bdi dir="ltr">{formatDateKey(entry.date)}</bdi>{entry.isFuture ? <span className="ms-1 text-xs font-normal text-slate-500">(עתידי)</span> : null}{entry.isCurrent ? <span className="ms-1 text-xs font-normal text-slate-500">(בתוקף)</span> : null}</span>
-                  <span className="text-slate-700">₪{toShekel(entry.rate).toLocaleString('he-IL', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</span>
+                  <span className="flex items-center gap-2 text-slate-700">
+                    ₪{toShekel(entry.rate).toLocaleString('he-IL', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+                    {entry.isFuture && confirming !== `value-${entry.id}` ? (
+                      <Button type="button" size="sm" variant="ghost" className="h-6 px-2 text-xs" onClick={() => setConfirming(`value-${entry.id}`)} disabled={cancelling} data-cancel-value>
+                        ביטול הערך העתידי
+                      </Button>
+                    ) : null}
+                    {entry.isFuture && confirming === `value-${entry.id}` ? (
+                      <span className="flex items-center gap-1" data-cancel-value-confirm>
+                        <span className="text-xs font-medium text-slate-700">לבטל?</span>
+                        <Button type="button" size="sm" variant="destructive" className="h-6 px-2 text-xs" onClick={() => void handleCancelValue(entry)} disabled={cancelling}>כן, לבטל</Button>
+                        <Button type="button" size="sm" variant="ghost" className="h-6 px-2 text-xs" onClick={() => setConfirming('')} disabled={cancelling}>לא</Button>
+                      </span>
+                    ) : null}
+                  </span>
                 </li>
               </React.Fragment>
             ))}

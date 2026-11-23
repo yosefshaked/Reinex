@@ -213,3 +213,50 @@ export async function loadRateHistoryRows(tenantClient, orgId, { employeeIds = [
   }
   return (data || []).map(normalizeRateRow).filter(Boolean);
 }
+
+/**
+ * Which rate row may be cancelled: only one that has not started yet (effective date after the
+ * org-local today). A past or current rate stays: the months it priced were computed by it.
+ * Returns { value: { rateId, effectiveDate } } or { error } (invalid_effective_date,
+ * dated_version_not_in_future). The row itself is read first (`cancelFutureRate`), so the date
+ * checked is the stored one.
+ */
+export function checkCancelableRate({ rate, today } = {}) {
+  const effectiveDate = normalizeDateKey(rate?.effective_date);
+  if (!isDateKey(effectiveDate)) return { error: 'invalid_effective_date' };
+  if (!(effectiveDate > normalizeDateKey(today))) return { error: 'dated_version_not_in_future' };
+  return { value: { rateId: rate.id, effectiveDate } };
+}
+
+/**
+ * Cancels (deletes) one future RateHistory row of an employee. Used only by DELETE /api/employee-rates.
+ * Returns { cancelled: true, rate } or { error, status } (400 dated_version_not_in_future,
+ * 404 rate_not_found, 500 failed_to_cancel_rate). Nothing else follows the rate: a "ערך קבוע ליום"
+ * method version dated the same day is a separate setting and stays.
+ *
+ * @param {any} client
+ * @param {string} orgId
+ * @param {{ employeeId: string, rateId: string, today: string }} params
+ */
+export async function cancelFutureRate(client, orgId, { employeeId, rateId, today }) {
+  const id = normalizeString(rateId);
+  const owner = normalizeString(employeeId);
+  if (!id) return { error: 'missing_rate_id', status: 400 };
+  const { data: found, error: readError } = await withOrgScope(client, 'RateHistory', orgId)
+    .select(RATE_HISTORY_COLUMNS)
+    .eq('id', id)
+    .eq('employee_id', owner)
+    .maybeSingle();
+  if (readError) return { error: 'failed_to_cancel_rate', status: 500, cause: readError };
+  if (!found) return { error: 'rate_not_found', status: 404 };
+  const checked = checkCancelableRate({ rate: found, today });
+  if (checked.error) return { error: checked.error, status: 400 };
+  const { data, error } = await withOrgScope(client, 'RateHistory', orgId)
+    .delete()
+    .eq('id', id)
+    .eq('employee_id', owner)
+    .select('id');
+  if (error) return { error: 'failed_to_cancel_rate', status: 500, cause: error };
+  if (!data || data.length === 0) return { error: 'rate_not_found', status: 404 };
+  return { cancelled: true, rate: normalizeRateRow(found) };
+}

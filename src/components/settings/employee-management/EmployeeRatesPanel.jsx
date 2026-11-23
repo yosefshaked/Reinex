@@ -27,6 +27,7 @@ import { formatDateKey } from '@/lib/date-key-format.js';
 import { formatCurrency, toAgorot } from '@/lib/currency.js';
 import { useServices } from '@/hooks/useOrgData.js';
 import { todayKey } from '@/lib/local-time.js';
+import { cancelEmployeeRate } from '@/lib/employee-rate-cancel.js';
 
 const LESSON_BASES = ['lesson_hourly', 'lesson_flat'];
 
@@ -205,9 +206,10 @@ function RateFields({ idPrefix, form, setForm, allowBasisChoice, warnings, savin
   );
 }
 
-function RateCard({ card, rates, today, onSave, onSaveScheduling, saving }) {
+function RateCard({ card, rates, today, onSave, onSaveScheduling, onCancelRate, saving }) {
   const [open, setOpen] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
+  const [confirmingCancel, setConfirmingCancel] = useState('');
   const history = useMemo(() => rowsForCard(rates, card), [rates, card]);
   const current = history.find((row) => row.effective_date <= today) || null;
   // A raise should not silently change the agreement: the form opens on the unit that is in effect,
@@ -350,10 +352,33 @@ function RateCard({ card, rates, today, onSave, onSaveScheduling, saving }) {
           {history.map((row) => (
             <li key={row.id} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 text-sm">
               <span className="font-bold text-slate-900">{describeRate(row)}</span>
-              <span className="text-xs text-slate-500">
-                {historyFromLabel(row)}
-                {row.effective_date > today ? ' (עתידי)' : ''}
-                {row.notes ? ` · ${row.notes}` : ''}
+              <span className="flex items-center gap-2 text-xs text-slate-500">
+                <span>
+                  {historyFromLabel(row)}
+                  {row.effective_date > today ? ' (עתידי)' : ''}
+                  {row.notes ? ` · ${row.notes}` : ''}
+                </span>
+                {row.effective_date > today && confirmingCancel !== row.id ? (
+                  <Button type="button" size="sm" variant="ghost" className="h-6 px-2 text-xs" onClick={() => setConfirmingCancel(row.id)} disabled={saving} data-cancel-rate>
+                    ביטול התעריף העתידי
+                  </Button>
+                ) : null}
+                {row.effective_date > today && confirmingCancel === row.id ? (
+                  <span className="flex items-center gap-1" data-cancel-rate-confirm>
+                    <span className="font-medium text-slate-700">לבטל?</span>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="destructive"
+                      className="h-6 px-2 text-xs"
+                      onClick={async () => { await onCancelRate(row); setConfirmingCancel(''); }}
+                      disabled={saving}
+                    >
+                      כן, לבטל
+                    </Button>
+                    <Button type="button" size="sm" variant="ghost" className="h-6 px-2 text-xs" onClick={() => setConfirmingCancel('')} disabled={saving}>לא</Button>
+                  </span>
+                ) : null}
               </span>
             </li>
           ))}
@@ -839,6 +864,20 @@ export default function EmployeeRatesPanel({ employee, orgId, session, services 
     }
   }
 
+  async function handleCancelRate(row) {
+    setSaving(true);
+    try {
+      await cancelEmployeeRate({ orgId, employeeId: employee.id, rateId: row.id, session });
+      await loadRates();
+      toast.success('התעריף העתידי בוטל.');
+    } catch (error) {
+      console.error('Failed to cancel the future rate', error);
+      toast.error(error?.message || 'ביטול התעריף העתידי נכשל.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
     <section className="space-y-3">
       <div className="flex flex-wrap items-start justify-between gap-2">
@@ -879,6 +918,7 @@ export default function EmployeeRatesPanel({ employee, orgId, session, services 
                     saving={saving}
                     onSave={handleSave}
                     onSaveScheduling={handleSaveScheduling}
+                    onCancelRate={handleCancelRate}
                   />
                 ))}
               </div>
