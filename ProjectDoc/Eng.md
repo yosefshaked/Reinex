@@ -246,10 +246,10 @@ All endpoints expect the tenant identifier (`org_id`) in the request body or que
 
 A Node.js script is provided for super admins/system administrators to verify backup file integrity and decryptability:
 
-- **Location:** `test/verify-backup.cjs`
+- **Location:** `tests/verify-backup.cjs`
 - **Usage:**
   ```
-  node test/verify-backup.cjs <backup-file-path> <password>
+  node tests/verify-backup.cjs <backup-file-path> <password>
   ```
 - **Features:**
   - Loads and decrypts a backup file using the provided password

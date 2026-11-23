@@ -108,7 +108,7 @@ Why: Prevents regressions when later missions modify attendance or authorization
 Why not another way: Manual QA alone will miss edge status combinations and race conditions.
 - Status: Completed (verified).
 - Summary:
-	- Added focused automated tests: test/finance-preview-contract.test.js.
+	- Added focused automated tests: tests/finance-preview-contract.test.js.
 	- Added coverage for billing/preview contract behavior:
 		- attended with active authorization yields explicit HMO split entries,
 		- no_show excluded by policy is not chargeable,
@@ -144,7 +144,7 @@ Why not another way: Hard-blocking generation is operationally risky for MVP and
 		- warnings array,
 		- warnings_notice for schema-unavailable fallback.
 	- Kept generation non-blocking: warnings are informational and do not prevent proposals from entering to_insert_instances.
-	- Added focused tests: test/calendar-generate-hmo-warning.test.js.
+	- Added focused tests: tests/calendar-generate-hmo-warning.test.js.
 	- Extended acceptance criteria with AC-GEN-001 and AC-GEN-002 in implementations/finance/ledger/finance-workflow-acceptance-criteria-v1.md.
 	- Verification pass 1 completed: focused Step 6 test suite passed (4/4).
 	- Verification pass 2 completed: response schema and criteria artifacts include generation warning fields and assertions.

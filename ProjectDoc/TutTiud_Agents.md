@@ -265,8 +265,8 @@
 - Frontend: Backup card in Settings page shows grayed-out state when `backup_local_enabled = false` with message "גיבוי אינו זמין. נא לפנות לתמיכה על מנת לבחון הפעלת הפונקציה". Uses `initialize_org_permissions` RPC on load to ensure permissions exist.
 - Frontend: Backup card now consumes `GET /api/backup-list` to show stored backups for the active org; restore is additive and requires the same permission gate.
 - OAuth backup destinations (Google Drive, OneDrive, Dropbox) planned but not yet implemented; permission flags reserved.
-- Admin tool: `test/verify-backup.cjs` verifies backup file integrity and decryptability by org/date.
-  - Usage: `node test/verify-backup.cjs <orgId> <YYYY-MM-DD>`
+- Admin tool: `tests/verify-backup.cjs` verifies backup file integrity and decryptability by org/date.
+  - Usage: `node tests/verify-backup.cjs <orgId> <YYYY-MM-DD>`
   - Prints manifest summary if successful, error if invalid or key/config is wrong.
   - Use for compliance, restore validation, and support troubleshooting.
 

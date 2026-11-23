@@ -270,7 +270,7 @@ Uncommitted, on the working branch.
 - `npm run build` ✓ (typecheck is warn-only; 3,073 pre-existing issues, none introduced here).
 - Owner verified A1, A2 and A3 in the local test environment (2026-09-14).
 - Automatic tester:
-  - New `test/automatic-tester/scripts/lesson-dialog-regressions.json` covers A1 (reopen and switching lessons land in view mode), A2 (back-to-back attendance with no conflict panel) and A3 (no status field in edit mode). It sets up its own instructors, students and lessons through the API. It passes `node runner.js --validate`; it hasn't been run live yet.
+  - New `tests/automatic-tester/scripts/lesson-dialog-regressions.json` covers A1 (reopen and switching lessons land in view mode), A2 (back-to-back attendance with no conflict panel) and A3 (no status field in edit mode). It sets up its own instructors, students and lessons through the API. It passes `node runner.js --validate`; it hasn't been run live yet.
   - No existing scenario touched the changed dialog UI.
   - `setup.js` now probes `Services.report_form_id`, so `node setup.js` re-applies the schema when the local DB is missing the Session Reports columns. The local tester DB was stale and made `GET /api/services` fail with `failed_to_load_services`. It was brought up to date by applying `SETUP_SQL_SCRIPT` (0 SQL errors).
 
@@ -296,7 +296,7 @@ The refactor is behavior-preserving.
 | Size | `LessonInstanceDialog.jsx`: 2,760 → 2,274 lines. |
 | Docs | `agents-docs/60` lists the new building blocks. |
 
-| Tests | `test/lesson-dialog-model.test.js`: 89 characterization tests for the model, wired into `test:finance-calendar`. |
+| Tests | `tests/lesson-dialog-model.test.js`: 89 characterization tests for the model, wired into `test:finance-calendar`. |
 
 **Bug found by the characterization tests, and fixed:**
 - `resolveMutationError` returned the generic 409 text ("השיעור עודכן על ידי משתמש אחר") before checking specific codes.
@@ -334,7 +334,7 @@ This phase builds the approved v4 prototype into the real dialog.
 - Owner smoke test: the footer said "נותר לסגירה: ... תביעת גורם מממן" on lessons where no participant has HMO coverage. This bug predates the redesign (`bd7c90a`); the new footer just made it visible. `calendar-attendance` stores `hmo_claim.decision = 'pending'` for **every** attended participant, and `evaluateParticipantSettlement` counted `pending` as "claim required", so these lessons could never close. They also inflated the calendar's "needs attention" HMO count. Now a claim is required only with an HMO `lesson_charge` ledger row, an open `hmo_claim_submission` task, or an explicit `required` decision. `calendar-workflow.test.js` has 4 new cases. The local DB was re-synced: of 22 lessons flagged `hmo_claim_unresolved`, 6 non-HMO lessons were false positives and 14 were stale (their claims were already batched). The 2 with open claim tasks correctly stay flagged. **Production:** stored `workflow_state` recalculates only when a lesson is written to, so already-flagged production lessons need a one-off re-sync (owner decision). The re-sync is built as a system-admin job: Admin Tools → Lesson closure re-sync (preview, then apply).
 
 **Tests:**
-- `test/lesson-impact-strip.test.js` covers the status display map, compact agorot, and the strip summary.
+- `tests/lesson-impact-strip.test.js` covers the status display map, compact agorot, and the strip summary.
 - `api/_shared/lesson-history.test.js` has 17 mapping tests.
 - `api/_shared/calendar-hmo-coverage.test.js` covers the new HMO display fields.
 - The automatic-tester scenario `lesson-dialog-regressions.json` moves to v1.1.0: new selectors for tabs, ✓, the strip and pills, plus a history-tab check (P3).

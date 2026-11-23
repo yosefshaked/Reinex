@@ -1,10 +1,10 @@
-// Usage: node test/verify-backup.cjs <orgId> <YYYY-MM-DD>
-// Example: node test/verify-backup.cjs 550e8400-e29b-41d4-a716-446655440000 2026-05-13
+// Usage: node tests/verify-backup.cjs <orgId> <YYYY-MM-DD>
+// Example: node tests/verify-backup.cjs 550e8400-e29b-41d4-a716-446655440000 2026-05-13
 
 async function main() {
   const [,, orgId, backupDate] = process.argv;
   if (!orgId || !backupDate) {
-    console.error('Usage: node test/verify-backup.cjs <orgId> <YYYY-MM-DD>');
+    console.error('Usage: node tests/verify-backup.cjs <orgId> <YYYY-MM-DD>');
     process.exit(1);
   }
 

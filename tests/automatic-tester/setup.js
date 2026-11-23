@@ -4,7 +4,7 @@
  *
  * Connects to Docker / Supabase to discover credentials automatically,
  * creates isolated test accounts, builds a test organisation, and writes
- * test/automatic-tester/.env so you never have to fill it in manually.
+ * tests/automatic-tester/.env so you never have to fill it in manually.
  *
  * Prerequisites:
  *   • Node 18+  (uses built-in fetch)

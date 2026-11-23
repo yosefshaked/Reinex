@@ -7,8 +7,8 @@ Use this checklist before returning any change that touches calendar status, les
 - Coverage decisions are in `api/_shared/hmo.js`.
 - Finance policy loading is in `api/_shared/employee-finance.js`.
 - Calendar endpoints may orchestrate mutations, but must not calculate lesson prices or write ledger rows directly.
-- Self-seeded backend workflow contracts live in `test/finance-calendar-workflows.test.js`.
-- Browser-driven end-to-end scenarios belong under `test/automatic-tester/scripts/`.
+- Self-seeded backend workflow contracts live in `tests/finance-calendar-workflows.test.js`.
+- Browser-driven end-to-end scenarios belong under `tests/automatic-tester/scripts/`.
 
 ## Required Questions
 - Which participant statuses can this change affect: `scheduled`, `attended`, `no_show`, `cancelled_student`, `cancelled_clinic`?

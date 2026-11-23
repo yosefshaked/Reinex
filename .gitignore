@@ -41,5 +41,5 @@ settings.json
 /manual-db-backup/backups
 /manual-db-backup/supabase
 /supabase/.temp
-/test/automatic-tester/reports
+/tests/automatic-tester/reports
 /.cache

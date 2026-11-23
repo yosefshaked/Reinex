@@ -154,7 +154,7 @@ const ERROR_PATTERNS = [
     hints: [
       'The test needs credentials that are not set in .env.',
       'Fix: run  node setup.js  — it creates all three test accounts automatically.',
-      'Or set the missing variables manually in test/automatic-tester/.env.',
+      'Or set the missing variables manually in tests/automatic-tester/.env.',
     ],
   },
   {

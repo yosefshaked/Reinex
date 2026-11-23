@@ -790,7 +790,7 @@ Do not edit frontend files.
 Ownership:
 
 - `api/billing/index.js`
-- tests under `test/` for billing endpoint behavior
+- tests under `tests/` for billing endpoint behavior
 
 Tasks:
 
@@ -845,7 +845,7 @@ Tasks:
 Ownership:
 
 - no production code unless fixing tests only
-- `test/` files
+- `tests/` files
 - implementation evidence docs under this folder
 
 Tasks:
@@ -967,7 +967,7 @@ Add or update:
 
 - `test/billing-hmo-claims-read-model.test.js`
 - `test/billing-hmo-batch-lifecycle.test.js`
-- `test/billing-claim-payment.test.js`
+- `tests/billing-claim-payment.test.js`
 
 Minimum test cases:
 

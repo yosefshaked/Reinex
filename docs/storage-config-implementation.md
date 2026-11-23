@@ -44,7 +44,7 @@ api/
 scripts/
 └── control-db-storage-profile-schema.sql  # DB migration
 
-test/
+tests/
 └── storage-config.test.js            # Comprehensive validation tests
 ```
 
@@ -142,7 +142,7 @@ test/
 
 ## Testing
 
-**Test Suite**: `test/storage-config.test.js`
+**Test Suite**: `tests/storage-config.test.js`
 **Coverage**: 24 comprehensive tests
 
 Tests cover:
@@ -279,7 +279,7 @@ Before deploying to production:
 
 For questions about this implementation:
 - Review `api/cross-platform/storage-config/README.md`
-- Check test cases in `test/storage-config.test.js`
+- Check test cases in `tests/storage-config.test.js`
 - Refer to AGENTS.md for development patterns
 
 This is a **backend-only** implementation. Frontend integration is out of scope for this task.

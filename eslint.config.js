@@ -163,7 +163,7 @@ export default defineConfig([
     },
   },
   {
-    files: ['test/**/*.{js,jsx,mjs}'],
+    files: ['tests/**/*.{js,jsx,mjs}'],
     languageOptions: {
       globals: {
         ...globals.node,
