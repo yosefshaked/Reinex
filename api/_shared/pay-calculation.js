@@ -48,7 +48,6 @@ import {
 import {
   LESSON_PAY_BASES,
   PAY_BASIS,
-  hasRateKind,
   loadRateHistoryRows,
   resolveLessonRateOnDate,
   resolveRateOnDate,
@@ -469,9 +468,29 @@ export async function computeEmployeePay(client, orgId, {
     leavePayPolicyOn: (dateKey) => financePoliciesOnDate(resolvedPolicies, dateKey)?.leavePayPolicy,
     rateRows: resolvedRateRows,
   });
+  // A leave day is covered by the salary only when a monthly salary is in force on that very date: it is
+  // then part of the salary and has no leave amount of its own. Any other leave day is valued by the
+  // employee's leave pay method on that date.
+  const salaryRateOn = (dateKey) => resolveRateOnDate(resolvedRateRows, {
+    employeeId,
+    payBasis: PAY_BASIS.MONTHLY_SALARY,
+    date: dateKey,
+  });
   const leaveAmounts = leaveDays.map((leaveDay) => {
+    if (salaryRateOn(leaveDay.leave_date)) {
+      return {
+        ...leaveDay,
+        covered_by_salary: true,
+        day_value: null,
+        method: 'monthly_salary',
+        lookback_months: null,
+        basis: null,
+        amount: 0,
+      };
+    }
     const detail = leaveValuer.detailOf(leaveDay.leave_date);
     return {
+      covered_by_salary: false,
       ...leaveDay,
       day_value: detail.value,
       method: detail.method || null,
@@ -481,14 +500,12 @@ export async function computeEmployeePay(client, orgId, {
     };
   });
   const paidLeaveTotal = coerceAgorot(leaveAmounts.reduce((sum, row) => sum + row.amount, 0));
-  const paidLeaveSummary = summarizePaidLeave(leaveAmounts);
+  const valuedLeave = leaveAmounts.filter((row) => !row.covered_by_salary);
+  const paidLeaveSummary = summarizePaidLeave(valuedLeave);
+  const salaryCoveredDays = roundTo2(leaveAmounts
+    .filter((row) => row.covered_by_salary && Number(row.pay_fraction) > 0)
+    .reduce((sum, row) => sum + Number(row.pay_fraction), 0));
   const correctionTotal = coerceAgorot((corrections || []).reduce((sum, row) => sum + coerceAgorot(row.amount), 0));
-
-  const paysMonthlySalary = hasRateKind(resolvedRateRows, {
-    employeeId,
-    payBasis: PAY_BASIS.MONTHLY_SALARY,
-    onOrBefore: endDate,
-  });
 
   const attendanceRows = priceAttendanceRecords(attendance, resolvedRateRows, employeeId);
   const attendanceAmount = coerceAgorot(attendanceRows.reduce((sum, row) => sum + row.amount, 0));
@@ -496,21 +513,27 @@ export async function computeEmployeePay(client, orgId, {
   const workingDays = resolveEmployeeWorkingDays(employee);
   const workingDaySet = new Set(workingDays);
   const leaveByDate = new Map(leaveAmounts.map((row) => [row.leave_date, row]));
-  const monthlySalaryAmount = paysMonthlySalary
-    ? coerceAgorot(enumerateDateKeys(localDateKey(startDate), localDateKey(endDate))
-      .filter((dateKey) => workingDaySet.has(weekdayOfDateKey(dateKey)))
-      .reduce((sum, dateKey) => {
-        const monthWorkingDays = Math.max(1, countWorkingDaysInRange(workingDays, firstDayOfMonth(dateKey), lastDayOfMonth(dateKey)));
-        const monthlySalary = resolveRateOnDate(resolvedRateRows, {
-          employeeId,
-          payBasis: PAY_BASIS.MONTHLY_SALARY,
-          date: dateKey,
-        })?.rate ?? 0;
-        const dailyRate = monthlySalary / monthWorkingDays;
-        const leaveDay = leaveByDate.get(dateKey);
-        return sum + (leaveDay ? dailyRate * Number(leaveDay.pay_fraction || 0) : dailyRate);
-      }, 0))
-    : 0;
+  // The salary of a working day is the salary in force on it ÷ the working days of its calendar month,
+  // so a full month adds up to the salary. On a day with leave: full paid leave pays the day, unpaid
+  // leave takes off its unpaid part, and half-paid leave pays the whole day when work was recorded that
+  // day (a counted lesson, or office minutes: the same test as collectWorkedDates) and half otherwise.
+  const workedDates = new Set(collectWorkedDates({ lessons, attendanceRecords: attendance }));
+  const halfLeaveWithoutHoursDates = [];
+  const monthlySalaryAmount = coerceAgorot(enumerateDateKeys(localDateKey(startDate), localDateKey(endDate))
+    .filter((dateKey) => workingDaySet.has(weekdayOfDateKey(dateKey)))
+    .reduce((sum, dateKey) => {
+      const salaryRate = salaryRateOn(dateKey);
+      if (!salaryRate) return sum;
+      const monthWorkingDays = Math.max(1, countWorkingDaysInRange(workingDays, firstDayOfMonth(dateKey), lastDayOfMonth(dateKey)));
+      const dailyRate = salaryRate.rate / monthWorkingDays;
+      const leaveDay = leaveByDate.get(dateKey);
+      if (!leaveDay) return sum + dailyRate;
+      const fraction = Number(leaveDay.pay_fraction || 0);
+      const halfPaid = fraction > 0 && fraction < 1;
+      if (halfPaid && workedDates.has(dateKey)) return sum + dailyRate;
+      if (halfPaid) halfLeaveWithoutHoursDates.push(dateKey);
+      return sum + dailyRate * fraction;
+    }, 0));
 
   const { baseAmount, paidLeaveAmount, totalAmount } = combinePayComponents({
     lessonAmount: lessonTotals.lesson_amount,
@@ -518,7 +541,6 @@ export async function computeEmployeePay(client, orgId, {
     monthlySalaryAmount,
     paidLeaveTotal,
     correctionTotal,
-    paysMonthlySalary,
   });
 
   const result = {
@@ -532,6 +554,9 @@ export async function computeEmployeePay(client, orgId, {
     attendance_minutes: attendanceRows.reduce((sum, row) => sum + row.other_minutes, 0),
     ...lessonTotals,
     monthly_salary_amount: monthlySalaryAmount,
+    // A paid half day of leave on a salaried date with no work recorded: paid half a day (an exception to review).
+    half_leave_without_hours_count: halfLeaveWithoutHoursDates.length,
+    half_leave_without_hours_dates: halfLeaveWithoutHoursDates,
     paid_leave_amount: paidLeaveAmount,
     correction_amount: correctionTotal,
     total_amount: totalAmount,
@@ -541,6 +566,8 @@ export async function computeEmployeePay(client, orgId, {
       unpaid_days: leaveDays.filter((row) => row.leave_type === 'unpaid').length,
       half_days: leaveDays.filter((row) => row.leave_type === 'half_day').length,
       paid_leave_total: paidLeaveTotal,
+      // Paid days that a monthly salary in force on their date covers ("כלול במשכורת"); they are not in paid_days.
+      salary_covered_days: salaryCoveredDays,
       // The leave line of the monthly summary: days counted (a half day is 0.5) and the value of one
       // day when every paid day has the same one (null when it varies).
       paid_days: paidLeaveSummary.days,
@@ -564,6 +591,7 @@ export async function computeEmployeePay(client, orgId, {
         // How the day value was chosen, for the "איך חושב" note: the method and, for the average, its months.
         method: row.method || null,
         lookback_months: row.lookback_months || null,
+        covered_by_salary: Boolean(row.covered_by_salary),
         amount: row.amount,
       })),
     };

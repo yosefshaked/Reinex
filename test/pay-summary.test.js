@@ -188,6 +188,46 @@ describe('the overview', () => {
     assert.equal(leave.note, 'כלול במשכורת');
   });
 
+  it('a salary covers only the leave days on its dates: covered ones say so, the rest are valued', () => {
+    const { rows } = buildSummaryRows({
+      ...PAY,
+      monthly_salary_amount: 1100000,
+      paid_leave_amount: 30000,
+      leave_breakdown: { paid_days: 1, day_value: 30000, salary_covered_days: 0.5 },
+      details: { ...PAY.details, leave: [
+        { leave_date: '2026-10-04', pay_fraction: 1, amount: 30000, day_value: 30000, method: 'fixed_rate', covered_by_salary: false },
+        { leave_date: '2026-10-19', pay_fraction: 0.5, amount: 0, day_value: null, method: 'monthly_salary', covered_by_salary: true },
+      ] },
+    });
+    const leave = rows.find((row) => row.key === 'leave');
+    assert.equal(leave.label, 'חופשה: יום אחד × ₪300.00');
+    assert.equal(leave.amount, 30000);
+    assert.match(leave.note, /כלול במשכורת: /);
+    assert.deepEqual(leave.leaveLines.map((line) => [line.dateLabel, line.amount, line.amountLabel]), [
+      ['04.10', 30000, null],
+      ['19.10', null, 'כלול במשכורת'],
+    ]);
+    const allCovered = buildSummaryRows({
+      ...PAY, monthly_salary_amount: 800000, paid_leave_amount: 0, leave_breakdown: { paid_days: 0, day_value: null, salary_covered_days: 2 },
+    }).rows.find((row) => row.key === 'leave');
+    assert.equal(allCovered.label, 'חופשה: 2 ימים');
+    assert.equal(allCovered.note, 'כלול במשכורת');
+    assert.equal(allCovered.amount, null);
+  });
+
+  it('a paid half day with no work on a salaried date is an amber exception in the summary and a tag in the table', () => {
+    const pay = { ...PAY, half_leave_without_hours_count: 2, half_leave_without_hours_dates: ['2026-10-05', '2026-10-12'] };
+    const exception = buildSummaryRows(pay).exceptions.find((row) => row.key === 'half_leave_no_hours');
+    assert.equal(exception.label, 'חצי יום חופשה בלי שעות: 2');
+    assert.equal(exception.tone, 'warning');
+    assert.deepEqual(exception.dateLines.map((line) => line.dateLabel), ['05.10', '12.10']);
+    assert.equal(buildSummaryRows(PAY).exceptions.some((row) => row.key === 'half_leave_no_hours'), false);
+    const [row] = buildPayrollTableRows([pay]);
+    assert.deepEqual(row.tags.map((tag) => [tag.label, tag.tone]), [
+      ['לא סומן: 1', 'warning'], ['חסר תעריף: 1', 'danger'], ['חצי יום חופשה בלי שעות: 2', 'warning'],
+    ]);
+  });
+
   it('a "ממוצע מומלץ" leave row says which months the day value comes from (PAY-G1)', () => {
     const basis = { start_month: '2026-07', end_month: '2026-09', worked_days: 55, wage_base: 2714000, divisor: 90, week_days: 5 };
     const leave = buildSummaryRows({

@@ -1075,6 +1075,121 @@
       ]
     },
     {
+      "id": "ui-salary-half-leave-tag",
+      "name": "API + UI – A paid half day of leave on a salaried date with no work is paid half a day and raises the amber \"חצי יום חופשה בלי שעות\" tag",
+      "description": "A salaried employee works all seven days. A paid half day of leave on the sixth of last month, with no lesson and no hours that day, is paid half a day of salary. The \"כספים\" table shows the amber tag with the count, and the employee's summary lists the date under the same words.",
+      "steps": [
+        {
+          "id": "create-salaried",
+          "action": "apiCall",
+          "method": "POST",
+          "endpoint": "/api/instructors",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "first_name": "משכורת",
+            "last_name": "חצי יום {{RUN_NUMERIC_ID}}",
+            "employee_id": "TEST-PAYS-{{RUN_NUMERIC_ID}}",
+            "employee_type": "instructor",
+            "start_date": "2020-01-01"
+          },
+          "store": "SALARIED_INSTRUCTOR_ID",
+          "storeField": "id"
+        },
+        {
+          "id": "work-every-day",
+          "description": "Every day of the week is a working day, so the sixth is one whatever weekday it falls on",
+          "action": "apiCall",
+          "method": "PUT",
+          "endpoint": "/api/instructors",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "instructor_id": "{{SALARIED_INSTRUCTOR_ID}}",
+            "working_days": [0, 1, 2, 3, 4, 5, 6]
+          }
+        },
+        {
+          "id": "seed-salary",
+          "description": "A monthly salary from long ago, so it is in force on every day of last month",
+          "action": "apiCall",
+          "method": "POST",
+          "endpoint": "/api/employee-rates",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "employee_id": "{{SALARIED_INSTRUCTOR_ID}}",
+            "pay_basis": "monthly_salary",
+            "rate": 3000000,
+            "effective_date": "2000-01-01",
+            "replace_existing": true
+          }
+        },
+        {
+          "id": "half-day-leave",
+          "description": "A paid half day on the sixth of last month; nothing else is recorded that day",
+          "action": "apiCall",
+          "method": "POST",
+          "endpoint": "/api/employee-leave",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "employee_id": "{{SALARIED_INSTRUCTOR_ID}}",
+            "leave_type": "employee_paid",
+            "duration_mode": "half_day",
+            "half_day_part": "first_half",
+            "start_date": "{{PREV_MONTH_SIXTH_DAY}}",
+            "end_date": "{{PREV_MONTH_SIXTH_DAY}}"
+          }
+        },
+        {
+          "id": "navigate-financials",
+          "action": "navigate",
+          "url": "{{BASE_URL}}/#/financials"
+        },
+        {
+          "id": "wait-table",
+          "action": "waitForSelector",
+          "selector": "[data-payroll-table]"
+        },
+        {
+          "id": "previous-month",
+          "action": "click",
+          "selector": "main button:has-text('הקודם')",
+          "first": true
+        },
+        {
+          "id": "assert-tag",
+          "description": "The amber tag with the count, on the employee's row",
+          "action": "waitForSelector",
+          "selector": "[data-payroll-row='{{SALARIED_INSTRUCTOR_ID}}'] [data-payroll-tag='half_leave_no_hours']:has-text('חצי יום חופשה בלי שעות: 1')"
+        },
+        {
+          "id": "open-employee-row",
+          "action": "click",
+          "selector": "[data-payroll-row='{{SALARIED_INSTRUCTOR_ID}}'] > button"
+        },
+        {
+          "id": "assert-exception-row",
+          "description": "The same words in the employee's summary, as an amber exception",
+          "action": "waitForSelector",
+          "selector": "[data-payroll-row='{{SALARIED_INSTRUCTOR_ID}}'] [data-pay-row='half_leave_no_hours'][data-pay-tone='warning']:has-text('חצי יום חופשה בלי שעות: 1')"
+        },
+        {
+          "id": "open-exception",
+          "action": "click",
+          "selector": "[data-payroll-row='{{SALARIED_INSTRUCTOR_ID}}'] [data-pay-row='half_leave_no_hours'] > div > button[aria-expanded='false']"
+        },
+        {
+          "id": "assert-leave-covered",
+          "description": "The leave row says the day is part of the salary",
+          "action": "waitForSelector",
+          "selector": "[data-payroll-row='{{SALARIED_INSTRUCTOR_ID}}'] [data-pay-row='leave']:has-text('כלול במשכורת')"
+        },
+        {
+          "id": "screenshot-half-leave-tag",
+          "action": "screenshot",
+          "name": "pay-summary-half-leave-tag"
+        }
+      ]
+    },
+    {
       "id": "logout",
       "name": "Logout",
       "steps": [

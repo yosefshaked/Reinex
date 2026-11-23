@@ -239,7 +239,9 @@ export function buildLeaveLines(leave = [], { withAmount = true } = {}) {
       key: row.leave_date,
       dateLabel: formatDayMonth(row.leave_date),
       portionLabel: Number(row.pay_fraction) < 1 ? 'חצי יום' : 'יום מלא',
-      amount: withAmount ? toAmount(row.amount) : null,
+      // A day a monthly salary in force on it covers has no amount of its own.
+      amount: withAmount && !row.covered_by_salary ? toAmount(row.amount) : null,
+      amountLabel: row.covered_by_salary ? 'כלול במשכורת' : null,
     }));
 }
 
@@ -346,20 +348,29 @@ export function buildSummaryRows(pay) {
     rows.push({ key: 'salary', label: 'שכר חודשי', amount: toAmount(pay.monthly_salary_amount) });
   }
   // Paid leave is its own line, apart from the lessons and the hours: "חופשה: 1.5 ימים × ₪300.00" and
-  // its total. A monthly salary already covers its leave days, so they are listed with no amount.
+  // its total. A day a monthly salary in force on its date covers is part of the salary ("כלול במשכורת",
+  // listed with no amount); the other days are valued by the leave pay method. `salary_covered_days` is
+  // the server's count of covered days; an older payload without it treats any salary as covering all.
   const breakdown = pay.leave_breakdown || {};
-  const detailDays = (details?.leave || []).reduce((sum, row) => sum + (Number(row?.pay_fraction) || 0), 0);
+  const knowsCoverage = breakdown.salary_covered_days !== undefined;
+  const coveredDays = Number(breakdown.salary_covered_days) || 0;
+  const detailDays = (details?.leave || [])
+    .filter((row) => !row?.covered_by_salary)
+    .reduce((sum, row) => sum + (Number(row?.pay_fraction) || 0), 0);
   const leaveDays = Number(breakdown.paid_days) > 0 ? Number(breakdown.paid_days) : detailDays;
   const leaveAmount = toAmount(pay.paid_leave_amount);
-  if (leaveDays > 0 || leaveAmount !== 0) {
-    const includedInSalary = leaveAmount === 0 && toAmount(pay.monthly_salary_amount) !== 0;
+  const allCovered = knowsCoverage && leaveDays === 0 && coveredDays > 0;
+  if (leaveDays > 0 || leaveAmount !== 0 || allCovered) {
+    const includedInSalary = knowsCoverage ? allCovered : leaveAmount === 0 && toAmount(pay.monthly_salary_amount) !== 0;
+    const shownDays = allCovered ? coveredDays : leaveDays;
     const dayValue = Number(breakdown.day_value) > 0 ? toAmount(breakdown.day_value) : 0;
     const times = !includedInSalary && dayValue > 0 ? ` × ${formatCurrency(dayValue)}` : '';
+    const mixedNote = !includedInSalary && coveredDays > 0 ? `כלול במשכורת: ${formatDays(coveredDays)}` : '';
     rows.push({
       key: 'leave',
-      label: leaveDays > 0 ? `חופשה: ${formatDays(leaveDays)}${times}` : 'חופשה',
+      label: shownDays > 0 ? `חופשה: ${formatDays(shownDays)}${times}` : 'חופשה',
       amount: includedInSalary ? null : leaveAmount,
-      note: includedInSalary ? 'כלול במשכורת' : '',
+      note: includedInSalary ? 'כלול במשכורת' : mixedNote,
       leaveLines: details ? buildLeaveLines(details.leave, { withAmount: !includedInSalary }) : null,
       basisLines: details && !includedInSalary ? buildLeaveBasisLines(details.leave) : [],
     });
@@ -388,8 +399,26 @@ export function buildSummaryRows(pay) {
     });
   }
 
+  // A paid half day of leave on a salaried date with no work recorded is paid half a day: worth a look.
+  const halfLeaveDates = Array.isArray(pay.half_leave_without_hours_dates) ? pay.half_leave_without_hours_dates : [];
+  const halfLeaveCount = Number(pay.half_leave_without_hours_count) || halfLeaveDates.length;
+  if (halfLeaveCount > 0) {
+    exceptions.push({
+      key: 'half_leave_no_hours',
+      label: `${HALF_LEAVE_NO_HOURS_LABEL}: ${halfLeaveCount}`,
+      amount: null,
+      amountLabel: '',
+      tone: 'warning',
+      note: 'שולם חצי יום',
+      lessons: null,
+      dateLines: halfLeaveDates.map((date) => ({ key: date, dateLabel: formatDayMonth(date) })),
+    });
+  }
+
   return { total: toAmount(pay.total_amount), rows, exceptions };
 }
+
+const HALF_LEAVE_NO_HOURS_LABEL = 'חצי יום חופשה בלי שעות';
 
 /** The all-employees table: one row per employee, with exception tags only when present. */
 export function buildPayrollTableRows(employees = []) {
@@ -399,6 +428,8 @@ export function buildPayrollTableRows(employees = []) {
     const missingRate = Number(employee?.missing_rate_lesson_count) || 0;
     if (unmarked > 0) tags.push({ key: 'unmarked', label: `לא סומן: ${unmarked}`, tone: 'warning' });
     if (missingRate > 0) tags.push({ key: 'missing_rate', label: `חסר תעריף: ${missingRate}`, tone: 'danger' });
+    const halfLeave = Number(employee?.half_leave_without_hours_count) || 0;
+    if (halfLeave > 0) tags.push({ key: 'half_leave_no_hours', label: `${HALF_LEAVE_NO_HOURS_LABEL}: ${halfLeave}`, tone: 'warning' });
     return {
       id: employee?.employee_id || '',
       name: employee?.employee_name || '',

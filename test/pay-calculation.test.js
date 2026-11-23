@@ -701,3 +701,97 @@ describe('marking attendance is never blocked by a missing rate', () => {
     assert.doesNotMatch(source, /instructor_rate_not_configured/);
   });
 });
+
+// A leave day is covered by a monthly salary only when the salary is in force on that very date.
+// October 2026 starts on a Thursday; with a Sunday-Thursday week it has 21 working days
+// (1, 4-8, 11-15, 18-22, 25-29), so a salary of ₪21,000 is ₪1,000 (100,000 agorot) a day.
+describe('monthly salary coverage per date', () => {
+  const SALARIED = { id: 'sal', working_days: [0, 1, 2, 3, 4] };
+  const salary = (rate, effectiveDate) => rateRow(`sal-${effectiveDate}`, 'sal', null, PAY_BASIS.MONTHLY_SALARY, rate, effectiveDate);
+  const leaveDay = (date, fraction, leaveType = 'employee_paid') => ({
+    id: `day-${date}`, org_id: ORG, leave_entry_id: `entry-${date}`, employee_id: 'sal', leave_date: date,
+    day_portion: fraction < 1 && fraction > 0 ? 'first_half' : 'full_day', leave_type: leaveType,
+    balance_days_delta: -fraction, pay_fraction: fraction,
+  });
+  const leaveTables = (days, attendance = []) => baseTables({
+    employee_leave_days: days,
+    employee_leave_entries: days.map((day) => ({ id: day.leave_entry_id, org_id: ORG, employee_id: 'sal', status: 'approved' })),
+    employee_attendance_records: attendance,
+  });
+  const office = (date, minutes) => ({ id: `att-${date}`, org_id: ORG, employee_id: 'sal', attendance_date: date, other_minutes: minutes });
+  const payFor = (tables, rateRows, startDate = '2026-10-01', endDate = '2026-10-31', employee = SALARIED) => computeEmployeePay(createFakeClient(tables), ORG, {
+    employee, startDate, endDate, policies: POLICIES, rateRows, now: new Date('2026-11-05T12:00:00Z'), includeDetails: true,
+  });
+
+  it('hourly until 14.10 and salary from 15.10: paid leave on 4.10 is the same leave amount in either view', async () => {
+    const fixedMethod = [{ key: 'leave_pay_method', employee_id: 'sal', effective_date: '2000-01-01', settings_value: { method: 'fixed_rate' } }];
+    const rates = [
+      rateRow('sal-office', 'sal', null, PAY_BASIS.ATTENDANCE_HOURLY, 5000, '2026-01-01'),
+      rateRow('sal-leave', 'sal', null, PAY_BASIS.LEAVE_DAY, 30000, '2026-01-01'),
+      salary(2100000, '2026-10-15'),
+    ];
+    const tables = leaveTables([leaveDay('2026-10-04', 1)]);
+    const employee = { ...SALARIED, leave_pay_method_versions: fixedMethod };
+    const firstHalf = await payFor(tables, rates, '2026-10-01', '2026-10-14', employee);
+    const whole = await payFor(tables, rates, '2026-10-01', '2026-10-31', employee);
+
+    // 4.10 has no salary in force: it is a leave day valued at the fixed ₪300, in both views.
+    assert.equal(firstHalf.paid_leave_amount, 30000);
+    assert.equal(whole.paid_leave_amount, 30000);
+    assert.equal(firstHalf.leave_breakdown.salary_covered_days, 0);
+    assert.equal(whole.details.leave[0].covered_by_salary, false);
+    // The salary starts on 15.10: 15, 18-22 and 25-29 are 11 of the month's 21 working days.
+    assert.equal(firstHalf.monthly_salary_amount, 0);
+    assert.equal(whole.monthly_salary_amount, 1100000);
+    assert.equal(whole.total_amount, 1130000);
+  });
+
+  it('a full salaried month adds up to exactly the salary', async () => {
+    // 2,000,000 ÷ 21 is not a whole number of agorot per day, but the 21 days sum to the salary.
+    const pay = await payFor(leaveTables([]), [salary(2000000, '2026-01-01')]);
+    assert.equal(pay.monthly_salary_amount, 2000000);
+    assert.equal(pay.total_amount, 2000000);
+  });
+
+  it('a leave day on a salaried date is part of the salary: no leave amount, shown as covered', async () => {
+    const pay = await payFor(leaveTables([leaveDay('2026-10-04', 1)]), [salary(2100000, '2026-01-01')]);
+    assert.equal(pay.monthly_salary_amount, 2100000);
+    assert.equal(pay.paid_leave_amount, 0);
+    assert.equal(pay.total_amount, 2100000);
+    assert.equal(pay.leave_breakdown.salary_covered_days, 1);
+    assert.equal(pay.leave_breakdown.paid_days, 0);
+    assert.equal(pay.details.leave[0].covered_by_salary, true);
+  });
+
+  it('a paid half day with work recorded that day pays the full day', async () => {
+    // Monday 5.10: half a day of leave and 60 minutes of other work.
+    const pay = await payFor(leaveTables([leaveDay('2026-10-05', 0.5)], [office('2026-10-05', 60)]), [salary(2100000, '2026-01-01')]);
+    assert.equal(pay.monthly_salary_amount, 2100000);
+    assert.equal(pay.half_leave_without_hours_count, 0);
+    assert.deepEqual(pay.half_leave_without_hours_dates, []);
+  });
+
+  it('a paid half day with a counted lesson that day also pays the full day', async () => {
+    const tables = leaveTables([leaveDay('2026-10-05', 0.5)]);
+    tables.lesson_instances = [lesson('sal-lesson', 'sal', '2026-10-05T08:00:00Z')];
+    tables.lesson_participants = [participant('p-sal', 'sal-lesson', 'attended')];
+    const pay = await payFor(tables, [salary(2100000, '2026-01-01'), rateRow('sal-lesson-rate', 'sal', 'riding', PAY_BASIS.LESSON_HOURLY, 10000, '2026-01-01')]);
+    assert.equal(pay.monthly_salary_amount, 2100000);
+    assert.equal(pay.half_leave_without_hours_count, 0);
+  });
+
+  it('a paid half day with no work pays half a day and is listed with its date', async () => {
+    const pay = await payFor(leaveTables([leaveDay('2026-10-05', 0.5)]), [salary(2100000, '2026-01-01')]);
+    assert.equal(pay.monthly_salary_amount, 2050000);
+    assert.equal(pay.total_amount, 2050000);
+    assert.equal(pay.half_leave_without_hours_count, 1);
+    assert.deepEqual(pay.half_leave_without_hours_dates, ['2026-10-05']);
+  });
+
+  it('an unpaid full day on salary takes one daily rate off the salary', async () => {
+    const pay = await payFor(leaveTables([leaveDay('2026-10-05', 0, 'unpaid')]), [salary(2100000, '2026-01-01')]);
+    assert.equal(pay.monthly_salary_amount, 2000000);
+    assert.equal(pay.total_amount, 2000000);
+    assert.equal(pay.half_leave_without_hours_count, 0);
+  });
+});

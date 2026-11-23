@@ -265,7 +265,7 @@ export function PaySummaryPrintSheet({ pay, orgName, monthLabel, detailed }) {
               {detailed && row.leaveLines ? row.leaveLines.map((line) => (
                 <tr key={line.key} className="pay-print-sub">
                   <td>{line.dateLabel} · {line.portionLabel}</td>
-                  <td>{line.amount === null ? '' : formatCurrency(line.amount)}</td>
+                  <td>{line.amountLabel || (line.amount === null ? '' : formatCurrency(line.amount))}</td>
                 </tr>
               )) : null}
               {detailed && row.correctionLines ? row.correctionLines.map((line) => (
@@ -283,10 +283,16 @@ export function PaySummaryPrintSheet({ pay, orgName, monthLabel, detailed }) {
           {exceptions.map((row) => (
             <React.Fragment key={row.key}>
               <tr className={`pay-print-exception pay-print-exception-${row.tone}`}>
-                <td>חסר: {row.label} ({row.note})</td>
+                <td>{row.key === 'missing_rate' ? 'חסר: ' : ''}{row.label} ({row.note})</td>
                 <td>{row.amountLabel || (row.amount === null ? '' : formatCurrency(row.amount))}</td>
               </tr>
-              {detailed ? <LessonLines lines={row.lessons} /> : null}
+              {detailed && row.dateLines ? row.dateLines.map((line) => (
+                <tr key={line.key} className="pay-print-sub">
+                  <td>{line.dateLabel}</td>
+                  <td />
+                </tr>
+              )) : null}
+              {detailed && !row.dateLines ? <LessonLines lines={row.lessons} /> : null}
             </React.Fragment>
           ))}
         </tbody>

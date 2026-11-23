@@ -265,7 +265,7 @@ export default function EmployeePaySummary({
     if (row.leaveLines) {
       return (
         <ul>
-          {row.leaveLines.map((line) => <DetailLine key={line.key} text={`${line.dateLabel} · ${line.portionLabel}`} amount={line.amount} />)}
+          {row.leaveLines.map((line) => <DetailLine key={line.key} text={`${line.dateLabel} · ${line.portionLabel}`} amount={line.amount} amountLabel={line.amountLabel ?? undefined} />)}
         </ul>
       );
     }
@@ -286,6 +286,13 @@ export default function EmployeePaySummary({
   }
 
   function renderExceptionContent(row) {
+    if (row.dateLines) {
+      return (
+        <ul>
+          {row.dateLines.map((line) => <DetailLine key={line.key} text={line.dateLabel} amount={null} />)}
+        </ul>
+      );
+    }
     const lines = row.lessons || [];
     return (
       <ul>
