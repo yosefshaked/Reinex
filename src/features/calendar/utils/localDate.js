@@ -1,11 +1,10 @@
+import { dateKeyFromCalendarDate } from '../../../lib/local-time.js';
+
 export const CALENDAR_WEEK_START = 0; // Sunday
 
+/** The calendar day of a browser Date (the calendar grid's own day), or null. */
 export function toLocalDateString(dateObj) {
-  if (!(dateObj instanceof Date) || Number.isNaN(dateObj.getTime())) return null;
-  const year = dateObj.getFullYear();
-  const month = String(dateObj.getMonth() + 1).padStart(2, '0');
-  const day = String(dateObj.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
+  return dateKeyFromCalendarDate(dateObj) || null;
 }
 
 export function parseLocalDateString(dateString) {

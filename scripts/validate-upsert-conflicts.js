@@ -11,6 +11,7 @@ const JS_FILE_PATTERN = /\.js$/i;
 
 const EXPECTED_CONFLICTS_BY_TABLE = {
   Settings: ['org_id,key'],
+  SettingsHistory: ['org_id,key,employee_id,effective_date'],
   grace_cancellation_requests: ['org_id,lesson_participant_id'],
   instructor_service_capabilities: ['org_id,employee_id,service_id'],
   instructor_profiles: ['employee_id'],
@@ -254,11 +255,72 @@ function validateConflictIndexesExistInSql() {
   return errs;
 }
 
+// Tables that carry an org_id column in setup-sql.js: rows that belong to one organisation.
+function collectTenantTables(sqlText) {
+  const tables = new Set();
+  const createPattern = /CREATE TABLE IF NOT EXISTS\s+public\.("?)(\w+)\1\s*\(([\s\S]*?)\n\);/gi;
+  let match;
+  while ((match = createPattern.exec(sqlText)) !== null) {
+    if (/^\s*"?org_id"?\s+uuid/im.test(match[3])) {
+      tables.add(match[2]);
+    }
+  }
+  return tables;
+}
+
+// Reads in api/_shared that are deliberately not filtered by the request's org, with the reason.
+const UNSCOPED_SHARED_READS_ALLOWED = new Map([
+  // Looked up by id from callers that already read that lesson in the request's org; every read
+  // below it (participants, locks, charges, claim batches) is scoped to the lesson's own org_id.
+  ['api/_shared/calendar-workflow.js:lesson_instances', 'closure state of a lesson the caller already read in its org'],
+  // System-admin maintenance over every organisation (optionally narrowed to one).
+  ['api/_shared/lesson-closure-maintenance.js:lesson_instances', 'system-admin cross-org maintenance batch'],
+  // Public invite links: the row is found by its secret token and carries its own org_id.
+  ['api/_shared/form-routing.js:active_routing', 'control-plane routing looked up by an unguessable token'],
+]);
+
+/**
+ * The API uses the service-role client, so RLS does not protect tenant rows: every read of a
+ * tenant table in api/_shared must go through withOrgScope(...) or filter .eq('org_id', ...) in the
+ * same statement. Without that, an id of another organisation passed in by a caller is found.
+ */
+function validateSharedTenantReadsAreScoped() {
+  const errors = [];
+  const tenantTables = collectTenantTables(setupSql);
+  const sharedDir = path.join(API_DIR, '_shared');
+  const rawFromPattern = /\.from\(\s*['"](\w+)['"]\s*\)/g;
+
+  for (const file of walkJsFiles(sharedDir)) {
+    if (/\.test\.js$/i.test(file)) continue;
+    const text = readFile(file);
+    const relativePath = readRelative(file);
+    let match;
+    while ((match = rawFromPattern.exec(text)) !== null) {
+      const table = match[1];
+      if (!tenantTables.has(table)) continue;
+      // `.storage.from(bucket)` is a storage bucket, not a table.
+      if (/storage\s*$/.test(text.slice(Math.max(0, match.index - 12), match.index))) continue;
+      const statementEnd = text.indexOf(';', match.index);
+      const statement = text.slice(match.index, statementEnd === -1 ? undefined : statementEnd);
+      // Only reads: `.from(t).select(...)`. A write with `.select()` after it returns its own rows.
+      if (!/^\.from\([^)]*\)\s*\.select\(/.test(statement)) continue;
+      if (/\.eq\(\s*['"]org_id['"]/.test(statement)) continue;
+      if (UNSCOPED_SHARED_READS_ALLOWED.has(`${relativePath}:${table}`)) continue;
+      errors.push(
+        `${relativePath}:${lineNumberAt(text, match.index)}: read of tenant table '${table}' is not scoped to an organisation; use withOrgScope(client, '${table}', orgId)`,
+      );
+    }
+  }
+
+  return errors;
+}
+
 const errors = [
   ...validateWithOrgScopeUpserts(),
   ...validateClientGuardiansUpsert(),
   ...validateLeaveLedgerWritesAreScoped(),
   ...validateConflictIndexesExistInSql(),
+  ...validateSharedTenantReadsAreScoped(),
 ];
 
 if (errors.length > 0) {

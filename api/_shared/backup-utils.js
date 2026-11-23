@@ -95,12 +95,12 @@ export async function decryptBackup(encryptedData, env = process.env ?? {}) {
  */
 export const EXPORT_TABLES = [
   'Settings',
+  'SettingsHistory',
   'Services',
   'Employees',
   'hmo_providers',
   'guardians',
   'client_profiles',
-  'payroll_runs',
   'claim_batches',
   'dashboard_tasks',
   'forms',
@@ -131,7 +131,6 @@ export const EXPORT_TABLES = [
   'lesson_template_participants',
   'lesson_instances',
   'lesson_participants',
-  'lesson_earnings',
   'grace_cancellation_requests',
   'instance_locks',
   'participant_locks',

@@ -16,14 +16,15 @@ import {
   canManageEmployeeOps,
   fetchApprovedLeaveDays,
   fetchAttendanceRecords,
-  endOfMonthKey,
   isYmdDate,
   resolveEmployeeRecord,
-  startOfMonthKey,
-  toDateKey,
 } from '../_shared/employee-finance.js';
+import { firstDayOfMonth, lastDayOfMonth, todayKey } from '../_shared/local-time.js';
+import { loadCountedLessons, summarizeLessonsByDate } from '../_shared/pay-calculation.js';
 
 const MAX_BODY_BYTES = 64 * 1024;
+const RECORD_COLUMNS = 'id, employee_id, attendance_date, status, other_minutes, notes, source_type, created_by, updated_by, created_at, updated_at, metadata';
+const SOURCE_TYPES = new Set(['manual', 'import']);
 
 function normalizeWorkedMinutes(value) {
   if (value === undefined) {
@@ -107,11 +108,11 @@ export default async function (context, req) {
     const employeeId = normalizeString(req?.query?.employee_id);
     const startDate = normalizeString(req?.query?.start_date);
     const endDate = normalizeString(req?.query?.end_date);
-    const defaultMonthDate = toDateKey(new Date());
-    const resolvedStart = isYmdDate(startDate) ? startDate : startOfMonthKey(defaultMonthDate);
-    const resolvedEnd = isYmdDate(endDate) ? endDate : endOfMonthKey(resolvedStart);
+    const defaultMonthDate = todayKey();
+    const resolvedStart = isYmdDate(startDate) ? startDate : firstDayOfMonth(defaultMonthDate);
+    const resolvedEnd = isYmdDate(endDate) ? endDate : lastDayOfMonth(resolvedStart);
 
-    const employeeResult = await resolveEmployeeRecord(supabase, {
+    const employeeResult = await resolveEmployeeRecord(supabase, orgId, {
       employeeId,
       userId,
       canManageAll,
@@ -126,16 +127,34 @@ export default async function (context, req) {
     }
 
     const employee = employeeResult.employee;
-    const [records, leaveDays] = await Promise.all([
-      fetchAttendanceRecords(supabase, { employeeId: employee.id, startDate: resolvedStart, endDate: resolvedEnd }),
-      fetchApprovedLeaveDays(supabase, { employeeId: employee.id, startDate: resolvedStart, endDate: resolvedEnd }),
-    ]);
+    // Office hours come from the attendance records. Lesson time is not stored: it is read from
+    // the calendar here, with the same rules the pay calculation uses.
+    let records, leaveDays, lessons;
+    try {
+      [records, leaveDays, lessons] = await Promise.all([
+        fetchAttendanceRecords(supabase, orgId, { employeeId: employee.id, startDate: resolvedStart, endDate: resolvedEnd }),
+        fetchApprovedLeaveDays(supabase, orgId, { employeeId: employee.id, startDate: resolvedStart, endDate: resolvedEnd }),
+        loadCountedLessons(supabase, orgId, { employeeId: employee.id, startDate: resolvedStart, endDate: resolvedEnd }),
+      ]);
+    } catch (loadError) {
+      context.log?.error?.('employee-attendance failed to load the month', { employeeId: employee.id, message: loadError?.message });
+      return respond(context, 500, { message: 'failed_to_load_attendance' });
+    }
+    const lessonDays = Array.from(summarizeLessonsByDate(lessons).entries())
+      .map(([date, day]) => ({
+        date,
+        lesson_minutes: day.lesson_minutes,
+        lesson_count: day.lesson_count,
+        unmarked_lesson_count: day.unmarked_lesson_count,
+      }))
+      .sort((a, b) => a.date.localeCompare(b.date));
 
     return respond(context, 200, {
       employee_id: employee.id,
       start_date: resolvedStart,
       end_date: resolvedEnd,
       records,
+      lesson_days: lessonDays,
       leave_days: leaveDays,
     });
   }
@@ -149,7 +168,10 @@ export default async function (context, req) {
     const attendanceDate = normalizeString(body?.attendance_date);
     const status = normalizeAttendanceStatus(body?.status);
     const notes = normalizeString(body?.notes) || null;
-    const workedMinutesResult = normalizeWorkedMinutes(body?.worked_minutes);
+    // The office enters work that is not a lesson. Lesson time is read from the calendar and paid
+    // through the lesson, so it is never stored here.
+    const otherMinutesResult = normalizeWorkedMinutes(body?.other_minutes);
+    const requestedSourceType = normalizeString(body?.source_type).toLowerCase();
 
     if (!employeeId) {
       return respond(context, 400, { message: 'missing_employee_id' });
@@ -160,11 +182,21 @@ export default async function (context, req) {
     if (!status) {
       return respond(context, 400, { message: 'invalid_status' });
     }
-    if (!workedMinutesResult.valid) {
-      return respond(context, 400, { message: 'invalid_worked_minutes' });
+    if (!otherMinutesResult.valid) {
+      return respond(context, 400, { message: 'invalid_other_minutes' });
     }
 
-    const conflict = await assertNoLeaveForAttendance(supabase, {
+    // An employee of another organisation is not found here, before anything about them is read.
+    const targetEmployee = await resolveEmployeeRecord(supabase, orgId, { employeeId, userId, canManageAll });
+    if (targetEmployee.error === 'employee_not_found') {
+      return respond(context, 404, { message: 'employee_not_found' });
+    }
+    if (targetEmployee.error) {
+      context.log?.error?.('employee-attendance failed to resolve employee', { employeeId, message: targetEmployee.error?.message });
+      return respond(context, 500, { message: 'failed_to_load_employee' });
+    }
+
+    const conflict = await assertNoLeaveForAttendance(supabase, orgId, {
       employeeId,
       date: attendanceDate,
       excludeEntryId: '',
@@ -178,9 +210,9 @@ export default async function (context, req) {
       employee_id: employeeId,
       attendance_date: attendanceDate,
       status,
-      worked_minutes: workedMinutesResult.value,
+      other_minutes: otherMinutesResult.value ?? 0,
       notes,
-      source_type: normalizeString(body?.source_type).toLowerCase() || 'manual',
+      source_type: SOURCE_TYPES.has(requestedSourceType) ? requestedSourceType : 'manual',
       updated_by: userId,
       updated_at: new Date().toISOString(),
     };
@@ -190,7 +222,7 @@ export default async function (context, req) {
       payload.created_at = new Date().toISOString();
       const { data, error } = await withOrgScope(supabase, 'employee_attendance_records', orgId)
         .insert(payload)
-        .select('id, employee_id, attendance_date, status, worked_minutes, notes, source_type, created_by, updated_by, created_at, updated_at, metadata')
+        .select(RECORD_COLUMNS)
         .single();
 
       if (error) {
@@ -215,7 +247,7 @@ export default async function (context, req) {
     }
 
     const { data, error } = await query
-      .select('id, employee_id, attendance_date, status, worked_minutes, notes, source_type, created_by, updated_by, created_at, updated_at, metadata')
+      .select(RECORD_COLUMNS)
       .maybeSingle();
 
     if (error) {

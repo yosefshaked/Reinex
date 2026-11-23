@@ -37,6 +37,7 @@ import ReadOnlyFormAnswersPreview from '@/features/forms/components/ReadOnlyForm
 import { toast } from '@/lib/toast.jsx';
 import { toAgorot } from '@/lib/currency.js';
 import { normalizePreferredTimeRangeToGrid, ceilClockTimeToGrid } from '@/lib/time-grid.js';
+import { formatInstant } from '@/lib/local-time.js';
 
 const DAYS_OF_WEEK = [
   { value: 0, label: 'ראשון', labelShort: 'א' },
@@ -98,18 +99,13 @@ function buildInitialInviteForm() {
 
 function formatInviteExpiry(expiresAt) {
   if (!expiresAt) return '';
-  try {
-    return new Intl.DateTimeFormat('he-IL', {
-      weekday: 'long',
-      day: 'numeric',
-      month: 'long',
-      hour: '2-digit',
-      minute: '2-digit',
-      timeZone: 'Asia/Jerusalem',
-    }).format(new Date(expiresAt));
-  } catch {
-    return String(expiresAt);
-  }
+  return formatInstant(expiresAt, {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+    hour: '2-digit',
+    minute: '2-digit',
+  }) || String(expiresAt);
 }
 
 function buildInviteWhatsappMessage({ inviteUrl, expiresAt, serviceName, studentName, organizationName }) {
@@ -276,16 +272,11 @@ function buildInitialForm(entry, studentMap) {
 
 function formatEntryCreatedAt(value) {
   if (!value) return '—';
-  try {
-    return new Intl.DateTimeFormat('he-IL', {
-      day: 'numeric',
-      month: 'short',
-      year: 'numeric',
-      timeZone: 'Asia/Jerusalem',
-    }).format(new Date(value));
-  } catch {
-    return '—';
-  }
+  return formatInstant(value, {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  }) || '—';
 }
 
 function getWaitingDays(value) {

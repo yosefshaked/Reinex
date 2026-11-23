@@ -31,7 +31,14 @@ import {
   DropdownMenuTrigger,
 } from '../../../components/ui/dropdown-menu';
 import { getParticipantDisplayName } from '../utils/participantDisplay.js';
-import { getParticipantCardHref, getParticipantStatusDisplay, shouldShowGraceWaiver } from '../utils/lessonDialogModel.js';
+import {
+  ATTENDANCE_MARK_UNCHANGED_REASON,
+  absenceCompensationChoice,
+  getParticipantCardHref,
+  getParticipantStatusDisplay,
+  hasAttendanceMarkChanged,
+  shouldShowGraceWaiver,
+} from '../utils/lessonDialogModel.js';
 import { LessonImpactStrip, ParticipantStatusPill } from './LessonImpactStrip.jsx';
 
 const ABSENCE_STATUSES = ['no_show', 'cancelled_student', 'cancelled_clinic'];
@@ -227,6 +234,13 @@ function AbsenceForm({
   const needsCompensation = Boolean(requirements?.requires_instructor_compensation_decision)
     && ABSENCE_STATUSES.includes(absenceForm.status);
   const waiverEligible = shouldShowGraceWaiver(billingPolicy, absenceForm.status);
+  const unchanged = !hasAttendanceMarkChanged(participant, {
+    status: absenceForm.status,
+    notes: absenceForm.notes,
+    instructorCompensationDecision: absenceCompensationChoice(absenceForm),
+    isExcused: waiverEligible && absenceForm.waiveFee === true,
+  });
+  const unchangedHintId = `absence-unchanged-${participant.id}`;
   const chip = (selected) => `inline-flex flex-col items-start rounded-lg border px-3 py-1.5 text-start text-xs font-bold transition ${
     selected ? 'border-primary bg-primary/10 text-slate-900' : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
   }`;
@@ -319,15 +333,20 @@ function AbsenceForm({
           </span>
         ) : null}
         <Button type="button" size="sm" variant="ghost" className="h-8 text-xs" onClick={onClose} disabled={busy}>ביטול</Button>
-        <Button
-          type="button"
-          size="sm"
-          className="h-8 bg-primary text-xs text-primary-foreground hover:bg-primary/90"
-          onClick={() => onContinue()}
-          disabled={busy || requirementsLoading || !requirements || (needsCompensation && !absenceForm.instructorCompensationDecision)}
-        >
-          המשך
-        </Button>
+        {/* The title sits on a wrapper: a disabled button takes no pointer events, so it shows no tooltip. */}
+        <span title={unchanged ? ATTENDANCE_MARK_UNCHANGED_REASON : undefined}>
+          <Button
+            type="button"
+            size="sm"
+            className="h-8 bg-primary text-xs text-primary-foreground hover:bg-primary/90"
+            onClick={() => onContinue()}
+            disabled={unchanged || busy || requirementsLoading || !requirements || (needsCompensation && !absenceForm.instructorCompensationDecision)}
+            aria-describedby={unchanged ? unchangedHintId : undefined}
+          >
+            המשך
+          </Button>
+        </span>
+        {unchanged ? <span id={unchangedHintId} className="sr-only">{ATTENDANCE_MARK_UNCHANGED_REASON}</span> : null}
       </div>
     </div>
   );
@@ -506,6 +525,7 @@ function ParticipantRow(props) {
           preview={statusStrip.preview}
           error={statusStrip.error}
           note={statusStrip.note}
+          unchanged={statusStrip.unchanged === true}
           saving={isMarkingAttendance}
           onConfirm={props.onConfirmStrip}
           onCancel={props.onCancelStrip}

@@ -3,6 +3,7 @@
 // Converts staged import_rows into import_candidates (Golden Records).
 // Runs in bounded chunks (max 100 rows); frontend drives iteration until complete.
 // Re-analyzing the same rows is idempotent via upsert on (workspace_id, source_row_id).
+import { dateKeyFromUtcCalendarDate } from '../_shared/local-time.js';
 import { resolveBearerAuthorization } from '../_shared/http.js';
 import {
   UUID_PATTERN,
@@ -137,14 +138,14 @@ function normalizeDate(raw) {
   }
   if (raw instanceof Date) {
     if (isNaN(raw.getTime())) return { provided: true, valid: false, value: null };
-    return { provided: true, valid: true, value: raw.toISOString().slice(0, 10) };
+    return { provided: true, valid: true, value: dateKeyFromUtcCalendarDate(raw) };
   }
   // Excel serial date (number of days since 1900-01-01 with leap-year bug)
   if (typeof raw === 'number') {
     const date = new Date((raw - 25569) * 86400 * 1000);
     return isNaN(date.getTime())
       ? { provided: true, valid: false, value: null }
-      : { provided: true, valid: true, value: date.toISOString().slice(0, 10) };
+      : { provided: true, valid: true, value: dateKeyFromUtcCalendarDate(date) };
   }
   const str = String(raw).trim();
   if (!str) return { provided: false, valid: true, value: null };

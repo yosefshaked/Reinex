@@ -5,18 +5,19 @@ import { normalizeString, withOrgScope } from './org-bff.js';
  * Covers both single-student templates (lesson_templates.student_id) and
  * multi-student group templates (lesson_template_participants).
  *
- * @param {object} tenantClient - Supabase client (RLS-scoped tenant client, or admin client)
+ * @param {object} tenantClient - Supabase client (the service-role client: RLS is bypassed)
  * @param {string} instructorEmployeeId - The instructor's employee record ID
- * @param {{ orgId?: string }} [options] - Pass orgId when using an admin/control client that bypasses RLS
+ * @param {{ orgId: string }} options - The organisation the request is signed in to; required
  */
-export async function fetchStudentIdsByInstructor(tenantClient, instructorEmployeeId, { orgId } = {}) {
+export async function fetchStudentIdsByInstructor(tenantClient, instructorEmployeeId, { orgId } = /** @type {any} */ ({})) {
+  if (!normalizeString(orgId)) {
+    return { studentIds: [], error: new Error('fetchStudentIdsByInstructor needs the organisation id') };
+  }
   if (!instructorEmployeeId) {
     return { studentIds: [], error: null };
   }
 
-  const scope = (table) => orgId
-    ? withOrgScope(tenantClient, table, orgId)
-    : tenantClient.from(table);
+  const scope = (table) => withOrgScope(tenantClient, table, orgId);
 
   // Step 1: find all active template IDs (and direct student_id) for this instructor
   const { data: templates, error } = await scope('lesson_templates')

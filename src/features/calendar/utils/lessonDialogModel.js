@@ -1,9 +1,12 @@
 // Pure helpers for the calendar lesson dialog (LessonInstanceDialog and its sub-components).
 // Keep this module free of React and '@/...' path aliases so node:test can import it directly.
+import { toShekel } from '../../../lib/currency.js';
 import { formatDateDisplay, formatTimeDisplay } from './timeGrid.js';
 import { buildSchedulingOverrideReasonDetails } from './schedulingOverride.js';
 import { getParticipantDisplayName } from './participantDisplay.js';
 import { extractSupportCode, resolveApiErrorMessage } from '../../../lib/error-support.js';
+import { dateKeyFromCalendarDate } from '../../../lib/local-time.js';
+import { describeLessonStartClockChange } from '../../../lib/clock-change.js';
 
 export const DEFAULT_BILLING_POLICY = {
   attended: true,
@@ -28,11 +31,7 @@ export function normalizeInstanceStatus(status) {
 }
 
 export function toLocalDateString(dateObj) {
-  if (!(dateObj instanceof Date) || Number.isNaN(dateObj.getTime())) return '';
-  const year = dateObj.getFullYear();
-  const month = String(dateObj.getMonth() + 1).padStart(2, '0');
-  const day = String(dateObj.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
+  return dateKeyFromCalendarDate(dateObj);
 }
 
 export function toUtcIsoString(dateString, timeString) {
@@ -49,6 +48,16 @@ export function toUtcIsoString(dateString, timeString) {
   }
 
   return localDate.toISOString();
+}
+
+/**
+ * The clock-change notice for the edit form: only when the date or time was changed, so an
+ * existing lesson at a repeated hour does not nag when another field is edited.
+ */
+export function resolveEditClockChangeNotice(formData, baseline) {
+  if (!formData?.date || !formData?.time) return null;
+  if (baseline && formData.date === baseline.date && formData.time === baseline.time) return null;
+  return describeLessonStartClockChange(formData.date, formData.time);
 }
 
 export function buildSchedulingOverrideMetadata(baseMetadata, { enabled, selectedReasonCode, customReason }) {
@@ -120,6 +129,44 @@ export function getDisplayParticipants(instance) {
   }));
 }
 
+/**
+ * The "instructor has no rate for this service on this date" refusal from a lesson or template save,
+ * as { instructorEmployeeId, serviceId, rateDate, message }, or null for any other error. The form
+ * uses it to offer adding the rate there and then.
+ */
+export function readMissingLessonRate(error) {
+  const data = error?.data;
+  if (!data || data.code !== 'instructor_rate_not_configured' || !data.instructor_employee_id || !data.service_id) {
+    return null;
+  }
+  return {
+    instructorEmployeeId: String(data.instructor_employee_id),
+    serviceId: String(data.service_id),
+    rateDate: typeof data.rate_date === 'string' ? data.rate_date : '',
+    message: typeof data.message === 'string' && data.message ? data.message : 'למדריך/ה אין תעריף על השירות הזה בתאריך הזה.',
+  };
+}
+
+/**
+ * The instructor, service and date a missing-rate notice is about, as one comparable key. The forms
+ * show a refusal only while the fields still hold that combination: once the user picks another
+ * instructor, service or date the notice (and its "הוספת תעריף") would be for the wrong one.
+ *
+ * @param {{ instructorId?: unknown, serviceId?: unknown, date?: unknown }} [selection]
+ */
+export function buildRateSelectionKey({ instructorId, serviceId, date } = {}) {
+  return [instructorId, serviceId, date].map((value) => String(value ?? '').trim()).join('|');
+}
+
+/**
+ * The notice to show for the current fields: the stored one when it was recorded for this same
+ * combination (`buildRateSelectionKey`), otherwise null.
+ */
+export function pickMissingRateForSelection(stored, selectionKey) {
+  if (!stored?.missingRate) return null;
+  return stored.selectionKey === selectionKey ? stored.missingRate : null;
+}
+
 export function resolveMutationError(error) {
   const supportMessage = resolveApiErrorMessage(error);
   if (extractSupportCode(supportMessage)) {
@@ -152,9 +199,6 @@ export function resolveMutationError(error) {
   if (error?.message === 'failed_to_load_service') {
     return 'לא ניתן היה לטעון את פרטי השירות כרגע. נסו שוב.';
   }
-  if (error?.data?.code === 'missing_instructor_compensation_decision') {
-    return 'יש לבחור אם המדריך אמור לקבל פיצוי לפני שמאשרים אי-הגעה מחויבת.';
-  }
   if (error?.message === 'failed_to_build_status_change_preview') {
     return 'לא ניתן היה לבנות תצוגה מקדימה לשינוי הסטטוס.';
   }
@@ -180,6 +224,61 @@ export function resolveMutationError(error) {
     return hasTranslatedMessage ? error.message : 'השיעור עודכן על ידי משתמש אחר. רעננו את התצוגה ונסו שוב.';
   }
   return error?.message || 'הפעולה נכשלה.';
+}
+
+export const ATTENDANCE_MARK_UNCHANGED_REASON = 'אין שינוי לשמור';
+
+/**
+ * The instructor-pay choice the absence form sends: what a person clicked ("לשלם" / "לא לשלם"), or
+ * null while the form still shows the earnings policy's preset ("לפי הגדרות השכר"). Null stores no
+ * decision, so the policy in force on the lesson's date decides, now and after a dated change.
+ *
+ * @param {{ instructorCompensationDecision?: string|null, compensationFromPolicy?: boolean } | null} form
+ */
+export function absenceCompensationChoice(form) {
+  if (!form || form.compensationFromPolicy) return null;
+  const decision = String(form.instructorCompensationDecision || '').trim().toLowerCase();
+  return decision === 'compensated' || decision === 'not_compensated' ? decision : null;
+}
+
+/**
+ * The attendance mark stored on a participant row, in the shape the save sends: status, notes, the
+ * instructor pay decision and whether the fee was waived.
+ */
+export function readStoredAttendanceMark(participant) {
+  const metadata = participant?.metadata && typeof participant.metadata === 'object' ? participant.metadata : {};
+  const workflow = metadata.workflow && typeof metadata.workflow === 'object' ? metadata.workflow : {};
+  return {
+    status: String(participant?.participant_status || '').trim().toLowerCase() || 'scheduled',
+    notes: typeof metadata.notes === 'string' ? metadata.notes : '',
+    instructorCompensationDecision: String(workflow.instructor_compensation?.decision || '').trim().toLowerCase(),
+    isExcused: workflow.is_excused === true,
+  };
+}
+
+/**
+ * Whether saving `draft` would change the attendance mark stored on `participant`. A save with no
+ * change is not offered.
+ * - status: any difference.
+ * - notes: compared trimmed, only when the draft sends notes (a string).
+ * - instructor pay: only an explicit "compensated"/"not_compensated" that differs (pass
+ *   absenceCompensationChoice(form): the policy's preset is no choice).
+ * - fee waiver: the draft's choice against the stored one.
+ *
+ * @param {object} participant the stored participant row
+ * @param {{ status?: string, notes?: string, instructorCompensationDecision?: string|null, isExcused?: boolean }} draft
+ */
+export function hasAttendanceMarkChanged(participant, draft) {
+  if (!participant || !draft) return true;
+  const stored = readStoredAttendanceMark(participant);
+  const status = String(draft.status || '').trim().toLowerCase();
+  if (!status || status !== stored.status) return true;
+  if (typeof draft.notes === 'string' && draft.notes.trim() !== stored.notes.trim()) return true;
+  const decision = String(draft.instructorCompensationDecision || '').trim().toLowerCase();
+  if ((decision === 'compensated' || decision === 'not_compensated') && decision !== stored.instructorCompensationDecision) {
+    return true;
+  }
+  return (draft.isExcused === true) !== stored.isExcused;
 }
 
 export function getParticipantStatusLabel(status) {
@@ -272,7 +371,6 @@ export function deriveDisplayWorkflowDecisions(participant, billingPolicy) {
 export function getWorkflowReasonLabel(reason) {
   if (reason === 'attendance_unresolved') return 'יש משתתפים שטרם קיבלו סטטוס סופי.';
   if (reason === 'student_billing_unresolved') return 'יש חיוב שעדיין לא הושלם.';
-  if (reason === 'instructor_compensation_unresolved') return 'שכר המדריך עדיין לא נסגר דרך הרצת שכר.';
   if (reason === 'hmo_claim_unresolved') return 'יש תביעת גורם מממן שעדיין לא הושלמה.';
   if (reason === 'missing_instance') return 'פרטי השיעור אינם זמינים.';
   return reason || 'קיים שלב פתוח בתהליך הסגירה.';
@@ -320,7 +418,7 @@ export function formatAgorotPreview(value) {
     currency: 'ILS',
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
-  }).format(amount / 100);
+  }).format(toShekel(amount));
 }
 
 export function getPreviewImpactClass(severity) {
@@ -350,7 +448,7 @@ export function getOpenActionToneClass(tone) {
 export function getOpenActionTab(actionId) {
   if (actionId === 'attendance') return 'participants';
   if (actionId === 'reminders') return 'participants';
-  if (['documentation', 'billing', 'payroll', 'hmo', 'closure'].includes(actionId)) return 'workflow';
+  if (['documentation', 'billing', 'hmo', 'closure'].includes(actionId)) return 'workflow';
   if (actionId === 'exception') return 'overview';
   return 'overview';
 }
@@ -366,7 +464,7 @@ export function getImpactGroupMeta(type) {
   if (['instructor_earning_reversal', 'instructor_earning_add', 'instructor_earning_update'].includes(type)) {
     return { key: 'payroll', label: 'שכר מדריך', borderClass: 'border-emerald-200', bgClass: 'bg-emerald-50/70' };
   }
-  if (['instructor_attendance_remove', 'instructor_attendance_update', 'instructor_attendance_add'].includes(type)) {
+  if (type === 'instructor_attendance_update') {
     return { key: 'attendance', label: 'נוכחות מדריך', borderClass: 'border-sky-200', bgClass: 'bg-sky-50/70' };
   }
   if (['hmo_task_resolve', 'hmo_split_detail'].includes(type)) {
@@ -460,7 +558,7 @@ export function formatAgorotCompact(value) {
     currency: 'ILS',
     minimumFractionDigits: 0,
     maximumFractionDigits: 2,
-  }).format(Math.abs(amount) / 100);
+  }).format(toShekel(Math.abs(amount)));
 }
 
 const STRIP_DETAIL_EXCLUDED_TYPES = new Set(['participant_status', 'lesson_status']);

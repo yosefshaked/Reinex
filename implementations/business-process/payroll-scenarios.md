@@ -18,12 +18,12 @@ These are the pay rules the monthly cycle will enforce, written as acceptance sc
 
 | ID | Scenario | Today |
 |---|---|---|
-| PAY-A1 | A rate set "from 1.10" pays every lesson from 1.10 on, until the next rate change. Lessons before 1.10 keep the previous rate. | ❌ Pay uses the current rate for every lesson, including old ones |
-| PAY-A2 | A rate with a future effective date is scheduled. It shows as "current X, from 1.10: Y" and takes effect on its own. | ❌ |
+| PAY-A1 | A rate set "from 1.10" pays every lesson from 1.10 on, until the next rate change. Lessons before 1.10 keep the previous rate. | ✅ Pay reads the `RateHistory` rate in effect on the lesson's date (phase 1) |
+| PAY-A2 | A rate with a future effective date is scheduled. It shows as "current X, from 1.10: Y" and takes effect on its own. | ✅ The rates screen schedules a future rate and shows it as "from 1.10: X" while the current rate stays (phase 1b) |
 | PAY-A3 | A back-dated rate change warns first. If confirmed, it recalculates lessons in open months. For closed months it adds a linked pay difference to the next open month (see H5 / I1). | ❌ |
-| PAY-A4 | A lesson whose instructor has no rate for that service on that date is flagged as "missing rate". Nothing is guessed, nothing is paid until a rate exists, and the flag blocks closing the month (H4). | 🟡 A rate check exists when booking; pay is computed as 0 without a flag |
-| PAY-A5 | An instructor paid per hour (`lesson_hourly`) earns rate × lesson length. An instructor paid per lesson (`lesson_flat`) earns the same amount whatever the length. | 🟡 Per hour only |
-| PAY-A6 | An employee who also works office hours has an hourly rate for those hours as well as their lesson rates. Each part of the month is paid from its own rate. | 🟡 A single pay model per employee |
+| PAY-A4 | A lesson whose instructor has no rate for that service on that date is flagged as "missing rate". Nothing is guessed, nothing is paid until a rate exists, and the flag blocks closing the month (H4). | 🟡 No rate on the lesson date means no pay (the earning is skipped and marked `missing_rate`), and attendance and completion are blocked. The review flag and close blocker come with the monthly cycle |
+| PAY-A5 | An instructor paid per hour (`lesson_hourly`) earns rate × lesson length. An instructor paid per lesson (`lesson_flat`) earns the same amount whatever the length. | ✅ Each service rate is saved as hourly or flat from the rates screen |
+| PAY-A6 | An employee who also works office hours has an hourly rate for those hours as well as their lesson rates. Each part of the month is paid from its own rate. | ✅ `api/payroll` adds every part the employee has rates for (`combinePayComponents`); `payroll_model` is a label, not a gate. Paid leave is added on top unless a monthly salary already covers the month |
 
 ## B — One lesson, one participant: what does the instructor earn?
 
@@ -56,18 +56,18 @@ Customer billing for the same cases is S4.4–S4.5 in the map. A cancellation be
 
 | ID | Scenario | Today |
 |---|---|---|
-| PAY-D1 | **Substitute instructor:** the pay goes to whoever gave the lesson, at the substitute's rate for that date. | 🟡 Pay moves to the lesson's current instructor; the rate is the current one (A1) |
+| PAY-D1 | **Substitute instructor:** the pay goes to whoever gave the lesson, at the substitute's rate for that date. | ✅ Pay goes to the lesson's instructor at their rate on the lesson date |
 | PAY-D2 | **Length changed:** hourly pay is recalculated if the month is open, and becomes a linked pay difference if it's closed. | 🟡 Always recalculated, closed months included |
 | PAY-D3 | **Attendance fixed after the lesson:** recalculated if the month is open, and becomes a linked pay difference if it's closed. | 🟡 Recalculated, unless a claim batch locks the lesson |
-| PAY-D4 | **Lesson moved to another date:** the pay belongs to the month of the new date, at the rate valid on that date. | 🟡 It follows the date; the rate is the current one |
+| PAY-D4 | **Lesson moved to another date:** the pay belongs to the month of the new date, at the rate valid on that date. | ✅ It follows the new date, at that date's rate |
 
 ## E — Hours
 
 | ID | Scenario | Today |
 |---|---|---|
-| PAY-E1 | The pay is the hours worked × the hourly rate valid on each day. | 🟡 Hours × the current rate |
-| PAY-E2 | **An instructor's lesson hours** come from the lessons they gave. | ✅ Derived from lessons |
-| PAY-E3 | **An hourly employee who isn't an instructor** enters their own hours (the office can enter them too). The office approves them. Unapproved hours block closing the month (H4). The record of actual hours is the employer's legal record (K6). | 🟡 The office enters hours by hand; there's no self-entry or approval |
+| PAY-E1 | The pay is the hours worked × the hourly rate valid on each day. | ✅ Hours × the hourly rate in effect on each day |
+| PAY-E2 | **An instructor's lesson hours** come from the lessons they gave, and are kept apart from other work on the same day. | ✅ Derived from lessons. The attendance day holds `lesson_minutes` (written from the lessons) and `other_minutes` (work that isn't a lesson) separately; hourly pay reads only `other_minutes`, so lesson time is never paid twice |
+| PAY-E3 | **An hourly employee who isn't an instructor** enters their own hours (the office can enter them too). The office approves them. Unapproved hours block closing the month (H4). The record of actual hours is the employer's legal record (K6). | 🟡 The office enters non-lesson hours by hand in the attendance tab; there's no self-entry or approval |
 
 ## F — Monthly salary
 
@@ -80,9 +80,9 @@ Customer billing for the same cases is S4.4–S4.5 in the map. A cancellation be
 
 | ID | Scenario | Today |
 |---|---|---|
-| PAY-G1 | **Monthly-salary employees** keep their regular salary during leave. **Hourly and per-lesson employees** are paid (gross wages of the last 3 months ÷ 90) × the number of leave days counted *including* weekends. If those 3 months weren't full, the fullest 3 consecutive months of the last 12 are used. The wage base includes paid absence days (leave, sick, holiday). | ❌ The code averages over *worked* days (3 or 12 months), which doesn't match the law |
+| PAY-G1 | **Monthly-salary employees** keep their regular salary during leave. **Hourly and per-lesson employees** are paid (gross wages of the last 3 months ÷ 90) × the number of leave days counted *including* weekends. If those 3 months weren't full, the fullest 3 consecutive months of the last 12 are used. The wage base includes paid absence days (leave, sick, holiday). | ✅ "ממוצע מומלץ" (method `legal`): our leave days are net working days, so one day = (wage base of the chosen 3 calendar months ÷ 90) × 7 ÷ W (W = 6 for a six-day week, else 5); a new employee is divided by the days employed in the window; the base is lessons + hours + paid leave (no sick or holiday pay is recorded yet, see PAY-K1/K2) |
 | PAY-G2 | A half day is paid at half the day's value. Unpaid leave pays nothing. | ✅ |
-| PAY-G3 | Paid leave days appear as their own line in the monthly review. | 🟡 They appear in the employee preview |
+| PAY-G3 | Paid leave days appear as their own line in the monthly review. | ✅ "חופשה: N ימים × ₪X" and its total, apart from lessons and hours; on screen and in the print |
 
 ## H — The monthly cycle
 

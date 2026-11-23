@@ -1,4 +1,5 @@
 /* eslint-env node */
+import { localDateKey, todayKey } from '../_shared/local-time.js';
 import { Buffer } from 'node:buffer';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { resolveBearerAuthorization } from '../_shared/http.js';
@@ -39,55 +40,9 @@ function safePasswordEquals(candidate, expected) {
   return timingSafeEqual(Buffer.from(left), Buffer.from(right));
 }
 
-async function lockLessonForPayroll({ client, orgId, lessonInstanceId, userId }) {
-  const now = new Date();
-  const periodStart = now.toISOString().slice(0, 10);
-
-  const { data: payrollRun, error: payrollRunError } = await withOrgScope(client, 'payroll_runs', orgId)
-    .insert({
-      period_start: periodStart,
-      period_end: periodStart,
-      status: 'finalized',
-      finalized_at: now.toISOString(),
-      finalized_by: userId,
-      metadata: {
-        debug_uat_tool: true,
-      },
-    })
-    .select('id, status, finalized_at')
-    .single();
-
-  if (payrollRunError) {
-    throw payrollRunError;
-  }
-
-  const { data: lock, error: lockError } = await withOrgScope(client, 'instance_locks', orgId)
-    .insert({
-      lesson_instance_id: lessonInstanceId,
-      lock_source_type: 'payroll_run',
-      lock_source_id: payrollRun.id,
-      lock_reason: 'debug_uat_payroll_lock',
-      created_by: userId,
-      metadata: {
-        debug_uat_tool: true,
-      },
-    })
-    .select('id, lesson_instance_id, lock_source_type, lock_source_id, lock_reason, created_at')
-    .single();
-
-  if (lockError) {
-    throw lockError;
-  }
-
-  return {
-    lock,
-    source: payrollRun,
-  };
-}
-
 async function lockLessonForPaidClaim({ client, orgId, lessonInstanceId, userId }) {
   const now = new Date();
-  const periodStart = now.toISOString().slice(0, 10);
+  const periodStart = todayKey(undefined, now);
 
   const { data: claimBatch, error: claimBatchError } = await withOrgScope(client, 'claim_batches', orgId)
     .insert({
@@ -192,6 +147,7 @@ async function inspectHmoChargeContext({
   const studentId = normalizeString(selectedParticipant.student_id);
   const coverageDecision = studentId
     ? await resolveLessonCoverageDecision(client, {
+      orgId,
       studentId,
       serviceId: instance.service_id,
       lessonDate: instance.datetime_start,
@@ -200,6 +156,7 @@ async function inspectHmoChargeContext({
 
   const allActiveAuthorizationsForStudent = studentId
     ? await loadHmoAuthorizations(client, {
+      orgId,
       studentId,
       activeOnly: true,
     })
@@ -215,7 +172,7 @@ async function inspectHmoChargeContext({
     }
     : selectedParticipant;
 
-  const policies = await loadFinancePolicies(client, orgId);
+  const policies = await loadFinancePolicies(client, orgId, { asOf: localDateKey(instance.datetime_start) || todayKey() });
   const chargeDecision = buildDesiredChargeDescriptors({
     participant: effectiveParticipant,
     service,
@@ -354,7 +311,7 @@ export default async function debugUatTools(context, req) {
     return respond(context, 400, { message: 'missing_lesson_instance_id' });
   }
 
-  if (action === 'lock_lesson' && !['payroll', 'paid_claim'].includes(lockKind)) {
+  if (action === 'lock_lesson' && lockKind !== 'paid_claim') {
     return respond(context, 400, { message: 'invalid_lock_kind' });
   }
 
@@ -408,9 +365,7 @@ export default async function debugUatTools(context, req) {
       });
     }
 
-    const result = lockKind === 'payroll'
-      ? await lockLessonForPayroll({ client: supabase, orgId, lessonInstanceId, userId })
-      : await lockLessonForPaidClaim({ client: supabase, orgId, lessonInstanceId, userId });
+    const result = await lockLessonForPaidClaim({ client: supabase, orgId, lessonInstanceId, userId });
 
     await logAuditEvent(supabase, {
       orgId,

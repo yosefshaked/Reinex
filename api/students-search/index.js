@@ -124,7 +124,7 @@ export default async function (context, req) {
 
   // Member instructors can only see students from their active templates.
   if (!isAdminRole(role)) {
-    const { studentIds, error: lessonError } = await fetchStudentIdsByInstructor(supabase, userId);
+    const { studentIds, error: lessonError } = await fetchStudentIdsByInstructor(supabase, userId, { orgId });
     if (lessonError) {
       context.log?.error?.('students-search failed to fetch instructor lesson templates', {
         message: lessonError.message,
@@ -145,6 +145,7 @@ export default async function (context, req) {
 
   const { ids: matchingClientProfileIds, error: profileSearchError } = await fetchMatchingStudentClientProfileIds(
     supabase,
+    orgId,
     searchSpec,
     { limit: 250 },
   );

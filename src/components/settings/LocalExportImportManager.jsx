@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { AlertTriangle, Download, FileJson, Loader2, ShieldCheck, Upload } from 'lucide-react';
 import { toast } from '@/lib/toast.jsx';
 import { authenticatedFetch } from '@/lib/api-client.js';
+import { utcFileStamp } from '@/lib/local-time.js';
 
 const REQUEST = {
   idle: 'idle',
@@ -16,7 +17,7 @@ const REQUEST = {
 };
 
 function formatDateForFile(date = new Date()) {
-  return date.toISOString().slice(0, 19).replace(/[:T]/g, '-');
+  return utcFileStamp(date);
 }
 
 function downloadJson(payload, orgId) {

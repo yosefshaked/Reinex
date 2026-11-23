@@ -8,6 +8,7 @@ import { useOrg } from '@/org/OrgContext';
 import { useStudents } from '@/hooks/useOrgData';
 import { useCalendarInstructors } from '../../hooks/useCalendar';
 import { useTemplateMutations } from '../../hooks/useTemplates';
+import { useMissingRateForSelection } from '../../hooks/useMissingRateForSelection.js';
 import { Loader2, AlertCircle, UserPlus, X } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { authenticatedFetch } from '@/lib/api-client.js';
@@ -22,6 +23,8 @@ import {
   timeToMinutes,
 } from '@/lib/instructor-availability.js';
 import { ceilClockTimeToGrid } from '@/lib/time-grid.js';
+import { MissingRateNotice } from '../MissingRateNotice.jsx';
+import { todayKey } from '@/lib/local-time.js';
 
 function formatTemplateTime(timeString) {
   if (!timeString) return '—';
@@ -107,11 +110,17 @@ export function AddTemplateDialog({
     day_of_week: normalizeDayToken(defaultDayOfWeek) || '',
     time_of_day: ceilClockTimeToGrid(defaultTimeOfDay) || '09:00',
     duration_minutes: Number(defaultDurationMinutes) || 60,
-    valid_from: new Date().toISOString().split('T')[0],
+    valid_from: todayKey(),
     valid_until: '',
   });
 
   const [error, setError] = useState(null);
+  // Cleared by itself when the instructor, service or start date changes (the refusal was for the old ones).
+  const [missingRate, setMissingRate, clearMissingRate] = useMissingRateForSelection({
+    instructorId: formData.instructor_employee_id,
+    serviceId: formData.service_id,
+    date: formData.valid_from,
+  });
   const [requiredFormWarnings, setRequiredFormWarnings] = useState(null);
   const activeServices = useMemo(
     () => (services || []).filter((s) => s?.is_active === true),
@@ -202,13 +211,14 @@ export function AddTemplateDialog({
         day_of_week: normalizeDayToken(defaultDayOfWeek) || '',
         time_of_day: ceilClockTimeToGrid(defaultTimeOfDay) || '09:00',
         duration_minutes: Number(defaultDurationMinutes) || 60,
-        valid_from: new Date().toISOString().split('T')[0],
+        valid_from: todayKey(),
         valid_until: '',
       });
       setError(null);
+      clearMissingRate();
       setRequiredFormWarnings(null);
     }
-  }, [open, defaultInstructorId, defaultDayOfWeek, defaultClientProfileId, defaultStudentId, defaultServiceId, defaultTimeOfDay, defaultDurationMinutes]);
+  }, [open, defaultInstructorId, defaultDayOfWeek, defaultClientProfileId, defaultStudentId, defaultServiceId, defaultTimeOfDay, defaultDurationMinutes, clearMissingRate]);
 
   // Once students load, pre-populate defaultStudentId
   useEffect(() => {
@@ -378,6 +388,7 @@ export function AddTemplateDialog({
   async function handleSubmit(e, { acknowledgeRequiredFormWarnings = false } = {}) {
     e?.preventDefault();
     setError(null);
+    clearMissingRate();
 
     const hasStudents = selectedStudents.length > 0;
     const hasClientProfile = Boolean(formData.client_profile_id && !hasStudents);
@@ -423,7 +434,7 @@ export function AddTemplateDialog({
       return;
     }
 
-    const { data: createdTemplate, error: apiError } = await createTemplate({
+    const { data: createdTemplate, error: apiError, missingRate: apiMissingRate } = await createTemplate({
       client_profile_id: formData.client_profile_id || null,
       student_ids: hasStudents ? selectedStudents.map((s) => s.id) : undefined,
       instructor_employee_id: formData.instructor_employee_id,
@@ -439,6 +450,11 @@ export function AddTemplateDialog({
     // Soft gate: API returns 200 with required_form_warnings when forms are missing but enforcement is 'warn'
     if (createdTemplate?.required_form_warnings?.length > 0) {
       setRequiredFormWarnings(createdTemplate.required_form_warnings);
+      return;
+    }
+
+    if (apiMissingRate) {
+      setMissingRate(apiMissingRate);
       return;
     }
 
@@ -875,6 +891,8 @@ export function AddTemplateDialog({
               </AlertDescription>
             </Alert>
           )}
+
+          <MissingRateNotice missingRate={missingRate} onRateAdded={() => clearMissingRate()} />
 
           {/* Error */}
           {error && (

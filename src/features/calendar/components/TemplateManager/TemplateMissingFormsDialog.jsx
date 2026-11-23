@@ -11,18 +11,14 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import SendRequiredFormDialog from '@/features/students/components/SendRequiredFormDialog.jsx';
 import { resolveSubjectFormDeliveryContact } from '@/features/forms/lib/delivery-contact.js';
+import { formatInstant } from '@/lib/local-time.js';
 
 function formatDateTime(value) {
   if (!value) return null;
-  try {
-    return new Intl.DateTimeFormat('he-IL', {
-      timeZone: 'Asia/Jerusalem',
-      dateStyle: 'short',
-      timeStyle: 'short',
-    }).format(new Date(value));
-  } catch {
-    return String(value);
-  }
+  return formatInstant(value, {
+    dateStyle: 'short',
+    timeStyle: 'short',
+  }) || String(value);
 }
 
 function DeliveryMethodIcon({ method }) {

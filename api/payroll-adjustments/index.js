@@ -16,6 +16,7 @@ import {
   canManageEmployeeOps,
   isYmdDate,
   listFinanceCorrections,
+  resolveEmployeeRecord,
 } from '../_shared/employee-finance.js';
 import { assertAgorot, FINANCE_LIMITS } from '../_shared/currency.js';
 
@@ -81,7 +82,7 @@ export default async function (context, req) {
     const employeeId = normalizeString(req?.query?.employee_id);
     const startDate = normalizeString(req?.query?.start_date);
     const endDate = normalizeString(req?.query?.end_date);
-    const entries = await listFinanceCorrections(supabase, {
+    const entries = await listFinanceCorrections(supabase, orgId, {
       employeeId,
       startDate: isYmdDate(startDate) ? startDate : '',
       endDate: isYmdDate(endDate) ? endDate : '',
@@ -113,6 +114,16 @@ export default async function (context, req) {
     }
     if (!isYmdDate(effectiveDate)) {
       return respond(context, 400, { message: 'invalid_effective_date' });
+    }
+
+    // An employee of another organisation is not found, like an id that does not exist.
+    const targetEmployee = await resolveEmployeeRecord(supabase, orgId, { employeeId, userId, canManageAll: true });
+    if (targetEmployee.error === 'employee_not_found') {
+      return respond(context, 404, { message: 'employee_not_found' });
+    }
+    if (targetEmployee.error) {
+      context.log?.error?.('payroll-adjustments failed to resolve employee', { employeeId, message: targetEmployee.error?.message });
+      return respond(context, 500, { message: 'failed_to_load_employee' });
     }
 
     const idempotencyKey = normalizeString(body?.idempotency_key) || null;

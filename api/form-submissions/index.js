@@ -33,6 +33,7 @@ import {
 } from '../_shared/forms-runtime.js';
 import { resolvePublicAppBaseUrl } from '../_shared/public-app-url.js';
 import { resolveClientProfileDeliveryDestination } from '../_shared/form-delivery-destination.js';
+import { formatInstant } from '../_shared/local-time.js';
 const OTP_DIGITS = 6;
 const OTP_TTL_MINUTES = 15;
 const ROUTING_CATEGORY = 'form_submission';
@@ -624,15 +625,10 @@ async function resolveOrganizationSenderName(controlClient, orgId, context) {
 
 function formatExpirationForDelivery(expiresAt) {
   if (!expiresAt) return '';
-  try {
-    return new Intl.DateTimeFormat('he-IL', {
-      timeZone: 'Asia/Jerusalem',
-      dateStyle: 'short',
-      timeStyle: 'short',
-    }).format(new Date(expiresAt));
-  } catch {
-    return String(expiresAt);
-  }
+  return formatInstant(expiresAt, {
+    dateStyle: 'short',
+    timeStyle: 'short',
+  }) || String(expiresAt);
 }
 
 function buildSubmissionAccessText(submitLink, otpCode, identityNumber, formName, expiresAt) {

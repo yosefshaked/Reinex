@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge.jsx';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Plus, LayoutTemplate, Wand2, ChevronDown, Coffee } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { DateNavigator } from '../components/CalendarHeader/DateNavigator.jsx';
 import { LessonInstanceDialog } from '../components/LessonInstanceDialog';
@@ -38,7 +38,13 @@ const CALENDAR_LAST_DAY_KEY = 'reinex_calendar_last_day';
 
 export default function CalendarPage() {
   const calendarNavigationRef = useRef(null);
+  // A link into the calendar (`/calendar?date=YYYY-MM-DD&lesson=<id>`, from the pay summary) opens
+  // that day, and the lesson when it is on that day.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const linkedDate = parseLocalDateString(searchParams.get('date') || '') ? searchParams.get('date') : '';
+  const pendingLinkedLessonRef = useRef(searchParams.get('lesson') || '');
   const [currentDate, setCurrentDateState] = useState(() => {
+    if (linkedDate) return linkedDate;
     const fallbackDate = getTodayLocalDateString();
     if (typeof window !== 'undefined') {
       const saved = sessionStorage.getItem(CALENDAR_DATE_KEY);
@@ -47,6 +53,7 @@ export default function CalendarPage() {
     return fallbackDate;
   });
   const [viewMode, setViewModeState] = useState(() => {
+    if (linkedDate) return 'day';
     if (typeof window !== 'undefined') {
       return sessionStorage.getItem(CALENDAR_VIEW_KEY) || 'day';
     }
@@ -192,6 +199,27 @@ export default function CalendarPage() {
     setSelectedInstance(null);
     setShowInstanceDialog(false);
   }, [currentDate, viewMode]);
+
+  // The day's lessons start empty and not loading; wait for a load to start and finish.
+  const linkedDayLoadStartedRef = useRef(false);
+  if (instancesLoading) linkedDayLoadStartedRef.current = true;
+
+  useEffect(() => {
+    if (!searchParams.has('date') && !searchParams.has('lesson')) return;
+    const lessonId = pendingLinkedLessonRef.current;
+    if (lessonId) {
+      if (!linkedDayLoadStartedRef.current || instancesLoading || !Array.isArray(instances)) return;
+      pendingLinkedLessonRef.current = '';
+      const linkedInstance = instances.find((instance) => instance.id === lessonId);
+      if (linkedInstance) {
+        setSelectedInstance(linkedInstance);
+        setShowInstanceDialog(true);
+      } else {
+        toast.info('המפגש לא נמצא ביום הזה ביומן. ייתכן שהוא הועבר בתיקון.');
+      }
+    }
+    setSearchParams({}, { replace: true });
+  }, [instances, instancesLoading, searchParams, setSearchParams]);
 
   const handleInstanceClick = (instance) => {
     setPendingSlotSelection(null);

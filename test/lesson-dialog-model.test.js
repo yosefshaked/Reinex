@@ -9,7 +9,9 @@ import {
   DEFAULT_BILLING_POLICY,
   DEFAULT_INSTRUCTOR_EARNINGS_POLICY,
   buildConflictLines,
+  buildRateSelectionKey,
   buildSchedulingOverrideMetadata,
+  resolveEditClockChangeNotice,
   deriveDisplayWorkflowDecisions,
   formatAgorotPreview,
   getCancellationStatusLabel,
@@ -19,10 +21,15 @@ import {
   getOpenActionTab,
   getParticipantStatusLabel,
   groupPreviewImpacts,
+  hasAttendanceMarkChanged,
+  absenceCompensationChoice,
+  readStoredAttendanceMark,
   isCancellationStatus,
   isResolvedParticipantStatus,
   normalizeInstanceStatus,
   parseIsoDateSafe,
+  pickMissingRateForSelection,
+  readMissingLessonRate,
   resolveClosureStepState,
   resolveLatestWorkflowState,
   resolveMutationError,
@@ -379,6 +386,63 @@ describe('lessonDialogModel: getDisplayInstance / getDisplayParticipants', () =>
 });
 
 // ---------------------------------------------------------------------------
+// readMissingLessonRate
+// ---------------------------------------------------------------------------
+describe('lessonDialogModel: readMissingLessonRate', () => {
+  it('reads who, what and when from the missing-rate refusal, with the server message', () => {
+    const message = 'לדנה כהן אין תעריף על "רכיבה".';
+    const error = apiError({
+      message,
+      code: 'instructor_rate_not_configured',
+      instructor_employee_id: 'dana',
+      service_id: 'riding',
+      rate_date: '2026-11-20',
+      next_rate_date: null,
+    }, 422);
+    assert.deepEqual(readMissingLessonRate(error), {
+      instructorEmployeeId: 'dana',
+      serviceId: 'riding',
+      rateDate: '2026-11-20',
+      message,
+    });
+    assert.equal(error.message, message, 'the plain error text is already the Hebrew explanation');
+  });
+
+  it('is null for any other error', () => {
+    assert.equal(readMissingLessonRate(apiError({ message: 'capacity_exceeded' }, 422)), null);
+    assert.equal(readMissingLessonRate(new Error('network')), null);
+    assert.equal(readMissingLessonRate(apiError({ message: 'x', code: 'instructor_rate_not_configured' }, 422)), null);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The missing-rate notice follows the instructor, service and date it was refused for
+// ---------------------------------------------------------------------------
+describe('lessonDialogModel: missing-rate notice per selection', () => {
+  const missing = { instructorEmployeeId: 'dana', serviceId: 'riding', rateDate: '2026-11-20', message: 'אין תעריף' };
+  const refusedFor = buildRateSelectionKey({ instructorId: 'dana', serviceId: 'riding', date: '2026-11-20' });
+  const stored = { missingRate: missing, selectionKey: refusedFor };
+
+  it('shows while the form still holds the refused combination', () => {
+    assert.equal(pickMissingRateForSelection(stored, refusedFor), missing);
+  });
+
+  it('disappears once the instructor, service or date changes', () => {
+    for (const changed of [
+      { instructorId: 'omer', serviceId: 'riding', date: '2026-11-20' },
+      { instructorId: 'dana', serviceId: 'therapy', date: '2026-11-20' },
+      { instructorId: 'dana', serviceId: 'riding', date: '2026-11-21' },
+    ]) {
+      assert.equal(pickMissingRateForSelection(stored, buildRateSelectionKey(changed)), null, JSON.stringify(changed));
+    }
+  });
+
+  it('nothing stored shows nothing', () => {
+    assert.equal(pickMissingRateForSelection(null, refusedFor), null);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // resolveMutationError
 // ---------------------------------------------------------------------------
 describe('lessonDialogModel: resolveMutationError', () => {
@@ -427,14 +491,6 @@ describe('lessonDialogModel: resolveMutationError', () => {
   it('409 means someone else updated the lesson', () => {
     const error = apiError({ message: 'version_conflict', code: 'version_conflict' }, 409);
     assert.equal(resolveMutationError(error), GENERIC_409_MESSAGE);
-  });
-
-  it('missing_instructor_compensation_decision (data.code, 400) asks for a compensation decision', () => {
-    const error = apiError(
-      { message: 'missing_instructor_compensation_decision', code: 'missing_instructor_compensation_decision', participant_status: 'no_show' },
-      400,
-    );
-    assert.equal(resolveMutationError(error), 'יש לבחור אם המדריך אמור לקבל פיצוי לפני שמאשרים אי-הגעה מחויבת.');
   });
 
   it('instance_cancelled_has_attended_participants lists attended names when not a 409', () => {
@@ -728,7 +784,7 @@ describe('lessonDialogModel: groupPreviewImpacts / getOpenActionTab / formatters
     assert.equal(getImpactGroupMeta('billing_charge').key, 'billing');
     assert.equal(getImpactGroupMeta('post_coverage_charge').key, 'billing');
     assert.equal(getImpactGroupMeta('instructor_earning_update').key, 'payroll');
-    assert.equal(getImpactGroupMeta('instructor_attendance_remove').key, 'attendance');
+    assert.equal(getImpactGroupMeta('instructor_attendance_update').key, 'attendance');
     assert.equal(getImpactGroupMeta('hmo_split_detail').key, 'hmo');
     assert.deepEqual(getImpactGroupMeta('something_else'), {
       key: 'workflow',
@@ -745,7 +801,7 @@ describe('lessonDialogModel: groupPreviewImpacts / getOpenActionTab / formatters
       { id: 3, type: 'status_change' },
       { id: 4, type: 'billing_reversal' },
       { id: 5, type: 'hmo_task_resolve' },
-      { id: 6, type: 'instructor_attendance_add' },
+      { id: 6, type: 'instructor_attendance_update' },
       { id: 7, type: 'instructor_earning_reversal' },
     ];
     const groups = groupPreviewImpacts(impacts);
@@ -773,7 +829,6 @@ describe('lessonDialogModel: groupPreviewImpacts / getOpenActionTab / formatters
       reminders: 'participants',
       documentation: 'workflow',
       billing: 'workflow',
-      payroll: 'workflow',
       hmo: 'workflow',
       closure: 'workflow',
       exception: 'overview',
@@ -929,5 +984,96 @@ describe('lessonDialogModel: buildConflictLines', () => {
       'דנה כהן מסומן כרגע כ-"נכח".',
       'הערת המשתתף עודכנה ל-"עודכן".',
     ]);
+  });
+});
+
+describe('hasAttendanceMarkChanged', () => {
+  const storedAbsence = {
+    id: 'p1',
+    participant_status: 'no_show',
+    metadata: {
+      notes: 'חולה',
+      workflow: { instructor_compensation: { decision: 'not_compensated' }, is_excused: true },
+    },
+  };
+  const sameDraft = { status: 'no_show', notes: 'חולה', instructorCompensationDecision: 'not_compensated', isExcused: true };
+
+  it('reads the stored mark in the shape the save sends', () => {
+    assert.deepEqual(readStoredAttendanceMark(storedAbsence), {
+      status: 'no_show',
+      notes: 'חולה',
+      instructorCompensationDecision: 'not_compensated',
+      isExcused: true,
+    });
+    assert.deepEqual(readStoredAttendanceMark({}), {
+      status: 'scheduled',
+      notes: '',
+      instructorCompensationDecision: '',
+      isExcused: false,
+    });
+  });
+
+  it('is unchanged when the draft repeats the stored mark', () => {
+    assert.equal(hasAttendanceMarkChanged(storedAbsence, sameDraft), false);
+  });
+
+  it('ignores surrounding spaces in notes and a missing notes field', () => {
+    assert.equal(hasAttendanceMarkChanged(storedAbsence, { ...sameDraft, notes: '  חולה ' }), false);
+    assert.equal(hasAttendanceMarkChanged(storedAbsence, { ...sameDraft, notes: undefined }), false);
+  });
+
+  it('sends a pay choice only when a person made it, not the policy preset', () => {
+    assert.equal(absenceCompensationChoice({ instructorCompensationDecision: 'not_compensated', compensationFromPolicy: true }), null);
+    assert.equal(absenceCompensationChoice({ instructorCompensationDecision: 'compensated', compensationFromPolicy: false }), 'compensated');
+    assert.equal(absenceCompensationChoice({ instructorCompensationDecision: 'not_compensated' }), 'not_compensated', 'a stored choice reopened in the form');
+    assert.equal(absenceCompensationChoice({ instructorCompensationDecision: '' }), null);
+    assert.equal(absenceCompensationChoice(null), null);
+    // An untouched preset is not a change to a participant with no stored choice.
+    const unmarkedChoice = { participant_status: 'no_show', metadata: {} };
+    const preset = { instructorCompensationDecision: 'compensated', compensationFromPolicy: true };
+    assert.equal(hasAttendanceMarkChanged(unmarkedChoice, { status: 'no_show', instructorCompensationDecision: absenceCompensationChoice(preset) }), false);
+  });
+
+  it('treats no pay choice as no change', () => {
+    assert.equal(hasAttendanceMarkChanged(storedAbsence, { ...sameDraft, instructorCompensationDecision: '' }), false);
+    assert.equal(hasAttendanceMarkChanged(storedAbsence, { ...sameDraft, instructorCompensationDecision: null }), false);
+  });
+
+  it('is changed by the status, the notes, the pay choice or the fee waiver', () => {
+    assert.equal(hasAttendanceMarkChanged(storedAbsence, { ...sameDraft, status: 'cancelled_student' }), true);
+    assert.equal(hasAttendanceMarkChanged(storedAbsence, { ...sameDraft, notes: 'חולה מאוד' }), true);
+    assert.equal(hasAttendanceMarkChanged(storedAbsence, { ...sameDraft, notes: '' }), true);
+    assert.equal(hasAttendanceMarkChanged(storedAbsence, { ...sameDraft, instructorCompensationDecision: 'compensated' }), true);
+    assert.equal(hasAttendanceMarkChanged(storedAbsence, { ...sameDraft, isExcused: false }), true);
+  });
+
+  it('treats a stored note of null like an empty note', () => {
+    const stored = { participant_status: 'attended', metadata: { notes: null } };
+    assert.equal(hasAttendanceMarkChanged(stored, { status: 'attended', notes: '' }), false);
+    assert.equal(hasAttendanceMarkChanged(stored, { status: 'no_show', notes: '' }), true);
+  });
+
+  it('a scheduled participant marked attended is a change', () => {
+    assert.equal(hasAttendanceMarkChanged({ participant_status: 'scheduled' }, { status: 'attended', notes: '' }), true);
+  });
+
+  it('counts a missing participant or draft as changed (nothing to compare with)', () => {
+    assert.equal(hasAttendanceMarkChanged(null, sameDraft), true);
+    assert.equal(hasAttendanceMarkChanged(storedAbsence, null), true);
+  });
+});
+
+describe('resolveEditClockChangeNotice', () => {
+  it('blocks a new start in the skipped hour and warns for a repeated one', () => {
+    const baseline = { date: '2026-03-26', time: '10:00' };
+    assert.equal(resolveEditClockChangeNotice({ date: '2026-03-27', time: '02:30' }, baseline)?.blocking, true);
+    assert.equal(resolveEditClockChangeNotice({ date: '2026-10-25', time: '01:30' }, baseline)?.kind, 'repeated');
+    assert.equal(resolveEditClockChangeNotice({ date: '2026-03-27', time: '03:30' }, baseline), null);
+  });
+
+  it('stays quiet when the date and time were not changed', () => {
+    const baseline = { date: '2026-10-25', time: '01:30' };
+    assert.equal(resolveEditClockChangeNotice({ date: '2026-10-25', time: '01:30' }, baseline), null);
+    assert.equal(resolveEditClockChangeNotice({ date: '', time: '' }, null), null);
   });
 });

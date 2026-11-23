@@ -86,7 +86,7 @@
     {
       "id": "api-setup-instructor",
       "name": "API – Create a test instructor employee",
-      "description": "Creates a standalone instructor employee and sets a service capability (base_rate=0) by inserting directly into Supabase so the instructor rate validation passes during attendance marking.",
+      "description": "Creates a standalone instructor employee and sets a service capability by inserting directly into Supabase, then gives the instructor a lesson rate for the service so the lessons can be added.",
       "steps": [
         {
           "id": "create-instructor",
@@ -99,9 +99,7 @@
             "first_name": "מדריך",
             "last_name": "בדיקה",
             "employee_id": "TEST-INST-99",
-            "employee_type": "instructor",
-            "payroll_model": "lesson_based",
-            "current_rate": 20000
+            "employee_type": "instructor"
           },
           "store": "INSTRUCTOR_ID",
           "storeField": "id"
@@ -109,7 +107,7 @@
         {
           "id": "set-instructor-service-rate-direct",
           "action": "apiCall",
-          "description": "Direct Supabase INSERT to set base_rate=0 capability for the service – bypasses the PostgREST onConflict constraint issue in local dev. Ignores 409 if the row already exists.",
+          "description": "Direct Supabase INSERT of a capability for the service – bypasses the PostgREST onConflict constraint issue in local dev. Ignores 409 if the row already exists.",
           "method": "POST",
           "endpoint": "{{SUPABASE_URL}}/rest/v1/instructor_service_capabilities",
           "headers": {
@@ -120,12 +118,27 @@
             "org_id": "{{TEST_ORG_ID}}",
             "employee_id": "{{INSTRUCTOR_ID}}",
             "service_id": "{{SERVICE_ID}}",
-            "base_rate": 0,
             "max_students": 1,
             "availability_windows": [],
             "metadata": {}
           },
           "ignoreStatus": [409]
+        },
+        {
+          "id": "seed-instructor-lesson-rate",
+          "action": "apiCall",
+          "description": "The instructor's lesson rate for the service, from the start of employment. A lesson cannot be added for an instructor without a rate for its service on its date.",
+          "method": "POST",
+          "endpoint": "/api/employee-rates",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "employee_id": "{{INSTRUCTOR_ID}}",
+            "service_id": "{{SERVICE_ID}}",
+            "pay_basis": "lesson_hourly",
+            "rate": 10000,
+            "effective_date": "2000-01-01",
+            "replace_existing": true
+          }
         }
       ]
     },

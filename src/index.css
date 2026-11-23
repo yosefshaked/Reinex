@@ -180,3 +180,5 @@
 @media (prefers-reduced-motion: reduce) {
   * { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; scroll-behavior: auto !important; }
 }
+/* The pay printouts are laid out in their own hidden iframe; their styles are in
+   src/features/finance/components/pay-print-styles.js. */

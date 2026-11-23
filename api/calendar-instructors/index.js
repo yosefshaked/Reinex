@@ -10,6 +10,7 @@ import {
   resolveOrgId,
   withOrgScope,
 } from '../_shared/org-bff.js';
+import { selectInChunks } from '../_shared/query-chunks.js';
 import { hasConfiguredAvailability } from '../_shared/instructor-availability.js';
 import { attachErrorTracking, respondTracked } from '../_shared/error-events.js';
 
@@ -114,12 +115,17 @@ export default async function (context, req) {
   // 3) has at least one instructor service capability row.
   const instructorIds = instructors.map(i => i.id);
   const [profilesResult, capabilitiesResult] = await Promise.all([
-    withOrgScope(supabase, 'instructor_profiles', orgId)
-      .select('employee_id')
-      .in('employee_id', instructorIds),
-    withOrgScope(supabase, 'instructor_service_capabilities', orgId)
-      .select('employee_id, service_id, max_students, base_rate, availability_windows, metadata')
-      .in('employee_id', instructorIds),
+    selectInChunks(
+      () => withOrgScope(supabase, 'instructor_profiles', orgId).select('employee_id'),
+      'employee_id',
+      instructorIds,
+    ),
+    selectInChunks(
+      () => withOrgScope(supabase, 'instructor_service_capabilities', orgId)
+        .select('employee_id, service_id, max_students, availability_windows, metadata'),
+      'employee_id',
+      instructorIds,
+    ),
   ]);
 
   if (profilesResult.error) {
@@ -168,7 +174,6 @@ export default async function (context, req) {
     capabilitiesMap.get(cap.employee_id).push({
       service_id: cap.service_id,
       max_students: cap.max_students,
-      base_rate: cap.base_rate,
       availability_windows: Array.isArray(cap.availability_windows) ? cap.availability_windows : [],
       setup_incomplete: !hasConfiguredAvailability(cap.availability_windows),
       metadata: cap.metadata,

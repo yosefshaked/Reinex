@@ -23,6 +23,7 @@
 import { after, before, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { createClient } from '@supabase/supabase-js';
+import { addDays, todayKey } from '../../../api/_shared/local-time.js';
 
 // ---------------------------------------------------------------------------
 // Config
@@ -274,9 +275,8 @@ describe('Flow 2: Create client-profile → org_id stamped', () => {
 // ---------------------------------------------------------------------------
 describe('Flow 3: Calendar generation → lesson instances stamped', () => {
   it('POST /calendar-generate dry run returns valid summary', async () => {
-    const today = new Date();
-    const startDate = today.toISOString().split('T')[0];
-    const endDate = new Date(today.getTime() + 7 * 86400000).toISOString().split('T')[0];
+    const startDate = todayKey();
+    const endDate = addDays(startDate, 7);
 
     const { status, data } = await apiFetch('calendar/generate', {
       method: 'POST',
@@ -314,7 +314,7 @@ describe('Flow 3: Calendar generation → lesson instances stamped', () => {
 // ---------------------------------------------------------------------------
 describe('Flow 4: Lesson instances via API', () => {
   it('GET /lesson-instances for today returns the inserted instance', async () => {
-    const today = new Date().toISOString().split('T')[0];
+    const today = todayKey();
     const { status, data } = await apiFetch('lesson-instances', {
       params: { org_id: state.orgId, date: today },
     });

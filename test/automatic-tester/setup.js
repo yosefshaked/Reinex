@@ -326,6 +326,7 @@ const SCHEMA_PROBE_TABLES = [
   'organizations',
   'org_memberships',
   'instructor_breaks',
+  'SettingsHistory',
 ];
 
 // Specific columns that were added in later versions of setup-sql.js.
@@ -775,7 +776,7 @@ async function deleteTestOrg(supabaseUrl, serviceKey) {
 
   // Clean up dependent tables first
   const deps = [
-    'ledger_transactions', 'lesson_earnings', 'commitments',
+    'ledger_transactions', 'commitments',
     'lesson_instances', 'lesson_templates', 'students',
     'client_profiles', 'Employees', 'Services', 'forms',
     'org_memberships',

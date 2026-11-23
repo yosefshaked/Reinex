@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, ArrowLeft, Check, Loader2 } from 'lucide-react';
 import { Button } from '../../../components/ui/button';
-import { getParticipantStatusDisplay, summarizePreviewImpacts } from '../utils/lessonDialogModel.js';
+import { ATTENDANCE_MARK_UNCHANGED_REASON, getParticipantStatusDisplay, summarizePreviewImpacts } from '../utils/lessonDialogModel.js';
 
 const TONE_CLASSES = {
   ok: 'bg-emerald-50 text-emerald-700 ring-1 ring-inset ring-emerald-200',
@@ -31,6 +31,7 @@ export function LessonImpactStrip({
   error,
   saving,
   note,
+  unchanged = false,
   onConfirm,
   onCancel,
 }) {
@@ -38,12 +39,13 @@ export function LessonImpactStrip({
   const confirmRef = useRef(null);
   const summary = preview ? summarizePreviewImpacts(preview) : null;
   const ready = !loading && Boolean(preview);
+  const canConfirm = ready && !unchanged;
 
   useEffect(() => {
-    if (ready) {
+    if (canConfirm) {
       confirmRef.current?.focus();
     }
-  }, [ready]);
+  }, [canConfirm]);
 
   return (
     <div className="flex flex-col gap-2 border-t border-dashed border-slate-200 bg-slate-50 px-3.5 py-2.5" role="group" aria-label="אישור שינוי סטטוס">
@@ -93,18 +95,23 @@ export function LessonImpactStrip({
           <Button type="button" size="sm" variant="ghost" className="h-8 px-2.5 text-xs" onClick={onCancel} disabled={saving}>
             ביטול
           </Button>
-          <Button
-            ref={confirmRef}
-            type="button"
-            size="sm"
-            className="h-8 gap-1.5 bg-primary px-3 text-xs text-primary-foreground hover:bg-primary/90"
-            onClick={onConfirm}
-            disabled={!ready || saving}
-          >
-            {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
-            {saving ? 'שומרים...' : 'אישור'}
-            {!saving ? <kbd className="rounded bg-white/20 px-1 text-[10px] font-bold">Enter</kbd> : null}
-          </Button>
+          {/* The title sits on a wrapper: a disabled button takes no pointer events, so it shows no tooltip. */}
+          <span title={unchanged ? ATTENDANCE_MARK_UNCHANGED_REASON : undefined}>
+            <Button
+              ref={confirmRef}
+              type="button"
+              size="sm"
+              className="h-8 gap-1.5 bg-primary px-3 text-xs text-primary-foreground hover:bg-primary/90"
+              onClick={onConfirm}
+              disabled={!canConfirm || saving}
+              aria-describedby={unchanged ? 'lesson-impact-strip-unchanged' : undefined}
+            >
+              {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+              {saving ? 'שומרים...' : 'אישור'}
+              {!saving ? <kbd className="rounded bg-white/20 px-1 text-[10px] font-bold">Enter</kbd> : null}
+            </Button>
+          </span>
+          {unchanged ? <span id="lesson-impact-strip-unchanged" className="sr-only">{ATTENDANCE_MARK_UNCHANGED_REASON}</span> : null}
         </div>
       </div>
 

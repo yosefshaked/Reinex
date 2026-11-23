@@ -2,10 +2,11 @@
 /* eslint-env node */
 import { loadFinancePolicies } from './employee-finance.js';
 import { coerceAgorot } from './currency.js';
-import { normalizeString } from './org-bff.js';
+import { normalizeString, withOrgScope } from './org-bff.js';
 import { loadHmoAuthorizations, resolveLessonCoverageDecision } from './hmo.js';
 import { createDashboardTask, resolveDashboardTask } from './dashboard-tasks.js';
 import { buildLessonCountBuckets, resolveEntitlementUsageDelta } from './commitment-behavior.js';
+import { endOfLocalDayUtc, localDateKey, startOfLocalDayUtc, todayKey } from './local-time.js';
 
 const RESOLVED_PARTICIPANT_STATUSES = new Set(['attended', 'no_show', 'cancelled_student', 'cancelled_clinic']);
 const HMO_NON_ATTENDANCE_STATUSES = new Set(['no_show', 'cancelled_student', 'cancelled_clinic']);
@@ -136,24 +137,12 @@ function effectiveLedgerEntries(entries) {
   return list.filter((e) => !e.reverses_transaction_id && !reversedIds.has(e.id));
 }
 
-function toDateKey(value) {
-  const normalized = normalizeString(value);
-  if (/^\d{4}-\d{2}-\d{2}$/.test(normalized)) {
-    return normalized;
-  }
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) {
-    return '';
-  }
-  return parsed.toISOString().slice(0, 10);
-}
-
-function dateKeyToUtcBoundary(value, boundary) {
-  const normalized = toDateKey(value);
-  if (!normalized) return '';
-  return boundary === 'end'
-    ? `${normalized}T23:59:59.999Z`
-    : `${normalized}T00:00:00.000Z`;
+// The UTC instant where a local period day starts, or where it ends (exclusive: the next local
+// midnight), so a lesson charge at 00:30 Israel time on the 1st belongs to that month's period.
+function localPeriodBoundaryUtc(value, boundary) {
+  const dateKey = localDateKey(value);
+  if (!dateKey) return '';
+  return (boundary === 'end' ? endOfLocalDayUtc(dateKey) : startOfLocalDayUtc(dateKey)) || '';
 }
 
 function signedAmount(direction, amount) {
@@ -356,9 +345,8 @@ async function loadServiceMap(tenantClient, orgId, serviceIds = []) {
   }]));
 }
 
-async function loadParticipantContext(tenantClient, lessonParticipantId) {
-  const { data, error } = await tenantClient
-    .from('lesson_participants')
+async function loadParticipantContext(tenantClient, orgId, lessonParticipantId) {
+  const { data, error } = await withOrgScope(tenantClient, 'lesson_participants', orgId)
     .select(`
       id,
       lesson_instance_id,
@@ -391,9 +379,8 @@ async function loadParticipantContext(tenantClient, lessonParticipantId) {
   return data || null;
 }
 
-async function loadInstanceParticipants(tenantClient, lessonInstanceId) {
-  const { data, error } = await tenantClient
-    .from('lesson_participants')
+async function loadInstanceParticipants(tenantClient, orgId, lessonInstanceId) {
+  const { data, error } = await withOrgScope(tenantClient, 'lesson_participants', orgId)
     .select('id')
     .eq('lesson_instance_id', lessonInstanceId)
     .order('id', { ascending: true });
@@ -405,9 +392,8 @@ async function loadInstanceParticipants(tenantClient, lessonInstanceId) {
   return data || [];
 }
 
-async function loadOpenLessonCharges(tenantClient, lessonParticipantId) {
-  const { data, error } = await tenantClient
-    .from('ledger_transactions')
+async function loadOpenLessonCharges(tenantClient, orgId, lessonParticipantId) {
+  const { data, error } = await withOrgScope(tenantClient, 'ledger_transactions', orgId)
     .select(`
       id,
       ledger_account_id,
@@ -667,7 +653,7 @@ function buildLessonChargeMetadata({
     actor_user_id: actorUserId || null,
     participant_status: normalizeString(participant?.participant_status).toLowerCase() || null,
     lesson_status: normalizeString(instance?.status).toLowerCase() || null,
-    lesson_date: toDateKey(instance?.datetime_start) || null,
+    lesson_date: localDateKey(instance?.datetime_start) || null,
     service_name: service?.service_name || service?.name || null,
     billing_reason: detail?.billingReason || null,
     coverage_status: coverageDecision?.status || null,
@@ -934,7 +920,7 @@ export default class BillingLedgerService {
     reasonCode,
     effectiveAt = null,
   }) {
-    const participant = await loadParticipantContext(this.tenantClient, lessonParticipantId);
+    const participant = await loadParticipantContext(this.tenantClient, this.orgId, lessonParticipantId);
     if (!participant?.id || !participant?.lesson_instance?.id) {
       return {
         lessonParticipantId,
@@ -953,7 +939,9 @@ export default class BillingLedgerService {
     }
     const serviceMap = await loadServiceMap(this.tenantClient, effectiveOrgId, [instance.service_id]);
     const service = serviceMap.get(instance.service_id) || null;
-    const policies = await loadFinancePolicies(this.tenantClient, effectiveOrgId);
+    const policies = await loadFinancePolicies(this.tenantClient, effectiveOrgId, {
+      asOf: localDateKey(instance?.datetime_start) || todayKey(),
+    });
     const coverageDecision = participant.student_id
       ? await resolveLessonCoverageDecision(this.tenantClient, {
         orgId: effectiveOrgId,
@@ -981,7 +969,7 @@ export default class BillingLedgerService {
       };
     }
 
-    const existingOpenCharges = await loadOpenLessonCharges(this.tenantClient, lessonParticipantId);
+    const existingOpenCharges = await loadOpenLessonCharges(this.tenantClient, this.orgId, lessonParticipantId);
     const desiredEntries = [];
     for (const descriptor of desiredResult.entries) {
       const ledgerAccount = await resolveLedgerAccount(this.tenantClient, effectiveOrgId, descriptor.accountType, descriptor.accountRefId);
@@ -1140,7 +1128,7 @@ export default class BillingLedgerService {
     actorUserId,
     reasonCode,
   }) {
-    const participants = await loadInstanceParticipants(this.tenantClient, lessonInstanceId);
+    const participants = await loadInstanceParticipants(this.tenantClient, this.orgId, lessonInstanceId);
     const participantResults = [];
     for (const participant of participants) {
       participantResults.push(await this.syncLessonParticipantCharge({
@@ -1238,8 +1226,7 @@ export default class BillingLedgerService {
       };
     }
 
-    let participantsQuery = this.tenantClient
-      .from('lesson_participants')
+    let participantsQuery = withOrgScope(this.tenantClient, 'lesson_participants', this.orgId)
       .select(`
         id,
         lesson_instance:lesson_instances!inner(
@@ -1369,8 +1356,7 @@ export default class BillingLedgerService {
     sourceId = null,
     metadata = {},
   }) {
-    const { data: original, error } = await this.tenantClient
-      .from('ledger_transactions')
+    const { data: original, error } = await withOrgScope(this.tenantClient, 'ledger_transactions', this.orgId)
       .select('*')
       .eq('id', transactionId)
       .maybeSingle();
@@ -1385,8 +1371,7 @@ export default class BillingLedgerService {
       throw new Error('lesson_charge_reversal_must_use_calendar');
     }
 
-    const { data: existingReversal, error: reversalLookupError } = await this.tenantClient
-      .from('ledger_transactions')
+    const { data: existingReversal, error: reversalLookupError } = await withOrgScope(this.tenantClient, 'ledger_transactions', this.orgId)
       .select('id')
       .eq('reverses_transaction_id', transactionId)
       .maybeSingle();
@@ -1404,11 +1389,11 @@ export default class BillingLedgerService {
     const reversalDirection = resolveReversalDirectionOrThrow(original);
     const reversal = await appendLedgerTransaction(this.tenantClient, {
       ...buildLegacyLedgerCompatFields({
-        orgId: original.org_id || this.orgId,
+        orgId: this.orgId,
         direction: reversalDirection,
         sourceType: normalizeString(sourceType) || 'reversal',
       }),
-      org_id: original.org_id || this.orgId,
+      org_id: this.orgId,
       ledger_account_id: original.ledger_account_id,
       direction: reversalDirection,
       amount: coerceAgorot(original.amount),
@@ -1630,7 +1615,7 @@ export default class BillingLedgerService {
     };
 
     const participant = normalizedParticipantId
-      ? await loadParticipantContext(this.tenantClient, normalizedParticipantId)
+      ? await loadParticipantContext(this.tenantClient, this.orgId, normalizedParticipantId)
       : null;
     const instance = participant?.lesson_instance || null;
     const effectiveProviderId = normalizeString(
@@ -1663,7 +1648,7 @@ export default class BillingLedgerService {
       : new Map();
     const service = serviceMap.get(instance?.service_id) || null;
     const policies = participant?.id
-      ? await loadFinancePolicies(this.tenantClient, this.orgId)
+      ? await loadFinancePolicies(this.tenantClient, this.orgId, { asOf: localDateKey(instance?.datetime_start) || todayKey() })
       : null;
     const coverageDecision = participant?.student_id
       ? await resolveLessonCoverageDecision(this.tenantClient, {
@@ -1683,7 +1668,7 @@ export default class BillingLedgerService {
       })
       : null;
     const openLessonCharges = participant?.id
-      ? await loadOpenLessonCharges(this.tenantClient, participant.id)
+      ? await loadOpenLessonCharges(this.tenantClient, this.orgId, participant.id)
       : [];
     const hmoChargeRows = openLessonCharges.filter((row) => normalizeString(row?.hmo_provider_id));
     const activeHmoProviderId = normalizeString(
@@ -2139,11 +2124,13 @@ export default class BillingLedgerService {
         .eq('hmo_provider_id', normalizedProviderId)
         .order('effective_at', { ascending: true });
 
-      if (dateKeyToUtcBoundary(periodStart, 'start')) {
-        query = query.gte('effective_at', dateKeyToUtcBoundary(periodStart, 'start'));
+      const periodStartUtc = localPeriodBoundaryUtc(periodStart, 'start');
+      if (periodStartUtc) {
+        query = query.gte('effective_at', periodStartUtc);
       }
-      if (dateKeyToUtcBoundary(periodEnd, 'end')) {
-        query = query.lte('effective_at', dateKeyToUtcBoundary(periodEnd, 'end'));
+      const periodEndExclusiveUtc = localPeriodBoundaryUtc(periodEnd, 'end');
+      if (periodEndExclusiveUtc) {
+        query = query.lt('effective_at', periodEndExclusiveUtc);
       }
 
       const { data, error } = await query;
@@ -2272,8 +2259,8 @@ export default class BillingLedgerService {
       .insert({
         org_id: this.orgId,
         hmo_provider_id: normalizedProviderId,
-        period_start: toDateKey(periodStart) || null,
-        period_end: toDateKey(periodEnd) || null,
+        period_start: localDateKey(periodStart) || null,
+        period_end: localDateKey(periodEnd) || null,
         status: 'draft',
         total_amount: totalAmount,
         paid_amount: 0,
@@ -3165,7 +3152,7 @@ export default class BillingLedgerService {
     }
 
     const lessonHistory = lessonHistoryRows.filter((row) => {
-      const lessonDate = toDateKey(row?.lesson_instance?.datetime_start);
+      const lessonDate = localDateKey(row?.lesson_instance?.datetime_start);
       if (normalizeString(startDate) && lessonDate && lessonDate < startDate) {
         return false;
       }
@@ -3317,7 +3304,7 @@ export default class BillingLedgerService {
         billing_status: billedAmount > 0 ? 'charged' : 'not_chargeable',
       };
     }).filter((row) => {
-      const lessonDate = toDateKey(row?.lesson_instance?.datetime_start);
+      const lessonDate = localDateKey(row?.lesson_instance?.datetime_start);
       if (normalizeString(startDate) && lessonDate && lessonDate < startDate) {
         return false;
       }

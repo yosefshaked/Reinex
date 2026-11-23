@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useOrg } from '@/org/OrgContext';
 import { authenticatedFetch } from '@/lib/api-client.js';
+import { readMissingLessonRate } from '../utils/lessonDialogModel.js';
 
 /**
  * Hook for fetching all lesson templates (Template Manager grid view)
@@ -102,7 +103,7 @@ export function useTemplateMutations() {
         });
         return { data, error: null };
       } catch (err) {
-        return { data: null, error: err?.message || 'Failed to create template' };
+        return { data: null, error: err?.message || 'Failed to create template', missingRate: readMissingLessonRate(err) };
       } finally {
         finishSubmitting();
       }
@@ -124,7 +125,7 @@ export function useTemplateMutations() {
         });
         return { data, error: null };
       } catch (err) {
-        return { data: null, error: err?.message || 'Failed to update template' };
+        return { data: null, error: err?.message || 'Failed to update template', missingRate: readMissingLessonRate(err) };
       } finally {
         finishSubmitting();
       }

@@ -1,4 +1,5 @@
 /* eslint-env node */
+import { todayKey } from '../_shared/local-time.js';
 import { resolveBearerAuthorization } from '../_shared/http.js';
 import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../_shared/supabase-admin.js';
 import {
@@ -11,6 +12,7 @@ import {
   resolveOrgId,
   withOrgScope,
 } from '../_shared/org-bff.js';
+import { selectInChunks } from '../_shared/query-chunks.js';
 import {
   buildCapabilityMap,
   buildInstructorMap,
@@ -19,7 +21,6 @@ import {
   buildWaitingListEntrySelect,
   isTemplateValidOn,
   normalizeMatchMode,
-  parseIsoDateInTimezone,
 } from '../_shared/waiting-list-matching.js';
 import { attachErrorTracking, respondTracked } from '../_shared/error-events.js';
 
@@ -177,14 +178,20 @@ export default async function waitingListMatches(context, req) {
   const serviceIds = Array.from(serviceDurationMap.keys()).filter(Boolean);
 
   const [capabilityResult, templateResult] = await Promise.all([
-    withOrgScope(supabase, 'instructor_service_capabilities', orgId)
-      .select('employee_id, service_id, max_students, availability_windows')
-      .in('service_id', serviceIds)
-      .in('employee_id', instructorIds),
-    withOrgScope(supabase, 'lesson_templates', orgId)
-      .select('id, student_id, instructor_employee_id, service_id, day_of_week, time_of_day, duration_minutes, valid_from, valid_until, is_active')
-      .eq('is_active', true)
-      .in('instructor_employee_id', instructorIds),
+    selectInChunks(
+      () => withOrgScope(supabase, 'instructor_service_capabilities', orgId)
+        .select('employee_id, service_id, max_students, availability_windows')
+        .in('service_id', serviceIds),
+      'employee_id',
+      instructorIds,
+    ),
+    selectInChunks(
+      () => withOrgScope(supabase, 'lesson_templates', orgId)
+        .select('id, student_id, instructor_employee_id, service_id, day_of_week, time_of_day, duration_minutes, valid_from, valid_until, is_active')
+        .eq('is_active', true),
+      'instructor_employee_id',
+      instructorIds,
+    ),
   ]);
 
   if (capabilityResult.error) {
@@ -210,7 +217,7 @@ export default async function waitingListMatches(context, req) {
     });
   }
 
-  const today = parseIsoDateInTimezone();
+  const today = todayKey();
   const instructorMap = buildInstructorMap(instructorRows || []);
   const capabilityMap = buildCapabilityMap(capabilityResult.data || [], serviceDurationMap);
   const validTemplates = (templateResult.data || []).filter((template) => isTemplateValidOn(template, today));

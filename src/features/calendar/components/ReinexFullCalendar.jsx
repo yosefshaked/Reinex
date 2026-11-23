@@ -40,16 +40,18 @@ import {
   SCHEDULING_OVERRIDE_REASON_OPTIONS,
 } from '../utils/schedulingOverride.js';
 import { getParticipantDisplayName } from '../utils/participantDisplay.js';
-import { addLocalDays, CALENDAR_WEEK_START, getWeekStartDate, parseLocalDateString, toLocalDateString as toCalendarLocalDateString } from '../utils/localDate.js';
+import { readMissingLessonRate } from '../utils/lessonDialogModel.js';
+import { MissingRateNotice } from './MissingRateNotice.jsx';
+import { ClockChangeNotice } from './ClockChangeNotice.jsx';
+import {
+  buildClockChangeBands,
+  describeLessonStartClockChange,
+  lessonLocalStartFields,
+  wallTimeAfterDelta,
+} from '@/lib/clock-change.js';
+import { localDateKey, localTime } from '@/lib/local-time.js';
+import { addLocalDays, CALENDAR_WEEK_START, getWeekStartDate, parseLocalDateString, toLocalDateString } from '../utils/localDate.js';
 import './reinex-fullcalendar.css';
-
-function toLocalDateString(dateObj) {
-  if (!(dateObj instanceof Date) || Number.isNaN(dateObj.getTime())) return null;
-  const year = dateObj.getFullYear();
-  const month = String(dateObj.getMonth() + 1).padStart(2, '0');
-  const day = String(dateObj.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-}
 
 function resolveViewDates(currentDate, viewMode) {
   const baseDate = parseLocalDateString(currentDate || '');
@@ -61,7 +63,7 @@ function resolveViewDates(currentDate, viewMode) {
     const weekStart = getWeekStartDate(baseDate, CALENDAR_WEEK_START);
     return Array.from({ length: 7 }, (_, index) => {
       const date = addLocalDays(weekStart, index);
-      const dateString = toCalendarLocalDateString(date);
+      const dateString = toLocalDateString(date);
       return {
         dateString,
         dayToken: dayTokenForJsDay(date?.getDay?.()),
@@ -276,6 +278,47 @@ function buildAvailabilityPresentationContext({ currentDate, viewMode, instructo
   };
 }
 
+function resolveViewerTimeZone() {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+  } catch {
+    return '';
+  }
+}
+
+// Background bands over the clock-change intervals of the visible days: across every resource,
+// not linked to a lesson, never clickable/draggable. Hours outside the visible range are simply
+// not drawn. Empty when the browser's zone does not share the org's change (see the module).
+function buildClockChangeBandEvents(currentDate, viewMode) {
+  const viewDates = resolveViewDates(currentDate, viewMode);
+  if (viewDates.length === 0) return [];
+  const viewerTimeZone = resolveViewerTimeZone();
+  return buildClockChangeBands(
+    viewDates[0].dateString,
+    viewDates[viewDates.length - 1].dateString,
+    viewerTimeZone ? { viewerTimeZone } : {},
+  ).map((band) => ({
+    id: band.id,
+    start: band.start,
+    end: band.end,
+    display: 'background',
+    editable: false,
+    startEditable: false,
+    durationEditable: false,
+    classNames: ['reinex-calendar-clock-change', `reinex-calendar-clock-change--${band.kind}`],
+    extendedProps: { isClockChange: true, clockChangeLabel: band.label },
+  }));
+}
+
+// The local wall time a dragged lesson lands on, from its old local start plus FullCalendar's
+// wall-clock delta (the dropped Date has already been moved past a skipped hour).
+function resolveDroppedLocalStart(instance, delta) {
+  const dateKey = localDateKey(instance?.datetime_start);
+  const clock = localTime(instance?.datetime_start);
+  if (!dateKey || !clock) return null;
+  return wallTimeAfterDelta({ dateKey, clock }, delta);
+}
+
 function resolveCalendarView(viewMode) {
   return viewMode === 'week' ? 'resourceTimeGridWeek' : 'resourceTimeGridDay';
 }
@@ -338,6 +381,7 @@ function rgbToHsl({ red, green, blue }) {
     return {
       hue: 0,
       saturation: 0,
+      // eslint-disable-next-line no-restricted-syntax -- not money: HSL lightness 0-1 to a 0-100 percentage
       lightness: lightness * 100,
     };
   }
@@ -362,7 +406,9 @@ function rgbToHsl({ red, green, blue }) {
 
   return {
     hue: hue * 60,
+    // eslint-disable-next-line no-restricted-syntax -- not money: HSL saturation 0-1 to a 0-100 percentage
     saturation: saturation * 100,
+    // eslint-disable-next-line no-restricted-syntax -- not money: HSL lightness 0-1 to a 0-100 percentage
     lightness: lightness * 100,
   };
 }
@@ -480,6 +526,13 @@ function EventContent({ arg }) {
     observer.observe(element);
     return () => observer.disconnect();
   }, []);
+
+  if (arg.event.extendedProps?.isClockChange) {
+    const { clockChangeLabel } = arg.event.extendedProps;
+    return (
+      <div className="reinex-calendar-clock-change__label" title={clockChangeLabel}>{clockChangeLabel}</div>
+    );
+  }
 
   if (isBreak) {
     const b = arg.event.extendedProps?.break;
@@ -728,10 +781,15 @@ export default function ReinexFullCalendar({
     [breaks],
   );
 
+  const clockChangeBandEvents = useMemo(
+    () => buildClockChangeBandEvents(currentDate, viewMode),
+    [currentDate, viewMode],
+  );
+
   const mappedEvents = useMemo(
     () => {
       const baseEvents = mapInstancesToEvents(instances);
-      const allEvents = [...baseEvents, ...mappedBreakEvents];
+      const allEvents = [...baseEvents, ...mappedBreakEvents, ...clockChangeBandEvents];
       if (!(selectedSlot?.start instanceof Date) || !(selectedSlot?.end instanceof Date) || !selectedSlot?.resourceId) {
         return allEvents;
       }
@@ -748,7 +806,7 @@ export default function ReinexFullCalendar({
         },
       ];
     },
-    [instances, mappedBreakEvents, selectedSlot],
+    [clockChangeBandEvents, instances, mappedBreakEvents, selectedSlot],
   );
   const mappedResources = useMemo(
     () => mapInstructorsToResources(availabilityPresentation.visibleInstructors),
@@ -797,7 +855,7 @@ export default function ReinexFullCalendar({
       }
       setPendingDropInfo((current) => (
         current?.rawInfo === dropInfo
-          ? { ...current, preview: null, previewError: '', previewLoading: false, previewRequestKey: '' }
+          ? { ...current, preview: null, previewError: '', previewMissingRate: null, previewLoading: false, previewRequestKey: '' }
           : current
       ));
       return undefined;
@@ -821,7 +879,7 @@ export default function ReinexFullCalendar({
 
     setPendingDropInfo((current) => (
       current?.rawInfo === dropInfo
-        ? { ...current, preview: null, previewError: '', previewLoading: true, previewRequestKey: requestKey }
+        ? { ...current, preview: null, previewError: '', previewMissingRate: null, previewLoading: true, previewRequestKey: requestKey }
         : current
     ));
 
@@ -834,6 +892,9 @@ export default function ReinexFullCalendar({
             org_id: activeOrgId,
             id: instance.id,
             datetime_start: nextStart.toISOString(),
+            ...(pendingDropInfo.localStart
+              ? lessonLocalStartFields(pendingDropInfo.localStart.dateKey, pendingDropInfo.localStart.clock)
+              : {}),
             instructor_employee_id: nextResourceId,
             duration_minutes: instance.duration_minutes,
             service_id: instance.service_id,
@@ -845,13 +906,20 @@ export default function ReinexFullCalendar({
 
         setPendingDropInfo((current) => (
           current?.rawInfo === dropInfo && current?.previewRequestKey === requestKey
-            ? { ...current, preview: payload?.preview || null, previewError: '', previewLoading: false, previewRequestKey: requestKey }
+            ? { ...current, preview: payload?.preview || null, previewError: '', previewMissingRate: null, previewLoading: false, previewRequestKey: requestKey }
             : current
         ));
       } catch (error) {
         setPendingDropInfo((current) => (
           current?.rawInfo === dropInfo && current?.previewRequestKey === requestKey
-            ? { ...current, preview: null, previewError: error?.message || 'לא ניתן היה לבנות תצוגה מקדימה להעברה.', previewLoading: false, previewRequestKey: requestKey }
+            ? {
+              ...current,
+              preview: null,
+              previewError: error?.message || 'לא ניתן היה לבנות תצוגה מקדימה להעברה.',
+              previewMissingRate: readMissingLessonRate(error),
+              previewLoading: false,
+              previewRequestKey: requestKey,
+            }
             : current
         ));
       }
@@ -869,7 +937,7 @@ export default function ReinexFullCalendar({
     }
 
     if (action === 'today') {
-      onDateChange(toCalendarLocalDateString(new Date()));
+      onDateChange(toLocalDateString(new Date()));
       return;
     }
 
@@ -1072,6 +1140,17 @@ export default function ReinexFullCalendar({
       return;
     }
 
+    // Spring forward: a lesson may not start in the hour the clock skips.
+    const localStart = resolveDroppedLocalStart(instance, info.delta);
+    const clockChangeNotice = localStart
+      ? describeLessonStartClockChange(localStart.dateKey, localStart.clock)
+      : null;
+    if (clockChangeNotice?.blocking) {
+      info.revert();
+      toast.error(clockChangeNotice.message);
+      return;
+    }
+
     const availabilityState = resolveCalendarAvailabilityState({
       instructorMap,
       instructorId: nextResourceId,
@@ -1089,6 +1168,8 @@ export default function ReinexFullCalendar({
     const overrideState = resolveSchedulingOverrideFormState(instance?.metadata?.scheduling_override);
     setPendingDropInfo({
       rawInfo: info,
+      localStart,
+      clockChangeNotice,
       availabilityState,
       useSchedulingOverride: availabilityState.status === 'outside_availability',
       selectedReasonCode: overrideState.selectedReasonCode || '',
@@ -1168,6 +1249,9 @@ export default function ReinexFullCalendar({
           org_id: activeOrgId,
           id: instance.id,
           datetime_start: nextStart.toISOString(),
+          ...(pendingDropInfo.localStart
+            ? lessonLocalStartFields(pendingDropInfo.localStart.dateKey, pendingDropInfo.localStart.clock)
+            : {}),
           instructor_employee_id: nextResourceId,
           duration_minutes: instance.duration_minutes,
           status: instance.status,
@@ -1392,6 +1476,7 @@ export default function ReinexFullCalendar({
                 : 'הפעולה תעדכן את מועד השיעור ותבדוק התנגשויות לפני השמירה.'}
             </AlertDialogDescription>
           </AlertDialogHeader>
+          <ClockChangeNotice notice={pendingDropInfo?.clockChangeNotice || null} />
           {pendingDropInfo?.availabilityState?.status === 'outside_availability' ? (
             <div className="space-y-3">
               <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950">
@@ -1449,7 +1534,14 @@ export default function ReinexFullCalendar({
               </div>
             ) : null}
 
-            {pendingDropInfo?.previewError ? (
+            {pendingDropInfo?.previewMissingRate ? (
+              <MissingRateNotice
+                missingRate={pendingDropInfo.previewMissingRate}
+                onRateAdded={() => setPendingDropInfo((current) => (current
+                  ? { ...current, preview: null, previewError: '', previewMissingRate: null, previewRequestKey: '' }
+                  : current))}
+              />
+            ) : pendingDropInfo?.previewError ? (
               <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-950">
                 {pendingDropInfo.previewError}
               </div>

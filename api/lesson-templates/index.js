@@ -1,10 +1,16 @@
 /* eslint-env node */
+import { todayKey } from '../_shared/local-time.js';
 import { resolveBearerAuthorization } from '../_shared/http.js';
 import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../_shared/supabase-admin.js';
 import { logAuditEvent, AUDIT_ACTIONS, AUDIT_CATEGORIES } from '../_shared/audit-log.js';
 import { logTenantAuditEvent, TENANT_AUDIT_RETENTION } from '../_shared/tenant-audit.js';
 import { normalizeDayToken, daySortValue } from '../_shared/day-of-week.js';
-import { hasConfiguredAvailability, isWithinAvailabilityWindows, timeToMinutes } from '../_shared/instructor-availability.js';
+import {
+  hasConfiguredAvailability,
+  isWithinAvailabilityWindows,
+  timeToMinutes,
+} from '../_shared/instructor-availability.js';
+import { checkTemplateInstructorRate, templateUpdateNeedsRateCheck } from '../_shared/employee-finance.js';
 import {
   UUID_PATTERN,
   ensureMembership,
@@ -789,6 +795,10 @@ export default async function lessonTemplates(context, req) {
       return tracked500('failed_to_create_lesson_template');
     }
 
+    const createRateCheck = await checkTemplateInstructorRate(supabase, orgId, { instructorEmployeeId, serviceId, validFrom }, context);
+    if (createRateCheck?.error) return tracked500(createRateCheck.body.message, createRateCheck.error);
+    if (createRateCheck) return respond(context, 422, createRateCheck.body);
+
     let waitingListEntry = null;
     let clientProfileBeforeMatch = null;
     let studentCreated = false;
@@ -845,7 +855,7 @@ export default async function lessonTemplates(context, req) {
 
       if (!effectiveStudentId && resolvedClientProfileId) {
         try {
-          const ensuredStudent = await ensureStudentForClientProfile(supabase, resolvedClientProfileId);
+          const ensuredStudent = await ensureStudentForClientProfile(supabase, orgId, resolvedClientProfileId);
           if (ensuredStudent.error || !ensuredStudent.student?.id) {
             return tracked500('failed_to_activate_student_from_waiting_list');
           }
@@ -881,7 +891,7 @@ export default async function lessonTemplates(context, req) {
 
     } else if (!effectiveStudentId && resolvedClientProfileId) {
       try {
-        const ensuredStudent = await ensureStudentForClientProfile(supabase, resolvedClientProfileId);
+        const ensuredStudent = await ensureStudentForClientProfile(supabase, orgId, resolvedClientProfileId);
         if (ensuredStudent.error || !ensuredStudent.student?.id) {
           return tracked500('failed_to_create_lesson_template');
         }
@@ -1364,6 +1374,18 @@ export default async function lessonTemplates(context, req) {
       return respond(context, 400, { message: 'missing_updates' });
     }
 
+    // A new instructor, service or start date (or switching the template back on) is a person's
+    // choice of who teaches what from when, so it must pay. Adding or removing riders is not.
+    if (templateUpdateNeedsRateCheck(existingTemplate, updates)) {
+      const updateRateCheck = await checkTemplateInstructorRate(supabase, orgId, {
+        instructorEmployeeId: updates.instructor_employee_id ?? existingTemplate.instructor_employee_id,
+        serviceId: updates.service_id ?? existingTemplate.service_id,
+        validFrom: updates.valid_from ?? existingTemplate.valid_from,
+      }, context);
+      if (updateRateCheck?.error) return tracked500(updateRateCheck.body.message, updateRateCheck.error);
+      if (updateRateCheck) return respond(context, 422, updateRateCheck.body);
+    }
+
     // Validate waiting list entry up front (capacity-mode assignment) before any DB writes
     let waitingEntryToMatch = null;
     if (waitingListEntryId) {
@@ -1409,7 +1431,7 @@ export default async function lessonTemplates(context, req) {
           addStudentIds.push(waitingEntry.student_id);
         } else if (clientProfileId) {
           try {
-            const ensured = await ensureStudentForClientProfile(supabase, clientProfileId);
+            const ensured = await ensureStudentForClientProfile(supabase, orgId, clientProfileId);
             if (ensured.error || !ensured.student?.id) {
               return tracked500('failed_to_activate_student_from_waiting_list');
             }
@@ -1779,7 +1801,7 @@ export default async function lessonTemplates(context, req) {
       return respond(context, 400, { message: 'invalid_template_id' });
     }
 
-    const today = new Date().toISOString().split('T')[0];
+    const today = todayKey();
 
     const { data: existingTemplate, error: loadTemplateError } = await withOrgScope(supabase, 'lesson_templates', orgId)
       .select('id, student_id, instructor_employee_id, day_of_week, time_of_day, valid_from, valid_until, is_active')

@@ -5,7 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { EnhancedDialogHeader } from '@/components/ui/DialogHeader';
-import { Sparkles, ClipboardList, ShieldCheck, Tag, EyeOff, HardDrive, FileText, Briefcase, History } from 'lucide-react';
+import { Sparkles, ClipboardList, ShieldCheck, Tag, EyeOff, HardDrive, FileText, Briefcase, History, CalendarClock } from 'lucide-react';
 import LocalExportImportManager from '@/components/settings/LocalExportImportManager.jsx';
 import BackupManager from '@/components/settings/BackupManager.jsx';
 import LogoManager from '@/components/settings/LogoManager.jsx';
@@ -17,8 +17,10 @@ import MyInstructorDocuments from '@/components/settings/MyInstructorDocuments.j
 import OrgDocumentsManager from '@/components/settings/OrgDocumentsManager.jsx';
 import AuditLogViewer from '@/components/settings/AuditLogViewer.jsx';
 import BillingSettingsWorkspace from '@/features/finance/components/BillingSettingsWorkspace.jsx';
+import LeaveDefaultSettings from '@/features/finance/components/LeaveDefaultSettings.jsx';
 import { fetchSettingsValue } from '@/features/settings/api/settings.js';
 import { upsertSetting } from '@/features/settings/api/settings.js';
+import { useInstructorEarningsPolicy } from '@/features/finance/hooks/useInstructorEarningsPolicy.js';
 import { OnboardingCard } from '@/features/onboarding/components/OnboardingCard.jsx';
 import { useOrg } from '@/org/OrgContext.jsx';
 import { useSupabase } from '@/context/SupabaseContext.jsx';
@@ -27,13 +29,6 @@ import PageLayout from '@/components/ui/PageLayout.jsx';
 const DEFAULT_BILLING_POLICY = {
   attended: true,
   no_show: false,
-  cancelled_student: false,
-  cancelled_clinic: false,
-};
-
-const DEFAULT_INSTRUCTOR_EARNINGS_POLICY = {
-  attended: true,
-  no_show: true,
   cancelled_student: false,
   cancelled_clinic: false,
 };
@@ -47,7 +42,7 @@ export default function Settings() {
   const canManageSessionForm = normalizedRole === 'admin' || normalizedRole === 'owner';
   const orgIdSyncCompletedRef = useRef(new Set());
   const orgIdSyncInFlightRef = useRef(new Set());
-  const [selectedModule, setSelectedModule] = useState(null); // 'backup' | 'localExport' | 'logo' | 'tags' | 'studentVisibility' | 'storage' | 'documents' | 'orgDocuments' | 'myDocuments' | 'auditLogs' | 'billingSettings'
+  const [selectedModule, setSelectedModule] = useState(null); // 'backup' | 'localExport' | 'logo' | 'tags' | 'studentVisibility' | 'storage' | 'documents' | 'orgDocuments' | 'myDocuments' | 'auditLogs' | 'billingSettings' | 'leaveDefault'
   const [localExportEnabled, setLocalExportEnabled] = useState(false);
   const [logoEnabled, setLogoEnabled] = useState(false);
   const [storageEnabled, setStorageEnabled] = useState(false);
@@ -55,8 +50,13 @@ export default function Settings() {
   const [refreshingPermissions, setRefreshingPermissions] = useState(false);
   const [isInstructor, setIsInstructor] = useState(false);
   const [billingPolicy, setBillingPolicy] = useState(DEFAULT_BILLING_POLICY);
-  const [instructorEarningsPolicy, setInstructorEarningsPolicy] = useState(DEFAULT_INSTRUCTOR_EARNINGS_POLICY);
   const [savingBillingPolicy, setSavingBillingPolicy] = useState(false);
+  // A dated setting: read and saved as versions from a date (dated-settings.js on the server).
+  const instructorEarnings = useInstructorEarningsPolicy({
+    session,
+    orgId: activeOrgId,
+    enabled: canManageSessionForm,
+  });
 
   // Fetch organization feature permissions and initialize if empty using the proper RPC function.
   useEffect(() => {
@@ -289,42 +289,27 @@ export default function Settings() {
   useEffect(() => {
     if (!session || !activeOrgId || !canManageSessionForm) {
       setBillingPolicy(DEFAULT_BILLING_POLICY);
-      setInstructorEarningsPolicy(DEFAULT_INSTRUCTOR_EARNINGS_POLICY);
       return;
     }
 
     let cancelled = false;
     const loadBillingPolicy = async () => {
       try {
-        const [billingResponse, instructorResponse] = await Promise.all([
-          fetchSettingsValue({
-            session,
-            orgId: activeOrgId,
-            key: 'billing_consumption_policy',
-          }),
-          fetchSettingsValue({
-            session,
-            orgId: activeOrgId,
-            key: 'instructor_earnings_policy',
-          }),
-        ]);
+        const billingResponse = await fetchSettingsValue({
+          session,
+          orgId: activeOrgId,
+          key: 'billing_consumption_policy',
+        });
         if (!cancelled) {
           setBillingPolicy({
             ...DEFAULT_BILLING_POLICY,
             ...(billingResponse?.value && typeof billingResponse.value === 'object' ? billingResponse.value : {}),
-          });
-          setInstructorEarningsPolicy({
-            ...DEFAULT_INSTRUCTOR_EARNINGS_POLICY,
-            ...(instructorResponse?.value && typeof instructorResponse.value === 'object'
-              ? instructorResponse.value
-              : {}),
           });
         }
       } catch (error) {
         console.error('Failed to load billing policy in settings', error);
         if (!cancelled) {
           setBillingPolicy(DEFAULT_BILLING_POLICY);
-          setInstructorEarningsPolicy(DEFAULT_INSTRUCTOR_EARNINGS_POLICY);
         }
       }
     };
@@ -429,12 +414,7 @@ export default function Settings() {
         key: 'billing_consumption_policy',
         value: billingPolicy,
       });
-      await upsertSetting({
-        session,
-        orgId: activeOrgId,
-        key: 'instructor_earnings_policy',
-        value: instructorEarningsPolicy,
-      });
+      await instructorEarnings.save();
       toast.success('מדיניות החיוב נשמרה.');
     } catch (error) {
       console.error('Failed to save billing policy from settings', error);
@@ -581,6 +561,33 @@ export default function Settings() {
                 variant={(!canManageSessionForm || !orgReady) ? 'secondary' : 'default'}
               >
                 <Briefcase className="h-4 w-4" /> פתיחת הגדרות חיוב
+              </Button>
+            </CardContent>
+          </Card>
+
+          <Card className="group relative w-full overflow-hidden border-0 bg-white/80 shadow-md transition-all duration-200 hover:shadow-xl hover:scale-[1.02] flex flex-col">
+            <CardHeader className="space-y-2 pb-3 flex-1">
+              <div className="flex items-start gap-2">
+                <div className="rounded-lg bg-emerald-100 p-2 text-emerald-600 transition-colors group-hover:bg-emerald-600 group-hover:text-white">
+                  <CalendarClock className="h-5 w-5" aria-hidden="true" />
+                </div>
+                <CardTitle className="text-lg font-bold text-slate-900">
+                  חופשה
+                </CardTitle>
+              </div>
+              <p className="text-sm text-slate-600 leading-relaxed min-h-[2.5rem]">
+                כמה ימי חופשה מגיעים לעובדים בשנה, וכמה משלמים על יום חופשה.
+              </p>
+            </CardHeader>
+            <CardContent className="pt-0 mt-auto">
+              <Button
+                size="sm"
+                className="w-full gap-2"
+                onClick={() => setSelectedModule('leaveDefault')}
+                disabled={!canManageSessionForm || !orgReady}
+                variant={(!canManageSessionForm || !orgReady) ? 'secondary' : 'default'}
+              >
+                <CalendarClock className="h-4 w-4" /> פתיחת הגדרות חופשה
               </Button>
             </CardContent>
           </Card>
@@ -922,6 +929,7 @@ export default function Settings() {
                 selectedModule === 'studentVisibility' ? <EyeOff /> :
                 selectedModule === 'storage' ? <HardDrive /> :
                 selectedModule === 'billingSettings' ? <Briefcase /> :
+                selectedModule === 'leaveDefault' ? <CalendarClock /> :
                 selectedModule === 'documents' ? <FileText /> :
                 selectedModule === 'orgDocuments' ? <Briefcase /> :
                 selectedModule === 'myDocuments' ? <FileText /> :
@@ -936,6 +944,7 @@ export default function Settings() {
                 selectedModule === 'studentVisibility' ? 'תצוגת תלמידים לא פעילים' :
                 selectedModule === 'storage' ? 'הגדרות אחסון' :
                 selectedModule === 'billingSettings' ? 'חיובים וגורמים מממנים' :
+                selectedModule === 'leaveDefault' ? 'חופשה' :
                 selectedModule === 'documents' ? 'ניהול מסמכים' :
                 selectedModule === 'orgDocuments' ? 'מסמכי הארגון' :
                 selectedModule === 'myDocuments' ? 'המסמכים שלי' :
@@ -978,11 +987,21 @@ export default function Settings() {
                   <BillingSettingsWorkspace
                     billingPolicy={billingPolicy}
                     setBillingPolicy={setBillingPolicy}
-                    instructorPolicy={instructorEarningsPolicy}
-                    setInstructorPolicy={setInstructorEarningsPolicy}
+                    instructorPolicy={instructorEarnings.policy}
+                    setInstructorPolicy={instructorEarnings.setPolicy}
+                    instructorPolicyDates={instructorEarnings}
                     canMutateBillingPolicy={canManageSessionForm}
                     savingPolicy={savingBillingPolicy}
+                    loadingPolicy={instructorEarnings.loading}
                     onSaveBillingPolicy={handleSaveBillingPolicy}
+                  />
+                )}
+                {selectedModule === 'leaveDefault' && (
+                  <LeaveDefaultSettings
+                    session={session}
+                    orgId={activeOrgId}
+                    canEdit={canManageSessionForm && orgReady}
+                    onClose={() => setSelectedModule(null)}
                   />
                 )}
                 {selectedModule === 'documents' && (

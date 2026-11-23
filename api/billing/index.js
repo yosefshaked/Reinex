@@ -1,4 +1,5 @@
 /* eslint-env node */
+import { todayKey as orgTodayKey } from '../_shared/local-time.js';
 import { resolveBearerAuthorization } from '../_shared/http.js';
 import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../_shared/supabase-admin.js';
 import {
@@ -302,7 +303,7 @@ async function buildHmoClaimsReadModel({
 
   const serviceMap = new Map((services || []).map((row) => [row.id, row]));
   const providerMap = new Map((providers || []).map((row) => [row.id, row]));
-  const todayKey = normalizeDateKey(new Date().toISOString().slice(0, 10));
+  const todayKey = normalizeDateKey(orgTodayKey());
 
   const { data: activeAuthorizationStudents, error: activeAuthorizationStudentsError } = await withOrgScope(client, 'hmo_authorizations', orgId)
     .select(`

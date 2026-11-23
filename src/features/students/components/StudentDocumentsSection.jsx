@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { roundTo2 } from '@/lib/round.js';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -59,7 +60,7 @@ function formatFileSize(bytes) {
   const k = 1024;
   const sizes = ['B', 'KB', 'MB', 'GB'];
   const i = Math.floor(Math.log(bytes) / Math.log(k));
-  const size = Math.round((bytes / Math.pow(k, i)) * 100) / 100;
+  const size = roundTo2(bytes / Math.pow(k, i));
   return `${size} ${sizes[i]}`;
 }
 
@@ -659,6 +660,7 @@ export default function StudentDocumentsSection({ student, session, orgId, onRef
         // Track upload progress
         xhr.upload.addEventListener('progress', (e) => {
           if (e.lengthComputable) {
+            // eslint-disable-next-line no-restricted-syntax -- not money: upload progress percentage
             const percentComplete = Math.round((e.loaded / e.total) * 100);
             setBackgroundUploads(prev => 
               prev.map(u => u.id === uploadId ? { ...u, progress: percentComplete } : u)
@@ -835,6 +837,7 @@ export default function StudentDocumentsSection({ student, session, orgId, onRef
 
         xhr.upload.addEventListener('progress', (e) => {
           if (e.lengthComputable) {
+            // eslint-disable-next-line no-restricted-syntax -- not money: upload progress percentage
             const percentComplete = Math.round((e.loaded / e.total) * 100);
             setBackgroundUploads(prev =>
               prev.map(u => u.id === uploadId ? { ...u, progress: percentComplete } : u)

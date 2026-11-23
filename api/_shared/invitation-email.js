@@ -1,6 +1,7 @@
 /* eslint-env node */
 import { readBrevoConfig } from './brevo.js';
 import { sendAndLogBrevoEmail } from './email-log.js';
+import { formatInstant } from './local-time.js';
 
 function escapeHtml(value) {
   return String(value ?? '')
@@ -16,19 +17,14 @@ function formatInvitationExpiry(value) {
     return '';
   }
 
-  try {
-    return new Intl.DateTimeFormat('he-IL', {
-      weekday: 'long',
-      day: 'numeric',
-      month: 'long',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-      timeZone: 'Asia/Jerusalem',
-    }).format(new Date(value));
-  } catch {
-    return String(value);
-  }
+  return formatInstant(value, {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  }) || String(value);
 }
 
 function buildInvitationHashRedirect(redirectTo, invitationToken, tokenHash) {

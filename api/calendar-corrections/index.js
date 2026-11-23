@@ -121,64 +121,11 @@ async function createAppliedCorrectionArtifacts({ client, orgId, billingService,
 
   const createdArtifacts = {
     correction,
-    finance_corrections: [],
-    attendance_corrections: [],
     ledger_adjustments: [],
   };
 
-  const payrollDelta = Number(preview.impact_snapshot?.payroll?.delta_amount || 0);
-  if (payrollDelta !== 0) {
-    const { data: financeCorrection, error: financeError } = await withOrgScope(client, 'finance_corrections', orgId)
-      .insert({
-        employee_id: preview.effective_state?.instance?.instructor_employee_id || preview.effective_state?.instance?.instructor_id,
-        correction_type: 'correction',
-        amount: payrollDelta,
-        effective_date: preview.impact_snapshot?.operational?.attendance_date,
-        notes: reasonText,
-        created_by: userId,
-        updated_by: userId,
-        metadata: {
-          source_type: 'calendar_instance_correction',
-          source_id: correction.id,
-          original_instance_id: preview.original_instance_id,
-        },
-      })
-      .select('*')
-      .single();
-
-    if (financeError) {
-      throw financeError;
-    }
-    createdArtifacts.finance_corrections.push(financeCorrection);
-  }
-
-  const workedMinutesDelta = Number(preview.impact_snapshot?.operational?.delta_minutes || 0);
-  if (workedMinutesDelta !== 0) {
-    const { data: attendanceCorrection, error: attendanceError } = await withOrgScope(client, 'employee_attendance_records', orgId)
-      .insert({
-        employee_id: preview.effective_state?.instance?.instructor_employee_id,
-        attendance_date: preview.impact_snapshot?.operational?.attendance_date,
-        status: workedMinutesDelta >= 0 ? 'present' : 'partial',
-        worked_minutes: workedMinutesDelta,
-        source_type: 'correction',
-        notes: reasonText,
-        created_by: userId,
-        updated_by: userId,
-        metadata: {
-          source_type: 'calendar_instance_correction',
-          source_id: correction.id,
-          original_instance_id: preview.original_instance_id,
-        },
-      })
-      .select('*')
-      .single();
-
-    if (attendanceError) {
-      throw attendanceError;
-    }
-    createdArtifacts.attendance_corrections.push(attendanceCorrection);
-  }
-
+  // Instructor pay and lesson hours are computed from the lesson as corrected (effective_state),
+  // so a correction writes no pay or attendance rows of its own.
   for (const participantImpact of preview.impact_snapshot?.billing?.affected_participants || []) {
     const delta = Number(participantImpact.delta_amount || 0);
     if (delta === 0 || !participantImpact.client_profile_id) {
@@ -307,6 +254,7 @@ export default async function calendarCorrections(context, req) {
   let preview;
   try {
     preview = await buildInstanceCorrectionPreview(supabase, {
+      orgId,
       originalInstanceId,
       correctionMode,
       instancePatch,
@@ -496,8 +444,6 @@ export default async function calendarCorrections(context, req) {
       resourceId: originalInstanceId,
       details: {
         correction_id: result.correction.id,
-        finance_correction_ids: result.finance_corrections.map((entry) => entry.id),
-        attendance_correction_ids: result.attendance_corrections.map((entry) => entry.id),
         ledger_adjustment_ids: result.ledger_adjustments.map((entry) => entry.transactionId || entry.id),
       },
     });
@@ -511,8 +457,6 @@ export default async function calendarCorrections(context, req) {
       resourceId: originalInstanceId,
       afterState: result.correction,
       details: {
-        finance_correction_ids: result.finance_corrections.map((entry) => entry.id),
-        attendance_correction_ids: result.attendance_corrections.map((entry) => entry.id),
         ledger_adjustment_ids: result.ledger_adjustments.map((entry) => entry.transactionId || entry.id),
       },
     });

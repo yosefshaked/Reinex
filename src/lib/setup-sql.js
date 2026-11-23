@@ -34,14 +34,13 @@ export const SETUP_SQL_SCRIPT = String.raw`-- ==================================
 -- Patch Notes (2026-04-09):
 -- - [AGOROT MIGRATION] Converted ALL currency/money columns from numeric to integer (agorot).
 --   1 shekel = 100 agorot. Financial values stored as integers (e.g. ₪10.50 = 1050 agorot).
---   Affected: Employees (current_rate, monthly_salary_amount, leave_fixed_day_rate),
---   Services (default_customer_charge_amount), RateHistory (rate),
---   finance_corrections (amount), instructor_service_capabilities (base_rate),
+--   Affected: Services (default_customer_charge_amount), RateHistory (rate),
+--   finance_corrections (amount),
 --   lesson_templates (price_override), lesson_participants (price_charged),
 --   hmo_provider_tracks (default_customer_charge_amount, default_insurer_claim_amount, default_post_coverage_policy),
 --   hmo_authorizations (covered_customer_charge_amount, covered_insurer_claim_amount, post_coverage_policy),
 --   commitments (total_amount, default_charge_amount),
---   ledger_transactions (amount), lesson_earnings (rate_used, payout_amount).
+--   ledger_transactions (amount).
 --   Non-currency numerics (annual_leave_days, balance_days_delta, pay_fraction,
 --   quantity_days) remain as numeric. get_student_remaining_balance() -> bigint.
 -- - [SCHEMA] ledger_transactions usage_type DEBIT enum extended: +transfer_debit, +refund.
@@ -521,6 +520,20 @@ CREATE INDEX IF NOT EXISTS active_routing_routing_info_gin_idx
 CREATE UNIQUE INDEX IF NOT EXISTS active_routing_active_org_user_uidx
   ON public.active_routing (user_id)
   WHERE user_id IS NOT NULL AND category = 'active_org' AND expires_at IS NULL;
+
+-- -----------------------------------------------------------------
+-- public.schema_migrations
+-- -----------------------------------------------------------------
+-- One row per file in migrations/ that was applied to this database. This script is the snapshot
+-- of the schema as it should be; one-time changes to an existing database (dropping a table or a
+-- column, moving data) live in migrations/ and record themselves here.
+
+CREATE TABLE IF NOT EXISTS public.schema_migrations (
+  version text PRIMARY KEY,
+  applied_at timestamptz NOT NULL DEFAULT now()
+);
+
+ALTER TABLE public.schema_migrations ENABLE ROW LEVEL SECURITY;
 
 -- -----------------------------------------------------------------
 -- public.audit_log (unified: replaces both control audit_log and
@@ -1053,23 +1066,17 @@ CREATE TABLE IF NOT EXISTS public."Employees" (
   "last_name" text,
   "employee_id" text NOT NULL,
   "employee_type" text,
-  "payroll_model" text,
-  "current_rate" integer,
-  "monthly_salary_amount" integer,
   "phone" text,
   "email" text,
   "start_date" date,
   "is_active" boolean DEFAULT true,
   "notes" text,
   "working_days" jsonb,
-  "annual_leave_days" numeric DEFAULT 12,
-  "leave_pay_method" text,
-  "leave_fixed_day_rate" integer,
+  "annual_leave_days" numeric, -- manual leave days per year; null = the organisation default (leave_entitlement_policy)
   "employment_scope" text,
   "instructor_types" uuid[],
   "metadata" jsonb,
-  CONSTRAINT "Employees_pkey" PRIMARY KEY ("id"),
-  CONSTRAINT Employees_payroll_model_check CHECK ("payroll_model" IS NULL OR "payroll_model" IN ('hourly', 'monthly_salary', 'lesson_based'))
+  CONSTRAINT "Employees_pkey" PRIMARY KEY ("id")
 );
 
 
@@ -1140,7 +1147,9 @@ CREATE TABLE IF NOT EXISTS public.employee_attendance_records (
   employee_id uuid NOT NULL,
   attendance_date date NOT NULL,
   status text NOT NULL DEFAULT 'present',
-  worked_minutes integer NULL,
+  -- Work that is not a lesson: office hours, stable work, meetings. Lesson time is never stored
+  -- here; it is read from the calendar when it is needed.
+  other_minutes integer NOT NULL DEFAULT 0,
   notes text NULL,
   source_type text NOT NULL DEFAULT 'manual',
   version int NOT NULL DEFAULT 1,
@@ -1151,21 +1160,16 @@ CREATE TABLE IF NOT EXISTS public.employee_attendance_records (
   metadata jsonb NULL,
   CONSTRAINT employee_attendance_records_employee_id_fkey FOREIGN KEY (employee_id) REFERENCES public."Employees"(id),
   CONSTRAINT employee_attendance_records_status_check CHECK (status IN ('present', 'partial', 'absent', 'remote')),
-  CONSTRAINT employee_attendance_records_source_type_check CHECK (source_type IN ('manual', 'import', 'system', 'correction'))
+  CONSTRAINT employee_attendance_records_source_type_check CHECK (source_type IN ('manual', 'import'))
 );
 
 DROP INDEX IF EXISTS public.employee_attendance_records_employee_date_uidx;
 
 CREATE UNIQUE INDEX IF NOT EXISTS employee_attendance_records_primary_date_uidx
-  ON public.employee_attendance_records (org_id, employee_id, attendance_date)
-  WHERE source_type IN ('manual', 'import', 'system');
+  ON public.employee_attendance_records (org_id, employee_id, attendance_date);
 
 CREATE INDEX IF NOT EXISTS employee_attendance_records_date_idx
   ON public.employee_attendance_records (org_id, attendance_date);
-
-CREATE INDEX IF NOT EXISTS employee_attendance_records_correction_idx
-  ON public.employee_attendance_records (org_id, employee_id, attendance_date, source_type)
-  WHERE source_type = 'correction';
 
 -- -----------------------------------------------------------------
 -- public.employee_leave_entries
@@ -1308,7 +1312,6 @@ CREATE TABLE IF NOT EXISTS public.instructor_service_capabilities (
   employee_id uuid NOT NULL,
   service_id uuid NOT NULL,
   max_students int NOT NULL DEFAULT 1,
-  base_rate integer NULL,
   availability_windows jsonb NOT NULL DEFAULT '[]'::jsonb,
   metadata jsonb NULL,
   CONSTRAINT instructor_service_capabilities_employee_id_fkey FOREIGN KEY (employee_id) REFERENCES public."Employees"(id),
@@ -1806,29 +1809,6 @@ CREATE INDEX IF NOT EXISTS grace_cancellation_requests_created_at_idx
   ON public.grace_cancellation_requests (org_id, created_at DESC);
 
 -- -----------------------------------------------------------------
--- public.payroll_runs
--- -----------------------------------------------------------------
-
-CREATE TABLE IF NOT EXISTS public.payroll_runs (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  org_id uuid NOT NULL REFERENCES public.organizations(id),
-  period_start date NOT NULL,
-  period_end date NOT NULL,
-  status text NOT NULL DEFAULT 'draft',
-  finalized_at timestamptz NULL,
-  finalized_by uuid NULL,
-  version int NOT NULL DEFAULT 1,
-  created_at timestamptz NOT NULL DEFAULT now(),
-  updated_at timestamptz NOT NULL DEFAULT now(),
-  metadata jsonb NULL,
-  CONSTRAINT payroll_runs_status_check CHECK (status IN ('draft', 'finalized', 'cancelled'))
-);
-
-
-CREATE INDEX IF NOT EXISTS payroll_runs_period_idx
-  ON public.payroll_runs (org_id, period_start, period_end, status);
-
--- -----------------------------------------------------------------
 -- public.claim_batches
 -- -----------------------------------------------------------------
 
@@ -1870,7 +1850,7 @@ CREATE TABLE IF NOT EXISTS public.instance_locks (
   created_at timestamptz NOT NULL DEFAULT now(),
   metadata jsonb NULL,
   CONSTRAINT instance_locks_lesson_instance_id_fkey FOREIGN KEY (lesson_instance_id) REFERENCES public.lesson_instances(id) ON DELETE CASCADE,
-  CONSTRAINT instance_locks_source_type_check CHECK (lock_source_type IN ('payroll_run', 'claim_batch', 'manual_compliance_lock'))
+  CONSTRAINT instance_locks_source_type_check CHECK (lock_source_type IN ('claim_batch', 'manual_compliance_lock'))
 );
 
 
@@ -1895,7 +1875,7 @@ CREATE TABLE IF NOT EXISTS public.participant_locks (
   created_at timestamptz NOT NULL DEFAULT now(),
   metadata jsonb NULL,
   CONSTRAINT participant_locks_lesson_participant_id_fkey FOREIGN KEY (lesson_participant_id) REFERENCES public.lesson_participants(id) ON DELETE CASCADE,
-  CONSTRAINT participant_locks_source_type_check CHECK (lock_source_type IN ('payroll_run', 'claim_batch', 'manual_compliance_lock'))
+  CONSTRAINT participant_locks_source_type_check CHECK (lock_source_type IN ('claim_batch', 'manual_compliance_lock'))
 );
 
 
@@ -2414,33 +2394,6 @@ END;
 $$;
 
 -- -----------------------------------------------------------------
--- public.lesson_earnings
--- -----------------------------------------------------------------
-
-CREATE TABLE IF NOT EXISTS public.lesson_earnings (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  org_id uuid NOT NULL REFERENCES public.organizations(id),
-  employee_id uuid NOT NULL,
-  lesson_instance_id uuid NOT NULL,
-  rate_used integer NOT NULL,
-  payout_amount integer NOT NULL,
-  created_at timestamptz NOT NULL DEFAULT now(),
-  metadata jsonb NULL,
-  CONSTRAINT lesson_earnings_employee_id_fkey FOREIGN KEY (employee_id) REFERENCES public."Employees"(id),
-  CONSTRAINT lesson_earnings_lesson_instance_id_fkey FOREIGN KEY (lesson_instance_id) REFERENCES public.lesson_instances(id)
-);
-
-CREATE UNIQUE INDEX IF NOT EXISTS lesson_earnings_employee_lesson_unique
-  ON public.lesson_earnings (org_id, employee_id, lesson_instance_id);
-
-
-CREATE INDEX IF NOT EXISTS lesson_earnings_employee_id_idx
-  ON public.lesson_earnings (org_id, employee_id);
-
-CREATE INDEX IF NOT EXISTS lesson_earnings_lesson_instance_id_idx
-  ON public.lesson_earnings (org_id, lesson_instance_id);
-
--- -----------------------------------------------------------------
 -- public.forms
 -- -----------------------------------------------------------------
 
@@ -2854,12 +2807,65 @@ SELECT
 FROM public.organizations org
 CROSS JOIN (
   VALUES
-    ('leave_policy', '{"carryover_enabled":false,"carryover_cap_days":null,"holiday_rules":[]}'::jsonb),
-    ('leave_pay_policy', '{"default_method":"legal","lookback_months":3,"legal_allow_12m_if_better":true,"fixed_rate_default":0}'::jsonb),
-    ('billing_consumption_policy', '{"attended":true,"no_show":false,"cancelled_student":false,"cancelled_clinic":false}'::jsonb),
-    ('instructor_earnings_policy', '{"attended":true,"no_show":true,"cancelled_student":false,"cancelled_clinic":false}'::jsonb)
+    ('leave_policy', '{"holiday_rules":[]}'::jsonb),
+    ('billing_consumption_policy', '{"attended":true,"no_show":false,"cancelled_student":false,"cancelled_clinic":false}'::jsonb)
 ) AS seed(key, settings_value)
 ON CONFLICT ("org_id", "key") DO NOTHING;
+
+-- -----------------------------------------------------------------
+-- public."SettingsHistory" (dated settings: a version of a setting from a date)
+-- -----------------------------------------------------------------
+-- A setting that changes how money is computed is read as of the date it applies to, like a rate:
+-- the version in force for a lesson is the latest one whose effective_date is on or before the
+-- lesson's local date (api/_shared/dated-settings.js). Such a key lives only here, never in
+-- "Settings". Written only by api/settings; one version per org, key and date.
+-- An employee's own dated setting (the key leave_pay_method: how that employee's leave day is
+-- valued, written by api/employee-leave) is a version with "employee_id" set; a version of the whole
+-- organisation has the all-zero employee_id, so one unique index covers both and an upsert can
+-- name its conflict columns.
+
+CREATE TABLE IF NOT EXISTS public."SettingsHistory" (
+  "id" uuid NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
+  "org_id" uuid NOT NULL REFERENCES public.organizations(id),
+  "key" text NOT NULL,
+  "effective_date" date NOT NULL,
+  "employee_id" uuid NOT NULL DEFAULT '00000000-0000-0000-0000-000000000000',
+  "settings_value" jsonb NOT NULL,
+  "notes" text,
+  "created_by" uuid NULL,
+  "created_at" timestamptz NOT NULL DEFAULT now()
+);
+
+ALTER TABLE public."SettingsHistory"
+  ADD COLUMN IF NOT EXISTS "employee_id" uuid NOT NULL DEFAULT '00000000-0000-0000-0000-000000000000';
+
+CREATE UNIQUE INDEX IF NOT EXISTS settings_history_org_key_employee_effective_date_uidx
+  ON public."SettingsHistory" ("org_id", "key", "employee_id", "effective_date");
+
+-- A first version "since the beginning" (2000-01-01, as rates carried over from before rate
+-- history) for each organisation that has no version of the key yet.
+INSERT INTO public."SettingsHistory" ("org_id", "key", "effective_date", "settings_value", "notes")
+SELECT
+  org.id,
+  seed.key,
+  DATE '2000-01-01',
+  -- A value still in "Settings" (migrations/0003 not applied yet) is the organisation's, not the default.
+  COALESCE(
+    (SELECT current."settings_value" FROM public."Settings" current
+     WHERE current."org_id" = org.id AND current."key" = seed.key LIMIT 1),
+    seed.settings_value
+  ),
+  NULL
+FROM public.organizations org
+CROSS JOIN (
+  VALUES
+    ('leave_pay_policy', '{"default_method":"legal","lookback_months":3,"fixed_rate_default":0}'::jsonb),
+    ('instructor_earnings_policy', '{"attended":true,"no_show":true,"cancelled_student":false,"cancelled_clinic":false}'::jsonb)
+) AS seed(key, settings_value)
+WHERE NOT EXISTS (
+  SELECT 1 FROM public."SettingsHistory" existing
+  WHERE existing."org_id" = org.id AND existing."key" = seed.key
+);
 
 -- -----------------------------------------------------------------
 -- public."Documents" (polymorphic file metadata)
@@ -3062,7 +3068,6 @@ DECLARE
   v_cancelled_participant_ids uuid[] := ARRAY[]::uuid[];
   v_cancelled_participant_audit_rows jsonb := '[]'::jsonb;
   v_billing_policy jsonb := '{"attended":true,"no_show":false,"cancelled_student":false,"cancelled_clinic":false}'::jsonb;
-  v_instructor_policy jsonb := '{"attended":true,"no_show":true,"cancelled_student":false,"cancelled_clinic":false}'::jsonb;
   v_instance_before_state jsonb := NULL;
   v_instance_after_state jsonb := NULL;
 BEGIN
@@ -3109,7 +3114,7 @@ BEGIN
     FROM public.instance_locks
     WHERE lesson_instance_id = p_instance_id
       AND org_id = p_org_id
-      AND lock_source_type IN ('payroll_run', 'claim_batch')
+      AND lock_source_type = 'claim_batch'
   ) OR EXISTS (
     SELECT 1
     FROM public.participant_locks lock_row
@@ -3117,7 +3122,7 @@ BEGIN
       ON participant.id = lock_row.lesson_participant_id
     WHERE participant.lesson_instance_id = p_instance_id
       AND participant.org_id = p_org_id
-      AND lock_row.lock_source_type IN ('payroll_run', 'claim_batch')
+      AND lock_row.lock_source_type = 'claim_batch'
   ) THEN
     RETURN QUERY
     SELECT
@@ -3198,16 +3203,6 @@ BEGIN
     v_billing_policy := '{"attended":true,"no_show":false,"cancelled_student":false,"cancelled_clinic":false}'::jsonb;
   END IF;
 
-  SELECT settings_value
-  INTO v_instructor_policy
-  FROM public."Settings"
-  WHERE "org_id" = p_org_id
-    AND key = 'instructor_earnings_policy'
-  LIMIT 1;
-
-  IF v_instructor_policy IS NULL THEN
-    v_instructor_policy := '{"attended":true,"no_show":true,"cancelled_student":false,"cancelled_clinic":false}'::jsonb;
-  END IF;
 
   WITH participants_before AS (
     SELECT
@@ -3242,7 +3237,8 @@ BEGIN
               'instructor_compensation',
               COALESCE(COALESCE(participant.metadata, '{}'::jsonb)->'workflow'->'instructor_compensation', '{}'::jsonb)
                 || jsonb_build_object(
-                  'decision', 'not_compensated',
+                  -- No stored decision: the earnings policy in force on the lesson's date decides.
+                  'decision', 'unknown',
                   'decided_at', v_now,
                   'decided_by', p_actor_user_id,
                   'reason', 'instance_cancelled'
@@ -3268,9 +3264,7 @@ BEGIN
         jsonb_build_object(
           'evaluated_at', v_now,
           'participant_status', 'cancelled_clinic',
-          'billing_consumption_policy', v_billing_policy,
-          'instructor_earnings_policy', v_instructor_policy,
-          'instructor_compensation_decision', 'not_compensated'
+          'billing_consumption_policy', v_billing_policy
         )
       ),
       '{}'::jsonb
@@ -3341,7 +3335,6 @@ DECLARE
   v_promoted_participant_ids uuid[] := ARRAY[]::uuid[];
   v_promoted_participant_audit_rows jsonb := '[]'::jsonb;
   v_billing_policy jsonb := '{"attended":true,"no_show":false,"cancelled_student":false,"cancelled_clinic":false}'::jsonb;
-  v_instructor_policy jsonb := '{"attended":true,"no_show":true,"cancelled_student":false,"cancelled_clinic":false}'::jsonb;
   v_instance_before_state jsonb := NULL;
   v_instance_after_state jsonb := NULL;
 BEGIN
@@ -3386,7 +3379,7 @@ BEGIN
     FROM public.instance_locks
     WHERE lesson_instance_id = p_instance_id
       AND org_id = p_org_id
-      AND lock_source_type IN ('payroll_run', 'claim_batch')
+      AND lock_source_type = 'claim_batch'
   ) OR EXISTS (
     SELECT 1
     FROM public.participant_locks lock_row
@@ -3394,7 +3387,7 @@ BEGIN
       ON participant.id = lock_row.lesson_participant_id
     WHERE participant.lesson_instance_id = p_instance_id
       AND participant.org_id = p_org_id
-      AND lock_row.lock_source_type IN ('payroll_run', 'claim_batch')
+      AND lock_row.lock_source_type = 'claim_batch'
   ) THEN
     RETURN QUERY
     SELECT
@@ -3426,15 +3419,6 @@ BEGIN
     v_billing_policy := '{"attended":true,"no_show":false,"cancelled_student":false,"cancelled_clinic":false}'::jsonb;
   END IF;
 
-  SELECT settings_value
-  INTO v_instructor_policy
-  FROM public."Settings"
-  WHERE "org_id" = p_org_id AND key = 'instructor_earnings_policy'
-  LIMIT 1;
-
-  IF v_instructor_policy IS NULL THEN
-    v_instructor_policy := '{"attended":true,"no_show":true,"cancelled_student":false,"cancelled_clinic":false}'::jsonb;
-  END IF;
 
   WITH participants_before AS (
     SELECT
@@ -3469,7 +3453,8 @@ BEGIN
               'instructor_compensation',
               COALESCE(COALESCE(participant.metadata, '{}'::jsonb)->'workflow'->'instructor_compensation', '{}'::jsonb)
                 || jsonb_build_object(
-                  'decision', 'compensated',
+                  -- No stored decision: the earnings policy in force on the lesson's date decides.
+                  'decision', 'unknown',
                   'decided_at', v_now,
                   'decided_by', p_actor_user_id,
                   'reason', 'attended'
@@ -3495,9 +3480,7 @@ BEGIN
         jsonb_build_object(
           'evaluated_at', v_now,
           'participant_status', 'attended',
-          'billing_consumption_policy', v_billing_policy,
-          'instructor_earnings_policy', v_instructor_policy,
-          'instructor_compensation_decision', 'compensated'
+          'billing_consumption_policy', v_billing_policy
         )
       ),
       '{}'::jsonb
@@ -3569,7 +3552,6 @@ DECLARE
   v_cancelled_participant_audit_rows jsonb := '[]'::jsonb;
   v_blocking_participants jsonb := '[]'::jsonb;
   v_billing_policy jsonb := '{"attended":true,"no_show":false,"cancelled_student":false,"cancelled_clinic":false}'::jsonb;
-  v_instructor_policy jsonb := '{"attended":true,"no_show":true,"cancelled_student":false,"cancelled_clinic":false}'::jsonb;
   v_has_scheduled boolean := false;
   v_has_attended boolean := false;
   v_next_status text := 'scheduled';
@@ -3605,7 +3587,7 @@ BEGIN
     FROM public.instance_locks
     WHERE lesson_instance_id = p_instance_id
       AND org_id = p_org_id
-      AND lock_source_type IN ('payroll_run', 'claim_batch')
+      AND lock_source_type = 'claim_batch'
   ) OR EXISTS (
     SELECT 1
     FROM public.participant_locks lock_row
@@ -3613,7 +3595,7 @@ BEGIN
       ON participant.id = lock_row.lesson_participant_id
     WHERE participant.lesson_instance_id = p_instance_id
       AND participant.org_id = p_org_id
-      AND lock_row.lock_source_type IN ('payroll_run', 'claim_batch')
+      AND lock_row.lock_source_type = 'claim_batch'
   ) THEN
     RETURN QUERY
     SELECT
@@ -3697,15 +3679,6 @@ BEGIN
     v_billing_policy := '{"attended":true,"no_show":false,"cancelled_student":false,"cancelled_clinic":false}'::jsonb;
   END IF;
 
-  SELECT settings_value
-  INTO v_instructor_policy
-  FROM public."Settings"
-  WHERE "org_id" = p_org_id AND key = 'instructor_earnings_policy'
-  LIMIT 1;
-
-  IF v_instructor_policy IS NULL THEN
-    v_instructor_policy := '{"attended":true,"no_show":true,"cancelled_student":false,"cancelled_clinic":false}'::jsonb;
-  END IF;
 
   WITH participants_before AS (
     SELECT
@@ -3768,7 +3741,6 @@ BEGIN
           'evaluated_at', v_now,
           'participant_status', 'cancelled_student',
           'billing_consumption_policy', v_billing_policy,
-          'instructor_earnings_policy', v_instructor_policy,
           'instructor_compensation_decision', 'not_compensated'
         )
       ),
@@ -3924,17 +3896,6 @@ BEGIN
 
   IF NOT EXISTS (
     SELECT 1 FROM pg_trigger
-    WHERE tgname = 'trg_payroll_runs_set_updated_at_version'
-      AND tgrelid = 'public.payroll_runs'::regclass
-  ) THEN
-    CREATE TRIGGER trg_payroll_runs_set_updated_at_version
-      BEFORE UPDATE ON public.payroll_runs
-      FOR EACH ROW
-      EXECUTE FUNCTION public.set_entity_updated_at_and_version();
-  END IF;
-
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_trigger
     WHERE tgname = 'trg_claim_batches_set_updated_at_version'
       AND tgrelid = 'public.claim_batches'::regclass
   ) THEN
@@ -3990,7 +3951,6 @@ CREATE INDEX IF NOT EXISTS hmo_authorizations_status_idx ON public.hmo_authoriza
 CREATE INDEX IF NOT EXISTS employee_leave_entries_status_idx ON public.employee_leave_entries (org_id, status);
 CREATE INDEX IF NOT EXISTS employee_leave_days_date_idx ON public.employee_leave_days (org_id, leave_date);
 CREATE INDEX IF NOT EXISTS finance_corrections_type_idx ON public.finance_corrections (org_id, correction_type);
-CREATE INDEX IF NOT EXISTS payroll_runs_status_idx ON public.payroll_runs (org_id, status, finalized_at);
 CREATE INDEX IF NOT EXISTS claim_batches_status_idx ON public.claim_batches (org_id, status, paid_at);
 CREATE INDEX IF NOT EXISTS dashboard_tasks_resource_idx ON public.dashboard_tasks (org_id, resource_type, resource_id, status);
 
@@ -4472,7 +4432,6 @@ ALTER TABLE public.employee_leave_entries ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.employee_leave_days ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.employee_leave_balance_events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.finance_corrections ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.payroll_runs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.claim_batches ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.instance_locks ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.participant_locks ENABLE ROW LEVEL SECURITY;
@@ -4490,7 +4449,6 @@ ALTER TABLE public.instructor_break_templates ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.grace_cancellation_requests ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.commitments ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.ledger_transactions ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.lesson_earnings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.forms ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.shared_form_blocks ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.form_shared_block_links ENABLE ROW LEVEL SECURITY;
@@ -4498,6 +4456,7 @@ ALTER TABLE public.form_submissions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.otp_challenges ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.waiting_list_entries ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public."Settings" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public."SettingsHistory" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public."Documents" ENABLE ROW LEVEL SECURITY;
 
 DO $$
@@ -4523,7 +4482,6 @@ BEGIN
     'employee_leave_days',
     'employee_leave_balance_events',
     'finance_corrections',
-    'payroll_runs',
     'claim_batches',
     'instance_locks',
     'participant_locks',
@@ -4541,7 +4499,6 @@ BEGIN
     'grace_cancellation_requests',
     'commitments',
     'ledger_transactions',
-    'lesson_earnings',
     'forms',
     'shared_form_blocks',
     'form_shared_block_links',
@@ -4549,6 +4506,7 @@ BEGIN
     'otp_challenges',
     'waiting_list_entries',
     'Settings',
+    'SettingsHistory',
     'Documents'
   ]
   LOOP
@@ -4621,7 +4579,6 @@ GRANT ALL ON TABLE public.employee_leave_entries TO app_user;
 GRANT ALL ON TABLE public.employee_leave_days TO app_user;
 GRANT ALL ON TABLE public.employee_leave_balance_events TO app_user;
 GRANT ALL ON TABLE public.finance_corrections TO app_user;
-GRANT ALL ON TABLE public.payroll_runs TO app_user;
 GRANT ALL ON TABLE public.claim_batches TO app_user;
 GRANT ALL ON TABLE public.instance_locks TO app_user;
 GRANT ALL ON TABLE public.participant_locks TO app_user;
@@ -4641,7 +4598,6 @@ GRANT ALL ON TABLE public.instructor_break_templates TO app_user;
 GRANT ALL ON TABLE public.grace_cancellation_requests TO app_user;
 GRANT ALL ON TABLE public.commitments TO app_user;
 GRANT ALL ON TABLE public.ledger_transactions TO app_user;
-GRANT ALL ON TABLE public.lesson_earnings TO app_user;
 GRANT ALL ON TABLE public.forms TO app_user;
 GRANT ALL ON TABLE public.shared_form_blocks TO app_user;
 GRANT ALL ON TABLE public.form_shared_block_links TO app_user;
@@ -4649,6 +4605,7 @@ GRANT ALL ON TABLE public.form_submissions TO app_user;
 GRANT ALL ON TABLE public.otp_challenges TO app_user;
 GRANT ALL ON TABLE public.waiting_list_entries TO app_user;
 GRANT ALL ON TABLE public."Settings" TO app_user;
+GRANT ALL ON TABLE public."SettingsHistory" TO app_user;
 GRANT ALL ON TABLE public."Documents" TO app_user;
 
 GRANT app_user TO postgres, authenticated, anon;
@@ -4916,12 +4873,12 @@ DECLARE
     'grace_cancellation_requests',
     'commitments',
     'ledger_transactions',
-    'lesson_earnings',
     'forms',
     'form_submissions',
     'otp_challenges',
     'waiting_list_entries',
     'Settings',
+    'SettingsHistory',
     'Documents'
   ];
   table_name text;
@@ -6838,4 +6795,82 @@ GRANT EXECUTE ON FUNCTION public.patch_import_workspace_config(uuid, uuid, jsonb
 -- api/import-commit-chunk/. Drop the dead function so it is not left dangling.
 -- =================================================================
 DROP FUNCTION IF EXISTS public.commit_import_chunk(uuid, uuid, uuid[]);
+
+-- =================================================================
+-- Patch 2026-09-17: RateHistory is the single source of truth for pay rates
+-- (implementations/business-process/payroll-prerequisites.md, P2).
+-- A row means "from effective_date until the next row of the same kind, the rate is X".
+-- pay_basis: lesson_hourly / lesson_flat (service required), attendance_hourly /
+-- monthly_salary / leave_day (no service). Pay code reads only RateHistory.
+-- =================================================================
+ALTER TABLE public."RateHistory" ADD COLUMN IF NOT EXISTS "pay_basis" text NULL;
+ALTER TABLE public."RateHistory" ADD COLUMN IF NOT EXISTS "created_at" timestamptz NOT NULL DEFAULT now();
+ALTER TABLE public."RateHistory" ADD COLUMN IF NOT EXISTS "created_by" uuid NULL;
+
+-- Legacy rows had no kind: a row with a service is a lesson rate, a row without one an hourly rate.
+UPDATE public."RateHistory"
+SET "pay_basis" = CASE WHEN "service_id" IS NOT NULL THEN 'lesson_hourly' ELSE 'attendance_hourly' END
+WHERE "pay_basis" IS NULL;
+
+ALTER TABLE public."RateHistory" ALTER COLUMN "pay_basis" SET NOT NULL;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'RateHistory_pay_basis_check'
+      AND conrelid = 'public."RateHistory"'::regclass
+  ) THEN
+    ALTER TABLE public."RateHistory"
+      ADD CONSTRAINT "RateHistory_pay_basis_check"
+      CHECK ("pay_basis" IN ('lesson_hourly', 'lesson_flat', 'attendance_hourly', 'monthly_salary', 'leave_day'));
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'RateHistory_service_matches_pay_basis_check'
+      AND conrelid = 'public."RateHistory"'::regclass
+  ) THEN
+    ALTER TABLE public."RateHistory"
+      ADD CONSTRAINT "RateHistory_service_matches_pay_basis_check"
+      CHECK (("pay_basis" IN ('lesson_hourly', 'lesson_flat')) = ("service_id" IS NOT NULL));
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'RateHistory_rate_non_negative_check'
+      AND conrelid = 'public."RateHistory"'::regclass
+  ) THEN
+    ALTER TABLE public."RateHistory"
+      ADD CONSTRAINT "RateHistory_rate_non_negative_check"
+      CHECK ("rate" >= 0);
+  END IF;
+END $$;
+
+-- One rate per employee, kind, service and effective date ("no service" compares equal).
+-- Created only when no duplicates exist, so an unexpected legacy duplicate can't abort the script.
+DROP INDEX IF EXISTS public."RateHistory_employee_service_effective_date_key";
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM public."RateHistory" rh
+    GROUP BY rh."org_id", rh."employee_id", rh."pay_basis",
+      COALESCE(rh."service_id", '00000000-0000-0000-0000-000000000000'::uuid), rh."effective_date"
+    HAVING count(*) > 1
+  ) THEN
+    CREATE UNIQUE INDEX IF NOT EXISTS "RateHistory_employee_basis_service_effective_date_key"
+      ON public."RateHistory" (
+        "org_id", "employee_id", "pay_basis",
+        COALESCE("service_id", '00000000-0000-0000-0000-000000000000'::uuid),
+        "effective_date"
+      );
+  ELSE
+    RAISE NOTICE 'RateHistory has duplicate rates for the same employee, kind, service and date; unique index not created.';
+  END IF;
+END $$;
+
+CREATE INDEX IF NOT EXISTS "RateHistory_employee_basis_effective_date_idx"
+  ON public."RateHistory" ("org_id", "employee_id", "pay_basis", "effective_date");
 `;

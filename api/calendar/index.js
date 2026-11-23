@@ -21,14 +21,18 @@ import {
   withOrgScope,
 } from '../_shared/org-bff.js';
 import { parseJsonBodyWithLimit } from '../_shared/validation.js';
-import { assertNoLeaveForLesson, syncInstructorAttendanceFromLessons, syncLessonInstructorEarnings, toDateKey, validateInstructorRateForLesson } from '../_shared/employee-finance.js';
+import {
+  assertNoLeaveForLesson,
+  checkInstructorRateForLesson,
+  hasLessonPayDateChanged,
+} from '../_shared/employee-finance.js';
+import { localDateKey, localDateRangeUtc, todayKey } from '../_shared/local-time.js';
+import { checkRequestedLessonStart } from '../_shared/clock-change-rules.js';
 import BillingLedgerService from '../_shared/BillingLedgerService.js';
 import { logTenantAuditEvent, TENANT_AUDIT_RETENTION } from '../_shared/tenant-audit.js';
 import { syncLessonClosureState } from '../_shared/calendar-workflow.js';
 import { enrichLessonInstancesWithHmoCoverage } from '../_shared/calendar-hmo-coverage.js';
 import {
-  buildUtcBoundsForTimezoneDateRange,
-  getCurrentDateInTimezone,
   extractScheduleSlotFromIso,
   hasConfiguredAvailability,
   isWithinAvailabilityWindows,
@@ -478,7 +482,7 @@ async function handleGetInstances(context, req, dbContext, userId, canManageAll)
     endDate = dateParam;
   } else {
     // Default to today
-    const today = getCurrentDateInTimezone();
+    const today = todayKey();
     startDate = today;
     endDate = today;
   }
@@ -489,7 +493,7 @@ async function handleGetInstances(context, req, dbContext, userId, canManageAll)
     return respond(context, 400, { message: 'invalid_date_format_use_yyyy_mm_dd' });
   }
 
-  const utcBounds = buildUtcBoundsForTimezoneDateRange(startDate, endDate);
+  const utcBounds = localDateRangeUtc(startDate, endDate);
   if (!utcBounds) {
     return respond(context, 400, { message: 'invalid_date_range' });
   }
@@ -579,7 +583,7 @@ async function handleGetInstances(context, req, dbContext, userId, canManageAll)
 
   // Non-admin/office users: filter by their instructor record
   if (!canManageAll) {
-    const { instructorId, error: instructorError } = await resolveActorInstructorId(client, userId);
+    const { instructorId, error: instructorError } = await resolveActorInstructorId(client, orgId, userId);
 
     if (instructorError) {
       context.log?.error?.('calendar/instances failed to find instructor', { message: instructorError.message });
@@ -772,7 +776,7 @@ async function handleGetInstances(context, req, dbContext, userId, canManageAll)
   });
 
   const coverageEnrichedInstances = await enrichLessonInstancesWithHmoCoverage(client, orgId, transformedInstances);
-  const enrichedInstances = await enrichInstancesWithCorrectionState(client, coverageEnrichedInstances);
+  const enrichedInstances = await enrichInstancesWithCorrectionState(client, orgId, coverageEnrichedInstances);
   return respond(context, 200, enrichedInstances);
 }
 
@@ -783,6 +787,9 @@ async function handleCreateInstance(context, body, dbContext, supabase, authCont
   if (!body.datetime_start) {
     return respond(context, 400, { message: 'missing_datetime_start' });
   }
+  // A start inside the hour the clock skips (spring forward) does not exist.
+  const clockChangeRefusal = checkRequestedLessonStart(body);
+  if (clockChangeRefusal) return respond(context, 422, clockChangeRefusal);
   if (!body.instructor_employee_id) {
     return respond(context, 400, { message: 'missing_instructor_employee_id' });
   }
@@ -809,7 +816,7 @@ async function handleCreateInstance(context, body, dbContext, supabase, authCont
 
   // Non-admin users can only create lessons for themselves
   if (!isAdmin) {
-    const { instructorId, error: instructorError } = await resolveActorInstructorId(client, userId);
+    const { instructorId, error: instructorError } = await resolveActorInstructorId(client, orgId, userId);
     if (instructorError) {
       context.log?.error?.('calendar/instances failed to resolve actor instructor', { message: instructorError.message, userId });
       return respondTracked(context, 500, { message: 'failed_to_resolve_actor_instructor' }, undefined, { error: instructorError });
@@ -960,9 +967,9 @@ async function handleCreateInstance(context, body, dbContext, supabase, authCont
     return respond(context, 400, { message: 'missing_or_invalid_participants' });
   }
 
-  const leaveConflict = await assertNoLeaveForLesson(client, {
+  const leaveConflict = await assertNoLeaveForLesson(client, orgId, {
     employeeId: body.instructor_employee_id,
-    date: toDateKey(body.datetime_start),
+    date: localDateKey(body.datetime_start),
   });
 
   if (leaveConflict) {
@@ -989,6 +996,17 @@ async function handleCreateInstance(context, body, dbContext, supabase, authCont
     });
     return respondTracked(context, 500, { message: 'failed_to_validate_instructor_availability' }, undefined, { error: availabilityError });
   }
+
+  // A person choosing an instructor, service and date must choose one that pays. Lessons the
+  // system makes (template generation, imports) are written elsewhere and never pass through here.
+  const rateCheck = await checkInstructorRateForLesson(client, {
+    orgId,
+    instructorEmployeeId: body.instructor_employee_id,
+    serviceId: body.service_id,
+    lessonDate: body.datetime_start,
+  }, context);
+  if (rateCheck?.error) return respondTracked(context, 500, rateCheck.body, undefined, { error: rateCheck.error });
+  if (rateCheck) return respond(context, 422, rateCheck.body);
 
   // Create lesson instance
   const instanceData = {
@@ -1109,7 +1127,6 @@ async function handleCreateInstance(context, body, dbContext, supabase, authCont
       actorUserId: userId,
       reasonCode: 'lesson_updated',
     });
-    await syncLessonInstructorEarnings(client, instance.id, userId);
     await syncLessonClosureState(client, instance.id, userId);
   } catch (syncError) {
     context.log?.error?.('calendar/instances failed to sync financial artifacts after create', {
@@ -1146,7 +1163,7 @@ async function handleUpdateInstance(context, req, body, dbContext, supabase, aut
 
   const expectedVersion = parseExpectedVersion(body.version, body.expected_version, body.expectedVersion);
 
-  const { error: mutationStateError, result: mutationState } = await fetchLessonMutationState(client, {
+  const { error: mutationStateError, result: mutationState } = await fetchLessonMutationState(client, orgId, {
     instanceId: body.id,
   });
 
@@ -1183,7 +1200,7 @@ async function handleUpdateInstance(context, req, body, dbContext, supabase, aut
 
   // Instructors (non-admin/office) can only update their own lessons
   if (!canManageAll) {
-    const { instructorId, error: instructorError } = await resolveActorInstructorId(client, userId);
+    const { instructorId, error: instructorError } = await resolveActorInstructorId(client, orgId, userId);
     if (instructorError) {
       context.log?.error?.('calendar/instances failed to resolve actor instructor', { message: instructorError.message, userId });
       return respondTrackedCalendarError({
@@ -1264,8 +1281,14 @@ async function handleUpdateInstance(context, req, body, dbContext, supabase, aut
     body.status = normalizedStatus;
   }
 
+  if (body.datetime_start !== undefined) {
+    // A start moved into the hour the clock skips (spring forward) does not exist.
+    const clockChangeRefusal = checkRequestedLessonStart(body);
+    if (clockChangeRefusal) return respond(context, 422, clockChangeRefusal);
+  }
+
   const targetInstructorId = body.instructor_employee_id || existingInstance.instructor_employee_id;
-  const targetDate = toDateKey(body.datetime_start || existingInstance.datetime_start);
+  const targetDate = localDateKey(body.datetime_start || existingInstance.datetime_start);
   const hasServiceUpdate = Object.prototype.hasOwnProperty.call(body, 'service_id');
   const requestedServiceId = hasServiceUpdate ? body.service_id : undefined;
   const targetServiceId = requestedServiceId || existingInstance.service_id;
@@ -1315,7 +1338,7 @@ async function handleUpdateInstance(context, req, body, dbContext, supabase, aut
 
   let leaveConflict = null;
   if (targetInstructorId && targetDate) {
-    leaveConflict = await assertNoLeaveForLesson(client, {
+    leaveConflict = await assertNoLeaveForLesson(client, orgId, {
       employeeId: targetInstructorId,
       date: targetDate,
     });
@@ -1357,6 +1380,28 @@ async function handleUpdateInstance(context, req, body, dbContext, supabase, aut
     }
   }
 
+  // Moving a lesson to another instructor, service or day is a person's choice, so it must land on
+  // a combination that pays. Marking the outcome or completing the lesson is never blocked.
+  const instructorChanged = String(targetInstructorId || '') !== String(existingInstance.instructor_employee_id || '');
+  // Pay is counted on the lesson's date in Israel, so compare that date, not the UTC one.
+  const lessonDateChanged = hasLessonPayDateChanged(existingInstance.datetime_start, body.datetime_start);
+  if (instructorChanged || serviceChanged || lessonDateChanged) {
+    const rateCheck = await checkInstructorRateForLesson(client, {
+      orgId,
+      instructorEmployeeId: targetInstructorId,
+      serviceId: targetServiceId,
+      lessonDate: body.datetime_start || existingInstance.datetime_start,
+    }, context);
+    if (rateCheck?.error) {
+      return respondTrackedCalendarError({
+        message: rateCheck.body.message,
+        error: rateCheck.error,
+        metadata: { instructor_employee_id: targetInstructorId, service_id: targetServiceId },
+      });
+    }
+    if (rateCheck) return respond(context, 422, rateCheck.body);
+  }
+
   if (isPreviewUpdate) {
     if (!canManageAll) {
       return respond(context, 403, { message: 'forbidden' });
@@ -1387,25 +1432,6 @@ async function handleUpdateInstance(context, req, body, dbContext, supabase, aut
       instance_version: existingInstance.version,
       preview,
     });
-  }
-
-  // Instructor rate pre-flight: block completion if no base_rate is configured.
-  // Instance cancellation does not trigger instructor earnings; participant-level policies do.
-  const EARNING_STATUSES = new Set(['completed']);
-  const newStatus = typeof body.status === 'string' ? body.status.trim().toLowerCase() : '';
-  if (EARNING_STATUSES.has(newStatus)) {
-    const rateError = await validateInstructorRateForLesson(client, {
-      instructorEmployeeId: body.instructor_employee_id || existingInstance.instructor_employee_id,
-      serviceId: body.service_id || existingInstance.service_id,
-    });
-    if (rateError) {
-      return respond(context, 422, {
-        message: 'לא ניתן להשלים את השיעור: תעריף המדריך לשירות זה לא הוגדר. יש להגדיר תעריף בכרטיס המדריך.',
-        code: rateError.code,
-        instructor_employee_id: rateError.instructor_employee_id,
-        service_id: rateError.service_id,
-      });
-    }
   }
 
   if (body.closed_reason !== undefined) {
@@ -1514,7 +1540,7 @@ async function handleUpdateInstance(context, req, body, dbContext, supabase, aut
       }
 
       if (cancellationResult.outcome === 'locked' || cancellationResult.outcome === 'closed') {
-        const { error: refreshedError, result: refreshedState } = await fetchLessonMutationState(client, {
+        const { error: refreshedError, result: refreshedState } = await fetchLessonMutationState(client, orgId, {
           instanceId: body.id,
         });
         if (refreshedError) {
@@ -1602,7 +1628,7 @@ async function handleUpdateInstance(context, req, body, dbContext, supabase, aut
       }
 
       if (completionResult.outcome === 'locked' || completionResult.outcome === 'closed') {
-        const { error: refreshedError, result: refreshedState } = await fetchLessonMutationState(client, {
+        const { error: refreshedError, result: refreshedState } = await fetchLessonMutationState(client, orgId, {
           instanceId: body.id,
         });
         if (refreshedError) {
@@ -1692,7 +1718,7 @@ async function handleUpdateInstance(context, req, body, dbContext, supabase, aut
     }
 
     if (!updatedInstanceRow) {
-      const { error: refreshedError, result: refreshedState } = await fetchLessonMutationState(client, {
+      const { error: refreshedError, result: refreshedState } = await fetchLessonMutationState(client, orgId, {
         instanceId: body.id,
       });
       if (refreshedError) {
@@ -1837,8 +1863,6 @@ async function handleUpdateInstance(context, req, body, dbContext, supabase, aut
       actorUserId: userId,
       reasonCode: 'lesson_updated',
     });
-    await syncLessonInstructorEarnings(client, body.id, userId);
-    await syncInstructorAttendanceFromLessons(client, body.id, userId);
     await syncLessonClosureState(client, body.id, userId);
     billingWarnings = (billingResult?.participantResults || [])
       .filter((row) => row.status === 'blocked')

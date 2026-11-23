@@ -90,12 +90,6 @@ export const PURGE_MANIFEST = [
     strategy: 'hard_delete', orgIdColumn: 'org_id',
   },
   {
-    phase: 2, step: '2.2',
-    table: 'lesson_earnings',        pgName: 'lesson_earnings',
-    schemaQuoted: 'public.lesson_earnings',
-    strategy: 'hard_delete', orgIdColumn: 'org_id',
-  },
-  {
     phase: 2, step: '2.3',
     table: 'hmo_invoice_batch_items', pgName: 'hmo_invoice_batch_items',
     schemaQuoted: 'public.hmo_invoice_batch_items',
@@ -105,12 +99,6 @@ export const PURGE_MANIFEST = [
     phase: 2, step: '2.4',
     table: 'hmo_invoice_batches',    pgName: 'hmo_invoice_batches',
     schemaQuoted: 'public.hmo_invoice_batches',
-    strategy: 'hard_delete', orgIdColumn: 'org_id',
-  },
-  {
-    phase: 2, step: '2.5',
-    table: 'payroll_runs',           pgName: 'payroll_runs',
-    schemaQuoted: 'public.payroll_runs',
     strategy: 'hard_delete', orgIdColumn: 'org_id',
   },
   {
@@ -278,6 +266,12 @@ export const PURGE_MANIFEST = [
     phase: 9, step: '9.3',
     table: 'ledger_accounts',        pgName: 'ledger_accounts',
     schemaQuoted: 'public.ledger_accounts',
+    strategy: 'hard_delete', orgIdColumn: 'org_id',
+  },
+  {
+    phase: 9, step: '9.4',
+    table: 'SettingsHistory',        pgName: 'SettingsHistory',
+    schemaQuoted: 'public."SettingsHistory"',
     strategy: 'hard_delete', orgIdColumn: 'org_id',
   },
 

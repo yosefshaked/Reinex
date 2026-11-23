@@ -12,7 +12,6 @@ function normalizeUuid(raw) {
 }
 
 export default function HiddenUatAdminToolsDialog({ open, onOpenChange, orgId, password }) {
-  const [payrollInstanceId, setPayrollInstanceId] = useState('');
   const [paidClaimInstanceId, setPaidClaimInstanceId] = useState('');
   const [inspectInstanceId, setInspectInstanceId] = useState('');
   const [inspectParticipantId, setInspectParticipantId] = useState('');
@@ -25,7 +24,7 @@ export default function HiddenUatAdminToolsDialog({ open, onOpenChange, orgId, p
   const canSubmit = useMemo(() => Boolean(password && orgId), [password, orgId]);
 
   async function handleLock(kind) {
-    const lessonInstanceId = normalizeUuid(kind === 'payroll' ? payrollInstanceId : paidClaimInstanceId);
+    const lessonInstanceId = normalizeUuid(paidClaimInstanceId);
     if (!lessonInstanceId) {
       setError('יש להזין lesson_instance_id תקין לפני נעילה.');
       return;
@@ -53,14 +52,10 @@ export default function HiddenUatAdminToolsDialog({ open, onOpenChange, orgId, p
         },
       });
 
-      const sourceType = payload?.lock?.lock_source_type || (kind === 'payroll' ? 'payroll_run' : 'claim_batch');
+      const sourceType = payload?.lock?.lock_source_type || 'claim_batch';
       setSuccessMessage(`נוצרה נעילה בהצלחה (${sourceType}) עבור ${lessonInstanceId}.`);
 
-      if (kind === 'payroll') {
-        setPayrollInstanceId('');
-      } else {
-        setPaidClaimInstanceId('');
-      }
+      setPaidClaimInstanceId('');
     } catch (requestError) {
       setError(requestError?.data?.message || requestError?.message || 'יצירת הנעילה נכשלה.');
     } finally {
@@ -147,31 +142,6 @@ export default function HiddenUatAdminToolsDialog({ open, onOpenChange, orgId, p
 
           <div className="rounded-lg border border-border p-4 space-y-3">
             <div className="space-y-1">
-              <h3 className="text-sm font-semibold">Lock Lesson (Payroll)</h3>
-              <p className="text-xs text-muted-foreground">יוצר שורת נעילה עם lock_source_type=payroll_run.</p>
-            </div>
-            <div className="grid gap-2 sm:grid-cols-[1fr,auto] sm:items-end">
-              <div className="space-y-2">
-                <Label htmlFor="debug-lock-payroll-instance-id">lesson_instance_id</Label>
-                <Input
-                  id="debug-lock-payroll-instance-id"
-                  placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-                  value={payrollInstanceId}
-                  onChange={(event) => setPayrollInstanceId(event.target.value)}
-                />
-              </div>
-              <Button
-                type="button"
-                onClick={() => handleLock('payroll')}
-                disabled={isSubmittingKind === 'payroll'}
-              >
-                {isSubmittingKind === 'payroll' ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Lock Lesson (Payroll)'}
-              </Button>
-            </div>
-          </div>
-
-          <div className="rounded-lg border border-border p-4 space-y-3">
-            <div className="space-y-1">
               <h3 className="text-sm font-semibold">Lock Lesson (Paid Claim)</h3>
               <p className="text-xs text-muted-foreground">יוצר claim_batch במצב paid ונעילת claim_batch עבור השיעור.</p>
             </div>
@@ -187,7 +157,6 @@ export default function HiddenUatAdminToolsDialog({ open, onOpenChange, orgId, p
               </div>
               <Button
                 type="button"
-                variant="secondary"
                 onClick={() => handleLock('paid_claim')}
                 disabled={isSubmittingKind === 'paid_claim'}
               >

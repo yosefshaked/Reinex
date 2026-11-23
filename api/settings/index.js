@@ -14,6 +14,73 @@ import { normalizeSessionFormConfigValue } from '../_shared/settings-utils.js';
 import { ensureOrgPermissions } from '../_shared/permissions-utils.js';
 import { parseJsonBodyWithLimit } from '../_shared/validation.js';
 import { logAuditEvent, AUDIT_ACTIONS, AUDIT_CATEGORIES } from '../_shared/audit-log.js';
+import { validateInstructorEarningsPolicyInput, validateLeavePayPolicyInput } from '../_shared/employee-finance.js';
+import {
+  DATED_SETTING_KEYS,
+  isDatedSettingKey,
+  listSettingVersions,
+  loadDatedSettingRows,
+  resolveSettingOnDate,
+  cancelDatedSettingVersion,
+  saveDatedSettingVersions,
+  validateSettingEffectiveDate,
+} from '../_shared/dated-settings.js';
+import { isDateKey, todayKey } from '../_shared/local-time.js';
+import { validateLeaveEntitlementPolicyInput } from '../_shared/leave-entitlement.js';
+
+const TYPED_SETTING_VALIDATORS = {
+  leave_pay_policy: validateLeavePayPolicyInput,
+  instructor_earnings_policy: validateInstructorEarningsPolicyInput,
+  leave_entitlement_policy: validateLeaveEntitlementPolicyInput,
+};
+
+/**
+ * Settings whose value is checked before it is stored. Each entry is replaced by its normalized
+ * value; the first invalid one is returned as { error } (the payload is then not written at all).
+ */
+function validateTypedSettings(entries) {
+  for (const entry of entries) {
+    const validate = TYPED_SETTING_VALIDATORS[entry.key];
+    if (validate) {
+      const result = validate(entry.settings_value);
+      if (result.error) {
+        return { error: result.error };
+      }
+      entry.settings_value = result.value;
+    }
+  }
+  return {};
+}
+
+/**
+ * Splits a write into plain settings ("Settings", one value) and dated ones ("SettingsHistory", a
+ * version from a date; see dated-settings.js). A dated setting needs `effective_date`, given on the
+ * entry ({ key: { value, effective_date, notes } }) or once for the whole body. Back-dating is
+ * allowed: the pay of the days from that date is computed by the new version.
+ */
+function splitDatedEntries(entries, body) {
+  const plain = [];
+  const dated = [];
+  for (const entry of entries) {
+    if (!isDatedSettingKey(entry.key)) {
+      // The date and note belong to dated settings only.
+      const { effective_date: _date, notes: _notes, ...plainEntry } = entry;
+      plain.push(plainEntry);
+      continue;
+    }
+    const date = validateSettingEffectiveDate(entry.effective_date ?? body?.effective_date);
+    if (date.error) {
+      return { error: date.error, key: entry.key };
+    }
+    dated.push({
+      key: entry.key,
+      settings_value: entry.settings_value,
+      effective_date: date.value,
+      notes: entry.notes ?? body?.notes ?? null,
+    });
+  }
+  return { plain, dated };
+}
 
 const SETTINGS_DIAGNOSTIC_CHECKS = new Set([
   'Table "Settings" exists',
@@ -116,13 +183,20 @@ function normalizeSettingsObject(raw) {
     if (!normalizedKey) {
       continue;
     }
-    // Support extended shape: { key: { value, metadata } }
+    // Support extended shape: { key: { value, metadata } }, and for a dated setting
+    // { key: { value, effective_date, notes } }.
     if (value && typeof value === 'object' && !Array.isArray(value) && (Object.prototype.hasOwnProperty.call(value, 'value') || Object.prototype.hasOwnProperty.call(value, 'metadata'))) {
       const val = Object.prototype.hasOwnProperty.call(value, 'value') ? value.value : null;
       const meta = Object.prototype.hasOwnProperty.call(value, 'metadata') ? value.metadata : undefined;
       const entry = { key: normalizedKey, settings_value: val ?? null };
       if (meta !== undefined) {
         entry.metadata = meta;
+      }
+      if (Object.prototype.hasOwnProperty.call(value, 'effective_date')) {
+        entry.effective_date = value.effective_date;
+      }
+      if (Object.prototype.hasOwnProperty.call(value, 'notes')) {
+        entry.notes = value.notes;
       }
       payload.push(entry);
     } else {
@@ -381,33 +455,66 @@ export default async function (context, req) {
 
     const requestedKeys = collectKeysFromQuery(query);
     const includeMeta = query.include_metadata === '1' || query.include_metadata === 'true';
-    let builder = withOrgScope(supabase, 'Settings', orgId)
-      .select(includeMeta ? 'key, settings_value, metadata' : 'key, settings_value');
-
-    if (requestedKeys.length) {
-      builder = builder.in('key', requestedKeys);
+    const includeVersions = query.include_versions === '1' || query.include_versions === 'true';
+    // A dated setting is returned as it stands on `as_of` (default: today in the org's zone).
+    const asOf = normalizeString(query.as_of) || todayKey();
+    if (!isDateKey(asOf)) {
+      return respond(context, 400, { message: 'invalid_as_of_date' });
     }
+    const plainKeys = requestedKeys.filter((key) => !isDatedSettingKey(key));
+    const datedKeys = requestedKeys.length ? requestedKeys.filter(isDatedSettingKey) : [...DATED_SETTING_KEYS];
 
-    const { data, error } = await builder;
+    let data = [];
+    if (!requestedKeys.length || plainKeys.length) {
+      let builder = withOrgScope(supabase, 'Settings', orgId)
+        .select(includeMeta ? 'key, settings_value, metadata' : 'key, settings_value');
 
-    if (error) {
-      context.log?.error?.('settings fetch failed', { message: error.message });
-      const mapped = await mapSettingsError(context, supabase, error, 'failed_to_fetch_settings');
-      return respond(context, mapped.status, mapped.body);
+      if (requestedKeys.length) {
+        builder = builder.in('key', plainKeys);
+      }
+
+      const { data: plainRows, error } = await builder;
+
+      if (error) {
+        context.log?.error?.('settings fetch failed', { message: error.message });
+        const mapped = await mapSettingsError(context, supabase, error, 'failed_to_fetch_settings');
+        return respond(context, mapped.status, mapped.body);
+      }
+      data = plainRows || [];
     }
 
     const settingsMap = {};
-    for (const entry of data || []) {
+    for (const entry of data) {
       if (!entry || typeof entry !== 'object') {
         continue;
       }
       const key = normalizeString(entry.key);
-      if (!key) {
+      if (!key || isDatedSettingKey(key)) {
         continue;
       }
       settingsMap[key] = includeMeta
         ? { value: entry.settings_value ?? null, metadata: entry.metadata ?? null }
         : (entry.settings_value ?? null);
+    }
+
+    let datedRows = [];
+    if (datedKeys.length) {
+      try {
+        datedRows = await loadDatedSettingRows(supabase, orgId, datedKeys);
+      } catch (datedError) {
+        context.log?.error?.('settings fetch of dated settings failed', { message: datedError?.message });
+        const mapped = await mapSettingsError(context, supabase, datedError, 'failed_to_fetch_settings');
+        return respond(context, mapped.status, mapped.body);
+      }
+    }
+    for (const key of datedKeys) {
+      const version = resolveSettingOnDate(datedRows, key, asOf);
+      if (!version) {
+        continue;
+      }
+      settingsMap[key] = includeMeta
+        ? { value: version.settings_value ?? null, metadata: null, effective_date: version.effective_date }
+        : (version.settings_value ?? null);
     }
 
     if (requestedKeys.length) {
@@ -418,7 +525,20 @@ export default async function (context, req) {
       }
     }
 
-    return respond(context, 200, { settings: settingsMap });
+    if (!includeVersions) {
+      return respond(context, 200, { settings: settingsMap });
+    }
+    // Every version of each dated key asked for, newest first: the history a settings screen shows.
+    const versions = {};
+    for (const key of datedKeys) {
+      versions[key] = listSettingVersions(datedRows, key).map((version) => ({
+        effective_date: version.effective_date,
+        settings_value: version.settings_value,
+        notes: version.notes,
+        created_at: version.created_at,
+      }));
+    }
+    return respond(context, 200, { settings: settingsMap, as_of: asOf, versions });
   }
 
   if (method === 'POST') {
@@ -426,6 +546,18 @@ export default async function (context, req) {
     if (!payload) {
       return respond(context, 400, { message: 'invalid_settings_payload' });
     }
+
+    const typedValidation = validateTypedSettings(payload);
+    if (typedValidation.error) {
+      return respond(context, 400, { message: typedValidation.error });
+    }
+
+    const split = splitDatedEntries(payload, body);
+    if (split.error) {
+      return respond(context, 400, { message: split.error, key: split.key });
+    }
+    const datedVersions = split.dated;
+    payload = split.plain;
 
     const sessionFormResult = await applySessionFormVersioning(supabase, orgId, payload);
     if (sessionFormResult.error) {
@@ -503,12 +635,21 @@ export default async function (context, req) {
       // continue without blocking the update
     }
 
-    const { error } = await withOrgScope(supabase, 'Settings', orgId)
-      .upsert(payload, { onConflict: 'org_id,key' });
+    const { error } = payload.length
+      ? await withOrgScope(supabase, 'Settings', orgId)
+        .upsert(payload, { onConflict: 'org_id,key' })
+      : { error: null };
 
     if (error) {
       context.log?.error?.('settings upsert failed', { message: error.message });
       const mapped = await mapSettingsError(context, supabase, error, 'failed_to_update_settings');
+      return respond(context, mapped.status, mapped.body);
+    }
+
+    const { error: datedError } = await saveDatedSettingVersions(supabase, orgId, datedVersions, userId);
+    if (datedError) {
+      context.log?.error?.('settings dated version upsert failed', { message: datedError.message });
+      const mapped = await mapSettingsError(context, supabase, datedError, 'failed_to_update_settings');
       return respond(context, mapped.status, mapped.body);
     }
 
@@ -524,12 +665,15 @@ export default async function (context, req) {
       resourceId: orgId,
       details: {
         operation: 'upsert',
-        keys: payload.map(entry => entry.key),
-        count: payload.length,
+        keys: [...payload.map(entry => entry.key), ...datedVersions.map((entry) => entry.key)],
+        count: payload.length + datedVersions.length,
+        ...(datedVersions.length
+          ? { effective_dates: Object.fromEntries(datedVersions.map((entry) => [entry.key, entry.effective_date])) }
+          : {}),
       },
     });
 
-    return respond(context, 201, { updated: true, count: payload.length });
+    return respond(context, 201, { updated: true, count: payload.length + datedVersions.length });
   }
 
   if (method === 'PUT' || method === 'PATCH') {
@@ -538,10 +682,25 @@ export default async function (context, req) {
       return respond(context, 400, { message: 'invalid_settings_payload' });
     }
 
+    const typedValidation = validateTypedSettings(payload);
+    if (typedValidation.error) {
+      return respond(context, 400, { message: typedValidation.error });
+    }
+
+    const split = splitDatedEntries(payload, body);
+    if (split.error) {
+      return respond(context, 400, { message: split.error, key: split.key });
+    }
+    const datedVersions = split.dated;
+    payload = split.plain;
+
+    // Only a plain setting must already exist to be updated; a dated one always gets a new version.
     const keys = payload.map((entry) => entry.key);
-    const { data: existing, error: existingError } = await withOrgScope(supabase, 'Settings', orgId)
-      .select('key, settings_value')
-      .in('key', keys);
+    const { data: existing, error: existingError } = keys.length
+      ? await withOrgScope(supabase, 'Settings', orgId)
+        .select('key, settings_value')
+        .in('key', keys)
+      : { data: [], error: null };
 
     if (existingError) {
       context.log?.error?.('settings lookup failed before update', { message: existingError.message });
@@ -638,12 +797,21 @@ export default async function (context, req) {
       context.log?.error?.('settings metadata processing failed', { message: metaError?.message });
     }
 
-    const { error } = await withOrgScope(supabase, 'Settings', orgId)
-      .upsert(payload, { onConflict: 'org_id,key' });
+    const { error } = payload.length
+      ? await withOrgScope(supabase, 'Settings', orgId)
+        .upsert(payload, { onConflict: 'org_id,key' })
+      : { error: null };
 
     if (error) {
       context.log?.error?.('settings update failed', { message: error.message });
       const mapped = await mapSettingsError(context, supabase, error, 'failed_to_update_settings');
+      return respond(context, mapped.status, mapped.body);
+    }
+
+    const { error: datedError } = await saveDatedSettingVersions(supabase, orgId, datedVersions, userId);
+    if (datedError) {
+      context.log?.error?.('settings dated version update failed', { message: datedError.message });
+      const mapped = await mapSettingsError(context, supabase, datedError, 'failed_to_update_settings');
       return respond(context, mapped.status, mapped.body);
     }
 
@@ -659,12 +827,39 @@ export default async function (context, req) {
       resourceId: orgId,
       details: {
         operation: 'update',
-        keys: payload.map(entry => entry.key),
-        count: payload.length,
+        keys: [...payload.map(entry => entry.key), ...datedVersions.map((entry) => entry.key)],
+        count: payload.length + datedVersions.length,
+        ...(datedVersions.length
+          ? { effective_dates: Object.fromEntries(datedVersions.map((entry) => [entry.key, entry.effective_date])) }
+          : {}),
       },
     });
 
-    return respond(context, 200, { updated: true, count: payload.length });
+    return respond(context, 200, { updated: true, count: payload.length + datedVersions.length });
+  }
+
+  if (method === 'DELETE' && (body?.effective_date !== undefined || query.effective_date !== undefined)) {
+    // Cancel one future version of a dated setting: { key, effective_date }. Past and current
+    // versions are refused (checkCancelableVersion).
+    const cancelKey = normalizeString(body?.key ?? query.key);
+    const cancelDate = body?.effective_date ?? query.effective_date;
+    const cancelled = await cancelDatedSettingVersion(supabase, orgId, { key: cancelKey, effectiveDate: cancelDate, today: todayKey() });
+    if (cancelled.error) {
+      if (cancelled.cause) context.log?.error?.('settings cancel version failed', { message: cancelled.cause.message });
+      return respond(context, cancelled.status || 400, { message: cancelled.error });
+    }
+    await logAuditEvent(supabase, {
+      orgId,
+      userId,
+      userEmail: authResult.data.user.email,
+      userRole: role,
+      actionType: AUDIT_ACTIONS.SETTINGS_UPDATED,
+      actionCategory: AUDIT_CATEGORIES.SETTINGS,
+      resourceType: 'settings',
+      resourceId: orgId,
+      details: { operation: 'cancel_version', key: cancelled.key, effective_date: cancelled.effectiveDate },
+    });
+    return respond(context, 200, { cancelled: true, key: cancelled.key, effective_date: cancelled.effectiveDate });
   }
 
   if (method === 'DELETE') {
@@ -674,6 +869,12 @@ export default async function (context, req) {
 
     if (!keys.length) {
       return respond(context, 400, { message: 'missing_settings_keys' });
+    }
+
+    // A dated setting keeps its versions: past months were computed by them.
+    const datedKeysToDelete = keys.filter(isDatedSettingKey);
+    if (datedKeysToDelete.length) {
+      return respond(context, 400, { message: 'dated_setting_cannot_be_deleted', keys: datedKeysToDelete });
     }
 
     const { data, error } = await withOrgScope(supabase, 'Settings', orgId)

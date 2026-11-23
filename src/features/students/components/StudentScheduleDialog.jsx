@@ -3,6 +3,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Button } from '@/components/ui/button';
 import { TextField, SelectField, DayOfWeekField, TimeField } from '@/components/ui/forms-ui';
 import { normalizeDayToken } from '@/lib/day-of-week.js';
+import { todayKey } from '@/lib/local-time.js';
 const DEFAULT_DURATION_MINUTES = 45;
 
 function formatEmployeeName(employee) {
@@ -28,7 +29,7 @@ function buildInitialState(template, defaultServiceId) {
     dayOfWeek,
     timeOfDay: formatTimeValue(template?.time_of_day),
     durationMinutes: template?.duration_minutes || DEFAULT_DURATION_MINUTES,
-    validFrom: template?.valid_from || new Date().toISOString().slice(0, 10),
+    validFrom: template?.valid_from || todayKey(),
     validUntil: template?.valid_until || '',
   };
 }

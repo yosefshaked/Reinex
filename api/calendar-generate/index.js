@@ -15,12 +15,12 @@ import {
 import { parseJsonBodyWithLimit } from '../_shared/validation.js';
 import { dayTokenForDate, normalizeDayToken } from '../_shared/day-of-week.js';
 import { breakTemplateMatchesDate, normalizeBreakTemplateTime } from '../_shared/break-template-schedule.js';
+import { extractScheduleSlotFromIso } from '../_shared/instructor-availability.js';
+import { enumerateDateKeys, localDateKey, localDateRangeUtc, localDateTimeToUtc, localTime } from '../_shared/local-time.js';
 import {
-  buildUtcBoundsForTimezoneDateRange,
-  buildUtcIsoForTimezoneDateTime,
-  extractScheduleSlotFromIso,
-  getDateKeyInTimezone,
-} from '../_shared/instructor-availability.js';
+  describeLessonStartClockChange,
+  GENERATION_SKIPPED_BY_CLOCK_CHANGE_TYPE,
+} from '../_shared/clock-change-rules.js';
 import { resolveLessonCoverageDecision } from '../_shared/hmo.js';
 import { attachErrorTracking, respondTracked } from '../_shared/error-events.js';
 
@@ -34,16 +34,7 @@ function isIsoDate(value) {
 }
 
 function enumerateDates(startDate, endDate) {
-  const dates = [];
-  const cursor = new Date(`${startDate}T00:00:00Z`);
-  const end = new Date(`${endDate}T00:00:00Z`);
-
-  while (cursor <= end) {
-    dates.push(cursor.toISOString().slice(0, 10));
-    cursor.setUTCDate(cursor.getUTCDate() + 1);
-  }
-
-  return dates;
+  return enumerateDateKeys(startDate, endDate);
 }
 
 function normalizeTimeHms(timeValue) {
@@ -74,21 +65,14 @@ function normalizeTimeHms(timeValue) {
   return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:${String(second).padStart(2, '0')}`;
 }
 
+// The lesson's local date and 'HH:MM:SS' start in the org's zone (datetime_start is a UTC instant).
 function extractDatePart(dateTimeValue) {
-  const raw = String(dateTimeValue || '');
-  if (raw.length >= 10) {
-    return raw.slice(0, 10);
-  }
-  return '';
+  return localDateKey(dateTimeValue);
 }
 
 function extractTimePart(dateTimeValue) {
-  const raw = String(dateTimeValue || '');
-  const match = raw.match(/T(\d{2}:\d{2}:\d{2})/);
-  if (match?.[1]) {
-    return match[1];
-  }
-  return '';
+  const time = localTime(dateTimeValue);
+  return time ? `${time}:00` : '';
 }
 
 function overlaps(startA, endA, startB, endB) {
@@ -738,7 +722,7 @@ export default async function calendarGenerate(context, req) {
   let hmoWarningsNotice = templateStudentIds.length > 0 ? null : null;
 
   const templateIds = templateRows.map((row) => row.id);
-  const instanceRangeBounds = buildUtcBoundsForTimezoneDateRange(startDate, endDate);
+  const instanceRangeBounds = localDateRangeUtc(startDate, endDate);
   if (!instanceRangeBounds?.startIso || !instanceRangeBounds?.endExclusiveIso) {
     return respond(context, 400, { message: 'invalid_generation_date_range' });
   }
@@ -802,7 +786,7 @@ export default async function calendarGenerate(context, req) {
     (Array.isArray(existingRows) ? existingRows : [])
       .map((row) => {
         const templateId = normalizeString(row?.template_id);
-        const targetDate = getDateKeyInTimezone(row?.datetime_start);
+        const targetDate = localDateKey(row?.datetime_start);
         const slot = extractScheduleSlotFromIso(row?.datetime_start);
         return buildTemplateSlotKey(templateId, targetDate, slot?.startTime || '');
       })
@@ -929,7 +913,25 @@ export default async function calendarGenerate(context, req) {
         continue;
       }
 
-      const datetimeStartIso = buildUtcIsoForTimezoneDateTime(date, finalTime);
+      // A template keeps its weekday and time; only the one occurrence whose start falls in the
+      // hour the clock skips (spring forward) is not created, and the office is told.
+      const clockChange = describeLessonStartClockChange(date, finalTime);
+      if (clockChange?.blocking) {
+        conflicts.push({
+          type: GENERATION_SKIPPED_BY_CLOCK_CHANGE_TYPE,
+          template_id: template.id,
+          student_id: primaryStudentId,
+          student_name: primaryStudentName,
+          client_profile_id: primaryClientProfileId,
+          service_name: finalServiceName,
+          target_date: date,
+          time_of_day: finalTime,
+          message: `${clockChange.message} המפגש הזה לא נוצר; אפשר לקבוע אותו ידנית בשעה אחרת.`,
+        });
+        continue;
+      }
+
+      const datetimeStartIso = localDateTimeToUtc(date, finalTime);
       if (!datetimeStartIso) {
         conflicts.push({
           type: 'invalid_datetime',
@@ -1179,7 +1181,7 @@ export default async function calendarGenerate(context, req) {
       for (const date of dates) {
         if (!breakTemplateMatchesDate(template, date)) continue;
         const timeHhMm = normalizeBreakTemplateTime(template.time_of_day);
-        const datetimeStartIso = buildUtcIsoForTimezoneDateTime(date, timeHhMm);
+        const datetimeStartIso = localDateTimeToUtc(date, timeHhMm);
         if (!datetimeStartIso) continue;
         // Idempotency: skip if a break already exists at this time for this instructor
         const { data: existingBreak } = await withOrgScope(supabase, 'instructor_breaks', orgId)

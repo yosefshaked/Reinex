@@ -27,9 +27,9 @@ import {
   withOrgScope,
 } from '../_shared/org-bff.js';
 import BillingLedgerService from '../_shared/BillingLedgerService.js';
-import { syncLessonInstructorEarnings, syncInstructorAttendanceFromLessons } from '../_shared/employee-finance.js';
 import { syncLessonClosureState } from '../_shared/calendar-workflow.js';
-import { buildUtcBoundsForTimezoneDateRange } from '../_shared/instructor-availability.js';
+import { localDateRangeUtc } from '../_shared/local-time.js';
+import { checkRequestedLessonStart } from '../_shared/clock-change-rules.js';
 import {
   ACTIVE_LESSON_INSTANCE_STATUSES,
   cancelLessonInstanceWithParticipants,
@@ -40,6 +40,7 @@ import {
 import { attachErrorTracking, respondTracked } from '../_shared/error-events.js';
 import { findBlockingReportParticipantIds } from '../_shared/session-reports-guards.js';
 import { buildLessonHistoryEvents, collectLessonHistoryReferenceIds } from '../_shared/lesson-history.js';
+import { checkInstructorRateForLesson } from '../_shared/employee-finance.js';
 
 function respondLessonInstanceError(context, status, message, error, metadata = {}) {
   return respondTracked(context, status, { message }, undefined, {
@@ -54,7 +55,7 @@ function isIsoDate(value) {
 }
 
 function buildUtcRange(dateString) {
-  const range = buildUtcBoundsForTimezoneDateRange(dateString, dateString);
+  const range = localDateRangeUtc(dateString, dateString);
   if (!range?.startIso || !range?.endExclusiveIso) {
     return null;
   }
@@ -158,7 +159,7 @@ async function enrichLessonInstanceRecordsForResponse(client, orgId, records = [
     return [];
   }
 
-  const correctionEnriched = await enrichInstancesWithCorrectionState(client, normalizedRecords);
+  const correctionEnriched = await enrichInstancesWithCorrectionState(client, orgId, normalizedRecords);
   const coverageEnriched = await enrichLessonInstancesWithHmoCoverage(client, orgId, correctionEnriched);
   return coverageEnriched.map((record) => (
     record?.version !== undefined
@@ -373,7 +374,7 @@ export default async function lessonInstances(context, req) {
   const billingService = new BillingLedgerService({ tenantClient: supabase, orgId });
 
   if (!isAdmin) {
-    const { instructorId, error: instructorError } = await resolveActorInstructorId(supabase, userId);
+    const { instructorId, error: instructorError } = await resolveActorInstructorId(supabase, orgId, userId);
     if (instructorError) {
       context.log?.error?.('lesson-instances failed to resolve actor instructor', { message: instructorError.message, userId });
       return respondLessonInstanceError(context, 500, 'failed_to_resolve_actor_instructor', instructorError, {
@@ -545,6 +546,10 @@ export default async function lessonInstances(context, req) {
       return respond(context, 400, { message: 'invalid_datetime_start' });
     }
 
+    // A start inside the hour the clock skips (spring forward) does not exist.
+    const clockChangeRefusal = checkRequestedLessonStart(body);
+    if (clockChangeRefusal) return respond(context, 422, clockChangeRefusal);
+
     if (!Number.isFinite(durationMinutes) || durationMinutes <= 0) {
       return respond(context, 400, { message: 'invalid_duration_minutes' });
     }
@@ -567,6 +572,22 @@ export default async function lessonInstances(context, req) {
     if (normalizedStudentIds.length === 0 && normalizedClientProfileIds.length === 0) {
       return respond(context, 400, { message: 'missing_participants' });
     }
+
+    // A person choosing an instructor, service and date must choose one that pays.
+    const rateCheck = await checkInstructorRateForLesson(supabase, {
+      orgId,
+      instructorEmployeeId,
+      serviceId,
+      lessonDate: datetimeStart,
+    }, context);
+    if (rateCheck?.error) {
+      return respondLessonInstanceError(context, 500, rateCheck.body.message, rateCheck.error, {
+        action: 'validate_instructor_rate',
+        instructor_employee_id: instructorEmployeeId,
+        service_id: serviceId,
+      });
+    }
+    if (rateCheck) return respond(context, 422, rateCheck.body);
 
     const { data: instanceRow, error: instanceError } = await withOrgScope(supabase, 'lesson_instances', orgId)
       .insert({
@@ -797,7 +818,7 @@ export default async function lessonInstances(context, req) {
     const allowedStatus = ACTIVE_LESSON_INSTANCE_STATUSES;
     const allowedDocumentation = new Set(['undocumented', 'documented']);
 
-    const { error: stateError, result: mutationState } = await fetchLessonMutationState(supabase, {
+    const { error: stateError, result: mutationState } = await fetchLessonMutationState(supabase, orgId, {
       instanceId: lessonInstanceId,
     });
 
@@ -926,7 +947,7 @@ export default async function lessonInstances(context, req) {
           }
 
           if (cancellationResult.outcome === 'locked' || cancellationResult.outcome === 'closed') {
-            const { error: refreshedError, result: refreshedState } = await fetchLessonMutationState(supabase, {
+            const { error: refreshedError, result: refreshedState } = await fetchLessonMutationState(supabase, orgId, {
               instanceId: lessonInstanceId,
             });
             if (refreshedError) {
@@ -1012,7 +1033,7 @@ export default async function lessonInstances(context, req) {
           }
 
           if (completionResult.outcome === 'locked' || completionResult.outcome === 'closed') {
-            const { error: refreshedError, result: refreshedState } = await fetchLessonMutationState(supabase, {
+            const { error: refreshedError, result: refreshedState } = await fetchLessonMutationState(supabase, orgId, {
               instanceId: lessonInstanceId,
             });
             if (refreshedError) {
@@ -1107,7 +1128,7 @@ export default async function lessonInstances(context, req) {
       }
 
       if (!updatedInstanceRows) {
-        const { error: refreshedError, result: refreshedState } = await fetchLessonMutationState(supabase, {
+        const { error: refreshedError, result: refreshedState } = await fetchLessonMutationState(supabase, orgId, {
           instanceId: lessonInstanceId,
         });
         if (refreshedError) {
@@ -1133,7 +1154,7 @@ export default async function lessonInstances(context, req) {
       };
     }
 
-    // Sync financial artifacts and instructor attendance when status changes
+    // Sync the charges and the closure state when the status changes
     if (nextStatus) {
       try {
         await billingService.syncLessonInstanceCharges({
@@ -1141,8 +1162,6 @@ export default async function lessonInstances(context, req) {
           actorUserId: userId,
           reasonCode: 'lesson_updated',
         });
-        await syncLessonInstructorEarnings(supabase, lessonInstanceId, userId);
-        await syncInstructorAttendanceFromLessons(supabase, lessonInstanceId, userId);
         await syncLessonClosureState(supabase, lessonInstanceId, userId);
       } catch (syncError) {
         context.log?.error?.('lesson-instances failed to sync financial artifacts', {
@@ -1271,7 +1290,7 @@ export default async function lessonInstances(context, req) {
       if (!instanceId) return respond(context, 400, { message: 'missing_instance_id' });
       if (!studentId && !clientProfileId) return respond(context, 400, { message: 'missing_client_profile_or_student_id' });
 
-      const { error: addStateError, result: addMutationState } = await fetchLessonMutationState(supabase, { instanceId });
+      const { error: addStateError, result: addMutationState } = await fetchLessonMutationState(supabase, orgId, { instanceId });
       if (addStateError) {
         context.log?.error?.('lesson-instances add-participant failed to load state', { message: addStateError.message });
         return respondLessonInstanceError(context, 500, 'failed_to_load_lesson_instance', addStateError, {
@@ -1425,7 +1444,7 @@ export default async function lessonInstances(context, req) {
       return respond(context, 400, { message: 'invalid_from_date' });
     }
 
-    const fromBounds = buildUtcBoundsForTimezoneDateRange(fromDate, fromDate);
+    const fromBounds = localDateRangeUtc(fromDate, fromDate);
     if (!fromBounds?.startIso) {
       return respond(context, 400, { message: 'invalid_from_date' });
     }
@@ -1582,8 +1601,6 @@ export default async function lessonInstances(context, req) {
             actorUserId: userId,
             reasonCode: 'lesson_updated',
           });
-          await syncLessonInstructorEarnings(client, instId, userId);
-          await syncInstructorAttendanceFromLessons(client, instId, userId);
           await syncLessonClosureState(client, instId, userId);
         } catch (syncError) {
           context.log?.error?.('lesson-instances bulk-cancel failed to sync lesson workflow', {

@@ -14,6 +14,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { authenticatedFetch } from '@/lib/api-client.js';
 import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { useOrg } from '@/org/OrgContext.jsx';
+import { addDays, todayKey } from '@/lib/local-time.js';
 
 const DAY_NAMES_HE = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת'];
 
@@ -181,11 +182,8 @@ export default function StudentScheduleTab({ studentId }) {
       setIsLoadingInstances(true);
       setInstanceError(null);
       try {
-        const today = new Date();
-        const endDate = new Date(today);
-        endDate.setDate(today.getDate() + 13);
-        const startStr = today.toISOString().split('T')[0];
-        const endStr = endDate.toISOString().split('T')[0];
+        const startStr = todayKey();
+        const endStr = addDays(startStr, 13);
         const data = await authenticatedFetch('calendar/instances', {
           session,
           params: {
@@ -215,13 +213,8 @@ export default function StudentScheduleTab({ studentId }) {
 
   const fetchHistoryWindow = useCallback(async (windowIndex, append) => {
     if (!studentId || !activeOrgId) return;
-    const today = new Date();
-    const endDate = new Date(today);
-    endDate.setDate(today.getDate() - windowIndex * HISTORY_WINDOW_DAYS - 1);
-    const startDate = new Date(endDate);
-    startDate.setDate(endDate.getDate() - (HISTORY_WINDOW_DAYS - 1));
-    const startStr = startDate.toISOString().split('T')[0];
-    const endStr = endDate.toISOString().split('T')[0];
+    const endStr = addDays(todayKey(), -(windowIndex * HISTORY_WINDOW_DAYS) - 1);
+    const startStr = addDays(endStr, -(HISTORY_WINDOW_DAYS - 1));
     try {
       const data = await authenticatedFetch('calendar/instances', {
         session,

@@ -84,15 +84,16 @@ export async function findClientProfileByIdentityNumber(tenantClient, identityNu
     return { data: null, error: null };
   }
 
-  let query = tenantClient
-    .from('client_profiles')
+  // The same person (same identity number) can be a client of several organisations, each with its
+  // own profile: the lookup is always inside one organisation.
+  if (!normalizedOrgId || !UUID_PATTERN.test(normalizedOrgId)) {
+    return { data: null, error: new Error('findClientProfileByIdentityNumber needs the organisation id') };
+  }
+
+  let query = withOrgScope(tenantClient, 'client_profiles', normalizedOrgId)
     .select('*')
     .eq('identity_number', normalized.value)
     .limit(1);
-
-  if (normalizedOrgId && UUID_PATTERN.test(normalizedOrgId)) {
-    query = query.eq('org_id', normalizedOrgId);
-  }
 
   if (excludeId) {
     query = query.neq('id', excludeId);
@@ -102,12 +103,11 @@ export async function findClientProfileByIdentityNumber(tenantClient, identityNu
   return { data, error };
 }
 
-export async function findClientProfileById(tenantClient, clientProfileId) {
-  if (!UUID_PATTERN.test(String(clientProfileId || ''))) {
+export async function findClientProfileById(tenantClient, orgId, clientProfileId) {
+  if (!UUID_PATTERN.test(String(clientProfileId || '')) || !normalizeString(orgId)) {
     return { data: null, error: null };
   }
-  const { data, error } = await tenantClient
-    .from('client_profiles')
+  const { data, error } = await withOrgScope(tenantClient, 'client_profiles', orgId)
     .select('*')
     .eq('id', clientProfileId)
     .maybeSingle();
@@ -345,11 +345,10 @@ export async function upsertClientGuardianLink(tenantClient, { orgId, clientProf
   if (error) throw new Error(`failed_to_link_guardian:${error.message}`);
 }
 
-export async function fetchPrimaryGuardianForClientProfile(tenantClient, clientProfileId) {
-  if (!UUID_PATTERN.test(String(clientProfileId || ''))) return { guardian: null, error: null };
+export async function fetchPrimaryGuardianForClientProfile(tenantClient, orgId, clientProfileId) {
+  if (!UUID_PATTERN.test(String(clientProfileId || '')) || !normalizeString(orgId)) return { guardian: null, error: null };
 
-  const { data, error } = await tenantClient
-    .from('client_guardians')
+  const { data, error } = await withOrgScope(tenantClient, 'client_guardians', orgId)
     .select('guardian_id, relationship, is_primary')
     .eq('client_profile_id', clientProfileId)
     .order('is_primary', { ascending: false })
@@ -359,8 +358,7 @@ export async function fetchPrimaryGuardianForClientProfile(tenantClient, clientP
   if (!data || !data.length) return { guardian: null, error: null };
 
   const link = data[0];
-  const { data: guardianRow, error: guardianError } = await tenantClient
-    .from('guardians')
+  const { data: guardianRow, error: guardianError } = await withOrgScope(tenantClient, 'guardians', orgId)
     .select('id, first_name, middle_name, last_name, phone, email')
     .eq('id', link.guardian_id)
     .maybeSingle();
@@ -383,12 +381,12 @@ export async function fetchPrimaryGuardianForClientProfile(tenantClient, clientP
   };
 }
 
-export async function resolveClientProfileDestination(tenantClient, clientProfileId, deliveryMethod) {
-  const { data: clientProfile, error } = await findClientProfileById(tenantClient, clientProfileId);
+export async function resolveClientProfileDestination(tenantClient, orgId, clientProfileId, deliveryMethod) {
+  const { data: clientProfile, error } = await findClientProfileById(tenantClient, orgId, clientProfileId);
   if (error) throw error;
   if (!clientProfile) return '';
 
-  const { guardian } = await fetchPrimaryGuardianForClientProfile(tenantClient, clientProfileId);
+  const { guardian } = await fetchPrimaryGuardianForClientProfile(tenantClient, orgId, clientProfileId);
   if (String(deliveryMethod || '').trim().toLowerCase() === 'email') {
     return normalizeString(clientProfile.email) || normalizeString(guardian?.email) || '';
   }
@@ -396,7 +394,7 @@ export async function resolveClientProfileDestination(tenantClient, clientProfil
   return normalizeString(clientProfile.phone) || normalizeString(guardian?.phone) || '';
 }
 
-export async function ensureStudentForClientProfile(tenantClient, clientProfileId, {
+export async function ensureStudentForClientProfile(tenantClient, orgId, clientProfileId, {
   medicalProvider = null,
   notesInternal = null,
   specialRate = null,
@@ -406,9 +404,12 @@ export async function ensureStudentForClientProfile(tenantClient, clientProfileI
   if (!UUID_PATTERN.test(String(clientProfileId || ''))) {
     return { student: null, created: false, error: 'invalid_client_profile_id' };
   }
+  const scopedOrgId = normalizeString(orgId);
+  if (!UUID_PATTERN.test(scopedOrgId)) {
+    throw new Error('ensureStudentForClientProfile needs the organisation id');
+  }
 
-  const { data: existingStudent, error: existingStudentError } = await tenantClient
-    .from('students')
+  const { data: existingStudent, error: existingStudentError } = await withOrgScope(tenantClient, 'students', scopedOrgId)
     .select('*')
     .eq('client_profile_id', clientProfileId)
     .limit(1)
@@ -421,8 +422,7 @@ export async function ensureStudentForClientProfile(tenantClient, clientProfileI
     return { student: existingStudent, created: false, error: null };
   }
 
-  const { data: profile, error: profileError } = await tenantClient
-    .from('client_profiles')
+  const { data: profile, error: profileError } = await withOrgScope(tenantClient, 'client_profiles', scopedOrgId)
     .select('*')
     .eq('id', clientProfileId)
     .maybeSingle();
@@ -438,10 +438,8 @@ export async function ensureStudentForClientProfile(tenantClient, clientProfileI
   }
 
   const createdAt = nowIso();
-  const { data: createdStudent, error: createError } = await tenantClient
-    .from('students')
+  const { data: createdStudent, error: createError } = await withOrgScope(tenantClient, 'students', scopedOrgId)
     .insert({
-      org_id: profile.org_id,
       client_profile_id: clientProfileId,
       medical_provider: medicalProvider,
       notes_internal: notesInternal,
@@ -458,6 +456,7 @@ export async function ensureStudentForClientProfile(tenantClient, clientProfileI
     throw createError || new Error('failed_to_create_student');
   }
 
+  // Keyed by a profile just read in this organisation, so these touch only its own rows.
   await Promise.all([
     tenantClient.from('form_submissions').update({ student_id: createdStudent.id }).eq('client_profile_id', clientProfileId).is('student_id', null),
     tenantClient.from('otp_challenges').update({ student_id: createdStudent.id }).eq('client_profile_id', clientProfileId).is('student_id', null),
@@ -465,8 +464,7 @@ export async function ensureStudentForClientProfile(tenantClient, clientProfileI
     tenantClient.from('lesson_participants').update({ student_id: createdStudent.id }).eq('client_profile_id', clientProfileId).is('student_id', null),
   ]);
 
-  const { data: refreshedStudent } = await tenantClient
-    .from('students')
+  const { data: refreshedStudent } = await withOrgScope(tenantClient, 'students', scopedOrgId)
     .select('*')
     .eq('id', createdStudent.id)
     .maybeSingle();

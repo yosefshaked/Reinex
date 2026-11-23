@@ -13,11 +13,11 @@
  * Those duplicates are merged here so one user action becomes one history entry.
  */
 import { normalizeLessonInstanceStatus } from './lesson-instance-status.js';
+import { formatLocalDateTime } from './local-time.js';
 
 export const LESSON_HISTORY_EVENT_LIMIT = 200;
 
 const MERGE_WINDOW_MS = 2 * 60 * 1000;
-const TIME_ZONE = 'Asia/Jerusalem';
 const EMPTY_VALUE = '—';
 const FALLBACK_PARTICIPANT_NAME = 'משתתף/ת';
 const SYSTEM_ACTOR_LABEL = 'מערכת';
@@ -97,16 +97,6 @@ const CREATED_SOURCE_NOTES = Object.freeze({
   migration: 'יובא ממערכת קודמת',
 });
 
-const dateTimeFormatter = new Intl.DateTimeFormat('en-GB', {
-  timeZone: TIME_ZONE,
-  day: '2-digit',
-  month: '2-digit',
-  year: 'numeric',
-  hour: '2-digit',
-  minute: '2-digit',
-  hourCycle: 'h23',
-});
-
 function text(value) {
   if (value == null) return '';
   return String(value).trim();
@@ -151,13 +141,10 @@ export function resolveParticipantDisplayName(participant) {
     || text(row.name);
 }
 
+// 'DD/MM/YYYY HH:mm' in the org's zone.
 function formatDateTime(value) {
-  const timestamp = Date.parse(value);
-  if (!Number.isFinite(timestamp)) return '';
-  const parts = Object.fromEntries(
-    dateTimeFormatter.formatToParts(new Date(timestamp)).map((part) => [part.type, part.value]),
-  );
-  return `${parts.day}/${parts.month}/${parts.year} ${parts.hour}:${parts.minute}`;
+  if (!Number.isFinite(Date.parse(value))) return '';
+  return formatLocalDateTime(value);
 }
 
 function normalizeLessonStatusValue(value) {

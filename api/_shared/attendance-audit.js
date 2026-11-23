@@ -64,11 +64,7 @@ export async function buildAttendanceTransitionAuditChanges(preview) {
     });
   }
 
-  const attendanceImpact = (preview.impacts || []).some((impact) => (
-    impact?.type === 'instructor_attendance_remove'
-      || impact?.type === 'instructor_attendance_update'
-      || impact?.type === 'instructor_attendance_add'
-  ));
+  const attendanceImpact = (preview.impacts || []).some((impact) => impact?.type === 'instructor_attendance_update');
   if (attendanceImpact) {
     changes.push({
       field: 'instructor_attendance_worked_minutes',

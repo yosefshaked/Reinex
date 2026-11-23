@@ -72,9 +72,10 @@ export function useLessonSessionReports({ enabled, open, orgId, instanceId }) {
 
 /**
  * Loads the org's billing consumption and instructor earnings policies; falls back to the defaults
- * when there is no org or the request fails.
+ * when there is no org or the request fails. The earnings policy is a dated setting, so it is the
+ * one in force on the lesson's date (`asOfDate`, 'YYYY-MM-DD'; today when omitted).
  */
-export function useLessonFinancePolicies(orgId) {
+export function useLessonFinancePolicies(orgId, asOfDate = '') {
   const [billingPolicy, setBillingPolicy] = useState(DEFAULT_BILLING_POLICY);
   const [instructorEarningsPolicy, setInstructorEarningsPolicy] = useState(DEFAULT_INSTRUCTOR_EARNINGS_POLICY);
 
@@ -92,6 +93,7 @@ export function useLessonFinancePolicies(orgId) {
           params: {
             org_id: orgId,
             key: 'billing_consumption_policy,instructor_earnings_policy',
+            ...(asOfDate ? { as_of: asOfDate } : {}),
           },
         });
         const settings = response?.settings && typeof response.settings === 'object'
@@ -124,7 +126,7 @@ export function useLessonFinancePolicies(orgId) {
     return () => {
       cancelled = true;
     };
-  }, [orgId]);
+  }, [orgId, asOfDate]);
 
   return { billingPolicy, instructorEarningsPolicy };
 }
