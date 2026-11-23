@@ -4,11 +4,14 @@
 
 Read this block first when you continue this plan in a new conversation.
 
-- **Plan status:** active. The owner approved the plan, Q1, Q3 and stage 0 only, on 2026-11-23. After subtask 2.4, overall status lives only in `docs/plans/index.csv`.
-- **Current stage:** 0 is done; its results are in the Progress log. Next: joint review of stage 0, then subtask 1.3 step 1. Stage 1 must not start before that review.
+- **Plan status:** active. The owner approved the plan, Q1, Q3, stage 0, the stage 0 baseline and stage 1, on 2026-11-23. After subtask 2.4, overall status lives only in `docs/plans/index.csv`.
+- **Current stage:** 1 is done; the pilot is commit `415cce4`, with results in the Progress log. Next: joint review of stage 1, then stage 2 (subtask 2.1). Stage 2 must not start before that review.
 - **Execution branch:** `repository-reconstruction`, based on `origin/staging` `dce8f2e790e939b7f0805803d7d44e71a23346ba`. See [Planning base](#planning-base) and [Q1](#q1-execution-branch).
-- **Repository state:** the approved plan is committed on its own. Stage 0 writes outside the repository only (`$env:TEMP\reinex-restructure\stage0\`), except the Progress log.
-- **Last update:** 2026-11-23. Stage 0 baseline recorded. The commit policy was added to stage 3 (3.10, 3.3, Q10).
+- **Repository state:**
+  - `test/` is now `tests/`.
+  - The raw evidence is outside the repository, in `$env:TEMP\reinex-restructure\stage0\` and `stage1\`.
+  - Nothing has been pushed.
+- **Last update:** 2026-11-23. Stage 1 done and measured against the baseline.
 
 Each stage appends to the [Progress log](#progress-log), ticks its subtasks and records answers under [Open decisions](#open-decisions). Keep this block at five bullets. It is a pointer, not a history.
 
@@ -1366,6 +1369,78 @@ Append one entry per stage. Newest last.
   - Added commitlint, hooks and CI checks on messages to the non-goals.
   - The stage 1 commit message now follows the policy.
   - Only the plan was edited.
+- **2026-11-23, stage 1: pilot `test/` → `tests/` (commit `415cce4`).** The owner approved the stage 0 baseline and stage 1 only.
+  - **Before moving.**
+    - Code, tests and config were unchanged since the baseline: `git diff 3a5ad46 HEAD -- . ':!docs/plans/**'` was empty.
+    - The plan update was committed first, as `7a1bdab docs(plans): add commit policy to restructure plan`, so the tree was clean.
+    - All stage 0 outputs and both tools were present in `$env:TEMP\reinex-restructure\`.
+  - **Real scenario added to the baseline (owner request): the local target, checked first.**
+    - Vite on `:5173` runs from this repository's `node_modules`.
+    - The Functions host on `:7071` was started with `preview_start api`.
+    - `/api/config` through Vite answers `source: api` with `supabaseUrl: http://127.0.0.1:54321`.
+    - The tester `.env` has `BASE_URL=http://localhost:5173`, `SUPABASE_URL=http://127.0.0.1:54321` and `TEST_ORG_ID=c3893a4d-…`. Only those non-secret keys were printed.
+    - That org exists in the local `supabase_db_automatic-tester` DB, as "Reinex Test Org (auto)".
+    - **Exposure note:** a JSON parse error printed one non-secret line of `api/local.settings.json` (`SYSTEM_ADMIN_ALLOW_WITHOUT_MFA`). No key or password was shown.
+  - **Real scenario, before (old path):** `node test/automatic-tester/runner.js --script leave-settings`: exit 0, 13 of 13 workflows passed, 70 s. Report: `test/automatic-tester/reports/run-2026-11-23T16-27-04/`.
+  - **Recorded after that run** (1.3 step 1):
+    - HEAD `7a1bdab`; clean status;
+    - 59 tracked files; 0 untracked non-ignored;
+    - 190 ignored local entries, all starting with `test/`: 187 report runs, `.env`, `node_modules/`, `supabase/.temp/`;
+    - a per-entry inventory of file count and bytes.
+  - **Order followed**, as in 1.3:
+    1. Added `/tests/automatic-tester/reports` next to the old rule.
+    2. Checked the target was free, then ran `Move-Item test tests`. It succeeded; Vite was running and did not block it.
+    3. `check-ignore` showed all four local items ignored at the new path.
+    4. The untracked set under `tests/` was the 59 tracked files minus the two ignored-but-tracked ones, which is 57, with 0 differences.
+  - **Consumers.**
+    - 73 occurrences across 25 files, using a scripted rewrite. It was anchored like the inventory grep, over an explicit file list, with line-level exceptions: `$env:TEMP\reinex-restructure\stage1-rewrite.cjs`.
+    - The old ignore line was then removed.
+    - **Left on purpose**, already broken or not paths:
+      - `hmo-claims/technical-implementation-plan.md:968-969` (those test files never existed);
+      - `info-from-tuttiud-leaves.md` (another repository's `test/`);
+      - `implementation-to-do.md:103` ("UI test/assertion");
+      - `students/implementation-plan.md:227` ("test/diagnostic mode");
+      - `issues/improvement-suggestions.md:175` (`test/tour.test.js` never existed);
+      - `robots.txt` (an HTTP path).
+    - The `https://app.test/…` fixtures were untouched.
+  - **Staged and reviewed before the commit:**
+    - 79 entries: 59 renames (54 `R100`, plus 5 that are `R088`–`R099`: the files with self-references) and 20 modified consumers.
+    - No added files and no other unstaged or untracked change.
+    - Both ignored-but-tracked files were staged as `R100` through `git add -f` from the explicit list.
+    - All 54 changed line pairs differ only by the anchored `test/` → `tests/` rewrite (checked by script).
+  - **Before vs after (all equal):**
+
+    | Check | Before | After |
+    |---|---|---|
+    | Path list | 59 | 59, diff 0; `git ls-files test` empty |
+    | `npm run test:finance-calendar` | exit 0; tests 589, suites 107, pass 560, fail 0, skipped 0, todo 29 | same; identity SHA-256 `4BF71F11…C0CC3E4` on both sides, diff 0 |
+    | 5 passing unscripted files | 91 tests, all pass | same identities, diff 0 |
+    | `supabase-client.test.js` (baseline failure) | exit 1, file does not load: no export `createDataClient` | same identity and same error |
+    | `whatsapp-message-templates.test.js` (baseline failure) | exit 1, 2 of 3 fail on the signature regex | same identities and same assertion lines |
+    | `run-tests.js` | exit 0, "All tests passed." | same |
+    | ESLint config for the moved test file | SHA-256 `e46c6579…` | identical |
+    | `npm run lint` / `lint:api` | exit 0; 717 / 220 files scanned; 0 problems | same; scan lists equal after mapping `test/`→`tests/` |
+    | `lint:sql` / `lint:upsert-conflicts` | 0 errors, 21 warnings / passed | same |
+    | Local data | 190 entries; per-entry file counts and bytes | identical (checked before the new run) |
+    | `runner.js --validate` | exit 0; 15 scripts pass; 15 stale warnings | identical result lines |
+    | Real `leave-settings` run | exit 0; 13/13; same 13 step results | exit 0; 13/13; step results diff 0; report `tests/automatic-tester/reports/run-2026-11-23T16-39-41/report.html` |
+    | `git status` after the real run | — | the new report is ignored; nothing untracked |
+    | `npm run build` | exit 0; 276 untracked 5xx, 21 SQL warnings, 3081 type issues, 3559 modules | identical figures |
+
+  - **Tester modes:**
+    - `--validate` proved that the runner starts from `tests/` and its 15 scripts resolve.
+    - The real run proved that `.env` is read, Playwright loads from the moved `node_modules`, and the report is written under the new path.
+    - Its starting state was the same: the scenario resets both organisation defaults itself.
+  - **No regression found.**
+  - **Out-of-repo follow-ups, for owner approval:**
+    - Claude memory files that name `test/` paths: `MEMORY.md`, `keep-tests-current-feedback.md`, `ux-improvement-initiative.md`.
+    - `.claude/launch.json` has no reference.
+    - The wiki was not checked.
+  - **Gaps:**
+    - Nothing is pushed.
+    - Stage 1 is a local commit on `repository-reconstruction`.
+    - The 5 files that were renamed and edited show `R088`–`R099`, as expected.
+  - **Joint review pending.**
 
 ---
 
