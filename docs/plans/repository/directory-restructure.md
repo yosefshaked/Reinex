@@ -5,7 +5,7 @@
 Read this block first when you continue this plan in a new conversation.
 
 - **Plan status:** active. The owner approved the plan, Q1, Q3 and stage 0 only, on 2026-11-23. After subtask 2.4, overall status lives only in `docs/plans/index.csv`.
-- **Current stage:** 0, the baseline. Stage 1 must not start before the joint review of the stage 0 results.
+- **Current stage:** 0 is done; its results are in the Progress log. Next: joint review of stage 0, then subtask 1.3 step 1. Stage 1 must not start before that review.
 - **Execution branch:** `repository-reconstruction`, based on `origin/staging` `dce8f2e790e939b7f0805803d7d44e71a23346ba`. See [Planning base](#planning-base) and [Q1](#q1-execution-branch).
 - **Repository state:** the approved plan is committed on its own. Stage 0 writes outside the repository only (`$env:TEMP\reinex-restructure\stage0\`), except the Progress log.
 - **Last update:** 2026-11-23. Owner approvals recorded; reporter rule and inventory command added.
@@ -327,6 +327,7 @@ npm run build
 3. **Normalise.**
    - Use forward slashes.
    - In "before" lists, map the moved prefix to its new name (`test/` → `tests/` in stage 1) **only at the start of the file field**.
+   - **A file that fails to load** is reported by Node as one test whose *name* is the file path, written with OS separators (for example `test\supabase-client.test.js`). When the name, with slashes normalised, equals the file field, map it the same way. This was found in stage 0.
    - Sort.
    - Number repeated identical lines with an occurrence suffix, so that a duplicate name in one suite still counts.
    - Record the SHA-256 of the sorted list, and the spec summary (`tests`, `suites`, `pass`, `fail`, `cancelled`, `skipped`, `todo`) from `finance.txt`.
@@ -336,6 +337,12 @@ npm run build
    - **Then, through `npm run test:finance-calendar` itself.**
 
    If either step fails, fall back to `--test-reporter=tap` with an indentation-aware parser, and record the method used.
+6. **Tools, outside the repository:**
+   - `$env:TEMP\reinex-restructure\identity-reporter.mjs`;
+   - `$env:TEMP\reinex-restructure\normalize-ids.ps1`, run as `-In <ids> -Out <norm> -FromPrefix test/ -ToPrefix tests/`. It prints the line count, the repeated identities and the SHA-256.
+
+   If `TEMP` was cleared, recreate both from this description before stage 1.
+7. **ESLint scan check.** ESLint here prints a `Processing: <file>` line for every file it lints. The sorted, de-duplicated list of those paths is the record of what ESLint scans. In stage 1, compare it with `test/` mapped to `tests/`.
 
 ---
 
@@ -359,20 +366,20 @@ npm run build
 **Depends on:** approval of this plan, and Q1.
 
 **Subtasks:**
-- [ ] 0.1 Verify the execution branch per Q1, and commit the approved plan in a dedicated commit. Record:
+- [x] 0.1 Verify the execution branch per Q1, and commit the approved plan in a dedicated commit. Record:
   - the branch;
   - its SHA;
   - the `git ls-remote origin refs/heads/staging` output;
   - `git status --porcelain --untracked-files=all`.
-- [ ] 0.2 Run the standard checks. Record the results as measured: exit codes, error and warning counts, the build result.
-- [ ] 0.3 Set up the identity reporter and check the tooling (method step 5). Record the identity baseline for `npm run test:finance-calendar`.
-- [ ] 0.4 Record the entry points and affected files for stage 1:
+- [x] 0.2 Run the standard checks. Record the results as measured: exit codes, error and warning counts, the build result.
+- [x] 0.3 Set up the identity reporter and check the tooling (method step 5). Record the identity baseline for `npm run test:finance-calendar`.
+- [x] 0.4 Record the entry points and affected files for stage 1:
   - `node test/run-tests.js`: exit code and output;
   - `node test/automatic-tester/runner.js --validate`: exit code and summary;
   - each of the 7 unscripted `test/*.test.js` files, run directly with the identity reporter: `billing-claim-payment`, `calendar-generate-break-templates`, `calendar-generate-hmo-warning`, `settings.session-form`, `storage-config`, `supabase-client`, `whatsapp-message-templates`.
-- [ ] 0.5 Re-run the stage 1.1 inventory commands and note any drift since `dce8f2e`.
-- [ ] 0.6 Record `npx eslint --print-config` for `test/pay-calculation.test.js`: the `languageOptions.globals` keys, and the `import/*` and `no-restricted-imports` rule values.
-- [ ] 0.7 Record the SHA-256 of `SETUP_SQL_SCRIPT`, for stage 5.
+- [x] 0.5 Re-run the stage 1.1 inventory commands and note any drift since `dce8f2e`.
+- [x] 0.6 Record `npx eslint --print-config` for `test/pay-calculation.test.js`: the `languageOptions.globals` keys, and the `import/*` and `no-restricted-imports` rule values.
+- [x] 0.7 Record the SHA-256 of `SETUP_SQL_SCRIPT`, for stage 5.
 
 **Affected paths:** none in the repository. Outputs go to `$env:TEMP\reinex-restructure\stage0\`.
 
@@ -433,6 +440,7 @@ Written so an agent in a new conversation can run it from this section and the s
 | Self-references (text) | `verify-backup.cjs` usage (3 lines); `automatic-tester/setup.js:7`; `engine/diagnostics.js:157`; `.env.example`; `Full First Time Workflow.txt` | rewrite the path |
 | Agent docs | `agents-docs/50` (2), `60` (1), `80` (2), `finance-calendar-change-checklist.md` (2); one `](../test` link | rewrite the path |
 | Other docs | `implementations/**` (about 30), `docs/storage-config-implementation.md`, `issues/*`, `ProjectDoc/*` | shared rule 10 |
+| **Not this plan** | `docs/plans/repository/directory-restructure.md` mentions both `test/` and `tests/` on purpose | Never rewrite it mechanically. Exclude it from the inventory comparison with `':!docs/plans/**'`. |
 
 **Inventory command.** This finds path-like occurrences. It is anchored on purpose:
 
@@ -975,7 +983,7 @@ Otherwise summarise the finding in the PR, the issue or the plan's progress log,
   - the `.branches/` and `.temp/` folders under `supabase-tenant/supabase/`, if that folder stays (Q7).
 - [ ] 6.9 Lint scope:
   - Add a Node block for `tools/**/*.{js,mjs}` to `eslint.config.js` if JS lands there.
-  - Record that `.cjs` files are not linted by any block (`**/*.{js,jsx}`).
+  - **Correction from stage 0:** `.cjs` and `.mjs` files **are** linted (`npm run lint` processes `test/verify-backup.cjs`, the root `_*.cjs` and `vite.config.mjs`), with the default config. A moved `.cjs` therefore stays in scope. Compare the ESLint scan list before and after.
 - [ ] 6.10 Tester reports stay at `tests/automatic-tester/reports/` unless Q4 changes `runner.js:292`.
 
 **Acceptance:**
@@ -1246,6 +1254,59 @@ Append one entry per stage. Newest last.
   - **Codex recommendations.** Q1, Q2 and Q3 were recorded as recommendations.
   - **`index.csv`.** It now uses CSV quoting.
   - **Working directory.** It now matches the planning base.
+- **2026-11-23, stage 0: baseline (measured).**
+  - **Setup.**
+    - Branch `repository-reconstruction`.
+    - The plan commit is `0fec72c` on top of `dce8f2e`; there is no other change since `dce8f2e`.
+    - `HEAD...origin/staging` = `0 0` before the plan commit.
+    - Node `v25.2.1`, Windows 11.
+    - The working tree was clean after the commit.
+    - Raw outputs are in `$env:TEMP\reinex-restructure\stage0\`.
+  - **Standard checks:**
+
+    | Check | Exit | Measured |
+    |---|---|---|
+    | `npm run lint` | 0 | 0 problems; 717 files scanned (35 under `test/`); scan-list SHA-256 `c8bfca5c309e0ec3…` |
+    | `npm run lint:api` | 0 | 0 problems; 220 files scanned |
+    | `npm run lint:sql` | 0 | 0 errors, 21 warnings |
+    | `npm run lint:upsert-conflicts` | 0 | "Org-scope write validation passed." |
+    | `npm run test:finance-calendar` | 0 | tests 589, suites 107, pass 560, fail 0, cancelled 0, skipped 0, todo 29; 30 files |
+    | `npm run build` | 0 | 113 s. Warn-only steps: error-tracking 276 untracked 5xx in 100 files; typecheck 3081 issues; SQL 21 warnings. Vite built 3559 modules. |
+
+  - **Identity method:** works on the repository itself.
+    - The sample (nested suites, repeated names, skip, todo, a failure, a subtest) matched Node's summary: tests 8 = 5 pass + 1 fail + 1 skip + 1 todo.
+    - Through `npm run test:finance-calendar`, the 589 identity lines equal Node's `tests`, and pass/fail/skip/todo match exactly.
+    - Two runs gave the same normalised SHA-256: `4BF71F113EF6D749245C138C9DDA4AC90ADEA444695EE1D7C43196983C0CC3E4` (with `test/` mapped to `tests/`). There are no repeated identities.
+  - **Affected entry points for stage 1:**
+    - `node test/run-tests.js`: exit 0, "All tests passed."
+    - `runner.js --validate`: exit 0. All 15 scripts pass, with 15 "may be stale" warnings, which are pre-existing.
+  - **Unscripted `test/*.test.js` files, run directly (exit; tests/pass/fail):**
+    - `billing-claim-payment`: 0; 21/21/0.
+    - `calendar-generate-break-templates`: 0; 28/28/0.
+    - `calendar-generate-hmo-warning`: 0; 17/17/0.
+    - `settings.session-form`: 0; 24/24/0.
+    - `storage-config`: 0; 1/1/0.
+    - **Pre-existing failures:**
+      - `supabase-client`: exit 1. The file does not load: `../src/lib/supabase-manager.js` has no export `createDataClient`.
+      - `whatsapp-message-templates`: exit 1, with 2 of 3 failing. The organisation signature (`נשלח מטעם חוות בדיקה`) is not at the end of the message.
+
+      Both stay as baseline failures. They are not fixed in this plan.
+  - **Inventory:**
+    - 59 tracked files under `test/`, with 0 untracked non-ignored files.
+    - 189 ignored local entries from the approved command, all starting with `test/`: `.env`, `node_modules/`, 186 report runs, `supabase/.temp/`. `.env` is present; its contents were not read.
+    - 65 path-like `test/` references outside `docs/plans/`, the same set as at `dce8f2e`.
+  - **ESLint config for `test/pay-calculation.test.js`:**
+    - 1166 globals, Node and browser;
+    - `import/no-unresolved`, `import/named`, `import/default`, `import/namespace` and `no-restricted-imports` all off; `import/no-cycle` on;
+    - file SHA-256 `e46c65792dfccc52…`.
+  - **`SETUP_SQL_SCRIPT`:** SHA-256 `fce6b94b5dbbfc65c71fa19762b7062ae57530f3e598aede0e2105d382465115`, length 259620.
+  - **Plan corrections found while measuring:**
+    - the file-load failure name rule (identity method step 3);
+    - `.cjs` and `.mjs` files are linted (stage 6.9);
+    - this plan is excluded from the stage 1 reference rewriting;
+    - the ESLint scan list as a check (identity method step 7).
+  - **Not run:** a real tester scenario. Only `--validate` was run.
+  - **Joint review pending.**
 
 ---
 
