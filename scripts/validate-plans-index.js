@@ -5,12 +5,13 @@
  * Checks docs/plans/index.csv, the only record of each plan's overall status.
  * See docs/plans/README.md.
  *
- * - Header is exactly `path,title,status`.
+ * - The header is exactly three fields: path, title, status (compared field by field).
  * - Fields follow standard CSV quoting (RFC 4180): a field with a comma, a double quote or a
  *   line break is wrapped in double quotes, and an inner double quote is written twice.
  * - Each record has exactly 3 fields, a non-empty title and a status of
  *   planned | active | completed | canceled.
- * - `path` is relative to docs/plans/, uses forward slashes, is `<topic>/<plan>.md`, and exists.
+ * - `path` is relative to docs/plans/, uses forward slashes, is `<topic>/<plan>.md`, and names a
+ *   regular plan file the checker found there (a folder named `x.md` is not a plan).
  * - No path is listed twice, and every `docs/plans/<topic>/<plan>.md` (except README.md) has a row.
  *
  * Usage: node scripts/validate-plans-index.js [--dir <plans directory>]
@@ -141,10 +142,19 @@ export function validatePlansIndex(plansDir) {
   if (parsed.errors.length > 0) return { errors: parsed.errors, rows: [] };
 
   const [header, ...records] = parsed.records;
-  if (!header || header.fields.join(',') !== HEADER.join(',')) {
-    errors.push(`line 1: header must be exactly "${HEADER.join(',')}"`);
+  // Compare field by field: a single quoted field "path,title,status" is one field, not a header.
+  const headerOk = header
+    && header.fields.length === HEADER.length
+    && HEADER.every((name, index) => header.fields[index] === name);
+  if (!headerOk) {
+    errors.push(`line 1: header must be exactly the three fields ${HEADER.join(', ')}`);
     return { errors, rows: [] };
   }
+
+  // Rows are matched against the plan files the checker discovers, so a folder named "x.md"
+  // or any other non-file entry never counts as a plan.
+  const { found, misplaced } = listPlanFiles(plansDir);
+  const planFiles = new Set(found);
 
   const rows = [];
   const seen = new Map();
@@ -157,8 +167,8 @@ export function validatePlansIndex(plansDir) {
     const [planPath, title, status] = record.fields;
     if (!PLAN_PATH.test(planPath) || planPath.endsWith('/README.md')) {
       errors.push(`${where}: path "${planPath}" must be "<topic>/<plan>.md", relative to docs/plans/, lowercase, with forward slashes`);
-    } else if (!fs.existsSync(path.join(plansDir, ...planPath.split('/')))) {
-      errors.push(`${where}: path "${planPath}" does not exist`);
+    } else if (!planFiles.has(planPath)) {
+      errors.push(`${where}: path "${planPath}" is not a plan file in docs/plans/<topic>/ (missing, or not a regular file)`);
     }
     if (title.trim() === '') errors.push(`${where}: title is empty`);
     if (!STATUSES.includes(status)) {
@@ -172,7 +182,6 @@ export function validatePlansIndex(plansDir) {
     rows.push({ path: planPath, title, status });
   });
 
-  const { found, misplaced } = listPlanFiles(plansDir);
   for (const file of misplaced) {
     errors.push(`${file}: a plan must be in a topic folder (docs/plans/<topic>/<plan>.md)`);
   }

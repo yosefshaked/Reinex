@@ -104,7 +104,17 @@ describe('plans index: broken registries fail with a reason', () => {
 
   it('rejects a wrong header', () => {
     const errors = errorsFor({ csv: `path,status,title\n${valid}\n` });
-    assert.match(errors[0], /header must be exactly "path,title,status"/);
+    assert.match(errors[0], /header must be exactly the three fields path, title, status/);
+  });
+
+  it('rejects a header that is one quoted field "path,title,status" (regression)', () => {
+    const errors = errorsFor({ csv: `"path,title,status"\n${valid}\n` });
+    assert.deepEqual(errors, ['line 1: header must be exactly the three fields path, title, status']);
+  });
+
+  it('rejects a header with an extra field', () => {
+    const errors = errorsFor({ csv: `path,title,status,owner\n${valid},x\n` });
+    assert.match(errors[0], /header must be exactly the three fields/);
   });
 
   it('rejects a bad status', () => {
@@ -119,7 +129,15 @@ describe('plans index: broken registries fail with a reason', () => {
 
   it('rejects a row whose file is missing', () => {
     const errors = errorsFor({ csv: `path,title,status\n${valid}\npayroll/missing.md,Missing,planned\n` });
-    assert.ok(errors.some((e) => /path "payroll\/missing.md" does not exist/.test(e)), errors.join('\n'));
+    assert.ok(errors.some((e) => /path "payroll\/missing.md" is not a plan file/.test(e)), errors.join('\n'));
+  });
+
+  it('rejects a row that points to a folder named like a plan (regression)', () => {
+    const dir = plansDir({ csv: `path,title,status\n${valid}\npayroll/folder.md,Not a plan,planned\n` });
+    fs.mkdirSync(path.join(dir, 'payroll', 'folder.md'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'payroll', 'folder.md', 'notes.md'), '# supporting file\n');
+    const { errors } = validatePlansIndex(dir);
+    assert.deepEqual(errors, ['record 2 (line 3): path "payroll/folder.md" is not a plan file in docs/plans/<topic>/ (missing, or not a regular file)']);
   });
 
   it('rejects a plan with no row', () => {
