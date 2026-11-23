@@ -11,6 +11,7 @@ import StatusBadge from '../ui/StatusBadge.jsx';
 import Drawer from '../ui/Drawer.jsx';
 import MetricCard from '../ui/MetricCard.jsx';
 import { useAdminModuleView, captureAdminEvent } from '../lib/admin-analytics.js';
+import { utcFileStamp } from '@/lib/local-time.js';
 
 /**
  * Audit Log — read-only surface over the audit_log table.
@@ -169,7 +170,7 @@ export default function AuditLogView() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `audit-log-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.csv`;
+    a.download = `audit-log-${utcFileStamp()}.csv`;
     document.body.appendChild(a);
     a.click();
     a.remove();

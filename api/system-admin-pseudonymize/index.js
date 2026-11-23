@@ -1,4 +1,5 @@
 /* eslint-env node */
+import { dateKeyFromUtcCalendarDate } from '../_shared/local-time.js';
 import crypto from 'node:crypto';
 import { resolveBearerAuthorization } from '../_shared/http.js';
 import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../_shared/supabase-admin.js';
@@ -66,7 +67,7 @@ function buildBucketUpdate(keyBuf, row, fields) {
     const raw = row[field];
     if (raw === null || raw === undefined) continue;
     if (raw instanceof Date) {
-      bucket[field] = raw.toISOString().split('T')[0];
+      bucket[field] = dateKeyFromUtcCalendarDate(raw);
     } else if (typeof raw === 'object') {
       // jsonb arrives from Supabase as a parsed JS object
       bucket[field] = JSON.stringify(raw);

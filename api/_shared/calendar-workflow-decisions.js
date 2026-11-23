@@ -45,6 +45,30 @@ export function readParticipantWorkflowMetadata(metadata) {
   };
 }
 
+const ABSENCE_STATUSES = new Set(['no_show', 'cancelled_student', 'cancelled_clinic']);
+
+/**
+ * The instructor-pay decision stored on a participant when someone marks the outcome.
+ *
+ * Only a choice a person made in the absence form is stored ('compensated' / 'not_compensated' on a
+ * no-show or cancellation); it overrides the earnings policy for that participant. Anything else is
+ * 'unknown': the earnings policy in force on the lesson's date decides (dated settings, read by
+ * shouldParticipantTriggerInstructorCompensation), so changing the policy from a date changes the
+ * lessons from that date and no others.
+ */
+export function resolveExplicitInstructorCompensationDecision(participantStatus, requestedDecision) {
+  const status = normalizeString(participantStatus).toLowerCase();
+  if (!ABSENCE_STATUSES.has(status)) {
+    return 'unknown';
+  }
+  const requested = normalizeWorkflowDecision(requestedDecision, 'unknown');
+  return requested === 'compensated' || requested === 'not_compensated' ? requested : 'unknown';
+}
+
+/**
+ * Whether a participant pays the instructor: an explicit choice wins, otherwise the earnings policy
+ * for the status. `policies` must be the policies on the lesson's date (financePoliciesOnDate).
+ */
 export function shouldParticipantTriggerInstructorCompensation(participant, policies) {
   const status = normalizeString(participant?.participant_status).toLowerCase();
   const workflow = readParticipantWorkflowMetadata(participant?.metadata);

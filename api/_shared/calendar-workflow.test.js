@@ -147,12 +147,8 @@ const SUMMARY_KEYS = [
   'all_attendance_resolved',
   'all_hmo_resolved',
   'all_student_billing_resolved',
-  'finalized_payroll_run_ids',
-  'has_payroll_lock',
   'hmo_claim_required',
   'instructor_compensation_required',
-  'instructor_compensation_resolved',
-  'lesson_earning_exists',
   'settled_claim_batch_ids',
   'student_billing_required',
 ];
@@ -209,7 +205,6 @@ function makeClient() {
     Settings: [],
     instance_locks: [],
     participant_locks: [],
-    lesson_earnings: [],
     ledger_transactions: [],
     dashboard_tasks: [],
   });
@@ -381,10 +376,8 @@ function attendedClosureState({ decision = 'pending', ledgerRows = [], openHmoTa
     instanceLocks: [],
     participantLocks: [],
     participantLocksByParticipant: new Map(),
-    lessonEarnings: [],
     ledgerRowsByParticipant: new Map([[PARTICIPANT_A, ledgerRows]]),
     openHmoTaskByParticipant: openHmoTask ? new Map([[PARTICIPANT_A, openHmoTask]]) : new Map(),
-    payrollRunById: new Map(),
     claimBatchById: new Map(),
   };
 }

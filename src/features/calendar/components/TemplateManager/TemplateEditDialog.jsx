@@ -7,6 +7,7 @@ import { useMemo, useState, useEffect } from 'react';
 import { useOrg } from '@/org/OrgContext';
 import { useCalendarInstructors } from '../../hooks/useCalendar';
 import { useTemplateMutations, useTemplateOverrides } from '../../hooks/useTemplates';
+import { useMissingRateForSelection } from '../../hooks/useMissingRateForSelection.js';
 import { Loader2, AlertCircle, Trash2, Pencil, X, RotateCcw, UserPlus } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { authenticatedFetch } from '@/lib/api-client.js';
@@ -20,6 +21,7 @@ import {
   isWithinAvailabilityWindows,
 } from '@/lib/instructor-availability.js';
 import { ceilClockTimeToGrid } from '@/lib/time-grid.js';
+import { MissingRateNotice } from '../MissingRateNotice.jsx';
 
 function formatTime(timeString) {
   return ceilClockTimeToGrid(timeString);
@@ -86,6 +88,13 @@ export function TemplateEditDialog({ template, open, onClose, onUpdate, onFixAva
   const [newOverrideDate, setNewOverrideDate] = useState('');
 
   const [error, setError] = useState(null);
+  // Cleared by itself when the instructor, service or start date changes (the refusal was for the old
+  // ones). Re-activation is checked on its own new start date.
+  const [missingRate, setMissingRate, clearMissingRate] = useMissingRateForSelection({
+    instructorId: formData.instructor_employee_id,
+    serviceId: formData.service_id,
+    date: isReactivating ? reactivationRange.valid_from : formData.valid_from,
+  });
 
   function formatDate(dateString) {
     if (!dateString) return '—';
@@ -124,8 +133,9 @@ export function TemplateEditDialog({ template, open, onClose, onUpdate, onFixAva
       });
       setNewOverrideDate('');
       setError(null);
+      clearMissingRate();
     }
-  }, [template, open]);
+  }, [template, open, clearMissingRate]);
 
   // Fetch services
   useEffect(() => {
@@ -271,6 +281,7 @@ export function TemplateEditDialog({ template, open, onClose, onUpdate, onFixAva
 
   async function handleSave() {
     setError(null);
+    clearMissingRate();
 
     if (missingCapability) {
       setError('לא ניתן לשמור בלי יכולת שירות פעילה למדריך/ה עבור השירות שנבחר.');
@@ -318,7 +329,12 @@ export function TemplateEditDialog({ template, open, onClose, onUpdate, onFixAva
       return;
     }
 
-    const { error: apiError } = await updateTemplate(template.id, updates);
+    const { error: apiError, missingRate: apiMissingRate } = await updateTemplate(template.id, updates);
+
+    if (apiMissingRate) {
+      setMissingRate(apiMissingRate);
+      return;
+    }
 
     if (apiError) {
       setError(
@@ -361,6 +377,7 @@ export function TemplateEditDialog({ template, open, onClose, onUpdate, onFixAva
 
   async function handleReactivate() {
     setError(null);
+    clearMissingRate();
 
     if (!reactivationRange.valid_from) {
       setError('כדי להפעיל מחדש יש לבחור טווח תוקף חדש (תוקף מ- הוא שדה חובה).');
@@ -372,11 +389,16 @@ export function TemplateEditDialog({ template, open, onClose, onUpdate, onFixAva
       return;
     }
 
-    const { error: apiError } = await updateTemplate(template.id, {
+    const { error: apiError, missingRate: apiMissingRate } = await updateTemplate(template.id, {
       is_active: true,
       valid_from: reactivationRange.valid_from,
       valid_until: reactivationRange.valid_until || null,
     });
+
+    if (apiMissingRate) {
+      setMissingRate(apiMissingRate);
+      return;
+    }
 
     if (apiError) {
       setError(
@@ -772,6 +794,8 @@ export function TemplateEditDialog({ template, open, onClose, onUpdate, onFixAva
               </div>
             </div>
 
+            <MissingRateNotice missingRate={missingRate} onRateAdded={() => clearMissingRate()} />
+
             {error && (
               <Alert variant="destructive">
                 <AlertCircle className="h-4 w-4" />
@@ -950,6 +974,8 @@ export function TemplateEditDialog({ template, open, onClose, onUpdate, onFixAva
                 />
               </div>
             </div>
+
+            <MissingRateNotice missingRate={missingRate} onRateAdded={() => clearMissingRate()} />
 
             {error && (
               <Alert variant="destructive">

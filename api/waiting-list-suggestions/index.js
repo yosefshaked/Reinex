@@ -1,4 +1,5 @@
 /* eslint-env node */
+import { todayKey } from '../_shared/local-time.js';
 import { resolveBearerAuthorization } from '../_shared/http.js';
 import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../_shared/supabase-admin.js';
 import {
@@ -12,6 +13,7 @@ import {
   resolveOrgId,
   withOrgScope,
 } from '../_shared/org-bff.js';
+import { selectInChunks } from '../_shared/query-chunks.js';
 import { hasConfiguredAvailability } from '../_shared/instructor-availability.js';
 import {
   buildCapabilityMap,
@@ -22,7 +24,6 @@ import {
   formatWaitingListPersonName,
   isTemplateValidOn,
   normalizeMatchMode,
-  parseIsoDateInTimezone,
 } from '../_shared/waiting-list-matching.js';
 import { attachErrorTracking, respondTracked } from '../_shared/error-events.js';
 
@@ -135,7 +136,7 @@ export default async function waitingListSuggestions(context, req) {
     return respond(context, 400, { message: 'waiting_list_entry_missing_service' });
   }
 
-  const today = parseIsoDateInTimezone();
+  const today = todayKey();
 
   const { data: instructorRows, error: instructorError } = await withOrgScope(supabase, 'Employees', orgId)
     .select('id, first_name, middle_name, last_name, is_active')
@@ -164,14 +165,20 @@ export default async function waitingListSuggestions(context, req) {
     capabilityResult,
     templateResult,
   ] = await Promise.all([
-    withOrgScope(supabase, 'instructor_service_capabilities', orgId)
-      .select('employee_id, service_id, max_students, availability_windows')
-      .eq('service_id', entry.desired_service_id)
-      .in('employee_id', instructorIds),
-    withOrgScope(supabase, 'lesson_templates', orgId)
-      .select('id, student_id, instructor_employee_id, service_id, day_of_week, time_of_day, duration_minutes, valid_from, valid_until, is_active')
-      .eq('is_active', true)
-      .in('instructor_employee_id', instructorIds),
+    selectInChunks(
+      () => withOrgScope(supabase, 'instructor_service_capabilities', orgId)
+        .select('employee_id, service_id, max_students, availability_windows')
+        .eq('service_id', entry.desired_service_id),
+      'employee_id',
+      instructorIds,
+    ),
+    selectInChunks(
+      () => withOrgScope(supabase, 'lesson_templates', orgId)
+        .select('id, student_id, instructor_employee_id, service_id, day_of_week, time_of_day, duration_minutes, valid_from, valid_until, is_active')
+        .eq('is_active', true),
+      'instructor_employee_id',
+      instructorIds,
+    ),
   ]);
 
   if (capabilityResult.error) {

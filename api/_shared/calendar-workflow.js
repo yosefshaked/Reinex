@@ -4,10 +4,10 @@ import { listDashboardTasks } from './dashboard-tasks.js';
 import { normalizeString, withOrgScope } from './org-bff.js';
 import { isPlainObject, readParticipantWorkflowMetadata, shouldParticipantTriggerInstructorCompensation } from './calendar-workflow-decisions.js';
 import { coerceAgorot } from './currency.js';
+import { localDateKey, todayKey } from './local-time.js';
 
 const RESOLVED_PARTICIPANT_STATUSES = new Set(['attended', 'no_show', 'cancelled_student', 'cancelled_clinic']);
 const LESSON_BILLING_USAGE_TYPES = ['lesson_charge', 'reversal'];
-const PAYROLL_SETTLED_STATUSES = new Set(['finalized']);
 const CLAIM_SETTLED_STATUSES = new Set(['issued', 'submitted', 'acknowledged', 'partially_paid', 'paid', 'closed']);
 
 function asArray(value) {
@@ -99,6 +99,11 @@ function evaluateParticipantSettlement(participant, context) {
   };
 }
 
+/**
+ * The closure state of one lesson. The lesson is read by id and everything under it (participants,
+ * locks, charges, claim batches) is read in the lesson's own organisation, so nothing of another
+ * organisation is mixed in. Callers pass an id they already read in the request's organisation.
+ */
 export async function loadLessonWorkflowState(tenantClient, lessonInstanceId) {
   const normalizedLessonInstanceId = normalizeString(lessonInstanceId);
   if (!normalizedLessonInstanceId) {
@@ -118,8 +123,7 @@ export async function loadLessonWorkflowState(tenantClient, lessonInstanceId) {
     return null;
   }
 
-  const { data: participants, error: participantsError } = await tenantClient
-    .from('lesson_participants')
+  const { data: participants, error: participantsError } = await withOrgScope(tenantClient, 'lesson_participants', instance.org_id)
     .select('id, lesson_instance_id, student_id, participant_status, metadata')
     .eq('lesson_instance_id', normalizedLessonInstanceId);
 
@@ -134,28 +138,20 @@ export async function loadLessonWorkflowState(tenantClient, lessonInstanceId) {
     policies,
     { data: instanceLocks, error: instanceLocksError },
     { data: participantLocks, error: participantLocksError },
-    { data: lessonEarnings, error: lessonEarningsError },
     { data: ledgerRows, error: ledgerRowsError },
     openTaskGroups,
   ] = await Promise.all([
-    loadFinancePolicies(tenantClient, instance.org_id),
-    tenantClient
-      .from('instance_locks')
+    loadFinancePolicies(tenantClient, instance.org_id, { asOf: localDateKey(instance.datetime_start) || todayKey() }),
+    withOrgScope(tenantClient, 'instance_locks', instance.org_id)
       .select('id, lesson_instance_id, lock_source_type, lock_source_id, metadata')
       .eq('lesson_instance_id', normalizedLessonInstanceId),
     participantIds.length > 0
-      ? tenantClient
-        .from('participant_locks')
+      ? withOrgScope(tenantClient, 'participant_locks', instance.org_id)
         .select('id, lesson_participant_id, lock_source_type, lock_source_id, metadata')
         .in('lesson_participant_id', participantIds)
       : Promise.resolve({ data: [], error: null }),
-    tenantClient
-      .from('lesson_earnings')
-      .select('id, employee_id, lesson_instance_id, payout_amount, metadata')
-      .eq('lesson_instance_id', normalizedLessonInstanceId),
     participantIds.length > 0
-      ? tenantClient
-        .from('ledger_transactions')
+      ? withOrgScope(tenantClient, 'ledger_transactions', instance.org_id)
         .select('id, lesson_participant_id, direction, source_type, amount, hmo_provider_id, metadata')
         .in('lesson_participant_id', participantIds)
         .in('source_type', LESSON_BILLING_USAGE_TYPES)
@@ -172,42 +168,28 @@ export async function loadLessonWorkflowState(tenantClient, lessonInstanceId) {
 
   if (instanceLocksError) throw instanceLocksError;
   if (participantLocksError) throw participantLocksError;
-  if (lessonEarningsError && lessonEarningsError.code !== '42P01') throw lessonEarningsError;
   if (ledgerRowsError && ledgerRowsError.code !== '42P01') throw ledgerRowsError;
 
   const instanceLockRows = asArray(instanceLocks);
   const participantLockRows = asArray(participantLocks);
-  const payrollRunIds = Array.from(new Set([
-    ...instanceLockRows.filter((lock) => normalizeString(lock?.lock_source_type) === 'payroll_run').map((lock) => lock.lock_source_id),
-    ...participantLockRows.filter((lock) => normalizeString(lock?.lock_source_type) === 'payroll_run').map((lock) => lock.lock_source_id),
-  ].filter(Boolean)));
   const claimBatchIds = Array.from(new Set([
     ...instanceLockRows.filter((lock) => normalizeString(lock?.lock_source_type) === 'claim_batch').map((lock) => lock.lock_source_id),
     ...participantLockRows.filter((lock) => normalizeString(lock?.lock_source_type) === 'claim_batch').map((lock) => lock.lock_source_id),
   ].filter(Boolean)));
 
-  const [{ data: payrollRuns, error: payrollRunsError }, { data: claimBatches, error: claimBatchesError }, { data: hmoInvoiceBatches, error: hmoInvoiceBatchesError }] = await Promise.all([
-    payrollRunIds.length > 0
-      ? tenantClient
-        .from('payroll_runs')
-        .select('id, status, finalized_at')
-        .in('id', payrollRunIds)
-      : Promise.resolve({ data: [], error: null }),
+  const [{ data: claimBatches, error: claimBatchesError }, { data: hmoInvoiceBatches, error: hmoInvoiceBatchesError }] = await Promise.all([
     claimBatchIds.length > 0
-      ? tenantClient
-        .from('claim_batches')
+      ? withOrgScope(tenantClient, 'claim_batches', instance.org_id)
         .select('id, status, submitted_at, paid_at')
         .in('id', claimBatchIds)
       : Promise.resolve({ data: [], error: null }),
     claimBatchIds.length > 0
-      ? tenantClient
-        .from('hmo_invoice_batches')
+      ? withOrgScope(tenantClient, 'hmo_invoice_batches', instance.org_id)
         .select('id, status, submitted_at, issued_at, paid_at')
         .in('id', claimBatchIds)
       : Promise.resolve({ data: [], error: null }),
   ]);
 
-  if (payrollRunsError && payrollRunsError.code !== '42P01') throw payrollRunsError;
   if (claimBatchesError && claimBatchesError.code !== '42P01') throw claimBatchesError;
   if (hmoInvoiceBatchesError && hmoInvoiceBatchesError.code !== '42P01') throw hmoInvoiceBatchesError;
 
@@ -247,10 +229,8 @@ export async function loadLessonWorkflowState(tenantClient, lessonInstanceId) {
     instanceLocks: instanceLockRows,
     participantLocks: participantLockRows,
     participantLocksByParticipant,
-    lessonEarnings: asArray(lessonEarnings),
     ledgerRowsByParticipant,
     openHmoTaskByParticipant,
-    payrollRunById: new Map(asArray(payrollRuns).map((row) => [row.id, row])),
     claimBatchById: new Map([
       ...asArray(claimBatches).map((row) => [row.id, row]),
       ...asArray(hmoInvoiceBatches).map((row) => [row.id, row]),
@@ -278,18 +258,6 @@ export function evaluateLessonClosureState(state) {
   const allHmoResolved = participantEvaluations.every((entry) => (
     !entry.hmo_claim_required || entry.hmo_claim_resolved
   ));
-  const finalizedPayrollRunIds = Array.from(new Set([
-    ...asArray(state.instanceLocks)
-      .filter((lock) => normalizeString(lock?.lock_source_type) === 'payroll_run')
-      .map((lock) => state.payrollRunById?.get(lock.lock_source_id))
-      .filter((row) => PAYROLL_SETTLED_STATUSES.has(normalizeString(row?.status).toLowerCase()))
-      .map((row) => row.id),
-    ...asArray(state.participantLocks)
-      .filter((lock) => normalizeString(lock?.lock_source_type) === 'payroll_run')
-      .map((lock) => state.payrollRunById?.get(lock.lock_source_id))
-      .filter((row) => PAYROLL_SETTLED_STATUSES.has(normalizeString(row?.status).toLowerCase()))
-      .map((row) => row.id),
-  ].filter(Boolean)));
   const settledClaimBatchIds = Array.from(new Set([
     ...asArray(state.instanceLocks)
       .filter((lock) => normalizeString(lock?.lock_source_type) === 'claim_batch')
@@ -302,14 +270,12 @@ export function evaluateLessonClosureState(state) {
       .filter((row) => CLAIM_SETTLED_STATUSES.has(normalizeString(row?.status).toLowerCase()))
       .map((row) => row.id),
   ].filter(Boolean)));
+  // Instructor pay is computed from the lesson whenever it is shown, so it never keeps a lesson open.
   const instructorCompensationRequired = participantEvaluations.some((entry) => entry.instructor_compensation_required);
-  const lessonEarningExists = asArray(state.lessonEarnings).length > 0;
-  const instructorCompensationResolved = !instructorCompensationRequired || (lessonEarningExists && finalizedPayrollRunIds.length > 0);
 
   const reasonsOpen = [];
   if (!allAttendanceResolved) reasonsOpen.push('attendance_unresolved');
   if (allAttendanceResolved && studentBillingRequired && !allStudentBillingResolved) reasonsOpen.push('student_billing_unresolved');
-  if (allAttendanceResolved && instructorCompensationRequired && !instructorCompensationResolved) reasonsOpen.push('instructor_compensation_unresolved');
   if (allAttendanceResolved && hmoClaimRequired && !allHmoResolved) reasonsOpen.push('hmo_claim_unresolved');
 
   return {
@@ -321,12 +287,8 @@ export function evaluateLessonClosureState(state) {
       student_billing_required: studentBillingRequired,
       all_student_billing_resolved: allStudentBillingResolved,
       instructor_compensation_required: instructorCompensationRequired,
-      instructor_compensation_resolved: instructorCompensationResolved,
       hmo_claim_required: hmoClaimRequired,
       all_hmo_resolved: allHmoResolved,
-      has_payroll_lock: finalizedPayrollRunIds.length > 0,
-      lesson_earning_exists: lessonEarningExists,
-      finalized_payroll_run_ids: finalizedPayrollRunIds,
       settled_claim_batch_ids: settledClaimBatchIds,
     },
   };

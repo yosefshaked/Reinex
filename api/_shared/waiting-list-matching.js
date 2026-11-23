@@ -33,17 +33,6 @@ export function normalizeMatchMode(value, fallback = 'capacity') {
   return WAITING_LIST_MATCH_MODES.has(normalized) ? normalized : fallback;
 }
 
-export function parseIsoDateInTimezone(date = new Date(), timeZone = 'Asia/Jerusalem') {
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).formatToParts(date);
-  const map = Object.fromEntries(parts.map((part) => [part.type, part.value]));
-  return `${map.year}-${map.month}-${map.day}`;
-}
-
 export function buildWaitingListEntrySelect() {
   return [
     'id',

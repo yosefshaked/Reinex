@@ -156,7 +156,7 @@ async function commitCustomer(supabase, orgId, candidate) {
   let studentLedgerAction = null;
   let noteSaved = false;
   if (customerType === 'student') {
-    const { student, created, error: studentError } = await ensureStudentForClientProfile(supabase, clientProfileId);
+    const { student, created, error: studentError } = await ensureStudentForClientProfile(supabase, orgId, clientProfileId);
     if (studentError) throw new Error(`failed_to_ensure_student:${studentError}`);
     if (student?.id) {
       studentId = student.id;
@@ -413,7 +413,6 @@ async function commitInstructor(supabase, orgId, workspaceId, candidate) {
       last_name: normalizeString(data.last_name) || '',
       employee_id: `${sourceSystem}:${sourceInstructorId}`,
       employee_type: 'instructor',
-      payroll_model: null,
       is_active: data.is_active === true,
       metadata: importMetadata,
     })
@@ -525,6 +524,9 @@ async function commitLessonParticipant(supabase, orgId, candidate) {
   const isFuture = new Date(lesson.datetime_start).getTime() > Date.now();
   if (isFuture && data.participant_status !== 'scheduled') throw new Error('future_participant_must_be_scheduled');
   const sourceParticipantStatus = data.participant_status;
+  // Written as 'scheduled' with the source status kept aside, so there is no outcome and no pay
+  // decision to store. Pay then follows the earnings policy in force on the lesson's date (a dated
+  // setting); only a person's choice in the absence form is ever stored on a participant.
   const liveParticipantStatus = 'scheduled';
   const { data: created, error: createError } = await withOrgScope(supabase, 'lesson_participants', orgId)
     .insert({

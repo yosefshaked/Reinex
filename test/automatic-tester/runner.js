@@ -26,6 +26,15 @@ import { readFileSync, readdirSync } from 'fs';
 import { mkdir } from 'fs/promises';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import {
+  addDays,
+  addMonths,
+  dateKeyFromUtcCalendarDate,
+  findClockChanges,
+  firstDayOfMonth,
+  localDateTimeToUtc,
+  todayKey,
+} from '../../api/_shared/local-time.js';
 
 // dotenv (optional — silently skip if not installed)
 try {
@@ -159,6 +168,29 @@ function loadAllScripts() {
  * Scripts can reference these as {{CURRENT_MONTH_START}} / {{PREV_MONTH_START}}.
  * A script's own `variables` block can override them for debugging purposes.
  */
+// The next night the org's clock skips forward (from the zone, never a fixed year): a wall time
+// inside the skipped interval and the same distance after it, with the instants a browser in the
+// org's zone would send for them. Empty strings when the zone has no such change ahead.
+function buildClockChangeVars() {
+  const today = todayKey();
+  const next = findClockChanges(today, addDays(today, 800)).find((change) => change.kind === 'skipped');
+  if (!next) {
+    return { CLOCK_SKIPPED_DATE: '', CLOCK_SKIPPED_TIME: '', CLOCK_SKIPPED_INSTANT: '', CLOCK_AFTER_SKIPPED_TIME: '', CLOCK_AFTER_SKIPPED_INSTANT: '' };
+  }
+  const toMinutes = (clock) => (Number(clock.slice(0, 2)) * 60) + Number(clock.slice(3, 5));
+  const toClock = (minutes) => `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
+  const gap = next.offsetAfterMinutes - next.offsetBeforeMinutes;
+  const inside = toClock(toMinutes(next.startTime) + Math.floor(gap / 2));
+  const after = toClock(toMinutes(inside) + gap);
+  return {
+    CLOCK_SKIPPED_DATE: next.dateKey,
+    CLOCK_SKIPPED_TIME: inside,
+    CLOCK_SKIPPED_INSTANT: localDateTimeToUtc(next.dateKey, inside),
+    CLOCK_AFTER_SKIPPED_TIME: after,
+    CLOCK_AFTER_SKIPPED_INSTANT: localDateTimeToUtc(next.dateKey, after),
+  };
+}
+
 function buildDynamicVars() {
   const now = new Date();
   const y   = now.getUTCFullYear();
@@ -167,8 +199,21 @@ function buildDynamicVars() {
   return {
     CURRENT_MONTH_START: new Date(Date.UTC(y, m,     1, 8, 0, 0)).toISOString(),
     PREV_MONTH_START:    new Date(Date.UTC(y, m - 1, 1, 8, 0, 0)).toISOString(),
+    PREV_MONTH_SECOND_DAY_START: new Date(Date.UTC(y, m - 1, 2, 8, 0, 0)).toISOString(),
+    PREV_MONTH_FIFTH_DAY: dateKeyFromUtcCalendarDate(new Date(Date.UTC(y, m - 1, 5))),
+    PREV_MONTH_SIXTH_DAY: dateKeyFromUtcCalendarDate(new Date(Date.UTC(y, m - 1, 6))),
+    PREV_MONTH_THIRD_DAY_START: new Date(Date.UTC(y, m - 1, 3, 8, 0, 0)).toISOString(),
+    PREV_MONTH_THIRD_DAY: dateKeyFromUtcCalendarDate(new Date(Date.UTC(y, m - 1, 3))),
+    PREV_MONTH_FOURTH_DAY_START: new Date(Date.UTC(y, m - 1, 4, 8, 0, 0)).toISOString(),
+    CURRENT_MONTH_FIRST_DAY: `${y}-${String(m + 1).padStart(2, '0')}-01`,
+    // Today and the first day of next month in the org's zone, as date keys (dated settings).
+    TODAY: todayKey(),
+    CURRENT_YEAR: todayKey().slice(0, 4),
+    TODAY_DISPLAY: todayKey().split('-').reverse().join('.'),
+    NEXT_MONTH_FIRST_DAY: addMonths(firstDayOfMonth(todayKey()), 1),
     RUN_ID:              `run-${runNumericId}`,
     RUN_NUMERIC_ID:      runNumericId,
+    ...buildClockChangeVars(),
   };
 }
 

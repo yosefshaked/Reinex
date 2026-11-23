@@ -12,6 +12,8 @@ const EXPORTABLE_TABLES = [
   { name: 'Employees', clearColumns: ['user_id'] },
   { name: 'Services' },
   { name: 'Settings' },
+  // employee_id is the all-zero id for a version of the whole organisation: kept as it is, not remapped.
+  { name: 'SettingsHistory', references: { employee_id: 'Employees' }, keepValues: { employee_id: '00000000-0000-0000-0000-000000000000' } },
   { name: 'RateHistory', references: { employee_id: 'Employees', service_id: 'Services' } },
   { name: 'employee_attendance_records', references: { employee_id: 'Employees' } },
   { name: 'employee_leave_entries', references: { employee_id: 'Employees' } },
@@ -34,10 +36,8 @@ const EXPORTABLE_TABLES = [
   { name: 'instance_locks', references: { lesson_instance_id: 'lesson_instances' } },
   { name: 'participant_locks', references: { lesson_participant_id: 'lesson_participants' } },
   { name: 'calendar_instance_corrections', references: { lesson_instance_id: 'lesson_instances' }, userColumnsToCurrentUser: ['corrected_by'] },
-  { name: 'payroll_runs', userColumnsToCurrentUser: ['finalized_by'] },
-  { name: 'finance_corrections', references: { employee_id: 'Employees', lesson_instance_id: 'lesson_instances', payroll_run_id: 'payroll_runs' } },
+  { name: 'finance_corrections', references: { employee_id: 'Employees', lesson_instance_id: 'lesson_instances' } },
   { name: 'claim_batches', userColumnsToCurrentUser: ['submitted_by', 'paid_by'] },
-  { name: 'lesson_earnings', references: { employee_id: 'Employees', lesson_instance_id: 'lesson_instances', payroll_run_id: 'payroll_runs' } },
   { name: 'forms', userColumnsToCurrentUser: ['created_by', 'updated_by'] },
   { name: 'shared_form_blocks', userColumnsToCurrentUser: ['created_by'] },
   { name: 'form_shared_block_links', references: { form_id: 'forms', shared_block_id: 'shared_form_blocks' } },
@@ -191,6 +191,7 @@ function transformRow(config, row, targetOrgId, userId, idMaps) {
 
   for (const [column, referencedTable] of Object.entries(config.references || {})) {
     if (!Object.prototype.hasOwnProperty.call(transformed, column)) continue;
+    if (config.keepValues?.[column] === transformed[column]) continue;
     const mapped = remapId(idMaps, referencedTable, transformed[column]);
     transformed[column] = mapped || null;
   }

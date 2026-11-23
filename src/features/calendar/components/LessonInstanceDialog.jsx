@@ -20,6 +20,8 @@ import { LockedCorrectionPanel } from './LockedCorrectionPanel';
 import { LessonParticipantRoster } from './LessonParticipantRoster.jsx';
 import { LessonDialogHeader } from './LessonDialogHeader.jsx';
 import { LessonHistoryTab } from './LessonHistoryTab.jsx';
+import { MissingRateNotice } from './MissingRateNotice.jsx';
+import { ClockChangeNotice } from './ClockChangeNotice.jsx';
 import { useVersionConflictResolver } from './useVersionConflictResolver';
 import { dayTokenForJsDay } from '@/lib/day-of-week.js';
 import { hasConfiguredAvailability, isWithinAvailabilityWindows } from '@/lib/instructor-availability.js';
@@ -41,12 +43,18 @@ import {
   getDisplayInstance,
   getDisplayParticipants,
   resolveMutationError,
+  readMissingLessonRate,
   getParticipantStatusLabel,
   getWorkflowReasonLabel,
   resolveLatestWorkflowState,
   getPreviewImpactClass,
   buildConflictLines,
+  hasAttendanceMarkChanged,
+  absenceCompensationChoice,
+  resolveEditClockChangeNotice,
 } from '../utils/lessonDialogModel.js';
+import { lessonLocalStartFields } from '@/lib/clock-change.js';
+import { localDateKey } from '@/lib/local-time.js';
 import {
   useAbsenceRequirements,
   useLessonFinancePolicies,
@@ -137,7 +145,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
     orgId: org?.id,
     instanceId: instance?.id,
   });
-  const { billingPolicy, instructorEarningsPolicy } = useLessonFinancePolicies(org?.id);
+  const { billingPolicy, instructorEarningsPolicy } = useLessonFinancePolicies(org?.id, localDateKey(instance?.datetime_start) || '');
   const {
     getCurrentInstanceVersion,
     getCurrentParticipantVersion,
@@ -186,6 +194,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
   const [cancelPreviewLoading, setCancelPreviewLoading] = useState(false);
   const [editPreview, setEditPreview] = useState(null);
   const [editPreviewError, setEditPreviewError] = useState('');
+  const [editMissingRate, setEditMissingRate] = useState(null);
   const [editPreviewLoading, setEditPreviewLoading] = useState(false);
   const [pendingEditBody, setPendingEditBody] = useState(null);
   const [addingParticipantId, setAddingParticipantId] = useState(null);
@@ -209,6 +218,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
   useEffect(() => {
     setEditPreview(null);
     setEditPreviewError('');
+    setEditMissingRate(null);
     setEditPreviewLoading(false);
     setPendingEditBody(null);
   }, [formData, useSchedulingOverride, selectedOverrideReasonCode, customOverrideReason]);
@@ -246,6 +256,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
     setCustomOverrideReason(overrideState.customReason);
     setEditPreview(null);
     setEditPreviewError('');
+    setEditMissingRate(null);
     setEditPreviewLoading(false);
     setPendingEditBody(null);
   }, [displayInstance]);
@@ -283,6 +294,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
     setCancelPreviewLoading(false);
     setEditPreview(null);
     setEditPreviewError('');
+    setEditMissingRate(null);
     setEditPreviewLoading(false);
     setPendingEditBody(null);
     setActiveViewTab('lesson');
@@ -443,6 +455,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
           id: latestValue.id,
           org_id: org.id,
           datetime_start,
+          ...lessonLocalStartFields(payload.formData.date, payload.formData.time),
           duration_minutes: payload.formData.duration_minutes,
           instructor_employee_id: payload.formData.instructor_employee_id,
           service_id: payload.formData.service_id,
@@ -531,6 +544,9 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
       throw new Error('יש למלא סיבת חריגה לפני שמירת שיבוץ מחוץ לזמינות.');
     }
 
+    if (editClockChangeNotice?.blocking) {
+      throw new Error(editClockChangeNotice.message);
+    }
     const datetime_start = toUtcIsoString(formData.date, formData.time);
     if (!datetime_start) {
       throw new Error('תאריך או שעה אינם תקינים.');
@@ -540,6 +556,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
       id: instance.id,
       org_id: org.id,
       datetime_start,
+      ...lessonLocalStartFields(formData.date, formData.time),
       duration_minutes: formData.duration_minutes,
       instructor_employee_id: formData.instructor_employee_id,
       service_id: formData.service_id,
@@ -564,11 +581,19 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
 
       setEditPreview(null);
       setEditPreviewError('');
+      setEditMissingRate(null);
       setPendingEditBody(null);
       setIsEditMode(false);
       onUpdate?.();
     } catch (err) {
       console.error('Error updating lesson:', err);
+      const missing = readMissingLessonRate(err);
+      if (missing) {
+        setEditPreview(null);
+        setPendingEditBody(null);
+        setEditMissingRate(missing);
+        return;
+      }
       const handled = await handleVersionConflict(err, createSaveConflictAdapter(), {
         formData: { ...formData },
         useSchedulingOverride,
@@ -586,6 +611,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
   async function handleSave() {
     setError(null);
     setEditPreviewError('');
+    setEditMissingRate(null);
     setEditPreview(null);
     setPendingEditBody(null);
 
@@ -612,7 +638,12 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
     } catch (err) {
       setEditPreview(null);
       setPendingEditBody(null);
-      setEditPreviewError(resolveMutationError(err));
+      const missing = readMissingLessonRate(err);
+      if (missing) {
+        setEditMissingRate(missing);
+      } else {
+        setEditPreviewError(resolveMutationError(err));
+      }
     } finally {
       setEditPreviewLoading(false);
     }
@@ -724,7 +755,8 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
       participantId,
       status: nextStatus,
       notes: existingNotes,
-      waiveFee: false,
+      // Start from what is stored, so an untouched form compares as unchanged.
+      waiveFee: participant?.metadata?.workflow?.is_excused === true,
       instructorCompensationDecision:
         existingCompensationDecision === 'compensated' || existingCompensationDecision === 'not_compensated'
           ? existingCompensationDecision
@@ -778,7 +810,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
     // Every absence is previewed by the server (the one-line confirm strip) before it is saved.
     await openAttendancePreview(currentParticipant, absenceForm.status, {
       notes: absenceForm.notes,
-      instructorCompensationDecision: absenceForm.instructorCompensationDecision || null,
+      instructorCompensationDecision: absenceCompensationChoice(absenceForm),
       isExcused: applyGraceWaiver,
     });
   }
@@ -1197,17 +1229,18 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
   const hasUnsetParticipants =
     displayParticipants.length > 0 && scheduledParticipantsCount > 0;
 
-  // Prefill the instructor-pay decision from the org's earnings policy when the server says a decision
-  // is needed; the user can still change it (the form marks it "לפי הגדרות השכר").
+  // Show the instructor-pay choice preset to what the earnings policy in force on the lesson's date
+  // says (the server's answer), marked "לפי הגדרות השכר". Left as is, nothing is stored and the
+  // policy decides; a person's click is stored as their choice (see absenceCompensationChoice).
   useEffect(() => {
     if (!absenceForm || absenceForm.instructorCompensationDecision) return;
     if (!absenceRequirements?.requires_instructor_compensation_decision) return;
-    const policyValue = instructorEarningsPolicy?.[absenceForm.status];
+    const policyValue = absenceRequirements.instructor_earnings_applies;
     if (typeof policyValue !== 'boolean') return;
     setAbsenceForm((prev) => (prev && !prev.instructorCompensationDecision
       ? { ...prev, instructorCompensationDecision: policyValue ? 'compensated' : 'not_compensated', compensationFromPolicy: true }
       : prev));
-  }, [absenceForm, absenceRequirements, instructorEarningsPolicy]);
+  }, [absenceForm, absenceRequirements]);
 
   const editBaseline = useMemo(() => {
     if (!displayInstance?.datetime_start) return null;
@@ -1223,6 +1256,11 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
       customOverrideReason: overrideState.customReason,
     };
   }, [displayInstance]);
+  // Spring forward: a new time may not exist (blocked); autumn: it may happen twice (notice).
+  const editClockChangeNotice = useMemo(
+    () => resolveEditClockChangeNotice(formData, editBaseline),
+    [editBaseline, formData],
+  );
   const isEditDirty = Boolean(isEditMode && editBaseline && (
     formData.instructor_employee_id !== editBaseline.instructor_employee_id
     || formData.service_id !== editBaseline.service_id
@@ -1241,10 +1279,23 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
     setRestorePreviewLoading(false);
   }
 
+  // A pending mark that would save exactly what is stored: its confirm is disabled.
+  function isPendingMarkUnchanged(pending) {
+    if (!pending) return false;
+    const participant = displayParticipants.find((entry) => entry.id === pending.participantId);
+    return !hasAttendanceMarkChanged(participant, {
+      status: pending.targetStatus,
+      notes: pending.notes || '',
+      instructorCompensationDecision: pending.instructorCompensationDecision,
+      isExcused: pending.isExcused === true,
+    });
+  }
+
   async function confirmStatusStrip() {
     const target = attendancePreviewTarget;
     const pending = restorePreview;
     if (!target || !pending || pending.participantId !== target.participantId) return;
+    if (isPendingMarkUnchanged(pending)) return;
     const result = await handleMarkAttendance(target.participantId, pending.targetStatus, pending.notes || '', {
       instructorCompensationDecision: pending.instructorCompensationDecision || null,
       isExcused: pending.isExcused === true,
@@ -1287,10 +1338,9 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
 
   if (!instance || !displayInstance) return null;
 
-  const LOCK_SOURCE_LABELS = { payroll_run: 'הרצת שכר', claim_batch: 'אצוות תביעות', manual_compliance_lock: 'נעילת ציות ידנית' };
+  const LOCK_SOURCE_LABELS = { claim_batch: 'אצוות תביעות', manual_compliance_lock: 'נעילת ציות ידנית' };
   const REMAINING_LABELS = {
     student_billing_unresolved: 'חיוב לקוחות',
-    instructor_compensation_unresolved: 'שכר מדריך/ה',
     hmo_claim_unresolved: 'תביעת גורם מממן',
   };
   const isLessonLocked = Boolean(instance.is_locked || hardBlockedByPaidClaim);
@@ -1378,6 +1428,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
       pendingPreview?.instructorCompensationDecision === 'compensated' ? 'המדריך/ה יקבל/תקבל שכר' : '',
       pendingPreview?.instructorCompensationDecision === 'not_compensated' ? 'ללא שכר למדריך/ה' : '',
     ].filter(Boolean).join(' · '),
+    unchanged: isPendingMarkUnchanged(pendingPreview),
   } : null;
 
   // Footer: one quiet line that says what is still open (details on hover).
@@ -1709,6 +1760,11 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
             required
           />
         </div>
+        {editClockChangeNotice ? (
+          <div className="sm:col-span-2">
+            <ClockChangeNotice notice={editClockChangeNotice} />
+          </div>
+        ) : null}
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="lesson-edit-service" className={fieldLabelClass}>שירות</Label>
           <Select
@@ -1814,7 +1870,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
 
   const editFooter = (
     <div className="flex flex-col gap-2.5">
-      {(editChanges.length || editPreview || editPreviewError) ? (
+      {(editChanges.length || editPreview || editPreviewError || editMissingRate) ? (
         <div className="flex max-h-[32vh] flex-col gap-2 overflow-y-auto">
           {editChanges.length ? (
             <div className="flex flex-wrap gap-1.5">
@@ -1828,6 +1884,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
               ))}
             </div>
           ) : null}
+          <MissingRateNotice missingRate={editMissingRate} onRateAdded={() => setEditMissingRate(null)} />
           {editPreviewError ? (
             <div className="flex items-start gap-2 rounded-lg bg-red-50 px-2.5 py-2 text-xs font-medium text-red-800">
               <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" /> <span>{editPreviewError}</span>

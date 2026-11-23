@@ -153,6 +153,8 @@ const TABLES_WITHOUT_APP_USER_GRANT = new Set([
   'contact_requests',
   'email_log',
   'error_events',
+  // Written only by the migration files, which run as the database owner.
+  'schema_migrations',
 ]);
 
 // These control-DB tables have hand-written RLS policies and are intentionally
@@ -170,6 +172,8 @@ const TABLES_WITH_CUSTOM_RLS = new Set([
   'contact_requests',
   'email_log',
   'error_events',
+  // Written only by the migration files, which run as the database owner.
+  'schema_migrations',
 ]);
 
 function validatePresenceCoverage() {

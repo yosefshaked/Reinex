@@ -9,11 +9,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Badge } from '@/components/ui/badge';
+import ConfirmDialog from '@/components/ui/ConfirmDialog.jsx';
 import { Loader2 } from 'lucide-react';
 import { toast } from '@/lib/toast.jsx';
 import { authenticatedFetch } from '@/lib/api-client.js';
 import { toAgorot, formatCurrency } from '@/lib/currency.js';
+import EmployeePaySummary from '@/features/finance/components/EmployeePaySummary.jsx';
+import { calendarDateFromDateKey, dateKeyFromCalendarDate, firstDayOfMonth, todayKey } from '@/lib/local-time.js';
 
 function startOfMonth(date) {
   return new Date(date.getFullYear(), date.getMonth(), 1);
@@ -23,76 +25,56 @@ function endOfMonth(date) {
   return new Date(date.getFullYear(), date.getMonth() + 1, 0);
 }
 
-function addMonths(date, delta) {
-  return new Date(date.getFullYear(), date.getMonth() + delta, 1);
-}
-
-function toLocalDateString(date) {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-}
-
-function formatMonth(date) {
-  return new Intl.DateTimeFormat('he-IL', { month: 'long', year: 'numeric' }).format(date);
-}
-
-
-
-function getPayrollModelLabel(value) {
-  if (value === 'lesson_based') return 'מבוסס שיעורים';
-  if (value === 'monthly_salary') return 'שכר חודשי';
-  return 'שעתי';
-}
-
+/**
+ * The employee's month of pay and the office's corrections. Leave (days a year and how a leave day
+ * is paid) is set in the "נוכחות" tab's "חופשה" row, not here.
+ */
 export default function EmployeeFinancePanel({ employee, orgId, session, onEditEmployee }) {
-  const [monthDate, setMonthDate] = useState(() => startOfMonth(new Date()));
-  const [preview, setPreview] = useState(null);
+  const [monthDate, setMonthDate] = useState(() => calendarDateFromDateKey(firstDayOfMonth(todayKey())));
   const [adjustments, setAdjustments] = useState([]);
-  const [loading, setLoading] = useState(false);
+  // Bumped after a correction here so the pay summary reads again.
+  const [summaryReloadKey, setSummaryReloadKey] = useState(0);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({
     correctionType: 'bonus',
     amount: '',
-    effectiveDate: toLocalDateString(new Date()),
+    effectiveDate: firstDayOfMonth(todayKey()),
     notes: '',
   });
+  const [pendingRemoval, setPendingRemoval] = useState(null);
 
-  const monthStart = useMemo(() => toLocalDateString(startOfMonth(monthDate)), [monthDate]);
-  const monthEnd = useMemo(() => toLocalDateString(endOfMonth(monthDate)), [monthDate]);
+  const monthStart = useMemo(() => dateKeyFromCalendarDate(startOfMonth(monthDate)), [monthDate]);
+  const monthEnd = useMemo(() => dateKeyFromCalendarDate(endOfMonth(monthDate)), [monthDate]);
+
+  // A correction belongs to the month on screen. Defaulting to today put a fix for last month into
+  // this one whenever the office was looking back.
+  useEffect(() => {
+    setForm((current) => ({ ...current, effectiveDate: monthStart }));
+  }, [monthStart]);
 
   const loadData = useCallback(async () => {
     if (!employee?.id || !orgId) return;
-    setLoading(true);
     try {
-      const [payrollPayload, adjustmentsPayload] = await Promise.all([
-        authenticatedFetch('payroll', {
-          session,
-          params: {
-            org_id: orgId,
-            employee_id: employee.id,
-            start_date: monthStart,
-            end_date: monthEnd,
-          },
-        }),
-        authenticatedFetch('payroll-adjustments', {
-          session,
-          params: {
-            org_id: orgId,
-            employee_id: employee.id,
-            start_date: monthStart,
-            end_date: monthEnd,
-          },
-        }),
-      ]);
-
-      setPreview(Array.isArray(payrollPayload?.employees) ? payrollPayload.employees[0] || null : null);
+      const adjustmentsPayload = await authenticatedFetch('payroll-adjustments', {
+        session,
+        params: {
+          org_id: orgId,
+          employee_id: employee.id,
+          start_date: monthStart,
+          end_date: monthEnd,
+        },
+      });
       setAdjustments(Array.isArray(adjustmentsPayload?.entries) ? adjustmentsPayload.entries : []);
     } catch (error) {
       console.error('Failed to load finance data', error);
       toast.error(error?.message || 'טעינת נתוני הפיננסים נכשלה.');
-    } finally {
-      setLoading(false);
     }
   }, [employee?.id, monthEnd, monthStart, orgId, session]);
+
+  const reloadAll = useCallback(async () => {
+    setSummaryReloadKey((value) => value + 1);
+    await loadData();
+  }, [loadData]);
 
   useEffect(() => {
     void loadData();
@@ -124,7 +106,7 @@ export default function EmployeeFinancePanel({ employee, orgId, session, onEditE
         effectiveDate: monthStart,
         notes: '',
       });
-      await loadData();
+      await reloadAll();
       toast.success('התיקון הפיננסי נשמר.');
     } catch (error) {
       console.error('Failed to save finance correction', error);
@@ -146,7 +128,7 @@ export default function EmployeeFinancePanel({ employee, orgId, session, onEditE
         },
       });
       setAdjustments((current) => current.filter((entry) => entry.id !== id));
-      await loadData();
+      await reloadAll();
       toast.success('התיקון הוסר.');
     } catch (error) {
       console.error('Failed to delete finance correction', error);
@@ -157,83 +139,21 @@ export default function EmployeeFinancePanel({ employee, orgId, session, onEditE
   }
 
   return (
+    <div className="space-y-3 [font-family:inherit]">
     <div className="grid gap-3 xl:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)] [font-family:inherit]">
-      <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm [font-family:inherit]">
-        <div className="mb-3 flex items-center justify-between gap-3">
-          <div>
-            <h3 className="text-sm font-bold text-slate-900">תצוגת שכר חיה</h3>
-            <p className="text-xs text-slate-500">מבוסס על נוכחות, שיעורים, חופשות ותיקונים פיננסיים.</p>
-          </div>
-          <div className="flex items-center gap-2">
-            <Button size="sm" variant="outline" onClick={() => setMonthDate(addMonths(monthDate, -1))}>הקודם</Button>
-            <div className="min-w-[120px] text-center text-sm font-semibold text-slate-700">{formatMonth(monthDate)}</div>
-            <Button size="sm" variant="outline" onClick={() => setMonthDate(addMonths(monthDate, 1))}>הבא</Button>
-          </div>
-        </div>
-
-        <div className="mb-4 grid gap-2 md:grid-cols-3">
-          <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3">
-            <div className="text-[11px] text-slate-500">מודל שכר</div>
-            <div className="mt-1 text-lg font-bold text-slate-900">{getPayrollModelLabel(employee?.payroll_model || (employee?.employee_type === 'instructor' ? 'lesson_based' : 'hourly'))}</div>
-          </div>
-          <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3">
-            <div className="text-[11px] text-slate-500">תעריף / שכר</div>
-            <div className="mt-1 text-lg font-bold text-slate-900">
-              {employee?.payroll_model === 'monthly_salary'
-                ? formatCurrency(employee?.monthly_salary_amount)
-                : formatCurrency(employee?.current_rate)}
-            </div>
-          </div>
-          <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3">
-            <div className="text-[11px] text-slate-500">שיטת חופשה</div>
-            <div className="mt-1 text-lg font-bold text-slate-900">{employee?.leave_pay_method || 'ברירת מחדל'}</div>
-          </div>
-        </div>
-
+      <div className="space-y-2">
         {onEditEmployee ? (
-          <div className="mb-4">
-            <Button size="sm" variant="outline" onClick={onEditEmployee}>ערוך הגדרות שכר בכרטיס העובד</Button>
-          </div>
+          <Button size="sm" variant="outline" onClick={onEditEmployee}>עריכת כרטיס העובד</Button>
         ) : null}
-
-        {loading ? (
-          <div className="flex items-center gap-2 text-sm text-slate-500">
-            <Loader2 className="h-4 w-4 animate-spin" />
-            טוען תצוגת שכר...
-          </div>
-        ) : preview ? (
-          <div className="space-y-3">
-            <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
-              <div className="rounded-2xl border border-blue-200 bg-blue-50 px-3 py-3">
-                <div className="text-[11px] text-blue-700">בסיס</div>
-                <div className="mt-1 text-xl font-bold text-blue-950">{formatCurrency(preview.base_amount)}</div>
-              </div>
-              <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-3 py-3">
-                <div className="text-[11px] text-emerald-700">חופשה בתשלום</div>
-                <div className="mt-1 text-xl font-bold text-emerald-950">{formatCurrency(preview.paid_leave_amount)}</div>
-              </div>
-              <div className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-3">
-                <div className="text-[11px] text-amber-700">תיקונים</div>
-                <div className="mt-1 text-xl font-bold text-amber-950">{formatCurrency(preview.correction_amount)}</div>
-              </div>
-              <div className="rounded-2xl border border-slate-900 bg-slate-900 px-3 py-3 text-white">
-                <div className="text-[11px] text-slate-300">סה״כ</div>
-                <div className="mt-1 text-xl font-bold">{formatCurrency(preview.total_amount)}</div>
-              </div>
-            </div>
-
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-700">
-              {preview.payroll_model === 'lesson_based' ? `שיעורים: ${formatCurrency(preview.lesson_amount)}` : null}
-              {preview.payroll_model === 'hourly' ? `נוכחות: ${formatCurrency(preview.attendance_amount)}` : null}
-              {preview.payroll_model === 'monthly_salary' ? `שכר חודשי יחסי: ${formatCurrency(preview.monthly_salary_amount)}` : null}
-            </div>
-          </div>
-        ) : (
-          <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-3 py-6 text-center text-sm text-slate-500">
-            אין נתוני שכר להצגה בתקופה הזו.
-          </div>
-        )}
-      </section>
+        <EmployeePaySummary
+          orgId={orgId}
+          session={session}
+          employeeId={employee?.id}
+          monthDate={monthDate}
+          onMonthChange={setMonthDate}
+          reloadKey={summaryReloadKey}
+        />
+      </div>
 
       <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm [font-family:inherit]">
         <div className="mb-3">
@@ -288,7 +208,7 @@ export default function EmployeeFinancePanel({ employee, orgId, session, onEditE
                   <div className="text-sm font-semibold text-slate-900">{entry.correction_type} • {formatCurrency(entry.amount)}</div>
                   <div className="mt-1 text-xs text-slate-500">{entry.effective_date} • {entry.notes || 'ללא הערות'}</div>
                 </div>
-                <Button size="sm" variant="outline" className="[font-family:inherit]" onClick={() => handleDeleteAdjustment(entry.id)} disabled={saving}>
+                <Button size="sm" variant="outline" className="[font-family:inherit]" onClick={() => setPendingRemoval(entry)} disabled={saving}>
                   הסר
                 </Button>
               </div>
@@ -301,6 +221,21 @@ export default function EmployeeFinancePanel({ employee, orgId, session, onEditE
           ) : null}
         </div>
       </section>
+      <ConfirmDialog
+        open={Boolean(pendingRemoval)}
+        onOpenChange={(open) => { if (!open) setPendingRemoval(null); }}
+        onConfirm={() => {
+          const target = pendingRemoval;
+          setPendingRemoval(null);
+          if (target?.id) void handleDeleteAdjustment(target.id);
+        }}
+        confirmLabel="הסרה"
+        title="להסיר את התיקון?"
+        description={pendingRemoval
+          ? `${formatCurrency(pendingRemoval.amount)} בתאריך ${pendingRemoval.effective_date} יימחק, והשכר של החודש יחושב מחדש בלעדיו.`
+          : ''}
+      />
+    </div>
     </div>
   );
 }

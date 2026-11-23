@@ -223,6 +223,7 @@ export default function CustomTourRenderer() {
         <div className="tt-tour-desc">{description}</div>
         <div className="tt-tour-footer">
           <div className="tt-tour-progress" aria-hidden="true">
+            {/* eslint-disable-next-line no-restricted-syntax -- not money: tour progress bar width percentage */}
             <div className="tt-tour-progress-fill" style={{ width: `${(current / total) * 100}%` }} />
           </div>
           <div className="tt-tour-actions">

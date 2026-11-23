@@ -1,3 +1,5 @@
+import { withOrgScope } from './org-bff.js';
+
 export const STUDENT_SEARCH_SELECT = 'id, first_name, middle_name, last_name, identity_number, phone, email, is_active';
 
 function normalizeStudentSearchQuery(value) {
@@ -79,7 +81,10 @@ export function filterStudentsBySearchTerms(students, searchQuery) {
   });
 }
 
-export async function fetchMatchingStudentClientProfileIds(tenantClient, searchQuery, { limit = 1000 } = {}) {
+export async function fetchMatchingStudentClientProfileIds(tenantClient, orgId, searchQuery, { limit = 1000 } = {}) {
+  if (!String(orgId || '').trim()) {
+    return { ids: [], error: new Error('fetchMatchingStudentClientProfileIds needs the organisation id') };
+  }
   const searchSpec = typeof searchQuery === 'string'
     ? parseStudentSearchQuery(searchQuery)
     : searchQuery;
@@ -89,8 +94,7 @@ export async function fetchMatchingStudentClientProfileIds(tenantClient, searchQ
   }
 
   const { data, error } = await applyStudentSearchFilter(
-    tenantClient
-      .from('client_profiles')
+    withOrgScope(tenantClient, 'client_profiles', orgId)
       .select('id, first_name, middle_name, last_name, identity_number, phone, email')
       .limit(limit),
     searchSpec,

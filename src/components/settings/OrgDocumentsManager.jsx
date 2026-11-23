@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { roundTo2 } from '@/lib/round.js';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -45,6 +46,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import { localDateKey } from '@/lib/local-time.js';
 
 const REQUEST_STATE = {
   idle: 'idle',
@@ -79,7 +81,7 @@ function formatFileSize(bytes) {
   const k = 1024;
   const sizes = ['B', 'KB', 'MB', 'GB'];
   const i = Math.floor(Math.log(bytes) / Math.log(k));
-  const size = Math.round((bytes / Math.pow(k, i)) * 100) / 100;
+  const size = roundTo2(bytes / Math.pow(k, i));
   return `${size} ${sizes[i]}`;
 }
 
@@ -1162,7 +1164,7 @@ function DocumentCard({ document: doc, expired, canManage, deleteState, onEdit, 
             <div className="flex flex-wrap gap-x-2 sm:gap-x-3 gap-y-1 text-xs">
               <span dir="ltr" className="shrink-0">{formatFileSize(doc.size)}</span>
               <span className="hidden sm:inline">הועלה: {formatDateTime(doc.uploaded_at)}</span>
-              <span className="sm:hidden">{formatFileDate(doc.uploaded_at.split('T')[0])}</span>
+              <span className="sm:hidden">{formatFileDate(localDateKey(doc.uploaded_at))}</span>
             </div>
 
             {doc.relevant_date && (

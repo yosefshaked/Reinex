@@ -1,4 +1,4 @@
-import { normalizeString } from './org-bff.js';
+import { normalizeString, withOrgScope } from './org-bff.js';
 
 export function extractSessionFormVersion(settingsValue) {
   if (settingsValue === null || settingsValue === undefined) {
@@ -51,9 +51,11 @@ export function extractSessionFormVersion(settingsValue) {
   return null;
 }
 
-export async function resolveSessionFormVersion(tenantClient) {
-  const result = await tenantClient
-    .from('Settings')
+export async function resolveSessionFormVersion(tenantClient, orgId) {
+  if (!normalizeString(orgId)) {
+    return { version: null, error: new Error('resolveSessionFormVersion needs the organisation id') };
+  }
+  const result = await withOrgScope(tenantClient, 'Settings', orgId)
     .select('settings_value')
     .eq('key', 'session_form_config')
     .maybeSingle();
@@ -65,12 +67,12 @@ export async function resolveSessionFormVersion(tenantClient) {
   return { version: extractSessionFormVersion(result.data?.settings_value) ?? null, error: null };
 }
 
-export async function buildSessionMetadata({ tenantClient, userId, role, source, logger }) {
+export async function buildSessionMetadata({ tenantClient, orgId, userId, role, source, logger }) {
   let formVersion = null;
   let versionError = null;
 
   if (tenantClient) {
-    const versionResult = await resolveSessionFormVersion(tenantClient);
+    const versionResult = await resolveSessionFormVersion(tenantClient, orgId);
     formVersion = versionResult.version ?? null;
     versionError = versionResult.error;
   }

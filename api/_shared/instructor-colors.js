@@ -1,4 +1,5 @@
 /* eslint-env node */
+import { withOrgScope } from './org-bff.js';
 
 const DEFAULT_COLOR_BANK = Object.freeze([
   '#2563eb',
@@ -85,13 +86,16 @@ export const INSTRUCTOR_COLOR_BANK = DEFAULT_COLOR_BANK;
 
 export async function ensureInstructorColors(
   tenantClient,
-  { context, columns = 'id, metadata', table = 'Instructors' } = {},
+  { context, orgId, columns = 'id, metadata', table = 'Instructors' } = {},
 ) {
+  // Colours are assigned among one organisation's instructors and written back to that organisation only.
+  if (!String(orgId || '').trim()) {
+    return { error: new Error('ensureInstructorColors needs the organisation id') };
+  }
   const selectColumns = typeof columns === 'string' && columns.trim() ? columns : 'id, metadata';
   const targetTable = typeof table === 'string' && table.trim() ? table.trim() : 'Instructors';
 
-  let query = tenantClient
-    .from(targetTable)
+  let query = withOrgScope(tenantClient, targetTable, orgId)
     .select(selectColumns);
 
   // Tenant schemas are not consistent about human-readable name columns. Prefer the primary
@@ -140,8 +144,7 @@ export async function ensureInstructorColors(
 
   if (updates.length) {
     for (const { instructor, metadata } of updates) {
-      const { error: updateError } = await tenantClient
-        .from(targetTable)
+      const { error: updateError } = await withOrgScope(tenantClient, targetTable, orgId)
         .update({ metadata })
         .eq('id', instructor.id);
 

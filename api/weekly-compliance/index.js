@@ -1,4 +1,5 @@
 /* eslint-env node */
+import { todayKey } from '../_shared/local-time.js';
 import { resolveBearerAuthorization } from '../_shared/http.js';
 import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../_shared/supabase-admin.js';
 import {
@@ -221,19 +222,17 @@ export default async function (context, req) {
     return respond(context, 403, { message: 'forbidden' });
   }
 
-  const orgScopedClient = {
-    from: table => withOrgScope(supabase, table, orgId),
-  };
-
   const weekStartQuery = normalizeString(req?.query?.week_start || req?.query?.weekStart);
   const requestedWeekStart = parseWeekStart(weekStartQuery);
-  const today = startOfUtcDay(new Date());
+  // Today in the org's zone, carried as a UTC-midnight calendar Date like the rest of this file.
+  const today = startOfUtcDay(`${todayKey()}T00:00:00Z`);
   const weekStart = requestedWeekStart || startOfUtcWeek(today);
   const weekEnd = addDaysUtc(weekStart, 6);
   const todayIso = formatUtcDate(today);
 
-  const colorsResult = await ensureInstructorColors(orgScopedClient, {
+  const colorsResult = await ensureInstructorColors(supabase, {
     context,
+    orgId,
     columns: 'id, name, metadata, is_active',
   });
 

@@ -15,13 +15,6 @@ import { Badge } from '@/components/ui/badge';
 import { Briefcase, Calendar, Mail, Trash2, UserRound } from 'lucide-react';
 import { toast } from '@/lib/toast.jsx';
 import { authenticatedFetch } from '@/lib/api-client';
-import { toShekel, toAgorot } from '@/lib/currency.js';
-import CapabilityCompensationFields from './CapabilityCompensationFields.jsx';
-import {
-  buildCapabilityCompensationSummary,
-  hydrateCapabilityCompensationForm,
-  serializeCapabilityCompensation,
-} from '@/lib/instructor-compensation.js';
 
 const DAYS_OF_WEEK = [
   { value: 0, label: 'ראשון', short: 'א' },
@@ -45,11 +38,9 @@ function deriveEmployeeType(employee) {
 
 function buildInitialState(employee) {
   const employeeType = deriveEmployeeType(employee);
-  const payrollModel = employee?.payroll_model || (employeeType === 'instructor' ? 'lesson_based' : 'hourly');
   return {
     employeeId: employee?.employee_id || '',
     employeeType,
-    payrollModel,
     sourceType: employeeType,
     firstName: employee?.first_name || '',
     middleName: employee?.middle_name || '',
@@ -57,23 +48,16 @@ function buildInitialState(employee) {
     email: employee?.email || '',
     phone: employee?.phone || '',
     startDate: employee?.start_date || '',
-    currentRate: employee?.current_rate != null ? toShekel(employee.current_rate) : '',
-    monthlySalaryAmount: employee?.monthly_salary_amount != null ? toShekel(employee.monthly_salary_amount) : '',
-    annualLeaveDays: employee?.annual_leave_days ?? '',
-    leavePayMethod: employee?.leave_pay_method || '',
-    leaveFixedDayRate: employee?.leave_fixed_day_rate != null ? toShekel(employee.leave_fixed_day_rate) : '',
     employmentScope: employee?.employment_scope || '',
     notes: employee?.notes || '',
-    officeWorkingDays: employeeType === 'office' && Array.isArray(employee?.working_days) ? employee.working_days : [],
+    officeWorkingDays: Array.isArray(employee?.working_days) ? employee.working_days : [],
     conversionBreakTimeMinutes: employee?.instructor_profile?.break_time_minutes ?? '',
     conversionCapabilities: Array.isArray(employee?.service_capabilities)
       ? employee.service_capabilities.map((capability) => ({
           service_id: capability.service_id,
           max_students: capability.max_students ?? 1,
-          base_rate: capability.base_rate != null ? toShekel(capability.base_rate) : '',
           availability_windows: Array.isArray(capability?.availability_windows) ? capability.availability_windows : [],
           metadata: capability.metadata || {},
-          pay_config: hydrateCapabilityCompensationForm(capability),
         }))
       : [],
   };
@@ -170,7 +154,6 @@ export default function EditEmployeeDialog({
     () => form.sourceType !== 'instructor' && form.employeeType === 'instructor',
     [form.employeeType, form.sourceType],
   );
-  const isOfficeEditing = useMemo(() => form.employeeType === 'office', [form.employeeType]);
 
   const updateField = (key, value) => {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -205,17 +188,12 @@ export default function EditEmployeeDialog({
       ...prev,
       conversionCapabilities: [
         ...prev.conversionCapabilities,
-        (() => {
-          const payConfig = hydrateCapabilityCompensationForm({ base_rate: 0, metadata: {} });
-          return {
+        {
           service_id: '',
           max_students: 1,
-          base_rate: 0,
           availability_windows: [],
           metadata: {},
-          pay_config: { ...payConfig, amountInput: '' },
-        };
-        })(),
+        },
       ],
     }));
   };
@@ -260,25 +238,17 @@ export default function EditEmployeeDialog({
         instructor_id: employee.id,
         employee_id: form.employeeId,
         employee_type: form.employeeType,
-        payroll_model: form.payrollModel,
         first_name: form.firstName,
         middle_name: form.middleName || null,
         last_name: form.lastName || null,
         email: form.email || null,
         phone: form.phone || null,
         start_date: form.startDate || null,
-        current_rate: form.currentRate === '' ? null : toAgorot(form.currentRate),
-        monthly_salary_amount: form.monthlySalaryAmount === '' ? null : toAgorot(form.monthlySalaryAmount),
-        annual_leave_days: form.annualLeaveDays === '' ? null : Number(form.annualLeaveDays),
-        leave_pay_method: form.leavePayMethod || null,
-        leave_fixed_day_rate: form.leaveFixedDayRate === '' ? null : toAgorot(form.leaveFixedDayRate),
         employment_scope: form.employmentScope || null,
         notes: form.notes || null,
       };
 
-      if (isOfficeEditing) {
-        payload.working_days = form.officeWorkingDays;
-      }
+      payload.working_days = form.officeWorkingDays;
 
       if (isRoleConversion) {
         payload.break_time_minutes = form.conversionBreakTimeMinutes === '' ? null : Number(form.conversionBreakTimeMinutes);
@@ -286,7 +256,6 @@ export default function EditEmployeeDialog({
           service_id: capability.service_id,
           max_students: capability.max_students === '' ? 1 : Number(capability.max_students),
           availability_windows: Array.isArray(capability.availability_windows) ? capability.availability_windows : [],
-          ...serializeCapabilityCompensation(capability),
         }));
       }
 
@@ -325,7 +294,7 @@ export default function EditEmployeeDialog({
             icon={UserRound}
             description="שדות זהות, סוג העובד ותיעוד בסיסי"
           >
-            <div className="grid gap-4 md:grid-cols-4">
+            <div className="grid gap-4 md:grid-cols-3">
               <div className="space-y-2">
                 <Label htmlFor="employee_id" className="text-xs text-slate-600">מספר עובד / תעודה</Label>
                 <Input id="employee_id" value={form.employeeId} onChange={(e) => updateField('employeeId', e.target.value)} disabled={isSaving} />
@@ -334,14 +303,7 @@ export default function EditEmployeeDialog({
                 <Label className="text-xs text-slate-600">סוג עובד</Label>
                 <Select
                   value={form.employeeType}
-                  onValueChange={(value) => {
-                    updateField('employeeType', value);
-                    if (value === 'instructor') {
-                      updateField('payrollModel', 'lesson_based');
-                    } else if (form.payrollModel === 'lesson_based') {
-                      updateField('payrollModel', 'hourly');
-                    }
-                  }}
+                  onValueChange={(value) => updateField('employeeType', value)}
                 >
                   <SelectTrigger>
                     <SelectValue placeholder="בחר סוג עובד" />
@@ -349,28 +311,6 @@ export default function EditEmployeeDialog({
                   <SelectContent>
                     <SelectItem value="instructor">מדריך/ה</SelectItem>
                     <SelectItem value="office">עובד/ת משרד</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label className="text-xs text-slate-600">מודל שכר</Label>
-                <Select
-                  value={form.employeeType === 'instructor' ? 'lesson_based' : form.payrollModel}
-                  onValueChange={(value) => updateField('payrollModel', value)}
-                  disabled={isSaving || form.employeeType === 'instructor'}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="בחר מודל שכר" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {form.employeeType === 'instructor' ? (
-                      <SelectItem value="lesson_based">מבוסס שיעורים</SelectItem>
-                    ) : (
-                      <>
-                        <SelectItem value="hourly">שעתי</SelectItem>
-                        <SelectItem value="monthly_salary">שכר חודשי</SelectItem>
-                      </>
-                    )}
                   </SelectContent>
                 </Select>
               </div>
@@ -418,11 +358,10 @@ export default function EditEmployeeDialog({
             </div>
           </Section>
 
-          {isOfficeEditing ? (
           <Section
             title="פרטי העסקה"
             icon={Calendar}
-            description="פרטי העסקה בסיסיים וזמינות שבועית לעובדי משרד"
+            description="היקף העסקה וימי עבודה שבועיים. ימי העבודה קובעים לפי איזו טבלה מחושבת החופשה."
           >
             <div className="grid gap-4 md:grid-cols-2">
               <div className="space-y-2">
@@ -439,56 +378,34 @@ export default function EditEmployeeDialog({
                   </SelectContent>
                 </Select>
               </div>
-              {form.payrollModel === 'monthly_salary' ? (
-                <div className="space-y-2">
-                  <Label htmlFor="monthly_salary_amount" className="text-xs text-slate-600">שכר חודשי</Label>
-                  <Input id="monthly_salary_amount" type="number" min="0" step="0.01" value={form.monthlySalaryAmount} onChange={(e) => updateField('monthlySalaryAmount', e.target.value)} disabled={isSaving} />
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  <Label htmlFor="current_rate" className="text-xs text-slate-600">תעריף שעתי</Label>
-                  <Input id="current_rate" type="number" min="0" step="0.01" value={form.currentRate} onChange={(e) => updateField('currentRate', e.target.value)} disabled={isSaving} />
-                </div>
-              )}
-            </div>
-
-            <div className="grid gap-4 md:grid-cols-3">
               <div className="space-y-2">
-                <Label htmlFor="annual_leave_days" className="text-xs text-slate-600">מכסת חופשה שנתית</Label>
-                <Input id="annual_leave_days" type="number" min="0" step="0.5" value={form.annualLeaveDays} onChange={(e) => updateField('annualLeaveDays', e.target.value)} disabled={isSaving} />
-              </div>
-              <div className="space-y-2">
-                <Label className="text-xs text-slate-600">שיטת תשלום חופשה</Label>
-                <Select value={form.leavePayMethod || '__default__'} onValueChange={(value) => updateField('leavePayMethod', value === '__default__' ? '' : value)} disabled={isSaving}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="ברירת מחדל ארגונית" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__default__">ברירת מחדל ארגונית</SelectItem>
-                    <SelectItem value="legal">ממוצע חוקי</SelectItem>
-                    <SelectItem value="avg_hourly_x_avg_day_hours">ממוצע היסטורי</SelectItem>
-                    <SelectItem value="fixed_rate">ערך קבוע</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="leave_fixed_day_rate" className="text-xs text-slate-600">ערך חופשה קבוע</Label>
-                <Input id="leave_fixed_day_rate" type="number" min="0" step="0.01" value={form.leaveFixedDayRate} onChange={(e) => updateField('leaveFixedDayRate', e.target.value)} disabled={isSaving} />
+                <span className="text-xs text-slate-600">תעריף / משכורת</span>
+                <p className="rounded-md border border-dashed border-slate-200 px-3 py-2 text-xs text-slate-500">
+                  נקבעים בלשונית פיננסים, עם התאריך שממנו הם חלים.
+                </p>
               </div>
             </div>
 
-            {isOfficeEditing ? (
-              <div className="space-y-3">
-                <div className="text-xs font-medium text-slate-600">ימי עבודה שבועיים</div>
-                <WorkingDaysPicker value={form.officeWorkingDays} onToggle={toggleOfficeWorkingDay} disabled={isSaving} />
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-2">
+                <span className="text-xs text-slate-600">ימי חופשה</span>
+                <p className="rounded-md border border-dashed border-slate-200 px-3 py-2 text-xs text-slate-500">
+                  נקבעים בלשונית נוכחות, ליד יתרת החופשה.
+                </p>
               </div>
-            ) : (
-              <div className="rounded-xl border border-dashed border-slate-200 bg-white px-3 py-3 text-xs text-slate-500">
-                לעובדי הדרכה זמינות תפעולית מנוהלת ברמת השירות, ולא דרך כרטיס העובד הכללי.
+              <div className="space-y-2">
+                <span className="text-xs text-slate-600">תשלום חופשה</span>
+                <p className="rounded-md border border-dashed border-slate-200 px-3 py-2 text-xs text-slate-500">
+                  השיטה וערך היום נקבעים בלשונית פיננסים.
+                </p>
               </div>
-            )}
+            </div>
+
+            <div className="space-y-3">
+              <div className="text-xs font-medium text-slate-600">ימי עבודה שבועיים</div>
+              <WorkingDaysPicker value={form.officeWorkingDays} onToggle={toggleOfficeWorkingDay} disabled={isSaving} />
+            </div>
           </Section>
-          ) : null}
 
           {isRoleConversion ? (
             <Section
@@ -576,22 +493,9 @@ export default function EditEmployeeDialog({
                         </div>
                       </div>
 
-                      <CapabilityCompensationFields
-                        capability={capability}
-                        service={availableServices.find((service) => service.id === capability.service_id) || null}
-                        disabled={isSaving}
-                        onChange={(payConfig) => updateConversionCapability(index, 'pay_config', payConfig)}
-                      />
-
                       {capability.service_id ? (
                         <div className="rounded-xl border border-slate-200 bg-slate-50/70 px-3 py-2 text-xs text-slate-600">
-                          {(() => {
-                            const summary = buildCapabilityCompensationSummary(
-                              capability,
-                              availableServices.find((service) => service.id === capability.service_id) || null,
-                            );
-                            return `תצוגה בכרטיס העובד: ${summary.valueLabel} • ${summary.basisLabel}`;
-                          })()}
+                          התעריף לשירות הזה ייקבע בלשונית פיננסים אחרי ההמרה.
                         </div>
                       ) : null}
                     </div>

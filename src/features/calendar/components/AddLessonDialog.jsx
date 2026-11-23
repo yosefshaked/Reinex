@@ -26,16 +26,13 @@ import {
   hasValidSchedulingOverrideReason,
   SCHEDULING_OVERRIDE_REASON_OPTIONS,
 } from '../utils/schedulingOverride.js';
-import { parseLocalDateString } from '../utils/localDate.js';
+import { parseLocalDateString, toLocalDateString } from '../utils/localDate.js';
 import { toAgorot } from '@/lib/currency.js';
-
-function toLocalDateString(dateObj) {
-  if (!(dateObj instanceof Date) || Number.isNaN(dateObj.getTime())) return null;
-  const year = dateObj.getFullYear();
-  const month = String(dateObj.getMonth() + 1).padStart(2, '0');
-  const day = String(dateObj.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-}
+import { readMissingLessonRate } from '../utils/lessonDialogModel.js';
+import { useMissingRateForSelection } from '../hooks/useMissingRateForSelection.js';
+import { MissingRateNotice } from './MissingRateNotice.jsx';
+import { ClockChangeNotice } from './ClockChangeNotice.jsx';
+import { describeLessonStartClockChange, lessonLocalStartFields } from '@/lib/clock-change.js';
 
 function toLocalTimeString(dateObj) {
   if (!(dateObj instanceof Date) || Number.isNaN(dateObj.getTime())) return null;
@@ -169,6 +166,12 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
   const [isCheckingConflicts, setIsCheckingConflicts] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState(null);
+  // Cleared by itself when the instructor, service or date changes (the refusal was for the old ones).
+  const [missingRate, setMissingRate, clearMissingRate] = useMissingRateForSelection({
+    instructorId: formData.instructor_employee_id,
+    serviceId: formData.service_id,
+    date: formData.date,
+  });
   const [studentDetails, setStudentDetails] = useState(null); // Cache first student details
   const [useSchedulingOverride, setUseSchedulingOverride] = useState(false);
   const [selectedOverrideReasonCode, setSelectedOverrideReasonCode] = useState('');
@@ -190,6 +193,7 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
     setFormData(buildInitialFormData(defaultDate, defaultSelection, defaultServiceId));
     setConflicts([]);
     setError(null);
+    clearMissingRate();
     setStudentDetails(null);
     setIsGroupSession(false);
     setUseSchedulingOverride(false);
@@ -197,7 +201,7 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
     setCustomOverrideReason('');
     setCreatedClientProfiles([]);
     setDirectClientChargeAmount('');
-  }, [open, defaultDate, defaultSelection, defaultServiceId]);
+  }, [open, defaultDate, defaultSelection, defaultServiceId, clearMissingRate]);
 
   useEffect(() => {
     if (!open || !activeOrgId || !session) return;
@@ -321,6 +325,12 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
   const missingCapability = Boolean(formData.instructor_employee_id && formData.service_id && !selectedCapability);
   const missingAvailability = Boolean(selectedCapability && !hasConfiguredAvailability(selectedCapability.availability_windows));
   const hasAvailableSlots = availableTimeSlots.length > 0;
+  // Spring forward: the typed time may not exist (blocked); autumn: it may happen twice (notice).
+  const clockChangeNotice = useMemo(
+    () => describeLessonStartClockChange(formData.date, formData.time),
+    [formData.date, formData.time],
+  );
+
   const selectedTimeOutsideAvailability = useMemo(() => {
     if (
       useSchedulingOverride
@@ -593,6 +603,7 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
     e.preventDefault();
     setIsSubmitting(true);
     setError(null);
+    clearMissingRate();
 
     try {
       const serviceIds = new Set(
@@ -632,6 +643,10 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
         setError('יש להזין מחיר לשיעור הזה לפני יצירת לקוח/ה חד-פעמי/ת ללא מחיר שירות ברירת מחדל.');
         return;
       }
+      if (clockChangeNotice?.blocking) {
+        setError(clockChangeNotice.message);
+        return;
+      }
       const datetime_start = toUtcIsoString(formData.date, formData.time);
       if (!datetime_start) {
         setError('תאריך או שעה אינם תקינים.');
@@ -645,6 +660,7 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
         body: {
           org_id: activeOrgId,
           datetime_start,
+          ...lessonLocalStartFields(formData.date, formData.time),
           duration_minutes: formData.duration_minutes,
           instructor_employee_id: formData.instructor_employee_id,
           service_id: formData.service_id,
@@ -671,6 +687,11 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
       onClose();
     } catch (err) {
       console.error('Error creating lesson:', err);
+      const missing = readMissingLessonRate(err);
+      if (missing) {
+        setMissingRate(missing);
+        return;
+      }
       const apiError = err?.message || '';
       setError(
         apiError === 'missing_instructor_service_capability'
@@ -1031,6 +1052,8 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
             </div>
           </div>
 
+          <ClockChangeNotice notice={clockChangeNotice} />
+
           {formData.instructor_employee_id && formData.service_id && !useSchedulingOverride && missingCapability ? (
             <Alert variant="destructive">
               <AlertCircle className="h-4 w-4" />
@@ -1169,6 +1192,8 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
             </Alert>
           )}
 
+          <MissingRateNotice missingRate={missingRate} onRateAdded={() => clearMissingRate()} />
+
           {/* Error Message */}
           {error && (
             <Alert variant="destructive">
@@ -1189,6 +1214,7 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
                 || !formData.instructor_employee_id
                 || !formData.date
                 || !formData.time
+                || Boolean(clockChangeNotice?.blocking)
                 || (selectedService && !selectedServiceHasValidDuration)
                 || participantTokens.length === 0
                 || (requiresDirectClientChargeAmount && !hasValidDirectClientChargeAmount)

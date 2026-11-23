@@ -782,7 +782,7 @@ export default async function handler(context, req) {
         hasUrl: !!adminConfig?.supabaseUrl,
         hasKey: !!adminConfig?.serviceRoleKey,
         urlPrefix: adminConfig?.supabaseUrl?.substring(0, 30) || 'null',
-        keyPrefix: adminConfig?.serviceRoleKey?.substring(0, 10) || 'null'
+        keyPrefix: adminConfig?.serviceRoleKey?.slice(0, 10) || 'null'
       };
       console.error('[ERROR] Missing Supabase admin credentials', errorDetails);
       context.log?.error?.('documents missing Supabase admin credentials', errorDetails);

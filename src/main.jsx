@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client';
 import { DirectionProvider } from '@radix-ui/react-direction';
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import './index.css';
+import { installNumberInputWheelGuard } from './lib/number-input-wheel-guard.js';
 import AppShell from './components/layout/AppShell.jsx';
 import DashboardPage from './pages/DashboardPage.jsx';
 import CalendarPage from './features/calendar/pages/CalendarPage.jsx';
@@ -151,6 +152,7 @@ export function renderApp(config = null) {
     );
   }
 
+  installNumberInputWheelGuard();
   const root = ReactDOM.createRoot(document.getElementById('root'));
 
   root.render(

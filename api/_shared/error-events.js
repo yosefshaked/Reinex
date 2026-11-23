@@ -1,4 +1,5 @@
 /* eslint-env node */
+import { utcDateKey } from './local-time.js';
 import { randomBytes } from 'node:crypto';
 import { respond } from './org-bff.js';
 
@@ -18,7 +19,7 @@ function normalizeString(value, fallback = '') {
 }
 
 export function generateSupportCode(now = new Date()) {
-  const stamp = now.toISOString().slice(0, 10).replace(/-/g, '');
+  const stamp = utcDateKey(now).replace(/-/g, '');
   return `ERR-${stamp}-${randomBytes(3).toString('hex').toUpperCase()}`;
 }
 

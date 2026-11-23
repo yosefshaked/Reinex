@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import { roundTo2 } from '@/lib/round.js';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -40,7 +41,7 @@ function formatFileSize(bytes) {
   const k = 1024;
   const sizes = ['B', 'KB', 'MB', 'GB'];
   const i = Math.floor(Math.log(bytes) / Math.log(k));
-  const size = Math.round((bytes / Math.pow(k, i)) * 100) / 100;
+  const size = roundTo2(bytes / Math.pow(k, i));
   return `${size} ${sizes[i]}`;
 }
 

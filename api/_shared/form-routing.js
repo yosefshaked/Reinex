@@ -6,6 +6,7 @@
 import { normalizeString, UUID_PATTERN } from './org-bff.js';
 import { resolvePublicAppBaseUrl } from './public-app-url.js';
 import { sendAndLogBrevoEmail } from './email-log.js';
+import { formatInstant } from './local-time.js';
 
 export function getNowIso() {
   return new Date().toISOString();
@@ -17,18 +18,13 @@ export function getFutureIso(minutes) {
 
 export function formatInviteDeadline(value) {
   if (!value) return '';
-  try {
-    return new Intl.DateTimeFormat('he-IL', {
-      weekday: 'long',
-      day: 'numeric',
-      month: 'long',
-      hour: '2-digit',
-      minute: '2-digit',
-      timeZone: 'Asia/Jerusalem',
-    }).format(new Date(value));
-  } catch {
-    return String(value);
-  }
+  return formatInstant(value, {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+    hour: '2-digit',
+    minute: '2-digit',
+  }) || String(value);
 }
 
 /**

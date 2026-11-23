@@ -2,6 +2,7 @@
 /* eslint-env node */
 import BillingLedgerService, { buildDesiredChargeDescriptors, resolveHmoSplitAmounts } from './BillingLedgerService.js';
 import { loadFinancePolicies } from './employee-finance.js';
+import { todayKey } from './local-time.js';
 import { normalizeString, withOrgScope } from './org-bff.js';
 import { loadHmoAuthorizations, resolveLessonCoverageDecision } from './hmo.js';
 
@@ -126,13 +127,15 @@ function buildBreakdown({
   };
 }
 
-async function loadServiceForInstance(tenantClient, instance) {
+async function loadServiceForInstance(tenantClient, orgId, instance) {
   if (!instance?.service_id) {
     return null;
   }
+  if (!normalizeString(orgId)) {
+    throw new Error('loadServiceForInstance needs the organisation id');
+  }
 
-  const { data, error } = await tenantClient
-    .from('Services')
+  const { data, error } = await withOrgScope(tenantClient, 'Services', orgId)
     .select('id, name, default_customer_charge_amount')
     .eq('id', instance.service_id)
     .maybeSingle();
@@ -162,7 +165,7 @@ export async function buildBillingDecision({
   service: providedService = null,
   coverageDecision: providedCoverageDecision = null,
 }) {
-  const service = providedService || (tenantClient ? await loadServiceForInstance(tenantClient, instance) : null);
+  const service = providedService || (tenantClient ? await loadServiceForInstance(tenantClient, orgId, instance) : null);
   const coverageDecision = providedCoverageDecision || (participant?.student_id && tenantClient
     ? await resolveLessonCoverageDecision(tenantClient, {
       orgId,
@@ -361,7 +364,8 @@ export async function fetchBillingSnapshot(tenantClient, {
     });
   }
 
-  const policies = await loadFinancePolicies(tenantClient, orgId);
+  // Only the student-billing policies are returned; they have one value (not dated).
+  const policies = await loadFinancePolicies(tenantClient, orgId, { asOf: todayKey() });
   const { data: students, error } = await withOrgScope(tenantClient, 'students', orgId)
     .select(`
       id,
@@ -400,7 +404,6 @@ export async function fetchBillingSnapshot(tenantClient, {
     policies: {
       billing_consumption_policy: policies.billingConsumptionPolicy,
       hmo_non_attendance_billing_policy: policies.hmoNonAttendanceBillingPolicy,
-      instructor_earnings_policy: policies.instructorEarningsPolicy,
     },
     student_summaries: studentSummaries,
   };

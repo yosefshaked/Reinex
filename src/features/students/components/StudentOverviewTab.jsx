@@ -7,6 +7,7 @@ import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { useOrg } from '@/org/OrgContext.jsx';
 import { coerceAgorot, formatCurrency } from '@/lib/currency.js';
 import { isAdminOrOffice, normalizeMembershipRole } from '@/features/students/utils/endpoints.js';
+import { addDays, todayKey } from '@/lib/local-time.js';
 
 const DAY_NAMES_HE = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת'];
 const DAY_NAME_TO_INDEX = {
@@ -51,13 +52,10 @@ function getServiceName(item) {
 }
 
 function getRangeDates(daysForward) {
-  const today = new Date();
-  const endDate = new Date(today);
-  endDate.setDate(today.getDate() + daysForward);
-
+  const startDate = todayKey();
   return {
-    startDate: today.toISOString().split('T')[0],
-    endDate: endDate.toISOString().split('T')[0],
+    startDate,
+    endDate: addDays(startDate, daysForward),
   };
 }
 

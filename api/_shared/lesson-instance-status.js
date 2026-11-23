@@ -1,4 +1,4 @@
-import { normalizeString } from './org-bff.js';
+import { normalizeString, withOrgScope } from './org-bff.js';
 
 export const ACTIVE_LESSON_INSTANCE_STATUSES = new Set(['scheduled', 'completed', 'cancelled']);
 
@@ -169,9 +169,8 @@ export async function cancelSelectedScheduledParticipantsAndReconcileInstance(te
   };
 }
 
-export async function listAttendedParticipantsForCancelledInstance(tenantClient, instanceId) {
-  const { data, error } = await tenantClient
-    .from('lesson_participants')
+export async function listAttendedParticipantsForCancelledInstance(tenantClient, orgId, instanceId) {
+  const { data, error } = await withOrgScope(tenantClient, 'lesson_participants', orgId)
     .select(`
       id,
       participant_status,

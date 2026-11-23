@@ -1036,6 +1036,7 @@ async function submitPublicInvite(context, req, { controlClient }) {
   let identityConflictStudentId = '';
   if (identityNumber) {
     const { data: conflictProfile, error } = await findClientProfileByIdentityNumber(client, identityNumber, {
+      orgId,
       excludeId: submission.client_profile_id,
     });
     if (error) {

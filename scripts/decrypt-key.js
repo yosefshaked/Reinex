@@ -164,7 +164,7 @@ console.log('──────────────────────�
 console.log('');
 console.log('📊 Analysis:');
 console.log(`   Length: ${decrypted.length} characters`);
-console.log(`   Starts with: ${decrypted.substring(0, 10)}...`);
+console.log(`   Starts with: ${decrypted.slice(0, 10)}...`);
 console.log(`   Ends with: ...${decrypted.substring(decrypted.length - 10)}`);
 console.log(`   Is JWT format: ${decrypted.startsWith('eyJ') && decrypted.split('.').length === 3 ? '✅ Yes' : '❌ No'}`);
 

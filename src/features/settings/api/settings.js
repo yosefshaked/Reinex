@@ -114,3 +114,73 @@ export async function upsertSetting({ session, orgId, key, value, signal } = {})
     settings: { [normalizedKey]: value },
   });
 }
+
+/**
+ * A dated setting (one whose value is read as of a date, like a rate; api/_shared/dated-settings.js):
+ * the value in force today and every version, newest first ({ effective_date, settings_value, notes }).
+ */
+export async function fetchDatedSetting({ session, orgId, key, signal } = {}) {
+  if (!key) {
+    throw new Error('נדרש מפתח הגדרה לקריאה.');
+  }
+  const validatedSession = ensureSession(session);
+  const normalizedOrgId = normalizeOrgId(orgId);
+  if (!normalizedOrgId) {
+    throw new Error('יש לבחור ארגון פעיל לפני ביצוע הפעולה.');
+  }
+  const search = `?org_id=${encodeURIComponent(normalizedOrgId)}&keys=${encodeURIComponent(key)}&include_versions=1`;
+  const response = await authenticatedFetch(`settings${search}`, { session: validatedSession, method: 'GET', signal });
+  const versions = Array.isArray(response?.versions?.[key]) ? response.versions[key] : [];
+  return { value: response?.settings?.[key] ?? null, versions };
+}
+
+/**
+ * Saves new versions of several dated settings in one request, all in force from `effectiveDate`:
+ * `versions` is [{ key, value }].
+ */
+export async function saveDatedSettings({ session, orgId, versions, effectiveDate, notes = null, signal } = {}) {
+  const list = Array.isArray(versions) ? versions.filter((entry) => entry?.key) : [];
+  if (!list.length) {
+    throw new Error('אין שינוי לשמירה.');
+  }
+  if (!effectiveDate) {
+    throw new Error('יש לבחור מאיזה תאריך ההגדרה בתוקף.');
+  }
+  const settings = Object.fromEntries(list.map(({ key, value }) => [key, { value, effective_date: effectiveDate, notes }]));
+  return upsertSettings({ session, orgId, signal, settings });
+}
+
+/**
+ * Cancels a version of a dated setting that has not started yet. The server refuses a version that is
+ * in force or in the past.
+ */
+export async function cancelDatedSettingVersion({ session, orgId, key, effectiveDate, signal } = {}) {
+  const validatedSession = ensureSession(session);
+  const normalizedOrgId = normalizeOrgId(orgId);
+  if (!normalizedOrgId) {
+    throw new Error('יש לבחור ארגון פעיל לפני ביצוע הפעולה.');
+  }
+  return authenticatedFetch('settings', {
+    session: validatedSession,
+    method: 'DELETE',
+    body: { org_id: normalizedOrgId, key, effective_date: effectiveDate },
+    signal,
+  });
+}
+
+/** Saves a new version of a dated setting, in force from `effectiveDate` ('YYYY-MM-DD'). */
+export async function saveDatedSetting({ session, orgId, key, value, effectiveDate, notes = null, signal } = {}) {
+  const normalizedKey = typeof key === 'string' ? key.trim() : '';
+  if (!normalizedKey) {
+    throw new Error('נדרש מפתח הגדרה תקף לעדכון.');
+  }
+  if (!effectiveDate) {
+    throw new Error('יש לבחור מאיזה תאריך ההגדרה בתוקף.');
+  }
+  return upsertSettings({
+    session,
+    orgId,
+    signal,
+    settings: { [normalizedKey]: { value, effective_date: effectiveDate, notes } },
+  });
+}

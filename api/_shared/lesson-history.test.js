@@ -408,7 +408,7 @@ test('events are newest first, capped, and use the response contract shape', () 
 
 test('debug tooling rows are excluded', () => {
   const events = build({
-    auditRows: [lessonRow({ id: 'dbg', event_type: 'debug_uat.lock_payroll_run', action_category: 'calendar' })],
+    auditRows: [lessonRow({ id: 'dbg', event_type: 'debug_uat.lock_paid_claim', action_category: 'calendar' })],
   });
   assert.deepEqual(events.map((event) => event.type), ['create']);
 });

@@ -24,6 +24,7 @@ import {
   buildFormAccessWhatsAppMessage,
   buildWaitingListInviteWhatsAppMessage,
 } from '@/lib/whatsapp-message-templates.js';
+import { formatInstant } from '@/lib/local-time.js';
 
 const WAITING_LIST_RELATIONSHIP_LABELS = {
   self: 'התלמיד/ה עצמו/ה',
@@ -106,15 +107,10 @@ function buildWaitingListInviteWhatsAppLink(phone, inviteUrl, formName, expiresA
 
 function formatDateTime(value) {
   if (!value) return '—';
-  try {
-    return new Intl.DateTimeFormat('he-IL', {
-      timeZone: 'Asia/Jerusalem',
-      dateStyle: 'short',
-      timeStyle: 'short',
-    }).format(new Date(value));
-  } catch {
-    return String(value);
-  }
+  return formatInstant(value, {
+    dateStyle: 'short',
+    timeStyle: 'short',
+  }) || String(value);
 }
 
 function formatWaitingListDays(days) {

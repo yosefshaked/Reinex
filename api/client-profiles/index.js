@@ -208,7 +208,7 @@ export default async function handler(context, req) {
       if (error) return respondTracked(context, 500, { message: 'failed_to_load_client_profile' }, undefined, { error });
       if (!profile) return respond(context, 404, { message: 'client_profile_not_found' });
       const { data: student } = await withOrgScope(supabase, 'students', orgId).select('id').eq('client_profile_id', clientProfileId).maybeSingle();
-      const { guardian } = await fetchPrimaryGuardianForClientProfile(supabase, clientProfileId);
+      const { guardian } = await fetchPrimaryGuardianForClientProfile(supabase, orgId, clientProfileId);
       return respond(context, 200, mergeClientProfile(profile, student?.id || null, guardian || null));
     }
 
@@ -280,7 +280,7 @@ export default async function handler(context, req) {
 
     const mergedRows = [];
     for (const row of pagedRows) {
-      const { guardian } = await fetchPrimaryGuardianForClientProfile(supabase, row.id);
+      const { guardian } = await fetchPrimaryGuardianForClientProfile(supabase, orgId, row.id);
       mergedRows.push(mergeClientProfile(row, studentMap.get(row.id) || null, guardian || null));
     }
 
@@ -380,7 +380,7 @@ export default async function handler(context, req) {
       .select('id')
       .eq('client_profile_id', result.clientProfileId)
       .maybeSingle();
-    const { guardian } = await fetchPrimaryGuardianForClientProfile(supabase, result.clientProfileId);
+    const { guardian } = await fetchPrimaryGuardianForClientProfile(supabase, orgId, result.clientProfileId);
     const merged = mergeClientProfile(profile, student?.id || null, guardian || null);
 
     try {
@@ -442,7 +442,7 @@ export default async function handler(context, req) {
   if (!updated) return respond(context, 404, { message: 'client_profile_not_found' });
 
   const { data: student } = await withOrgScope(supabase, 'students', orgId).select('id').eq('client_profile_id', clientProfileId).maybeSingle();
-  const { guardian } = await fetchPrimaryGuardianForClientProfile(supabase, clientProfileId);
+  const { guardian } = await fetchPrimaryGuardianForClientProfile(supabase, orgId, clientProfileId);
 
   try {
     await logTenantAuditEvent(supabase, {

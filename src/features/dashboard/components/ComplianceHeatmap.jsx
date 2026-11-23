@@ -130,6 +130,7 @@ export function ComplianceHeatmap() {
       upcoming,
       missing,
       sessions: sessionsInSlot,
+      // eslint-disable-next-line no-restricted-syntax -- not money: documentation compliance percentage
       complianceRate: total - upcoming > 0 ? (documented / (total - upcoming)) * 100 : null,
     }
   }, [getHourSlot])
@@ -258,6 +259,7 @@ export function ComplianceHeatmap() {
           upcoming,
           missing,
           sessions: sessionsInSlot,
+          // eslint-disable-next-line no-restricted-syntax -- not money: documentation compliance percentage
           complianceRate: total - upcoming > 0 ? (documented / (total - upcoming)) * 100 : null
         })
       })
@@ -565,6 +567,7 @@ export function ComplianceHeatmap() {
                         const documented = day.sessions.filter(s => s.status === 'complete').length
                         const upcoming = day.sessions.filter(s => s.status === 'upcoming').length
                         const rate = totalSessions - upcoming > 0
+                          // eslint-disable-next-line no-restricted-syntax -- not money: documentation compliance percentage
                           ? Math.round((documented / (totalSessions - upcoming)) * 100)
                           : null
 
