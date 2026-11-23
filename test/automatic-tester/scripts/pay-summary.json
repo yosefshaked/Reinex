@@ -787,12 +787,14 @@
           "id": "leave-method-fixed",
           "description": "The employee is paid a fixed value per leave day",
           "action": "apiCall",
-          "method": "PUT",
-          "endpoint": "/api/instructors",
+          "method": "POST",
+          "endpoint": "/api/employee-leave",
           "body": {
+            "entity_type": "leave_pay_method_version",
             "org_id": "{{TEST_ORG_ID}}",
-            "instructor_id": "{{PAY_INSTRUCTOR_ID}}",
-            "leave_pay_method": "fixed_rate"
+            "employee_id": "{{PAY_INSTRUCTOR_ID}}",
+            "method": "fixed_rate",
+            "effective_date": "2000-01-01"
           }
         },
         {
@@ -948,12 +950,14 @@
           "id": "leave-method-legal",
           "description": "This employee is paid \"ממוצע מומלץ\", whatever the organisation default is",
           "action": "apiCall",
-          "method": "PUT",
-          "endpoint": "/api/instructors",
+          "method": "POST",
+          "endpoint": "/api/employee-leave",
           "body": {
+            "entity_type": "leave_pay_method_version",
             "org_id": "{{TEST_ORG_ID}}",
-            "instructor_id": "{{LEGAL_INSTRUCTOR_ID}}",
-            "leave_pay_method": "legal"
+            "employee_id": "{{LEGAL_INSTRUCTOR_ID}}",
+            "method": "legal",
+            "effective_date": "2000-01-01"
           }
         },
         {

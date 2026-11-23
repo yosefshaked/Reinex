@@ -28,7 +28,13 @@ import {
   resolveLessonRateOnDate,
   resolveRateOnDate,
 } from './rate-history.js';
-import { isDatedSettingKey, loadDatedSettingRows, resolveSettingOnDate } from './dated-settings.js';
+import {
+  isDatedSettingKey,
+  loadDatedSettingRows,
+  loadEmployeeSettingRows,
+  resolveEmployeeSettingOnDate,
+  resolveSettingOnDate,
+} from './dated-settings.js';
 import { LEAVE_ENTITLEMENT_POLICY_KEY, normalizeLeaveEntitlementPolicy, workWeekDays } from './leave-entitlement.js';
 
 export const DEFAULT_LEAVE_POLICY = Object.freeze({
@@ -330,7 +336,7 @@ function requireOrgId(orgId, helperName) {
 export async function resolveEmployeeRecord(tenantClient, orgId, { employeeId, userId, canManageAll = false }) {
   const scopedOrgId = requireOrgId(orgId, 'resolveEmployeeRecord');
   let query = withOrgScope(tenantClient, 'Employees', scopedOrgId)
-    .select('id, user_id, first_name, last_name, employee_type, start_date, annual_leave_days, leave_pay_method, employment_scope, working_days')
+    .select('id, user_id, first_name, last_name, employee_type, start_date, annual_leave_days, employment_scope, working_days')
     .limit(1);
 
   if (employeeId) {
@@ -353,6 +359,7 @@ export async function resolveEmployeeRecord(tenantClient, orgId, { employeeId, u
   if (!canManageAll && employee.user_id !== userId) {
     return { error: 'forbidden' };
   }
+  employee.leave_pay_method_versions = await loadLeavePayMethodVersions(tenantClient, scopedOrgId, [employee.id]);
   return { employee };
 }
 
@@ -531,9 +538,31 @@ function computeAverageDayValue(records, targetDate, months) {
   return totalAmount / workedDays.length;
 }
 
-export function resolveLeavePayMethod(employee, leavePayPolicy) {
-  const employeeMethod = normalizeString(employee?.leave_pay_method).toLowerCase();
-  if (LEAVE_PAY_METHODS.has(employeeMethod)) {
+export const LEAVE_PAY_METHOD_KEY = 'leave_pay_method';
+
+/** Every dated version of the employees' own leave pay method (see dated-settings.js), read once. */
+export async function loadLeavePayMethodVersions(tenantClient, orgId, employeeIds = []) {
+  return loadEmployeeSettingRows(tenantClient, orgId, LEAVE_PAY_METHOD_KEY, employeeIds);
+}
+
+/**
+ * The method an employee's own setting gives a leave day on `dateKey`, or '' when none is in force
+ * (no version yet, or the version says "follow the organisation"). `employee.leave_pay_method_versions`
+ * are the rows of loadLeavePayMethodVersions.
+ */
+export function employeeLeavePayMethodOnDate(employee, dateKey) {
+  const version = resolveEmployeeSettingOnDate(employee?.leave_pay_method_versions, LEAVE_PAY_METHOD_KEY, employee?.id, dateKey);
+  const method = normalizeString(version?.settings_value?.method).toLowerCase();
+  return LEAVE_PAY_METHODS.has(method) ? method : '';
+}
+
+/**
+ * The leave pay method for a leave day on `dateKey`: the employee's own version in force on that day,
+ * else the organisation's `leavePayPolicy.default_method` (itself the one in force on that day).
+ */
+export function resolveLeavePayMethod(employee, leavePayPolicy, dateKey) {
+  const employeeMethod = employeeLeavePayMethodOnDate(employee, dateKey);
+  if (employeeMethod) {
     return employeeMethod;
   }
   return leavePayPolicy.default_method || DEFAULT_LEAVE_PAY_POLICY.default_method;
@@ -778,7 +807,7 @@ export function createLeaveDayValuer({
 
   function computeDetail(targetKey, depth) {
     const policy = policyOn(targetKey);
-    const method = resolveLeavePayMethod(employee, policy);
+    const method = resolveLeavePayMethod(employee, policy, targetKey);
 
     if (method === 'fixed_rate') {
       // The fixed leave-day value is a dated rate (pay_basis leave_day); without one, the farm default applies.

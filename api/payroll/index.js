@@ -13,6 +13,7 @@ import {
   canManageEmployeeOps,
   isYmdDate,
   loadFinancePolicies,
+  loadLeavePayMethodVersions,
   resolveEmployeeRecord,
 } from '../_shared/employee-finance.js';
 import { firstDayOfMonth, lastDayOfMonth, todayKey } from '../_shared/local-time.js';
@@ -84,7 +85,7 @@ export default async function (context, req) {
   let employees = [];
   if (canManageAll) {
     let query = withOrgScope(supabase, 'Employees', orgId)
-      .select('id, user_id, first_name, last_name, employee_id, employee_type, start_date, annual_leave_days, leave_pay_method, working_days')
+      .select('id, user_id, first_name, last_name, employee_id, employee_type, start_date, annual_leave_days, working_days')
       .eq('is_active', true)
       .order('first_name', { ascending: true });
 
@@ -98,6 +99,12 @@ export default async function (context, req) {
       return respond(context, 500, { message: 'failed_to_load_employees' });
     }
     employees = data || [];
+    // One read of every employee's own leave pay method versions, instead of one per employee.
+    const methodVersions = await loadLeavePayMethodVersions(supabase, orgId, employees.map((row) => row.id));
+    employees = employees.map((row) => ({
+      ...row,
+      leave_pay_method_versions: methodVersions.filter((version) => version.employee_id === row.id),
+    }));
   } else {
     const employeeResult = await resolveEmployeeRecord(supabase, orgId, {
       employeeId,

@@ -20,6 +20,7 @@
  */
 import { normalizeString, withOrgScope } from './org-bff.js';
 import { isDateKey, normalizeDateKey } from './local-time.js';
+import { selectInChunks } from './query-chunks.js';
 
 /**
  * The settings that are read as of a date. Each affects pay: what pays an instructor, what a leave
@@ -34,15 +35,32 @@ export const DATED_SETTING_KEYS = Object.freeze([
 const DATED_KEY_SET = new Set(DATED_SETTING_KEYS);
 
 /**
+ * Dated settings of one employee, not of the organisation: a version has the employee's id in
+ * `employee_id`. `leave_pay_method` is how that employee's leave day is valued
+ * (`{ method: 'legal' | 'avg_hourly_x_avg_day_hours' | 'fixed_rate' | null }`, null = follow the
+ * organisation's leave_pay_policy). Written only by api/employee-leave. These keys are not in
+ * DATED_SETTING_KEYS, so no organisation-level read, write or cancel ever touches them.
+ */
+export const EMPLOYEE_SETTING_KEYS = Object.freeze(['leave_pay_method']);
+const EMPLOYEE_KEY_SET = new Set(EMPLOYEE_SETTING_KEYS);
+
+/** The `employee_id` of a version of the whole organisation (the column is part of the unique index). */
+export const ORG_LEVEL_EMPLOYEE_ID = '00000000-0000-0000-0000-000000000000';
+
+/**
  * The "since the beginning" date of a first version, the same date rates carried over from before
  * rate history start on (RateHistory backfill, `BACKFILL_DATE` in EmployeeRatesPanel.jsx).
  */
 export const SINCE_THE_BEGINNING = '2000-01-01';
 
-const VERSION_COLUMNS = 'id, key, effective_date, settings_value, notes, created_by, created_at';
+const VERSION_COLUMNS = 'id, key, employee_id, effective_date, settings_value, notes, created_by, created_at';
 
 export function isDatedSettingKey(key) {
   return DATED_KEY_SET.has(normalizeString(key));
+}
+
+export function isEmployeeSettingKey(key) {
+  return EMPLOYEE_KEY_SET.has(normalizeString(key));
 }
 
 /** A SettingsHistory row as the resolver reads it, or null when it is not a usable version. */
@@ -54,6 +72,9 @@ export function normalizeSettingVersion(row) {
   return {
     id: row.id || null,
     key,
+    employee_id: normalizeString(row.employee_id) && normalizeString(row.employee_id) !== ORG_LEVEL_EMPLOYEE_ID
+      ? normalizeString(row.employee_id)
+      : null,
     effective_date: effectiveDate,
     settings_value: row.settings_value ?? null,
     notes: row.notes ?? null,
@@ -138,7 +159,7 @@ export function validateSettingEffectiveDate(effectiveDate) {
  */
 export function checkCancelableVersion({ key, effectiveDate, today }) {
   const normalizedKey = normalizeString(key);
-  if (!isDatedSettingKey(normalizedKey)) return { error: 'invalid_setting_key' };
+  if (!isDatedSettingKey(normalizedKey) && !isEmployeeSettingKey(normalizedKey)) return { error: 'invalid_setting_key' };
   const date = validateSettingEffectiveDate(effectiveDate);
   if (date.error) return { error: date.error };
   if (!(date.value > normalizeDateKey(today))) return { error: 'dated_version_not_in_future' };
@@ -159,6 +180,7 @@ export async function cancelDatedSettingVersion(client, orgId, { key, effectiveD
   const { data, error } = await withOrgScope(client, 'SettingsHistory', orgId)
     .delete()
     .eq('key', checked.value.key)
+    .eq('employee_id', ORG_LEVEL_EMPLOYEE_ID)
     .eq('effective_date', checked.value.effectiveDate)
     .select('id');
   if (error) return { error: 'failed_to_cancel_version', status: 500, cause: error };
@@ -186,6 +208,82 @@ export async function saveDatedSettingVersions(client, orgId, versions, userId) 
   }));
   if (rows.length === 0) return { error: null };
   const { error } = await withOrgScope(client, 'SettingsHistory', orgId)
-    .upsert(rows, { onConflict: 'org_id,key,effective_date' });
+    .upsert(rows, { onConflict: 'org_id,key,employee_id,effective_date' });
   return { error: error || null };
+}
+
+/**
+ * Every version of an employee-level key for the given employees, read once per request.
+ * Rows carry `employee_id`; resolve one employee's with `resolveEmployeeSettingOnDate`.
+ *
+ * @param {any} client
+ * @param {string} orgId
+ * @param {string} key one of EMPLOYEE_SETTING_KEYS
+ * @param {string[]} employeeIds
+ */
+export async function loadEmployeeSettingRows(client, orgId, key, employeeIds) {
+  const normalizedOrgId = normalizeString(orgId);
+  const normalizedKey = normalizeString(key);
+  const ids = Array.from(new Set((employeeIds || []).map((id) => normalizeString(id)).filter(Boolean)));
+  if (!normalizedOrgId || !isEmployeeSettingKey(normalizedKey) || ids.length === 0) return [];
+  const { data, error } = await selectInChunks(
+    () => withOrgScope(client, 'SettingsHistory', normalizedOrgId)
+      .select(VERSION_COLUMNS)
+      .eq('key', normalizedKey),
+    'employee_id',
+    ids,
+  );
+  if (error) throw error;
+  return (data || []).map(normalizeSettingVersion).filter(Boolean);
+}
+
+/** The version of an employee-level key in force for one employee on a date, or null. */
+export function resolveEmployeeSettingOnDate(rows, key, employeeId, dateKey) {
+  const id = normalizeString(employeeId);
+  if (!id) return null;
+  return resolveSettingOnDate((Array.isArray(rows) ? rows : []).filter((row) => normalizeString(row?.employee_id) === id), key, dateKey);
+}
+
+/** One employee's versions of a key, newest first (what the history list shows). */
+export function listEmployeeSettingVersions(rows, key, employeeId) {
+  const id = normalizeString(employeeId);
+  return listSettingVersions((Array.isArray(rows) ? rows : []).filter((row) => normalizeString(row?.employee_id) === id), key);
+}
+
+/**
+ * Writes one version of an employee-level key. A version on a date that already has one replaces it.
+ * Only `api/employee-leave` calls this.
+ */
+export async function saveEmployeeSettingVersion(client, orgId, { employeeId, key, settings_value, effective_date, notes = null }, userId) {
+  if (!isEmployeeSettingKey(key) || !normalizeString(employeeId)) return { error: new Error('invalid_employee_setting') };
+  const { error } = await withOrgScope(client, 'SettingsHistory', orgId)
+    .upsert([{
+      key: normalizeString(key),
+      employee_id: normalizeString(employeeId),
+      effective_date,
+      settings_value: settings_value ?? null,
+      notes: normalizeString(notes) || null,
+      created_by: userId || null,
+      created_at: new Date().toISOString(),
+    }], { onConflict: 'org_id,key,employee_id,effective_date' });
+  return { error: error || null };
+}
+
+/**
+ * Cancels one future version of an employee-level key (the same rule as an organisation version:
+ * only one that has not started yet). Returns { deleted: 1 } or { error, status }.
+ */
+export async function cancelEmployeeSettingVersion(client, orgId, { employeeId, key, effectiveDate, today }) {
+  const checked = checkCancelableVersion({ key, effectiveDate, today });
+  if (checked.error) return { error: checked.error, status: 400 };
+  if (!isEmployeeSettingKey(checked.value.key) || !normalizeString(employeeId)) return { error: 'invalid_setting_key', status: 400 };
+  const { data, error } = await withOrgScope(client, 'SettingsHistory', orgId)
+    .delete()
+    .eq('key', checked.value.key)
+    .eq('employee_id', normalizeString(employeeId))
+    .eq('effective_date', checked.value.effectiveDate)
+    .select('id');
+  if (error) return { error: 'failed_to_cancel_version', status: 500, cause: error };
+  if (!data || data.length === 0) return { error: 'version_not_found', status: 404 };
+  return { deleted: data.length, key: checked.value.key, effectiveDate: checked.value.effectiveDate };
 }

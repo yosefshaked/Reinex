@@ -1,6 +1,7 @@
 // Presentation only: lessons come from the calendar, other work from manual records.
 import { toAgorot, toShekel } from '../../../lib/currency.js';
 import { formatDateKey } from '../../../lib/date-key-format.js';
+import { versionInForce } from '../../../features/settings/lib/dated-setting.js';
 
 function minutes(value) {
   const number = Number(value);
@@ -254,9 +255,10 @@ export function leaveBalanceText(summary, entitlement = null, currentYear = null
 }
 
 // The employee's "חופשה" row in the "נוכחות" tab: one "שינוי" opens two steps. Step 1 is how many
-// leave days a year (Employees.annual_leave_days, null = the organisation default), step 2 what a
-// leave day is paid (Employees.leave_pay_method, null = the organisation default; the fixed value per
-// day is a dated leave_day rate set in the same step).
+// leave days a year (Employees.annual_leave_days, null = the organisation default, not dated), step 2
+// what a leave day is paid (a dated version of key leave_pay_method in SettingsHistory from "בתוקף מ-",
+// null = the organisation default; the fixed value per day is a dated leave_day rate set in the same
+// step). A leave day is valued by the method in force on that day.
 export const ENTITLEMENT_CHOICES = [
   { value: 'default', label: 'לפי ברירת המחדל של הארגון' },
   { value: 'manual', label: 'מספר ימים קבוע לשנה' },
@@ -335,19 +337,63 @@ export function buildEntitlementChoiceBody({ choice, manualDays }, { orgId, empl
 }
 
 /**
- * The PUT /api/instructors body for the two steps, with only the fields that change:
- * { body, changed }, or null when the manual number is not valid. `current` is what is stored
- * ({ annual_leave_days, leave_pay_method }).
+ * The PUT /api/instructors body for step 1 (the yearly days, not dated), with only the field that
+ * changes: { body, changed }, or null when the manual number is not valid. `current` is what is stored
+ * ({ annual_leave_days }). The pay method is a dated version: see buildLeavePayMethodVersionBody.
  */
-export function buildEmployeeLeaveBody({ daysChoice, manualDays, payMethod }, { orgId, employeeId }, current = {}) {
+export function buildEmployeeLeaveBody({ daysChoice, manualDays }, { orgId, employeeId }, current = {}) {
   const daysBody = buildEntitlementChoiceBody({ choice: daysChoice, manualDays }, { orgId, employeeId });
   if (!daysBody) return null;
   const body = { org_id: orgId, instructor_id: employeeId };
   const storedDays = current?.annual_leave_days == null ? null : Number(current.annual_leave_days);
   if (daysBody.annual_leave_days !== storedDays) body.annual_leave_days = daysBody.annual_leave_days;
-  const nextMethod = payMethod || null;
-  if (nextMethod !== (current?.leave_pay_method || null)) body.leave_pay_method = nextMethod;
   return { body, changed: Object.keys(body).length > 2 };
+}
+
+/**
+ * The body of POST /api/employee-leave for step 2: a version of the employee's own pay method from
+ * `effectiveDate` ('' = the organisation's). `versions` are the stored versions ({ effective_date,
+ * method }); nothing is sent when the method in force on that date is already the chosen one.
+ * Returns { body, changed, error }.
+ */
+export function buildLeavePayMethodVersionBody({ payMethod, effectiveDate }, { orgId, employeeId }, versions = []) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(effectiveDate || ''))) {
+    return { body: null, changed: false, error: 'יש לבחור מאיזה תאריך השיטה בתוקף.' };
+  }
+  const next = payMethod || null;
+  const inForce = versionInForce(versions, effectiveDate);
+  return {
+    body: { entity_type: 'leave_pay_method_version', org_id: orgId, employee_id: employeeId, method: next, effective_date: effectiveDate },
+    changed: (inForce?.method || null) !== next,
+    error: '',
+  };
+}
+
+/**
+ * The employee's own pay-method versions for the history and the "ישתנה ב-" note, newest first.
+ * `current` is the version in force on `today`, `next` the earliest one that has not started yet.
+ */
+export function leavePayMethodTimeline(versions, today, orgPolicy = null) {
+  const rows = (Array.isArray(versions) ? versions : [])
+    .filter((row) => row?.effective_date)
+    .sort((left, right) => String(right.effective_date).localeCompare(String(left.effective_date)));
+  const current = rows.find((row) => row.effective_date <= today) || null;
+  const next = rows.filter((row) => row.effective_date > today).pop() || null;
+  const entries = rows.map((row) => ({
+    id: row.effective_date,
+    date: row.effective_date,
+    method: row.method || null,
+    label: leavePayMethodVersionText(row, orgPolicy),
+    isFuture: row.effective_date > today,
+    isCurrent: row === current,
+  }));
+  const note = next ? `ישתנה ב-${formatDateKey(next.effective_date)}: ${leavePayMethodVersionText(next, orgPolicy)}` : '';
+  return { entries, current, next, note };
+}
+
+/** What a stored version holds, in a few words ("ממוצע היסטורי", or the organisation's default). */
+export function leavePayMethodVersionText(version, orgPolicy = null) {
+  return version?.method ? payMethodLabel(version.method) : `לפי ברירת המחדל (${payMethodLabel(orgPayMethod(orgPolicy))})`;
 }
 
 function payPolicyMonths(orgPolicy) {

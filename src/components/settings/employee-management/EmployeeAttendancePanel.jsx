@@ -81,6 +81,7 @@ export default function EmployeeAttendancePanel({ employee, orgId, session, onEm
   // The employee's leave choices and the organisation's leave-pay default, as GET /api/employee-leave
   // returns them with the balance.
   const [leaveChoices, setLeaveChoices] = useState(null);
+  const [leaveMethodVersions, setLeaveMethodVersions] = useState([]);
   const [orgLeavePayPolicy, setOrgLeavePayPolicy] = useState(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -139,6 +140,7 @@ export default function EmployeeAttendancePanel({ employee, orgId, session, onEm
     setLeaveEntitlement(leave?.entitlement || null);
     setBalanceEvents(Array.isArray(leave?.balance_events) ? leave.balance_events : []);
     setLeaveChoices(leave?.policy || null);
+    setLeaveMethodVersions(Array.isArray(leave?.leave_pay_method_versions) ? leave.leave_pay_method_versions : []);
     setOrgLeavePayPolicy(leave?.leave_pay_policy || null);
   }, [balanceYear, employee?.id, orgId, session]);
 
@@ -560,8 +562,9 @@ export default function EmployeeAttendancePanel({ employee, orgId, session, onEm
                 session={session}
                 current={leaveChoices || {
                   annual_leave_days: employee.annual_leave_days ?? null,
-                  leave_pay_method: employee.leave_pay_method || null,
+                  leave_pay_method: null,
                 }}
+                methodVersions={leaveMethodVersions}
                 orgPayPolicy={orgLeavePayPolicy}
                 onChanged={handleLeaveSettingsChanged}
               />

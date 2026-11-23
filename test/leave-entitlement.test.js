@@ -39,6 +39,8 @@ import {
 import {
   buildEmployeeLeaveBody,
   buildEntitlementChoiceBody,
+  buildLeavePayMethodVersionBody,
+  leavePayMethodTimeline,
   describeEmployeeLeavePayChoice,
   employeeLeaveSummaryText,
   entitlementManualReason,
@@ -418,23 +420,54 @@ describe('the settings dialog and the employee choice', () => {
     assert.equal(buildEntitlementChoiceBody({ choice: 'manual', manualDays: '14.3' }, ids), null);
   });
 
-  it('the "חופשה" row sends only the fields that change, both in one body', () => {
+  it('the yearly days (not dated) are sent alone; the pay method is never in that body', () => {
     const ids = { orgId: 'o', employeeId: 'e' };
-    const stored = { annual_leave_days: null, leave_pay_method: null };
-    assert.deepEqual(buildEmployeeLeaveBody({ daysChoice: 'default', manualDays: '', payMethod: '' }, ids, stored), { body: { org_id: 'o', instructor_id: 'e' }, changed: false });
+    const stored = { annual_leave_days: null };
+    assert.deepEqual(buildEmployeeLeaveBody({ daysChoice: 'default', manualDays: '' }, ids, stored), { body: { org_id: 'o', instructor_id: 'e' }, changed: false });
     assert.deepEqual(
       buildEmployeeLeaveBody({ daysChoice: 'manual', manualDays: '9', payMethod: 'fixed_rate' }, ids, stored),
-      { body: { org_id: 'o', instructor_id: 'e', annual_leave_days: 9, leave_pay_method: 'fixed_rate' }, changed: true },
+      { body: { org_id: 'o', instructor_id: 'e', annual_leave_days: 9 }, changed: true },
     );
     assert.deepEqual(
-      buildEmployeeLeaveBody({ daysChoice: 'manual', manualDays: '9', payMethod: '' }, ids, { annual_leave_days: 9, leave_pay_method: 'legal' }),
-      { body: { org_id: 'o', instructor_id: 'e', leave_pay_method: null }, changed: true },
-    );
-    assert.deepEqual(
-      buildEmployeeLeaveBody({ daysChoice: 'default', manualDays: '9', payMethod: 'legal' }, ids, { annual_leave_days: 9, leave_pay_method: 'legal' }),
+      buildEmployeeLeaveBody({ daysChoice: 'default', manualDays: '9' }, ids, { annual_leave_days: 9 }),
       { body: { org_id: 'o', instructor_id: 'e', annual_leave_days: null }, changed: true },
     );
-    assert.equal(buildEmployeeLeaveBody({ daysChoice: 'manual', manualDays: '400', payMethod: '' }, ids, stored), null);
+    assert.equal(buildEmployeeLeaveBody({ daysChoice: 'manual', manualDays: '400' }, ids, stored), null);
+  });
+
+  it('the pay method is a dated version: sent only when the method in force on that date differs', () => {
+    const ids = { orgId: 'o', employeeId: 'e' };
+    const versions = [
+      { effective_date: '2000-01-01', method: 'legal' },
+      { effective_date: '2026-12-01', method: 'fixed_rate' },
+    ];
+    // Same as the one in force on 15.11 -> nothing to send.
+    assert.equal(buildLeavePayMethodVersionBody({ payMethod: 'legal', effectiveDate: '2026-11-15' }, ids, versions).changed, false);
+    // Back to "legal" from 1.1.2027 undoes the future fixed version, so it is a change.
+    assert.deepEqual(
+      buildLeavePayMethodVersionBody({ payMethod: 'legal', effectiveDate: '2027-01-01' }, ids, versions),
+      { body: { entity_type: 'leave_pay_method_version', org_id: 'o', employee_id: 'e', method: 'legal', effective_date: '2027-01-01' }, changed: true, error: '' },
+    );
+    // "" = the organisation: a change from a stored method, none when nothing is stored.
+    assert.equal(buildLeavePayMethodVersionBody({ payMethod: '', effectiveDate: '2026-11-15' }, ids, versions).body.method, null);
+    assert.equal(buildLeavePayMethodVersionBody({ payMethod: '', effectiveDate: '2026-11-15' }, ids, versions).changed, true);
+    assert.equal(buildLeavePayMethodVersionBody({ payMethod: '', effectiveDate: '2026-11-15' }, ids, []).changed, false);
+    assert.equal(buildLeavePayMethodVersionBody({ payMethod: 'legal', effectiveDate: '' }, ids, []).changed, false);
+    assert.match(buildLeavePayMethodVersionBody({ payMethod: 'legal', effectiveDate: '' }, ids, []).error, /תאריך/);
+  });
+
+  it('the method history lists the versions newest first and notes the next change', () => {
+    const versions = [
+      { effective_date: '2000-01-01', method: 'legal' },
+      { effective_date: '2026-12-01', method: 'fixed_rate' },
+    ];
+    const timeline = leavePayMethodTimeline(versions, '2026-11-15', { default_method: 'legal' });
+    assert.deepEqual(timeline.entries.map((entry) => [entry.date, entry.label, entry.isFuture, entry.isCurrent]), [
+      ['2026-12-01', 'ערך קבוע ליום', true, false],
+      ['2000-01-01', 'ממוצע מומלץ', false, true],
+    ]);
+    assert.equal(timeline.note, 'ישתנה ב-01.12.2026: ערך קבוע ליום');
+    assert.equal(leavePayMethodTimeline([], '2026-11-15').note, '');
   });
 
   it('the "חופשה" row reads first as one short line', () => {

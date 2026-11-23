@@ -14,7 +14,6 @@ import {
 import { selectInChunks } from '../_shared/query-chunks.js';
 import { parseJsonBodyWithLimit, validateInstructorCreate, validateInstructorUpdate } from '../_shared/validation.js';
 import { ensureInstructorColors } from '../_shared/instructor-colors.js';
-import { PAY_BASIS, hasPositiveLeaveDayRate, loadRateHistoryRows } from '../_shared/rate-history.js';
 import { AUDIT_ACTIONS, AUDIT_CATEGORIES, logAuditEvent } from '../_shared/audit-log.js';
 import { normalizeAvailabilityWindows, hasConfiguredAvailability } from '../_shared/instructor-availability.js';
 import { logTenantAuditEvent, TENANT_AUDIT_RETENTION } from '../_shared/tenant-audit.js';
@@ -22,7 +21,7 @@ import { getAuthUserById } from '../_shared/auth-users.js';
 import { buildAccountDisplayName } from '../_shared/account-profile.js';
 import { attachErrorTracking, respondTracked } from '../_shared/error-events.js';
 
-const EMPLOYEE_SELECT_COLUMNS = 'id, user_id, first_name, middle_name, last_name, employee_id, employee_type, phone, email, start_date, is_active, notes, working_days, annual_leave_days, leave_pay_method, employment_scope, metadata, instructor_types';
+const EMPLOYEE_SELECT_COLUMNS = 'id, user_id, first_name, middle_name, last_name, employee_id, employee_type, phone, email, start_date, is_active, notes, working_days, annual_leave_days, employment_scope, metadata, instructor_types';
 
 async function respondTrackedInstructorError(context, status, message, error, metadata = {}) {
   return respondTracked(context, status, { message }, undefined, {
@@ -530,7 +529,6 @@ export default async function (context, req) {
       is_active: true,
       notes: validation.notes || null,
       working_days: workingDaysInput.value,
-      leave_pay_method: validation.leavePayMethod || null,
       employment_scope: validation.employmentScope || null,
     };
     if (hasAnnualLeaveDaysInput) {
@@ -711,19 +709,6 @@ export default async function (context, req) {
         if (disallowed.length > 0 || !isSelf) {
           return respond(context, 403, { message: 'forbidden' });
         }
-      }
-    }
-
-    // "ערך קבוע ליום" pays nothing without a value: the leave-day rate must be set (above zero) first.
-    if (updates.leave_pay_method === 'fixed_rate') {
-      try {
-        const leaveRates = await loadRateHistoryRows(supabase, orgId, { employeeIds: [instructorId], payBases: [PAY_BASIS.LEAVE_DAY] });
-        if (!hasPositiveLeaveDayRate(leaveRates, instructorId)) {
-          return respond(context, 400, { message: 'leave_day_value_required' });
-        }
-      } catch (rateError) {
-        context.log?.error?.('instructors failed to load leave day rates', { message: rateError?.message, instructorId });
-        return respond(context, 500, { message: 'failed_to_update_instructor' });
       }
     }
 

@@ -12,7 +12,8 @@ const EXPORTABLE_TABLES = [
   { name: 'Employees', clearColumns: ['user_id'] },
   { name: 'Services' },
   { name: 'Settings' },
-  { name: 'SettingsHistory' },
+  // employee_id is the all-zero id for a version of the whole organisation: kept as it is, not remapped.
+  { name: 'SettingsHistory', references: { employee_id: 'Employees' }, keepValues: { employee_id: '00000000-0000-0000-0000-000000000000' } },
   { name: 'RateHistory', references: { employee_id: 'Employees', service_id: 'Services' } },
   { name: 'employee_attendance_records', references: { employee_id: 'Employees' } },
   { name: 'employee_leave_entries', references: { employee_id: 'Employees' } },
@@ -190,6 +191,7 @@ function transformRow(config, row, targetOrgId, userId, idMaps) {
 
   for (const [column, referencedTable] of Object.entries(config.references || {})) {
     if (!Object.prototype.hasOwnProperty.call(transformed, column)) continue;
+    if (config.keepValues?.[column] === transformed[column]) continue;
     const mapped = remapId(idMaps, referencedTable, transformed[column]);
     transformed[column] = mapped || null;
   }

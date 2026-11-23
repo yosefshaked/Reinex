@@ -31,6 +31,11 @@ function rateRow(id, employeeId, serviceId, payBasis, rate, effectiveDate) {
   return { id, employee_id: employeeId, service_id: serviceId, pay_basis: payBasis, rate, effective_date: effectiveDate };
 }
 
+// An employee's own leave pay method is a dated setting: a version in force from a date.
+function methodVersion(employeeId, method, effectiveDate = '2000-01-01') {
+  return { key: 'leave_pay_method', employee_id: employeeId, effective_date: effectiveDate, settings_value: { method } };
+}
+
 // Dana teaches riding at 100 ₪/hour until 30.9, 120 ₪/hour from 1.10. Omer substitutes at 110 ₪/hour.
 // Dana also works office hours at 50 ₪/hour.
 const RATES = [
@@ -294,7 +299,7 @@ describe('PAY-E hours', () => {
   });
   it('PAY-E2 hourly pay reads only the other work entered for the day, never lesson time', () => {
     // A day an instructor taught 120 minutes (on the calendar) and entered 90 minutes of office work.
-    const employee = { id: 'dana', leave_pay_method: 'legal' };
+    const employee = { id: 'dana', leave_pay_method_versions: [methodVersion('dana', 'legal')] };
     const rateRows = [rateRow('dana-office', 'dana', null, PAY_BASIS.ATTENDANCE_HOURLY, 6000, '2026-01-01')];
     const lessonHistory = [{ lesson_date: '2026-09-10', payout_amount: 30000, duration_minutes: 120 }];
     const officeOnly = resolveLeaveDayValue({
@@ -317,7 +322,7 @@ describe('PAY-E hours', () => {
   });
 
   it('PAY-E2 the leave-day average counts a teaching day once, not as lesson pay plus hourly pay', () => {
-    const employee = { id: 'dana', leave_pay_method: 'legal' };
+    const employee = { id: 'dana', leave_pay_method_versions: [methodVersion('dana', 'legal')] };
     const rateRows = [rateRow('dana-office', 'dana', null, PAY_BASIS.ATTENDANCE_HOURLY, 5000, '2026-01-01')];
     const lessonHistory = [{ lesson_date: '2026-09-10', payout_amount: 30000, duration_minutes: 120 }];
     const attendanceRecords = [{
@@ -357,7 +362,7 @@ describe('PAY-G annual leave', () => {
   });
 
   it('PAY-G1 farm override: the fixed leave-day rate in effect on the leave date is used as is', () => {
-    const employee = { id: 'dana', leave_pay_method: 'fixed_rate' };
+    const employee = { id: 'dana', leave_pay_method_versions: [methodVersion('dana', 'fixed_rate')] };
     const rateRows = [
       rateRow('leave-250', 'dana', null, PAY_BASIS.LEAVE_DAY, 25000, '2026-01-01'),
       rateRow('leave-280', 'dana', null, PAY_BASIS.LEAVE_DAY, 28000, '2026-10-01'),
@@ -377,7 +382,7 @@ describe('PAY-G annual leave', () => {
     }));
     // July, August and September 2026: 18 days × 5 hours × ₪100 = ₪9,000 a month, ₪27,000 in all.
     const FULL_QUARTER = [...officeDays('2026-07', 18, 300), ...officeDays('2026-08', 18, 300), ...officeDays('2026-09', 18, 300)];
-    const gal = { id: 'gal', leave_pay_method: 'legal' };
+    const gal = { id: 'gal', leave_pay_method_versions: [methodVersion('gal', 'legal')] };
     const valueOf = (facts) => resolveLeaveDayDetail({ employee: gal, targetDate: '2026-10-15', rateRows: OFFICE_100, ...facts });
 
     it('(a) a full quarter of hourly pay: ₪27,000 ÷ 90 × 7/5 = ₪420.00 a day; a six-day week ₪350.00', () => {

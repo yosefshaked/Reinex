@@ -39,6 +39,7 @@ import {
   listFinanceCorrections,
   loadFinancePolicies,
   loadGraceCancellationParticipantIds,
+  loadLeavePayMethodVersions,
   priceAttendanceRecords,
   resolveCompensationEligibleParticipants,
   resolveEmployeeWorkingDays,
@@ -417,12 +418,15 @@ export async function computeEmployeePay(client, orgId, {
   includeDetails = false,
 } = {}) {
   const employeeId = employee?.id;
-  const [resolvedPolicies, resolvedRateRows, leaveDays, corrections] = await Promise.all([
+  const [resolvedPolicies, resolvedRateRows, leaveDays, corrections, leavePayMethodVersions] = await Promise.all([
     policies || loadFinancePolicies(client, orgId, { asOf: localDateKey(endDate) }),
     rateRows || loadRateHistoryRows(client, orgId, { employeeIds: [employeeId] }),
     fetchApprovedLeaveDays(client, orgId, { employeeId, startDate, endDate }),
     listFinanceCorrections(client, orgId, { employeeId, startDate, endDate }),
+    employee?.leave_pay_method_versions || loadLeavePayMethodVersions(client, orgId, [employeeId]),
   ]);
+  // The leave pay method is the employee's own dated setting: each leave day uses the one in force on it.
+  const employeeWithMethod = { ...employee, leave_pay_method_versions: leavePayMethodVersions };
 
   // A leave day can be valued by the pay of the months before it, so history is read only when the
   // period has leave in it. The "legal" value reaches back through the leave inside its window (see
@@ -457,7 +461,7 @@ export async function computeEmployeePay(client, orgId, {
   const lessonTotals = summarizeLessons(lessons);
 
   const leaveValuer = createLeaveDayValuer({
-    employee,
+    employee: employeeWithMethod,
     lessonHistory,
     attendanceRecords: attendanceHistory,
     leaveDays: [...historyLeaveDays, ...leaveDays],

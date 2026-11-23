@@ -223,13 +223,6 @@ export function validateSessionWrite(body) {
 // ----- Instructors write validation (SOT) -----
 const PHONE_PATTERN = /^[0-9+\-()\s]{6,20}$/;
 const SIMPLE_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
-const LEAVE_PAY_METHODS = new Set(['legal', 'avg_hourly_x_avg_day_hours', 'fixed_rate']);
-
-function normalizeLeavePayMethod(value) {
-  const normalized = normalizeString(value).toLowerCase();
-  return LEAVE_PAY_METHODS.has(normalized) ? normalized : '';
-}
-
 function coerceOptionalDateString(value) {
   const normalized = normalizeString(value);
   if (!normalized) {
@@ -308,7 +301,6 @@ export function validateInstructorCreate(body) {
     return { error: 'invalid_annual_leave_days' };
   }
   const employeeType = normalizeString(body?.employee_type ?? body?.employeeType).toLowerCase() || '';
-  const leavePayMethod = normalizeLeavePayMethod(body?.leave_pay_method ?? body?.leavePayMethod);
   const employmentScope = normalizeString(body?.employment_scope ?? body?.employmentScope) || '';
 
   // employee_id is required (national ID or worker number)
@@ -331,7 +323,6 @@ export function validateInstructorCreate(body) {
     employeeType,
     startDate: startDateResult.value,
     annualLeaveDays: annualLeaveDaysResult.value,
-    leavePayMethod,
     employmentScope,
   };
 }
@@ -438,13 +429,6 @@ export function validateInstructorUpdate(body, orgPermissions = {}) {
       return { error: 'invalid_annual_leave_days' };
     }
     updates.annual_leave_days = result.value;
-  }
-
-  if (Object.prototype.hasOwnProperty.call(body, 'leave_pay_method') || Object.prototype.hasOwnProperty.call(body, 'leavePayMethod')) {
-    const v = normalizeLeavePayMethod(
-      Object.prototype.hasOwnProperty.call(body, 'leave_pay_method') ? body.leave_pay_method : body.leavePayMethod
-    );
-    updates.leave_pay_method = v || null;
   }
 
   if (Object.prototype.hasOwnProperty.call(body, 'employment_scope') || Object.prototype.hasOwnProperty.call(body, 'employmentScope')) {

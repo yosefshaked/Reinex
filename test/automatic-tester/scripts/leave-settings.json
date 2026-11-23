@@ -712,6 +712,22 @@
           "selector": "[data-leave-settings-line]:has-text('ימים: 9 בשנה · תשלום: ממוצע מומלץ')"
         },
         {
+          "id": "open-method-history",
+          "description": "The pay method is a dated version: the history lists it with its date, marked as in force",
+          "action": "click",
+          "selector": "[data-leave-day-history-toggle]"
+        },
+        {
+          "id": "assert-method-history",
+          "action": "waitForSelector",
+          "selector": "[data-leave-method-history] [data-leave-method-entry]:has-text('ממוצע מומלץ'):has-text('(בתוקף)')"
+        },
+        {
+          "id": "close-method-history",
+          "action": "click",
+          "selector": "[data-leave-day-history-toggle]"
+        },
+        {
           "id": "open-explain",
           "action": "click",
           "selector": "[data-leave-explain-open]"
@@ -1339,8 +1355,9 @@
         },
         {
           "id": "wait-for-second-change",
+          "description": "The separator exists only once there are two changes (the first one also contains a 3)",
           "action": "waitForSelector",
-          "selector": "[data-balance-event]:has-text('3')"
+          "selector": "[data-balance-separator]"
         },
         {
           "id": "assert-history-separator",

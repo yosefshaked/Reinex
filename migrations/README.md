@@ -30,3 +30,6 @@ on deploy is planned and not built yet.
 - `0004_leave_entitlement_default.sql` - `Employees.annual_leave_days` loses its default of 12 and
   becomes the manual yearly leave number (null = the organisation's `leave_entitlement_policy`);
   existing 12s (the old default) become null, once.
+- `0005_employee_leave_pay_method_dated.sql` - `Employees.leave_pay_method` becomes a dated setting:
+  `SettingsHistory` gets `employee_id` (all-zero = the organisation) with a new unique index, each
+  employee's current method becomes a first version from 2000-01-01, and the column is dropped.

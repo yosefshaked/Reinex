@@ -7,6 +7,11 @@ import {
   DATED_SETTING_KEYS,
   SINCE_THE_BEGINNING,
   cancelDatedSettingVersion,
+  cancelEmployeeSettingVersion,
+  isEmployeeSettingKey,
+  listEmployeeSettingVersions,
+  normalizeSettingVersion,
+  resolveEmployeeSettingOnDate,
   checkCancelableVersion,
   isDatedSettingKey,
   listSettingVersions,
@@ -20,8 +25,10 @@ import {
   financePoliciesOnDate,
   loadFinancePolicies,
   loadSettingsMap,
+  resolveLeavePayMethod,
   validateInstructorEarningsPolicyInput,
 } from '../api/_shared/employee-finance.js';
+import { validateLeavePayMethodVersion } from '../api/_shared/leave-pay-method-version.js';
 import {
   SINCE_THE_BEGINNING as SCREEN_SINCE_THE_BEGINNING,
   buildDatedSettingWarnings,
@@ -102,7 +109,7 @@ describe('cancelling a future version', () => {
       },
     };
   }
-  const row = (id, key, effectiveDate, orgId = 'org-1') => ({ id, org_id: orgId, key, effective_date: effectiveDate });
+  const row = (id, key, effectiveDate, orgId = 'org-1') => ({ id, org_id: orgId, key, employee_id: '00000000-0000-0000-0000-000000000000', effective_date: effectiveDate });
 
   it('deletes only the future version of that key in that org, through the org scope', async () => {
     const rows = [
@@ -115,7 +122,7 @@ describe('cancelling a future version', () => {
     const result = await cancelDatedSettingVersion(client, 'org-1', { key: 'leave_pay_policy', effectiveDate: '2026-12-01', today: TODAY });
     assert.equal(result.deleted, 1);
     assert.deepEqual(rows.map((entry) => entry.id), ['past', 'other-key', 'other-org']);
-    assert.deepEqual(client.calls.find(([name]) => name === 'filters')[1], { org_id: 'org-1', key: 'leave_pay_policy', effective_date: '2026-12-01' });
+    assert.deepEqual(client.calls.find(([name]) => name === 'filters')[1], { org_id: 'org-1', key: 'leave_pay_policy', employee_id: '00000000-0000-0000-0000-000000000000', effective_date: '2026-12-01' });
   });
 
   it('refuses a past or current version without touching the table, and reports a missing one', async () => {
@@ -293,5 +300,84 @@ describe('one screen that saves two dated settings from one date', () => {
       ['leave_pay_policy', 'תשלום', 'ממוצע מומלץ', '2000-01-01'],
     ]);
     assert.deepEqual(mergeVersionHistory([]), []);
+  });
+});
+
+describe('an employee\'s own leave pay method as a dated setting', () => {
+  const ZERO = '00000000-0000-0000-0000-000000000000';
+  const method = (employeeId, effectiveDate, value) => ({
+    key: 'leave_pay_method', employee_id: employeeId, effective_date: effectiveDate, settings_value: { method: value },
+  });
+  const rows = [
+    method('dana', '2000-01-01', 'legal'),
+    method('dana', '2026-10-15', 'fixed_rate'),
+    method('omer', '2000-01-01', 'avg_hourly_x_avg_day_hours'),
+    { key: 'leave_pay_policy', employee_id: ZERO, effective_date: '2000-01-01', settings_value: { default_method: 'legal' } },
+  ].map(normalizeSettingVersion);
+
+  it('is an employee key, never an organisation key', () => {
+    assert.equal(isEmployeeSettingKey('leave_pay_method'), true);
+    assert.equal(isDatedSettingKey('leave_pay_method'), false);
+    assert.equal(isEmployeeSettingKey('leave_pay_policy'), false);
+  });
+
+  it('each leave day is valued by the version in force on that day, per employee', () => {
+    const on = (employeeId, date) => resolveEmployeeSettingOnDate(rows, 'leave_pay_method', employeeId, date)?.settings_value.method;
+    assert.equal(on('dana', '2026-10-14'), 'legal');
+    assert.equal(on('dana', '2026-10-15'), 'fixed_rate');
+    assert.equal(on('omer', '2026-10-20'), 'avg_hourly_x_avg_day_hours');
+    assert.equal(on('nobody', '2026-10-20'), undefined);
+  });
+
+  it('the employee method wins on the day it is in force, otherwise the organisation default on that day', () => {
+    const dana = { id: 'dana', leave_pay_method_versions: rows };
+    const policy = { default_method: 'avg_hourly_x_avg_day_hours' };
+    assert.equal(resolveLeavePayMethod(dana, policy, '2026-10-14'), 'legal');
+    assert.equal(resolveLeavePayMethod(dana, policy, '2026-10-15'), 'fixed_rate');
+    // Before the first version (or without any) the organisation's policy in force on that day decides.
+    const early = { id: 'dana', leave_pay_method_versions: [method('dana', '2026-10-15', 'fixed_rate')].map(normalizeSettingVersion) };
+    assert.equal(resolveLeavePayMethod(early, policy, '2026-10-01'), 'avg_hourly_x_avg_day_hours');
+    // A version that says "follow the organisation" (null) falls back too.
+    const follow = { id: 'dana', leave_pay_method_versions: [method('dana', '2000-01-01', null)].map(normalizeSettingVersion) };
+    assert.equal(resolveLeavePayMethod(follow, { default_method: 'legal' }, '2026-10-01'), 'legal');
+  });
+
+  it('lists one employee\'s versions newest first', () => {
+    assert.deepEqual(listEmployeeSettingVersions(rows, 'leave_pay_method', 'dana').map((entry) => entry.effective_date), ['2026-10-15', '2000-01-01']);
+  });
+
+  it('validates a version about to be saved', () => {
+    assert.deepEqual(validateLeavePayMethodVersion({ method: 'Legal', effectiveDate: '2026-12-01' }), { value: { method: 'legal', effectiveDate: '2026-12-01' } });
+    assert.deepEqual(validateLeavePayMethodVersion({ method: '', effectiveDate: '2026-12-01' }), { value: { method: null, effectiveDate: '2026-12-01' } });
+    assert.equal(validateLeavePayMethodVersion({ method: 'monthly', effectiveDate: '2026-12-01' }).error, 'invalid_leave_pay_method');
+    assert.equal(validateLeavePayMethodVersion({ method: 'legal', effectiveDate: '' }).error, 'missing_effective_date');
+    assert.equal(validateLeavePayMethodVersion({ method: 'legal', effectiveDate: '1.12.2026' }).error, 'invalid_effective_date');
+  });
+
+  it('cancels only that employee\'s future version', async () => {
+    const table = [
+      { id: 'a', org_id: 'org-1', key: 'leave_pay_method', employee_id: 'dana', effective_date: '2026-12-01' },
+      { id: 'b', org_id: 'org-1', key: 'leave_pay_method', employee_id: 'omer', effective_date: '2026-12-01' },
+    ];
+    const client = {
+      from() {
+        const filters = {};
+        const chain = {
+          delete() { return chain; },
+          eq(column, value) { filters[column] = value; return chain; },
+          select() {
+            const hit = table.filter((r) => Object.entries(filters).every(([c, v]) => r[c] === v));
+            for (const r of hit) table.splice(table.indexOf(r), 1);
+            return Promise.resolve({ data: hit.map((r) => ({ id: r.id })), error: null });
+          },
+        };
+        return chain;
+      },
+    };
+    const result = await cancelEmployeeSettingVersion(client, 'org-1', { employeeId: 'dana', key: 'leave_pay_method', effectiveDate: '2026-12-01', today: '2026-11-18' });
+    assert.equal(result.deleted, 1);
+    assert.deepEqual(table.map((r) => r.id), ['b']);
+    const past = await cancelEmployeeSettingVersion(client, 'org-1', { employeeId: 'omer', key: 'leave_pay_method', effectiveDate: '2026-11-01', today: '2026-11-18' });
+    assert.equal(past.error, 'dated_version_not_in_future');
   });
 });

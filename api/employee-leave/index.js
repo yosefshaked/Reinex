@@ -22,11 +22,16 @@ import {
   deleteLeaveArtifacts,
   fetchApprovedLeaveDays,
   isYmdDate,
+  LEAVE_PAY_METHOD_KEY,
+  employeeLeavePayMethodOnDate,
   loadFinancePolicies,
   resolveEmployeeRecord,
   upsertLeaveBalanceUsage,
 } from '../_shared/employee-finance.js';
 import { todayKey } from '../_shared/local-time.js';
+import { cancelEmployeeSettingVersion, listEmployeeSettingVersions, saveEmployeeSettingVersion } from '../_shared/dated-settings.js';
+import { hasPositiveLeaveDayRate, loadRateHistoryRows, PAY_BASIS } from '../_shared/rate-history.js';
+import { leavePayMethodVersionView, validateLeavePayMethodVersion } from '../_shared/leave-pay-method-version.js';
 import { attachErrorTracking, respondTracked } from '../_shared/error-events.js';
 import {
   computeLeaveEntitlement,
@@ -73,6 +78,10 @@ function normalizeEntryStatus(value) {
 function normalizeHalfDayPart(value) {
   const normalized = normalizeString(value).toLowerCase();
   return HALF_DAY_PARTS.has(normalized) ? normalized : '';
+}
+
+function isLeavePayMethodVersionRequest(body) {
+  return normalizeString(body?.entity_type).toLowerCase() === 'leave_pay_method_version';
 }
 
 function isBalanceEventRequest(body) {
@@ -301,6 +310,9 @@ export default async function (context, req) {
     }
 
     if (method === 'POST' || method === 'PUT') {
+      if (isLeavePayMethodVersionRequest(body)) {
+        return await handleLeavePayMethodVersionSave(context, supabase, orgId, body, userId);
+      }
       if (isBalanceEventRequest(body)) {
         return await handleBalanceEventUpsert(context, supabase, orgId, body, userId, method);
       }
@@ -308,6 +320,9 @@ export default async function (context, req) {
     }
 
     if (method === 'DELETE') {
+      if (isLeavePayMethodVersionRequest(body)) {
+        return await handleLeavePayMethodVersionCancel(context, supabase, orgId, body);
+      }
       if (isBalanceEventRequest(body)) {
         return await handleBalanceEventDelete(context, supabase, orgId, body, userId);
       }
@@ -417,8 +432,12 @@ async function handleGet(context, req, client, orgId, userId, canManageAll) {
     policy_source: 'Employees',
     policy: {
       annual_leave_days: employee.annual_leave_days ?? null,
-      leave_pay_method: employee.leave_pay_method || null,
+      // The method in force today; null = the organisation's. The versions are the history.
+      leave_pay_method: employeeLeavePayMethodOnDate(employee, today) || null,
     },
+    leave_pay_method_versions: listEmployeeSettingVersions(employee.leave_pay_method_versions, LEAVE_PAY_METHOD_KEY, employee.id)
+      .map(leavePayMethodVersionView),
+    today,
     entitlement,
     ledger_status: balanceEvents.length > 0 ? 'employee_leave_balance_events' : 'unavailable',
     entry_count: balanceEvents.length,
@@ -642,6 +661,51 @@ async function handleDelete(context, client, orgId, body, userId) {
   }
 }
 
+
+/**
+ * POST { entity_type: 'leave_pay_method_version', org_id, employee_id, method, effective_date, notes? }
+ * A version of the employee's own leave pay method from a date; `method` null = follow the
+ * organisation. "ערך קבוע ליום" needs a leave-day value above zero (RateHistory, pay_basis leave_day).
+ */
+async function handleLeavePayMethodVersionSave(context, client, orgId, body, userId) {
+  const employeeId = normalizeString(body?.employee_id);
+  if (!employeeId) return respond(context, 400, { message: 'missing_employee_id' });
+  const checked = validateLeavePayMethodVersion({ method: body?.method, effectiveDate: body?.effective_date });
+  if (checked.error) return respond(context, 400, { message: checked.error });
+  const notFound = await respondUnlessEmployeeInOrg(context, client, orgId, employeeId, userId);
+  if (notFound) return notFound;
+  if (checked.value.method === 'fixed_rate') {
+    const leaveRates = await loadRateHistoryRows(client, orgId, { employeeIds: [employeeId], payBases: [PAY_BASIS.LEAVE_DAY] });
+    if (!hasPositiveLeaveDayRate(leaveRates, employeeId)) {
+      return respond(context, 400, { message: 'leave_day_value_required' });
+    }
+  }
+  const { error } = await saveEmployeeSettingVersion(client, orgId, {
+    employeeId,
+    key: LEAVE_PAY_METHOD_KEY,
+    settings_value: { method: checked.value.method },
+    effective_date: checked.value.effectiveDate,
+    notes: body?.notes,
+  }, userId);
+  if (error) {
+    return respondTrackedLeaveError(context, 500, 'failed_to_save_leave_pay_method', error, { action: 'save_leave_pay_method_version', orgId, userId, employeeId });
+  }
+  return respond(context, 200, { employee_id: employeeId, method: checked.value.method, effective_date: checked.value.effectiveDate });
+}
+
+/** DELETE { entity_type: 'leave_pay_method_version', org_id, employee_id, effective_date }: a future version only. */
+async function handleLeavePayMethodVersionCancel(context, client, orgId, body) {
+  const employeeId = normalizeString(body?.employee_id);
+  if (!employeeId) return respond(context, 400, { message: 'missing_employee_id' });
+  const result = await cancelEmployeeSettingVersion(client, orgId, {
+    employeeId,
+    key: LEAVE_PAY_METHOD_KEY,
+    effectiveDate: body?.effective_date,
+    today: todayKey(),
+  });
+  if (result.error) return respond(context, result.status || 400, { message: result.error });
+  return respond(context, 200, result);
+}
 
 async function handleBalanceEventUpsert(context, client, orgId, body, userId, method) {
   const employeeId = normalizeString(body?.employee_id);

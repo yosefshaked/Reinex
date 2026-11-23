@@ -148,15 +148,17 @@
           "id": "refuse-fixed-method-without-value",
           "description": "\"ערך קבוע ליום\" without a leave-day value is refused (400 leave_day_value_required)",
           "action": "apiCall",
-          "method": "PUT",
-          "endpoint": "/api/instructors",
+          "method": "POST",
+          "endpoint": "/api/employee-leave",
           "ignoreStatus": [
             400
           ],
           "body": {
+            "entity_type": "leave_pay_method_version",
             "org_id": "{{TEST_ORG_ID}}",
-            "instructor_id": "{{RATE_INSTRUCTOR_ID}}",
-            "leave_pay_method": "fixed_rate"
+            "employee_id": "{{RATE_INSTRUCTOR_ID}}",
+            "method": "fixed_rate",
+            "effective_date": "2000-01-01"
           }
         },
         {

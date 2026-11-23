@@ -1073,7 +1073,6 @@ CREATE TABLE IF NOT EXISTS public."Employees" (
   "notes" text,
   "working_days" jsonb,
   "annual_leave_days" numeric, -- manual leave days per year; null = the organisation default (leave_entitlement_policy)
-  "leave_pay_method" text,
   "employment_scope" text,
   "instructor_types" uuid[],
   "metadata" jsonb,
@@ -2820,20 +2819,28 @@ ON CONFLICT ("org_id", "key") DO NOTHING;
 -- the version in force for a lesson is the latest one whose effective_date is on or before the
 -- lesson's local date (api/_shared/dated-settings.js). Such a key lives only here, never in
 -- "Settings". Written only by api/settings; one version per org, key and date.
+-- An employee's own dated setting (the key leave_pay_method: how that employee's leave day is
+-- valued, written by api/employee-leave) is a version with "employee_id" set; a version of the whole
+-- organisation has the all-zero employee_id, so one unique index covers both and an upsert can
+-- name its conflict columns.
 
 CREATE TABLE IF NOT EXISTS public."SettingsHistory" (
   "id" uuid NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
   "org_id" uuid NOT NULL REFERENCES public.organizations(id),
   "key" text NOT NULL,
   "effective_date" date NOT NULL,
+  "employee_id" uuid NOT NULL DEFAULT '00000000-0000-0000-0000-000000000000',
   "settings_value" jsonb NOT NULL,
   "notes" text,
   "created_by" uuid NULL,
   "created_at" timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS settings_history_org_key_effective_date_uidx
-  ON public."SettingsHistory" ("org_id", "key", "effective_date");
+ALTER TABLE public."SettingsHistory"
+  ADD COLUMN IF NOT EXISTS "employee_id" uuid NOT NULL DEFAULT '00000000-0000-0000-0000-000000000000';
+
+CREATE UNIQUE INDEX IF NOT EXISTS settings_history_org_key_employee_effective_date_uidx
+  ON public."SettingsHistory" ("org_id", "key", "employee_id", "effective_date");
 
 -- A first version "since the beginning" (2000-01-01, as rates carried over from before rate
 -- history) for each organisation that has no version of the key yet.
