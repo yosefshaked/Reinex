@@ -8,7 +8,7 @@ Read this block first when you continue this plan in a new conversation.
 - **Current stage:** 0 is done; its results are in the Progress log. Next: joint review of stage 0, then subtask 1.3 step 1. Stage 1 must not start before that review.
 - **Execution branch:** `repository-reconstruction`, based on `origin/staging` `dce8f2e790e939b7f0805803d7d44e71a23346ba`. See [Planning base](#planning-base) and [Q1](#q1-execution-branch).
 - **Repository state:** the approved plan is committed on its own. Stage 0 writes outside the repository only (`$env:TEMP\reinex-restructure\stage0\`), except the Progress log.
-- **Last update:** 2026-11-23. Owner approvals recorded; reporter rule and inventory command added.
+- **Last update:** 2026-11-23. Stage 0 baseline recorded. The commit policy was added to stage 3 (3.10, 3.3, Q10).
 
 Each stage appends to the [Progress log](#progress-log), ticks its subtasks and records answers under [Open decisions](#open-decisions). Keep this block at five bullets. It is a pointer, not a history.
 
@@ -44,7 +44,8 @@ Today that knowledge is spread over seven documentation folders and two instruct
 - changing CI triggers or behaviour;
 - automating migrations in deployment;
 - performance work;
-- moving off Azure.
+- moving off Azure;
+- commitlint, Git hooks or CI checks on commit messages (the commit policy itself is in stage 3).
 
 ## Legend
 
@@ -534,7 +535,7 @@ All commands run in PowerShell from the repository root. Keep `$work = "$env:TEM
    - For each renamed file below 100%, run `git diff --cached -M -- tests/<x>` and confirm it shows only expected reference updates.
    - Every other entry is `M` on a file from the consumer table.
 9. **Run the acceptance checks (1.4)** on the staged working tree, before committing.
-10. **Commit** with the message `Move test/ to tests/ and update its consumers`. Record the SHA.
+10. **Commit** with the message `refactor(tests): move shared tests to tests/`. This follows the commit policy planned in stage 3.3, so the pilot already matches it. Record the SHA.
 
 #### 1.4 Acceptance (compare with the stage 0 measurements)
 
@@ -735,18 +736,64 @@ Then confirm that the local data is back, using the report count and the `.env` 
 - [ ] 3.7 Fix the C3 messages.
 - [ ] 3.8 Delete the retired instruction sources after owner confirmation.
 - [ ] 3.9 Decide whether the link check becomes `scripts/check-doc-links.js`. It resolves relative Markdown links and the `implementations/`, `docs/`, `tests/` and `database/` paths cited in code comments.
+- [ ] 3.10 Define one commit policy for every development agent in Reinex. The owner requested it on 2026-11-23. See 3.3.
+
+#### 3.3 Commit policy (subtask 3.10)
+
+**Where it lives.**
+- The policy is maintained in **one place**: `docs/project-rules/commits.md`.
+- `AGENTS.md` names it in its always-on rules and in the routing table ("committing work → `docs/project-rules/commits.md`"), as one line with a link. It does not copy the rules.
+- The policy links to the specification: https://www.conventionalcommits.org/en/v1.0.0/
+
+**What the policy says.** These are the points to write; the final wording is settled in the joint review.
+
+1. **Format.** [Conventional Commits 1.0.0](https://www.conventionalcommits.org/en/v1.0.0/). Messages are written in English.
+2. **Title.**
+   - Shape: `<type>(<scope>): <description>`.
+   - **Type:** one of the types from the specification and its common conventions: `feat`, `fix`, `docs`, `refactor`, `test`, `chore`, `build`, `ci`, `perf`, `style`, `revert`.
+   - **Scope:** added when it helps to identify the area. It is optional; the policy lists the scopes in use, such as `payroll`, `leave`, `calendar`, `billing`, `tests`, `plans`, `db` and `api`.
+   - **Description:** short, and starts with a verb in the imperative.
+3. **Body.** Explain why the change was made, or what follows from it, when that is not clear from the title and the diff. Otherwise there is no body.
+4. **One logical change per commit.** A commit can be reviewed and reverted as one unit. Two examples:
+   - **Belongs together:** moving `test/` to `tests/` together with updating its npm scripts, the ESLint config and the ignore rules. Without those updates, the move alone breaks the build.
+   - **Separate commits:** adding new tests to cover a missing scenario is its own change, not part of the move.
+5. **Examples for Reinex:**
+   - `docs(plans): add repository restructure plan`
+   - `refactor(tests): move shared tests to tests/`
+   - `fix(payroll): use the rate effective on the lesson date`
+6. **Out of the policy's scope:**
+   - **The conversation language.** It is a personal preference and stays outside the project settings.
+   - **The `Co-authored-by` trailer.** It is decided separately, see [Q10](#q10-co-authored-by-trailer). Until then the policy says nothing about it.
+7. **History.** The policy applies from its adoption on. Earlier commits are not rewritten, including this plan's own commits `0fec72c` and `3a5ad46`.
+
+**Not in scope** (separate initiatives, listed with the other non-goals):
+- commitlint;
+- Git hooks;
+- CI checks on messages.
 
 **Acceptance:**
+- A new agent with no memory gets a short task: a change that touches several files, for example "move `test/` to `tests/` and add one new test for a missing scenario". Through `AGENTS.md` alone, it must:
+  - find `docs/project-rules/commits.md`;
+  - propose a fitting title for each commit;
+  - explain which files belong together in one commit and which go in a separate one, and why.
+- The rules appear only in `docs/project-rules/commits.md`. `AGENTS.md` holds only the pointer.
+  - `git grep -n "Conventional Commits" -- AGENTS.md CLAUDE.md docs/project-rules` finds the rules in one file and a single link line in `AGENTS.md`.
+- The policy links to the 1.0.0 specification URL above.
+- No commitlint configuration, hook or CI change is added.
+
+**Acceptance (stage 3 as a whole):**
 - A checklist maps every line of the old `CLAUDE.md` and `AGENTS.md` to its new location.
 - The link check over `AGENTS.md`, `CLAUDE.md` and `docs/project-rules/**` finds 0 broken links.
 - `npm run lint` and `npm run lint:api` show the stage 2 counts.
+- The commit policy acceptance in 3.3 passes.
 
 **Rollback:** revert.
 
 **Evidence:**
 - the line-mapping checklist;
 - the link-check output;
-- the resolved conflicts.
+- the resolved conflicts;
+- the commit-policy agent test: the task given, and the agent's titles and grouping.
 
 ### Stage 4: `docs/product/` and `docs/research/`, first domain: payroll and leave
 
@@ -1166,6 +1213,12 @@ These are the questions whose answers change the plan. Record each answer direct
 - **Who:** the owner.
 - **When:** stage 2. The default is no.
 
+### Q10 Co-authored-by trailer
+- **Known:** the owner decided on 2026-11-23 that this question is settled separately from the commit policy (stage 3.3). Claude currently appends a `Co-Authored-By:` trailer by default.
+- **Missing:** whether the policy requires, allows or forbids the trailer for agents.
+- **Who:** the owner.
+- **When:** before 3.10 is closed. The policy is written without the topic until then.
+
 **Recorded from the Codex review on `index.csv`.** The columns `path,title,status` and the four statuses stay as agreed. Titles may contain commas and quotes under standard CSV quoting. The earlier proposal to forbid them was dropped. The validator parses quoted fields itself, with no new dependency (stage 2).
 
 **Reason to adjust an agreed decision.** For decision 7, `database/setup-sql.js` is workable, but `SetupAssistant` bundles the file into the app. The move therefore includes a frontend import change, and no bridge is allowed. Stage 5 covers it. No alternative is proposed.
@@ -1307,6 +1360,12 @@ Append one entry per stage. Newest last.
     - the ESLint scan list as a check (identity method step 7).
   - **Not run:** a real tester scenario. Only `--validate` was run.
   - **Joint review pending.**
+- **2026-11-23, plan update (owner request).**
+  - Added subtask 3.10 and section 3.3: a shared commit policy based on Conventional Commits 1.0.0, with its own acceptance.
+  - Added Q10, the `Co-authored-by` trailer, to be decided separately.
+  - Added commitlint, hooks and CI checks on messages to the non-goals.
+  - The stage 1 commit message now follows the policy.
+  - Only the plan was edited.
 
 ---
 
@@ -1325,6 +1384,7 @@ Append one entry per stage. Newest last.
 | Owner decision 7: `database/`, all consumers, setup and upgrade preserved | Stage 5 |
 | Owner decision 8: `local/`, tracked local files, tools with fixed paths | Local items; stages 1 and 6 |
 | Owner decision 9: per-stage report and joint review | Shared execution rules, item 9 |
+| Commit policy (Conventional Commits 1.0.0, one place, found through `AGENTS.md`) | Stage 3: subtask 3.10, section 3.3, stage acceptance; Non-goals; Q10; stage 1.3 step 10 |
 | Test-scope rule (entry points, affected files, no coverage growth) | Purpose; stages 0, 1, 5; Dependencies |
 | Silent-failure cases | Dependencies beyond imports |
 | Open questions and Codex recommendations | Open decisions |
