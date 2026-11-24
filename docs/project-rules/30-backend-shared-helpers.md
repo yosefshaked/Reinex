@@ -80,8 +80,8 @@ RLS protects requests made with a user's token. The API uses the service-role cl
   - `createSingleClient(env)`
   - `resolveBearerAuthorization(req)`
   - `supabase.auth.getUser(token)`
-  - `ensureMembership(...)`
-  - `withOrgScope(...)` or explicit `.eq('org_id', orgId)`
+  - authorisation: for a member's request `ensureMembership(client, orgId, userId)`, stop on `null`, then the role and instructor checks the action needs (other routes: see "Org isolation in the API" above)
+  - org scoping: `withOrgScope(client, table, orgId)` for every select, insert, update, upsert and delete on a tenant table; an RPC, storage or auth-admin call documents its own org enforcement ("Org isolation in the API")
   - `respond(context, ...)`
 - Always set `context.res` through `respond`.
 - JSON API responses sent through `respond` include default security headers (`nosniff`, referrer policy, permissions policy, HSTS). Keep endpoint-specific response headers additive unless a route has a concrete reason to override one.
