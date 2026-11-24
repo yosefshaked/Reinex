@@ -1,2 +1,3 @@
 path,title,status
 repository/directory-restructure.md,Repository directory restructure,active
+students/atomic-student-operations.md,Prevent partial student creation during imports and lesson scheduling,planned
