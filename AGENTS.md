@@ -3,7 +3,7 @@
 The binding entry point for every agent working in this repository. `CLAUDE.md` only loads this file.
 
 ## What Reinex is
-A multi-tenant management system for therapeutic riding farms and clinics: scheduling, students and clients, billing and HMO claims, staff payroll, forms and messaging. The UI is in Hebrew (right to left). The API is Azure Functions (Node, ESM) in `api/`; the frontend is React and Vite in `src/`; data is in one Supabase Postgres project.
+A multi-tenant management system for therapeutic riding farms and clinics: scheduling, students and clients, billing and HMO claims, staff payroll, forms and messaging. The UI is in Hebrew (right to left); every text the product shows a user is Hebrew (the full rule is in [`20`](docs/project-rules/20-frontend-shared-helpers.md) "The product speaks Hebrew"). The API is Azure Functions (Node, ESM) in `api/`; the frontend is React and Vite in `src/`; data is in one Supabase Postgres project.
 
 ## Hard limits
 - **`main` needs explicit owner approval.** Never push to `main` or merge into it without the owner's explicit approval for that push or merge. **Why:** a push to `main` runs the Azure Static Web Apps deployment workflow.

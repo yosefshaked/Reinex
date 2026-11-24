@@ -46,6 +46,11 @@ These files are an entry point, not a boundary: follow imports, callers (grep th
 - WhatsApp message text helpers in [`../../src/lib/whatsapp-message-templates.js`](../../src/lib/whatsapp-message-templates.js) for organization signatures and shared form / waiting-list / reminder wording.
 
 ## Known patterns / do not reinvent
+- **The product speaks Hebrew.** Every text the product writes and shows or reads out to a user is in Hebrew. This covers admin screens, public forms, error and confirmation messages, loading and empty states, placeholders, tooltips, and accessibility labels such as `aria-label`. **Why:** the users work in Hebrew, and a mixed or English message is a message they cannot act on.
+  - **Kept as they are:** what the user typed, trade names, and technical identifiers meant to be passed on by the user, such as a support code.
+  - **English is allowed** only for technical diagnostics meant explicitly for developers. The rest of the UI stays in Hebrew in developer mode too.
+  - **API codes stay stable English** (`snake_case`). Where a message reaches the user, a known code gets its Hebrew message, and an unknown code, an English server message or a response with no message gets a safe Hebrew default. The shared mapping is in [`../../src/lib/api-client.js`](../../src/lib/api-client.js) and [`../../src/lib/error-support.js`](../../src/lib/error-support.js). The original code stays on the error (`error.code`, `error.apiCode`) for consumers that branch on it.
+  - This is a product rule. It does not set the language of conversations with agents or of development documentation.
 - **Quoting UI names in Hebrew text.** When UI text or UI-writing guidance quotes the name of a button, field or status, use straight double quotes, for example: לחצו על "בטל שיעור". Do not use „…” or “…”. **Why:** one consistent quote character keeps names easy to search and avoids mixed marks in RTL text.
 - Default to [`../../src/lib/api-client.js`](../../src/lib/api-client.js) for authenticated requests.
 - Public auth-email initiation flows (for example password reset) should still use shared frontend API wrappers rather than direct Supabase email-sending methods, so delivery stays centralized on backend Brevo helpers.
