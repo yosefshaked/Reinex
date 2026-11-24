@@ -458,7 +458,8 @@ export async function ensureStudentForClientProfile(tenantClient, orgId, clientP
 
   // Link the profile's earlier rows to the new student, in this organisation only: a profile id
   // read in this org does not replace the org filter (docs/project-rules/30, "Org isolation").
-  // Partial failure and retry are handled by docs/plans/students/atomic-student-operations.md.
+  // Partial failure and retry are not handled here yet; they are tracked in issue #63
+  // (https://github.com/yosefshaked/Reinex/issues/63), planned in docs/plans/students/atomic-student-operations.md.
   await Promise.all([
     withOrgScope(tenantClient, 'form_submissions', scopedOrgId).update({ student_id: createdStudent.id }).eq('client_profile_id', clientProfileId).is('student_id', null),
     withOrgScope(tenantClient, 'otp_challenges', scopedOrgId).update({ student_id: createdStudent.id }).eq('client_profile_id', clientProfileId).is('student_id', null),
