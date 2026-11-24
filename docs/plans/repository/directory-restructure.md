@@ -5,7 +5,7 @@
 Read this block first when you continue this plan in a new conversation.
 
 - **Plan status:** the overall status of this plan is recorded only in [`docs/plans/index.csv`](../index.csv). Check it with `npm run lint:plans`.
-- **Current stage:** 3F. Stage 3 is closed (3.9 gap fixed); F1.1–F1.4 are written up as a proposal under F1. Next: joint review of the F1 proposal, then F1.5. Still open in stage 3: 3.8 deletions (owner) and the 3.4 hard limits (D9).
+- **Current stage:** 3F, F1 re-planned. The owner requires each user operation to commit whole or not at all; F1.6–F1.9 hold the boundary map, the atomic RPC proposal, the proof and the attempt measurement. Next: owner answers to F1-Q1 to F1-Q4, then F1.5. Approved but not yet executed: the 3.8 deletions, the D9 rules (`main`, straight quotes), and Q10 (`attribution.commit`).
 - **Execution branch:** `repository-reconstruction`, based on `origin/staging` `dce8f2e790e939b7f0805803d7d44e71a23346ba`. See [Planning base](#planning-base) and [Q1](#q1-execution-branch).
 - **Repository state:**
   - `test/` is now `tests/`; `agents-docs/` is now `docs/project-rules/`.
@@ -13,7 +13,7 @@ Read this block first when you continue this plan in a new conversation.
   - `docs/plans/index.csv` and `npm run lint:plans` exist.
   - The raw evidence is outside the repository, in `$env:TEMP\reinex-restructure\stage0\`, `stage1\`, `stage2\` and `stage3\`.
   - Nothing has been pushed; the owner decides on the push together with Claude.
-- **Last update:** 2026-11-24. `lint:doc-links` now checks angle-bracket and reference links and skips inline code; F1 findings and proposal recorded.
+- **Last update:** 2026-11-24. F1 revised to atomic operations (awaiting scope approval); owner decisions on 3.8, required checks, `main`, straight quotes and Q10 recorded.
 
 Each stage appends to the [Progress log](#progress-log), ticks its subtasks and records answers under [Open decisions](#open-decisions). Keep this block at five bullets. It is a pointer, not a history.
 
@@ -1024,19 +1024,19 @@ The aim is to fix what the change made stale. It does not require a full documen
 | Rule (memory file) | Status |
 |---|---|
 | Every behaviour change is covered by tests (`keep-tests-current`) | **Binding**, in the C7 wording (owner, 2026-11-24) |
-| Never push or merge to `main` without the owner | Needs an owner decision before it becomes policy. Not written in 3.4 until then. |
+| Never push or merge to `main` without the owner | **Binding** (owner, 2026-11-24): every push or merge to `main` needs explicit owner approval. To be written in the `AGENTS.md` hard limits (3.4 item 2). |
 | The preview environment uses the production DB (`pp-pr62-open`) | A claim about an environment. Written only with a verified configuration source (D9). |
-| Straight quotes in UI terms (`straight-quotes-feedback`) | Needs an owner decision before it becomes policy |
+| Straight quotes in UI terms (`straight-quotes-feedback`) | **Binding** (owner, 2026-11-24): in UI-writing guidance, a quoted Hebrew button, field or status name uses straight quotes, for example: לחצו על "בטל שיעור". To be written in `20-frontend-shared-helpers.md`. |
 | Migrations applied from CI on deploy (`db-migrations-decision`) | Not written as fact; the research (4R) and the decision (Q11) are deferred |
 | Conversation language (`narration-language-feedback`) | Personal preference; stays outside the repository |
 
 **Still open after 3.1:**
-- Q10;
-- the two memory rules above that need an owner decision;
+- ~~Q10~~ (decided 2026-11-24);
+- ~~the two memory rules above that need an owner decision~~ (both decided 2026-11-24);
 - a verified source for the preview and production claims;
 - the F1 fix design, after the callers are reviewed;
 - the F3 workflow, confirmed at its review;
-- making "Plan registry" and the F3 check required checks (Q9, F3);
+- making the F3 check a required check (F3). "Plan registry" and "Doc links" are decided (Q9, 2026-11-24);
 - the migration workflow decision (Q11), deferred with 4R by the owner on 2026-11-24;
 - Q2 and Q4–Q8.
 
@@ -1055,7 +1055,7 @@ The aim is to fix what the change made stale. It does not require a full documen
   Done in `c576742`. The current tree had 285 links inside the folder, not 262: 275 leave it and were rewritten, and 10 stay inside it and were left unchanged. All 393 links in the repository resolve to the same file as before. See the stage 3 Progress log entry.
 - [x] 3.4 Rewrite `AGENTS.md`, at most about 100 lines. Done in `83d4b1a` and `0d52f96`: 58 lines. Item 2 is left open; see below.
   1. what Reinex is;
-  2. hard limits: only limits the owner has decided, each claim about an environment backed by a verified configuration source (D9). **Open:** no limit has both an owner decision and a verified source yet, so `AGENTS.md` has no hard-limits section. It is added once D9's open items are decided;
+  2. hard limits: only limits the owner has decided, each claim about an environment backed by a verified configuration source (D9). **Open:** no limit had both an owner decision and a verified source when stage 3 ran, so `AGENTS.md` has no hard-limits section yet. *Update 2026-11-24:* the `main` rule is now decided (D9 table) and is written in the next approved round. The preview and production claim still needs a verified configuration source;
   3. always-on rules, each with a one-line why. These include the C1 and C2 lines, the binding test rule (C7) and "Keep documentation current" (D8);
   4. the reading rule (C6), written once;
   5. a routing table (task → `project-rules` → `product` → tests → start files), including "committing work → `docs/project-rules/commits.md`";
@@ -1064,7 +1064,11 @@ The aim is to fix what the change made stale. It does not require a full documen
 - [x] 3.5 Make `CLAUDE.md` exactly `@AGENTS.md`, plus Claude-only notes if any remain. Remove the validation table copy in `00-core-rules.md`, leaving a link (C5). Done in `83d4b1a`. No Claude-only notes remained.
 - [x] 3.6 Add a "Start here" list to each `project-rules` file (C6). Write the full C1 and C2 rules in `30-backend-shared-helpers.md`. Done in `83d4b1a`: each "Load these files first" list was renamed "Start here" with the C6 sentence. In `0d52f96`, the deleted `api/backup-status/index.js` was removed from the list in `90`.
 - [x] 3.7 Fix the four C3 hints, found by their text (`git grep -n "resolveTenantClient" -- eslint.config.js scripts docs/api-validation-tool.md`). Remove `AGENTS.md:9`. Done in `f74bdf4` (the hints) and `83d4b1a` (`AGENTS.md`). The output of `node scripts/validate-api-endpoints.js` is identical before and after; it exits 1 on both sides because of pre-existing findings.
-- [ ] 3.8 Delete the retired instruction sources after owner confirmation. **Open:** each file needs its own owner approval. The preparation is done; see [3.8 Retirement candidates](#38-retirement-candidates).
+- [ ] 3.8 Delete the retired instruction sources after owner confirmation. **Owner decisions (2026-11-24):**
+  - `.github/chatmodes/Azure_function_codegen_and_deployment.chatmode.md`: **deletion approved**. Not executed yet.
+  - `docs/AI-Coder-Gotchas.md`: **deletion approved** after checking that the valid guidance moved (done in `0eb74a2`) and after updating the references to it: `docs/README.md:71,94,140,156` and `ProjectDoc/TutTiud_Agents.md:574`. Not executed yet.
+  - `ProjectDoc/TutTiud_Agents.md`, `ProjectDoc/Conventions.md`: still left to the stage 7.1 triage.
+  - The preparation is in [3.8 Retirement candidates](#38-retirement-candidates).
 - [x] 3.9 Decide whether the link check becomes `scripts/check-doc-links.js`. **Decided at the stage 3 review (owner, 2026-11-24): yes.** Done in `fdebc18` and `2d71c48`.
   - **Command:** `npm run lint:doc-links`, outside `npm run build`.
   - **Scope:** every relative Markdown link in `AGENTS.md` and `docs/project-rules/**/*.md`, resolved from the file that contains it, to a file or folder in the repository.
@@ -1243,7 +1247,11 @@ Every line of the two old files, and where it is maintained at the end of stage 
 - [x] F1.2 Record the real user flow from each caller. Done; see below.
 - [x] F1.3 Plan the four updates through `withOrgScope`. Done; see below.
 - [x] F1.4 Examine partial failure and propose a solution. Done; see below. **Joint review before F1.5.**
-- [ ] F1.5 Implement the approved solution, test first.
+- [x] F1.6 Map the operation boundary in each path (owner request, 2026-11-24). See F1.6 below.
+- [x] F1.7 Propose one atomic transaction per operation. See F1.7; scope awaiting approval (F1-Q1).
+- [x] F1.8 Define the proof against local PostgreSQL. See F1.8.
+- [x] F1.9 Propose how a failed attempt and its retry are measured. See F1.9.
+- [ ] F1.5 Implement the approved solution, test first. **Blocked on F1-Q1 to F1-Q4.**
 
 ##### F1 findings and proposal (for joint review)
 
@@ -1270,7 +1278,7 @@ Every line of the two old files, and where it is maintained at the end of stage 
 
 **No second student is possible today, or after the change [V].** `src/lib/setup-sql.js` has `students_client_profile_id_uidx`, UNIQUE ON `students (org_id, client_profile_id)` WHERE `client_profile_id IS NOT NULL`. A concurrent second insert fails, and the function throws.
 
-**F1.3 and F1.4 Proposed solution:**
+**F1.3 and F1.4 Proposed solution** *(rejected by the owner on 2026-11-24; kept as history, see "F1 revised" below)*:
 1. **One link step, org-scoped.** Move the four updates into an internal `linkClientProfileRowsToStudent(client, orgId, clientProfileId, studentId)`. Each update is:
 
    `withOrgScope(client, table, orgId).update({ student_id }).eq('client_profile_id', clientProfileId).is('student_id', null)`
@@ -1306,15 +1314,209 @@ Every line of the two old files, and where it is maintained at the end of stage 
   - The success path of a user flow does not change, so no tester scenario is needed (C7 rule). This is reviewed again if the review changes the caller contract.
 - **Checks:** `npm run test:finance-calendar` (the test file is in it; the identity changes only by the added tests), `npm run lint:api`, `npm run lint:upsert-conflicts` and `npm run lint:doc-links`.
 
-**Acceptance (Node tests, plus a tester scenario if a user flow changes):**
-- **Correct linking:** after creation, the profile's rows in all four tables in this org carry the new `student_id`. Rows that were already linked are unchanged.
-- **Isolation between two orgs:** a row in another org with the same `client_profile_id` value stays unchanged, and each of the four queries carries `org_id`. The assertion style is that of `tests/org-scope-reads.test.js`.
-- **Partial failure and retry:**
-  - a failing link is reported, not silently ignored;
-  - a retry, including the early-exit path, ends with all four tables linked;
-  - no second student is created.
-- `npm run lint:api` exits 0, and `npm run lint:upsert-conflicts` passes.
-- The callers' existing tests pass. The new tests are run directly or added to the right entry point, as the C7 guidance says.
+##### F1 revised: each user operation commits whole or not at all (owner decision, 2026-11-24)
+
+**Decision.** The operation must succeed in full during the user's request. Leaving a new student, or some of the links, to be completed by a retry is **rejected**. The proposal above ("F1.3 and F1.4 Proposed solution") is kept only as history.
+
+**What follows from it.** The four links cannot be made atomic on their own. In every path, `ensureStudentForClientProfile` sits in the middle of a longer chain of writes. A later step can fail, or can return a 4xx after the student already exists. So the unit that must be atomic is the **whole user operation**, not the helper.
+
+###### F1.6 The operation boundary in each path [V at `a5c3819`]
+
+**Path A: one import record** (`api/import-commit-chunk/index.js`, a `customer` candidate with `customer_type = 'student'`). Writes in order:
+
+| # | Write | Code |
+|---|---|---|
+| A1 | `client_profiles`: fill-empty update of a linked profile (`link_to_existing`); or, through `createOrReuseClientProfile`, update an existing profile found by identity, or insert a new one | `commitCustomer` ~107-150; `client-profiles.js` ~139-175 |
+| A2 | `students` insert (when the profile has no student) | `ensureStudentForClientProfile` |
+| A3 | the four links (`form_submissions`, `otp_challenges`, `waiting_list_entries`, `lesson_participants`) | same |
+| A4 | `students` update with the note (when `note_text` is set) | `commitCustomer` ~176-187 |
+| A5 | `import_commit_ledger` rows, one per resource. Best effort: an error is ignored | `writeLedgerRow` |
+| A6 | `import_candidates.status = 'committed'` | chunk loop ~748 |
+| on throw | `import_candidates.status = 'failed'`. No reason is stored; the message goes only to `context.log` and the response's `failures[]`. No `error_events` row is written for a candidate failure. | `catch` ~754 |
+
+- **Existed before the request:** the candidate (`ready` or `failed`), possibly the profile (link or reuse), and that profile's earlier rows in the four tables.
+- **To undo if a later step fails:** A1–A5. The candidate must end as `failed`, with evidence (F1.9).
+- **Example of today's state after a failure.** A new person; A3 fails on `lesson_participants` with a network error.
+  - The new `client_profiles` row stays.
+  - The new `students` row stays.
+  - Three of four tables are linked, and there is no note and no ledger row.
+  - The candidate is `failed`.
+  - A retry reuses the profile (A1 becomes `update` or `link`) and the student (`link`). The ledger then never says the student was created.
+
+**Path B: create a template** (`POST` in `api/lesson-templates/index.js`), either from a waiting-list entry (`~858`) or for a client profile (`~894`). Writes in order:
+
+| # | Write or exit | Code |
+|---|---|---|
+| B1 | `ensureStudentForClientProfile`: `students` insert and the four links. The waiting-list entry's `student_id` is set here. | ~858 / ~894 |
+| exits after B1 | 409 `duplicate_template_conflict`; 409 `required_form_missing`; **200 `required_form_warnings`** (the UI asks for acknowledgement and sends the request again); 500s | ~932, ~958, ~1006, ~1013 |
+| B2 | `lesson_templates` insert (the DB trigger rejects an instructor overlap with 409) | ~1025 |
+| B3 | `lesson_template_participants` insert; on error, `rollbackCreatedTemplate` | ~1060 |
+| B4 | `client_profiles` reactivation (when the profile was inactive); on error, the template is rolled back | ~1098 |
+| B5 | `waiting_list_entries.status = 'matched'` plus metadata; on error, the template and the reactivation are rolled back by hand | ~1140-1185 |
+| B6 | tenant audit and `logAuditEvent` | ~1190-1240 |
+
+- **Existed before the request:** the waiting-list entry (`open`), the profile (active or inactive), its earlier rows, and the instructor's other templates.
+- **To undo:** B1–B5. B6 is written only after success.
+- **Example of today's state after a "failure".** The office creates a template from a waiting-list entry, and a required form gives a warning.
+  - The response is 200 with `required_form_warnings` and no template.
+  - A new student exists, and the entry carries its `student_id` while its status stays `open`.
+  - If the office then cancels, the student and the links stay.
+  - Each manual rollback (B3–B5) leaves the student in place.
+
+**Path C: assign a waiting-list entry to a free place** (`PATCH` in `api/lesson-templates/index.js`, with `waiting_list_entry_id`). Writes in order:
+
+| # | Write or exit | Code |
+|---|---|---|
+| C1 | `ensureStudentForClientProfile`, **only when** `waiting_list_entries.student_id` is empty | ~1434 |
+| C2 | `client_profiles` reactivation, when inactive. It runs **before** the later validations. | ~1465 |
+| exits after C1/C2 | 400 `invalid_service_id`, `invalid_service_duration`, `invalid_valid_until`, `reactivation_requires_new_valid_range`; 409 availability and conflict; 500s | ~1489-1621 |
+| C3 | `lesson_templates` update (the other fields in the same PATCH) | ~1634 |
+| C4 | `lesson_template_participants` insert. **On error, C3 is not reverted.** | ~1664 |
+| C5 | `waiting_list_entries.status = 'matched'`; on error, C4's rows are deleted, but C3 and C2 are not reverted | ~1683-1708 |
+| C6 | participant removals in the same PATCH | ~1714 |
+| C7 | `logAuditEvent` | ~1755 |
+
+- **The path where the entry already has `student_id`** skips C1, but C2–C6 are just as non-atomic. It is covered by the same solution.
+- **Existed before the request:** the entry (`open`, with or without `student_id`), the profile, the template and its participants.
+- **To undo:** C1–C6.
+- **Example of today's state after a failure.** The entry has no student, the profile is inactive, and availability returns 409.
+  - A new student exists.
+  - The entry carries its `student_id`.
+  - The profile is now active.
+  - The template is unchanged.
+
+  With a C5 failure instead, the template's own field changes (C3) stay, the participant is removed, and the entry stays `open`.
+
+###### F1.7 Proposed solution: one database transaction per user operation
+
+**The shape:**
+- **Validate first, write last.** Each endpoint keeps its business logic in JavaScript and runs every check that needs no lock *before* any write: conflicts, required forms, availability, service, dates and rates. It then builds the complete set of writes as data.
+- **One RPC per operation applies that set in one PostgreSQL transaction.** A PL/pgSQL function runs in a single transaction, so any exception rolls back every write it made. The repository already uses this pattern: `complete_lesson_instance_with_participants`, `cancel_lesson_instance_with_participants` and `cancel_selected_scheduled_participants_and_reconcile_instance`, called through `client.rpc(...)` from `api/_shared/lesson-instance-status.js`.
+
+**Three new functions in `src/lib/setup-sql.js`** (the snapshot only adds functions and grants, so no migration file is needed):
+
+| Function | Applies, in one transaction |
+|---|---|
+| `commit_import_customer_candidate(p_org_id, p_workspace_id, p_candidate_id, p_actor_user_id, p_plan jsonb)` | lock the candidate row (`FOR UPDATE`), check `status IN ('ready','failed')`; the profile write (A1); ensure the student (A2) and link (A3); the note (A4); the ledger rows (A5, no longer best effort); `status = 'committed'` (A6). Returns the ids and the ledger actions. |
+| `create_lesson_template_atomic(p_org_id, p_actor_user_id, p_plan jsonb)` | lock the waiting-list entry and the profile (`FOR UPDATE`), check the entry is still `open`; ensure the student and link (B1); insert the template (B2, the overlap trigger still runs) and its participants (B3); reactivate (B4); mark the entry matched (B5). |
+| `assign_waiting_list_entry_to_template(p_org_id, p_actor_user_id, p_template_id, p_plan jsonb)` | lock the template, the entry and the profile; recheck that the entry is `open` and the template's capacity under the lock; ensure the student only when the entry has none (C1); reactivate (C2); update the template (C3); add (C4) and remove (C6) participants; mark the entry matched (C5). |
+
+**Ensuring the student and the links** becomes one shared internal SQL function, `ensure_student_and_link_client_profile_rows(p_org_id, p_client_profile_id)`. The three functions call it. Every statement in it filters on `org_id = p_org_id` (C1 in SQL), and the links keep `client_profile_id = …` and `student_id IS NULL`. The JavaScript helper `ensureStudentForClientProfile` is removed, so there is one path, not two. Its other read callers, if any are found at implementation time, are listed for review first.
+
+**Organisation isolation and authorisation:**
+- The endpoints keep authorisation exactly as today: bearer token, `ensureMembership` with a stop on `null`, then the role checks. They pass only the authorised `orgId` and `userId` into the RPC.
+- Inside each function, every read, insert, update and delete filters by, or sets, `p_org_id`. A row of another org is "not found" and raises an error that rolls the transaction back.
+- **Grants:** `REVOKE ALL … FROM PUBLIC, anon, authenticated` and `GRANT EXECUTE … TO service_role` only. The functions are **not** `SECURITY DEFINER`.
+  - *Finding:* the three existing lesson RPCs revoke only `authenticated` and leave the default `PUBLIC` grant. That is outside F1 and is recorded as an open item for a separate fix.
+- `onConflict` contracts are unaffected (no new upserts). `lint:sql` covers the new functions.
+
+**What the caller and the user get:**
+- **Success:** the same response shapes as today.
+- **Any failure inside the function:** nothing is written. The endpoint returns its existing error (4xx for business codes raised in SQL, mapped from the exception code; a tracked 500 otherwise).
+- **For the import,** the candidate ends as `failed` in a separate write after the rollback, with the failure evidence (F1.9). The chunk still returns 200 with `failures[]`.
+
+**Two concurrent requests:**
+- Each function takes its row locks (`FOR UPDATE`) in a fixed order: candidate or entry, then profile, then template.
+- The second request waits, then sees the first request's committed state: the candidate is `committed`, or the entry is `matched`, or the student exists. It returns the matching outcome and writes nothing twice.
+- The unique index `students (org_id, client_profile_id)` remains the last guard against a second student.
+- **Not covered today:** the duplicate-student template check, which is JavaScript only; only the instructor overlap is a DB trigger. Under the template lock it becomes a recheck inside the function.
+
+**A retry after the server committed but the response was lost:**
+- **Import:** the candidate is `committed` in the same transaction, so a retry returns `already_committed` (existing behaviour). The ledger shows the real actions once.
+- **Waiting-list paths (B from an entry, and C):** the entry is `matched`, with `matched_template_id` and `matched_by_user_id` in its metadata. **Proposed:** when the same user repeats the same operation on an entry that is already matched to the same template, return the existing result with `already_applied: true` instead of 409 `waiting_list_entry_not_open`.
+- **A direct template create (B without an entry):** there is no natural key. A retry gets 409 `duplicate_template_conflict` with `conflicting_template_id`, so nothing is written twice, but the user sees a conflict instead of a success. A full fix needs a client request id (`Idempotency-Key`), which means a frontend change and somewhere to store the key. **This is outside F1 as defined and needs owner approval (F1-Q2).**
+
+**Scope, for approval (F1-Q1).** This is wider than F1 as defined (four writes in one helper). It touches:
+- `src/lib/setup-sql.js` (4 functions with their grants);
+- `api/import-commit-chunk/index.js` (`commitCustomer` builds a plan; the profile matching stays in JavaScript);
+- `api/lesson-templates/index.js` (POST and the capacity-assign PATCH are reordered to validate first; the manual rollbacks are removed);
+- `api/_shared/client-profiles.js` (the helper is removed or reduced to building the plan);
+- the docs `40`, `60` and `30` (the new atomic pattern, under D8).
+
+The rest of each endpoint's behaviour, and the frontend, do not change, except for `already_applied`. Two alternatives were considered and rejected:
+- **Compensating JavaScript rollbacks:** they cannot cover a crash or timeout between steps, and they repeat today's partial rollbacks.
+- **Moving only the four links into SQL:** it does not meet the decision, because the student would still survive a later failure.
+
+###### F1.8 Proof against the local PostgreSQL (the `automatic-tester` stack)
+
+**Where.** New integration tests in `tests/integration/f1-atomic-student.test.js`, run directly (`node --test …`).
+- They need the running local stack. They refuse to run unless `SUPABASE_URL` is `http://127.0.0.1:54321`, so production is never touched.
+- They read the local keys from the environment at run time and never print them.
+- Each test creates its own two orgs, a user with membership in org A, profiles and rows, and removes them at the end.
+
+**A deliberate failure after an early write.** The test installs a temporary trigger, named per test run, on one late table: for example on `waiting_list_entries` (`BEFORE UPDATE … WHEN NEW.status = 'matched'`) for paths B and C, and on `import_commit_ledger` for path A. The trigger raises an exception for that test's row only, so earlier statements in the function, such as the student insert and the links, have already run when the error comes. The test drops the trigger afterwards. This is run against the local stack only, through `psql` in the `supabase_db_automatic-tester` container.
+
+**Assertions, for each path:**
+1. **Failure leaves the business data as it was.** After the failed call, compare before and after snapshots of:
+   - the students for the profile;
+   - the four link tables;
+   - the profile's `is_active`, `onboarding_status` and `metadata`;
+   - the template and its participants;
+   - the waiting-list entry;
+   - the candidate's profile and ledger rows.
+
+   They must be identical. The only allowed change is the import candidate's `status = 'failed'`.
+2. **What existed before the request is kept:** a pre-existing profile, earlier rows already linked to another student, and the entry's `student_id` in the "already has a student" case of path C.
+3. **A successful attempt (trigger dropped) completes once:**
+   - exactly one student for the profile;
+   - all four tables linked in org A;
+   - one template or participant;
+   - the entry `matched`;
+   - the ledger with `create` for the student.
+
+   Calling again gives `already_committed`, or `already_applied`, with no new rows.
+4. **Isolation:** org B holds rows with the same `client_profile_id` value, and a waiting-list entry and a template of its own. A row-by-row snapshot before and after both attempts is identical.
+5. **Concurrency:** two simultaneous calls for the same candidate or entry end with one success, one "already" outcome, and one student.
+
+**What the user receives.** Each path is also driven through its HTTP handler: the function's default export, imported and called with a request built from a real local auth token, against the local DB.
+- **Path A** (`import-commit-chunk`): the failed attempt returns 200 with the candidate in `failures[]` and `outcome: 'failed'`. The retry returns `outcome: 'committed'`, and `GET` on the workspace shows the candidate as committed.
+- **Path C** (`lesson-templates` PATCH): the failed attempt returns a tracked 500 with an `error_id`. Under F2, that code points to a saved `error_events` row; F1 asserts the row exists. The retry returns 200 with the participant and the entry `matched`.
+- **Path B** is covered at the RPC level, plus one handler test for the `required_form_warnings` 200: no rows at all are written, because validation now runs first.
+
+**Also:**
+- the Node unit tests for the plan builders (pure functions) in `tests/`;
+- a tester scenario (`tests/automatic-tester/scripts/`) for the waiting-list-to-template flow, because the user-visible behaviour on warnings and failures changes (C7 rule);
+- `npm run lint:sql`, `lint:api`, `lint:upsert-conflicts`, `test:finance-calendar`, `lint:doc-links`.
+
+###### F1.9 Measuring a failed first attempt and a successful retry
+
+**What exists today [V]:**
+- **Template paths:** a 500 goes through `tracked500`, so an `error_events` row exists, with `route`, `org_id`, `actor_user_id`, `metadata` (jsonb), and a 90-day retention. Success writes a tenant audit and `logAuditEvent`.
+- **Import:**
+  - a candidate failure writes **no** `error_events` row; it goes to `context.log` and the response only;
+  - `import_candidates.status` is overwritten from `failed` to `committed`, and no reason or attempt count is kept;
+  - `import_commit_ledger` records only the actions that were saved (and stays so).
+- Nothing links one failed attempt to a later one.
+
+**The smallest addition proposed** (no new table, no new column):
+1. **Correlation metadata** on every failure and success record of the three operations:
+   - `operation`: `import.customer_commit`, `lesson_template.create`, or `lesson_template.assign_waiting_list`;
+   - `operation_key`: the candidate id; the waiting-list entry id, or the client profile id for a direct create; or the template id plus the entry id;
+   - `input_fingerprint`: a SHA-256 of the normalised input the operation acted on (the candidate's `candidate_data` and `decisions`, or the relevant request fields).
+2. **Failure evidence that survives the rollback.** After the RPC fails, the endpoint writes an `error_events` row outside the rolled-back transaction, through the shared tracking helpers, with that metadata and the failed step. For import candidates this is new: one row per failed candidate, with the chunk still returning 200.
+3. **Success evidence:**
+   - **Templates:** the existing audit rows get the same three fields.
+   - **Import:** none is needed. The ledger already carries `candidate_id`, and `candidate_data` at commit time gives the fingerprint again. The business ledger keeps describing only what was saved.
+4. **The measurement.** For each `operation_key`, count failure events followed by a success:
+   - same fingerprint: **a retry with the same input**;
+   - different fingerprint: **the user corrected the data**.
+
+   This is a read-only query for the system-admin error view or for an ad-hoc report.
+
+**Limits:**
+- `error_events` keep 90 days.
+- A failure before the client exists cannot be tracked (the C2 exemption).
+- A user who edits the data and is then rejected by validation (4xx, no RPC call) is not counted as a failure. Tracking 4xx is outside the C2 rule.
+- The success record depends on F2 being in place, so that the code the user sees is always saved.
+
+###### Open questions for the owner (F1)
+
+- **F1-Q1:** approve the widened scope in F1.7: three atomic RPCs, validate first, and the helper removed.
+- **F1-Q2:** idempotency for a direct template create. Accept a 409 with `conflicting_template_id` on a lost-response retry, or add an `Idempotency-Key` (frontend and storage).
+- **F1-Q3:** approve the `already_applied` replay response on the waiting-list paths.
+- **F1-Q4:** order against F2. F1's handler tests assert the `error_events` row, which F2 guarantees. The proposal is to do F2 before F1.5, or to accept that F1 asserts the row only when the insert succeeded.
+
+**Acceptance:** F1.8 replaces the earlier F1 acceptance list.
 
 #### F2 The support code must point to a saved record
 
@@ -1872,15 +2074,16 @@ These are the questions whose answers change the plan. Record each answer direct
 - **Current answer (2026-11-23, owner, after the stage 2 joint review):**
   - The registry is enforced in CI on every PR to `staging` or `main` and every push to them, through its own workflow, `.github/workflows/plan-registry.yml`. Its check is "Plan registry".
   - `npm run lint:plans` stays available locally and separate from `npm run build`.
-  - **Not decided yet:** making "Plan registry" a required check for merging in the branch rules. That needs separate owner approval.
+  - **Decided (owner, 2026-11-24):** "Plan registry" and "Doc links" become required checks for merging into `staging` and `main`, after their first successful run on GitHub Actions. That needs a push first. The branch settings are changed only then, and the change is reported.
 
 ### Q10 Co-authored-by trailer
 - **Known:** the owner decided on 2026-11-23 that this question is settled separately from the commit policy (stage 3.3). Claude currently appends a `Co-Authored-By:` trailer by default.
 - **Missing:** whether the policy requires, allows or forbids the trailer for agents.
 - **Who:** the owner.
-- **When:** open; not a precondition for 3.10 (owner, 2026-11-24).
+- **When:** decided on 2026-11-24, see below.
 - **Still open after 3.1 (2026-11-24).**
-- **Owner decision (2026-11-24):** the commit policy and 3.10 are completed without deciding this question. The existing attribution settings stay as they are. The policy says nothing about the trailer.
+- **Answer (2026-11-24, owner):** Claude's commits in this project carry no `Co-Authored-By` line. This is set through `attribution.commit` as an empty string in the shared project settings (`.claude/settings.json`). It applies to commits only. The owner knows this changes how GitHub shows Claude as a co-author. **Not applied yet:** the settings change is an implementation step for the next approved round. Until then, the commit policy keeps saying nothing about trailers.
+- **Earlier decision (2026-11-24):** the commit policy and 3.10 are completed without deciding this question. The existing attribution settings stay as they are. The policy says nothing about the trailer.
 
 ### Q11 Migration workflow
 - **Known [V at `0339f45`]:**
@@ -2365,6 +2568,30 @@ Append one entry per stage. Newest last.
   - **Waiting for GitHub Actions:** as before, "Doc links" runs only after a push.
   - **F1.1–F1.4** are done and written up in [F1 findings and proposal](#f1-findings-and-proposal-for-joint-review). No code was changed. **F1.5 waits for the joint review.**
   - **Open:** 3.8 deletions (owner, per file); 3.4 hard limits (D9); required checks in the branch rules (owner).
+
+- **2026-11-24, F1 re-planned as atomic operations, and owner decisions recorded** (plan only; no code, settings or deletions changed).
+  - **Product decision:** the operation must succeed in full during the user's request. The earlier F1 proposal (finish the links on a retry) was rejected and kept as history.
+  - **New in F1:**
+    - **F1.6, the operation boundary:** the boundary of each path, with the writes before and after the student step, what existed before, and an example of today's state after a failure. Read from the code at `a5c3819`.
+    - **Findings while mapping:**
+      - **Template create:** the student and links are written **before** the conflict and required-form checks. A `required_form_warnings` 200 or a 409 therefore leaves a new student behind.
+      - **Capacity assign:** it reactivates the profile before its validations, and it does not revert the template update when the participant insert fails.
+      - **Import:** a candidate failure leaves no `error_events` row and no stored reason.
+    - **F1.7, the proposed solution:** validate first, then one PL/pgSQL RPC per operation, which is one transaction. It follows the existing lesson-RPC pattern.
+      - Each function is org-scoped on every statement and granted to `service_role` only.
+      - Locks are taken in a fixed order for concurrent requests.
+      - On a lost-response retry: `already_committed` for the import, and a proposed `already_applied` for the waiting-list paths.
+      - The scope is wider than F1 as defined, so it awaits owner approval (F1-Q1).
+      - *Finding:* the existing lesson RPCs revoke `authenticated` only and keep the default `PUBLIC` grant. This is left for a separate fix.
+    - **F1.8, the proof against local PostgreSQL:** a deliberate failure is raised by a temporary trigger after the early writes. Snapshots before and after must be identical, earlier data must be kept, a success must apply exactly once, org B must stay unchanged, and concurrent calls must create one student. Handler-level tests show what the user receives.
+    - **F1.9, measuring attempts:** correlation metadata (`operation`, `operation_key`, `input_fingerprint`) on failure events, which are written after the rollback, and on success audit rows. No new table or column. The business import ledger is unchanged.
+  - **Open (F1):** F1-Q1 (scope), F1-Q2 (idempotency for a direct template create), F1-Q3 (`already_applied`), F1-Q4 (F2 before F1.5). **F1.5 is blocked until they are answered.**
+  - **Owner decisions recorded:**
+    - **3.8:** deleting the Copilot chat mode is approved. Deleting `docs/AI-Coder-Gotchas.md` is approved after its references in `docs/README.md` and `ProjectDoc/TutTiud_Agents.md:574` are updated. Neither is executed yet.
+    - **Q9 and "Doc links":** both become required checks for `staging` and `main` after their first successful run on GitHub Actions.
+    - **D9:** every push or merge to `main` needs explicit owner approval (binding); straight quotes for quoted Hebrew UI names in UI-writing guidance (binding). Both are to be written in the next approved round.
+    - **Q10:** `attribution.commit` is set to an empty string in the shared project settings, for commits only. Not applied yet.
+    - **4R and Q11:** still deferred.
 
 ---
 
