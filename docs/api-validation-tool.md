@@ -46,7 +46,7 @@ npm run validate:api
 7. **Deprecated Imports**
    - Detects usage of deprecated functions and modules
    - `checkOrgMembership` → Use `ensureMembership` instead
-   - `../_shared/supabase-tenant.js` → Use `resolveTenantClient` from `org-bff.js`
+   - `../_shared/supabase-tenant.js` → Use `createSingleClient(env)` from `org-bff.js` for the client and `withOrgScope(client, table, orgId)` for tenant tables (`resolveTenantClient` was removed)
    - `_shared/storage-drivers` → Use `../cross-platform/storage-drivers/index.js`
 
 8. **Incorrect ensureMembership Usage**

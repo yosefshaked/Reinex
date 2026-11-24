@@ -100,7 +100,7 @@ export default defineConfig([
           patterns: [
             {
               group: ['**/supabase-tenant.js'],
-              message: 'supabase-tenant.js is deprecated. Use resolveTenantClient from org-bff.js instead.',
+              message: 'supabase-tenant.js is deprecated. Use createSingleClient(env) from org-bff.js for the client and withOrgScope(client, table, orgId) for tenant tables.',
             },
             {
               group: ['**/_shared/storage-drivers*'],
@@ -140,7 +140,7 @@ export default defineConfig([
           patterns: [
             {
               group: ['**/supabase-tenant.js'],
-              message: 'supabase-tenant.js is deprecated. Use resolveTenantClient from org-bff.js instead.',
+              message: 'supabase-tenant.js is deprecated. Use createSingleClient(env) from org-bff.js for the client and withOrgScope(client, table, orgId) for tenant tables.',
             },
             {
               group: ['**/_shared/storage-drivers*'],

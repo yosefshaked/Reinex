@@ -24,7 +24,7 @@ const VALID_EXPORTS = {};
 const STORAGE_DRIVERS_PATH = '../cross-platform/storage-drivers/index.js';
 const DEPRECATED_IMPORTS = {
   'checkOrgMembership': 'Use ensureMembership instead',
-  '../_shared/supabase-tenant.js': 'Use resolveTenantClient from org-bff.js instead',
+  '../_shared/supabase-tenant.js': 'Use createSingleClient(env) from org-bff.js for the client and withOrgScope(client, table, orgId) for tenant tables',
   '_shared/storage-drivers': 'Use ../cross-platform/storage-drivers/index.js instead',
 };
 
