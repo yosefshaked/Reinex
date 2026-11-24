@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import { attachErrorTracking, respondTracked, respondTrackedError, trackErrorEvent } from './error-events.js';
+import { handleGet } from '../system-admin-error-events/index.js';
 
 /** Captures every operational log call by level. */
 function createLogs() {
@@ -205,5 +206,77 @@ describe('F2: a support code shown to the user points to a saved record', () => 
     const failure = logs.entries.find((entry) => entry.message === 'error-events: tracking failed');
     assert.equal(failure.meta.trackingError, 'tracking_not_attached');
     assert.equal(failure.meta.originalError.message, 'duplicate key value violates unique constraint');
+  });
+});
+
+/**
+ * A tiny in-memory error_events table that both the tracking insert and the support search use,
+ * so a test can follow a code from the response to the record support finds.
+ */
+function createErrorEventsStore() {
+  const rows = [];
+  function query() {
+    const filters = [];
+    const api = {
+      select() { return api; },
+      order() { return api; },
+      range() { return api; },
+      eq(column, value) { filters.push((row) => row[column] === value); return api; },
+      ilike() { return api; },
+      gte() { return api; },
+      lt() { return api; },
+      or(expression) {
+        const needle = /support_code\.ilike\.%([^%]*)%/.exec(expression)?.[1] || '';
+        filters.push((row) => String(row.support_code).includes(needle) || String(row.route).includes(needle));
+        return api;
+      },
+      then(resolve, reject) {
+        const data = rows.filter((row) => filters.every((filter) => filter(row)));
+        return Promise.resolve({ data, error: null, count: data.length }).then(resolve, reject);
+      },
+    };
+    return api;
+  }
+  return {
+    rows,
+    from(table) {
+      assert.equal(table, 'error_events');
+      return {
+        ...query(),
+        insert(payload) { rows.push({ id: `event-${rows.length + 1}`, ...payload }); return Promise.resolve({ error: null }); },
+        delete() { return { lt() { return Promise.resolve({ error: null }); } }; },
+      };
+    },
+  };
+}
+
+describe('F2: the code the user sees is found by the support search', () => {
+  it('a returned error_id finds exactly its saved event, by exact code and by free search', async () => {
+    const store = createErrorEventsStore();
+    const context = { log: createLogs().log };
+    // Another event first, so the search has something to tell apart.
+    await respondTrackedError({ log: createLogs().log }, { method: 'GET', url: '/api/other' }, store, { status: 500, message: 'other_failure' });
+    await respondTrackedError(context, { method: 'POST', url: '/api/lesson-templates' }, store, {
+      status: 500, message: 'failed_to_create_lesson_template', error: new Error('db down'),
+    });
+    const { error_id: errorId } = JSON.parse(context.res.body);
+
+    const exact = {};
+    await handleGet(exact, { query: { support_code: errorId } }, store);
+    const found = JSON.parse(exact.res.body).errors;
+    assert.equal(found.length, 1);
+    assert.equal(found[0].support_code, errorId);
+    assert.equal(found[0].public_message, 'failed_to_create_lesson_template');
+    assert.equal(found[0].route, 'lesson-templates');
+
+    const free = {};
+    await handleGet(free, { query: { q: errorId } }, store);
+    assert.deepEqual(JSON.parse(free.res.body).errors.map((row) => row.support_code), [errorId]);
+  });
+
+  it('when the insert failed there is no code to search for, and the store has no such event', async () => {
+    const context = { log: createLogs().log };
+    await respondTrackedError(context, { method: 'POST', url: '/api/x' }, createSupabaseMock({ failInsert: true }), { status: 500, message: 'x_failed' });
+    assert.equal(JSON.parse(context.res.body).error_id, undefined);
   });
 });
