@@ -4,7 +4,7 @@ import { toShekel } from '../../../lib/currency.js';
 import { formatDateDisplay, formatTimeDisplay } from './timeGrid.js';
 import { buildSchedulingOverrideReasonDetails } from './schedulingOverride.js';
 import { getParticipantDisplayName } from './participantDisplay.js';
-import { extractSupportCode, resolveApiErrorMessage } from '../../../lib/error-support.js';
+import { extractSupportCode, resolveApiErrorMessage, resolveUserErrorMessage } from '../../../lib/error-support.js';
 import { dateKeyFromCalendarDate } from '../../../lib/local-time.js';
 import { describeLessonStartClockChange } from '../../../lib/clock-change.js';
 
@@ -223,7 +223,9 @@ export function resolveMutationError(error) {
     const hasTranslatedMessage = typeof error?.message === 'string' && error.message && error.message !== supportMessage;
     return hasTranslatedMessage ? error.message : 'השיעור עודכן על ידי משתמש אחר. רעננו את התצוגה ונסו שוב.';
   }
-  return error?.message || 'הפעולה נכשלה.';
+  // Anything not explained above: a general Hebrew message with the public code or HTTP status in
+  // parentheses, or the connection message when the request got no response (docs/project-rules/20).
+  return resolveUserErrorMessage(error, 'הפעולה נכשלה.');
 }
 
 export const ATTENDANCE_MARK_UNCHANGED_REASON = 'אין שינוי לשמור';

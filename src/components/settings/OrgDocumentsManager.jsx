@@ -513,15 +513,16 @@ export default function OrgDocumentsManager({ session, orgId, membershipRole }) 
       } catch (error) {
         console.error('Duplicate check error:', error);
         
-        const errorMessage = error?.message || '';
-        if (error?.status === 401 || errorMessage.includes('401') || errorMessage.includes('Unauthorized')) {
+        if (error?.name === 'AbortError') {
+          // A cancelled check is not an error for the user.
+        } else if (error?.status === 401) {
           toast.error('שגיאת הרשאה. נא להתחבר מחדש');
-        } else if (error?.status === 403 || errorMessage.includes('403') || errorMessage.includes('admin_only')) {
+        } else if (error?.status === 403) {
           toast.error('רק בעלי/ות הרשאות מנהל יכולים/ות להעלות מסמכים ארגוניים');
-        } else if (error?.status >= 500 || errorMessage.includes('500')) {
-          toast.error('שגיאת שרת בעת בדיקת כפליות');
-        } else if (!errorMessage.includes('AbortError')) {
-          console.warn('Duplicate check error details:', error);
+        } else {
+          // Everything else, including a 500 with or without a saved support code and a network
+          // failure: the Hebrew message, the support code when saved, and the support details.
+          toast.apiError(error, { action: 'בדיקת כפילויות', fallback: 'בדיקת הכפילויות נכשלה.' });
         }
         return { has_duplicates: false, duplicates: [] };
       }

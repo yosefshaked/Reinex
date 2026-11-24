@@ -14,6 +14,7 @@ import { authenticatedFetch } from '@/lib/api-client.js';
 import { toast } from '@/lib/toast.jsx';
 import { AlertCircle, AlertTriangle, Check, Clock, Loader2, Lock, MoreHorizontal, Pencil, Search, ShieldCheck, UserPlus, Users, X } from 'lucide-react';
 import { Alert, AlertDescription } from '../../../components/ui/alert';
+import ErrorDetails from '../../../components/ui/ErrorDetails.jsx';
 import { Textarea } from '../../../components/ui/textarea';
 import { Checkbox } from '../../../components/ui/checkbox';
 import { LockedCorrectionPanel } from './LockedCorrectionPanel';
@@ -601,7 +602,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
         customOverrideReason,
       });
       if (!handled) {
-        setError(resolveMutationError(err));
+        setError(err);
       }
     } finally {
       setIsSaving(false);
@@ -619,7 +620,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
     try {
       body = buildEditUpdateBody();
     } catch (err) {
-      setError(resolveMutationError(err));
+      setError(err);
       return;
     }
 
@@ -663,7 +664,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
 
   async function handleMarkAttendance(participantId, status, notes, options = {}) {
     if (!org?.id) {
-      setError('Organization not found');
+      setError('הארגון לא נמצא. רעננו את הדף ונסו שוב.');
       return false;
     }
     setIsMarkingAttendance(true);
@@ -817,7 +818,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
 
   async function handleCancel(status) {
     if (!org?.id) {
-      setError('Organization not found');
+      setError('הארגון לא נמצא. רעננו את הדף ונסו שוב.');
       return;
     }
     setIsSaving(true);
@@ -842,7 +843,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
         requestedStatus: status,
       });
       if (!handled) {
-        setError(resolveMutationError(err));
+        setError(err);
       }
     } finally {
       setIsSaving(false);
@@ -905,7 +906,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
 
   async function handleReportStatus(status) {
     if (!org?.id) {
-      setError('Organization not found');
+      setError('הארגון לא נמצא. רעננו את הדף ונסו שוב.');
       return;
     }
     setIsSaving(true);
@@ -936,7 +937,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
         requestedStatus: status,
       });
       if (!handled) {
-        setError(resolveMutationError(err));
+        setError(err);
       }
     } finally {
       setIsSaving(false);
@@ -1061,7 +1062,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
       onUpdate?.();
       toast.success(studentName ? `${studentName} נוסף/ה לשיעור.` : 'המשתתף/ת נוסף/ה לשיעור.');
     } catch (err) {
-      setError(resolveMutationError(err));
+      setError(err);
     } finally {
       setAddingParticipantId(null);
     }
@@ -1141,7 +1142,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
       onUpdate?.();
     } catch (err) {
       console.error('Error setting reminder confirmation:', err);
-      setError(resolveMutationError(err));
+      setError(err);
     } finally {
       setReminderUpdating(false);
     }
@@ -1581,7 +1582,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
             onClick={() => applyConflictOverride({
               onUnhandledError: (err) => {
                 console.error('Error overriding conflict:', err);
-                setError(resolveMutationError(err));
+                setError(err);
               },
             })}
             disabled={isResolvingConflict}
@@ -2061,7 +2062,9 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
             {error ? (
               <Alert variant="destructive">
                 <AlertCircle className="h-4 w-4" />
-                <AlertDescription>{error}</AlertDescription>
+                {/* The error object is kept until here, so its status and codes reach the details. */}
+                <AlertDescription>{typeof error === 'string' ? error : resolveMutationError(error)}</AlertDescription>
+                {typeof error === 'object' ? <ErrorDetails error={error} action="עדכון השיעור" fallback="הפעולה נכשלה." /> : null}
               </Alert>
             ) : null}
             {conflictAlert}

@@ -558,9 +558,12 @@ describe('lessonDialogModel: resolveMutationError', () => {
     assert.equal(resolveMutationError(error), 'Something broke (ERR-20260101-ZZ99AA)');
   });
 
-  it('falls back to error.message, then to a generic Hebrew failure message', () => {
-    assert.equal(resolveMutationError(apiError({ message: 'some_unmapped_code' }, 400)), 'some_unmapped_code');
-    assert.equal(resolveMutationError(new Error('Network down')), 'Network down');
+  it('an unexplained error shows a general Hebrew message with its public code, status or nothing', () => {
+    // docs/project-rules/20 "Showing an error": never the raw code or English text as the only text.
+    assert.equal(resolveMutationError(apiError({ message: 'some_unmapped_code' }, 422)), 'הפעולה נכשלה. (some_unmapped_code)');
+    assert.equal(resolveMutationError(apiError({}, 500)), 'הפעולה נכשלה. (HTTP 500)');
+    assert.equal(resolveMutationError(new TypeError('Failed to fetch')), 'לא הצלחנו להתחבר לשרת. בדקו את החיבור לאינטרנט ונסו שוב.');
+    assert.equal(resolveMutationError(new Error('Network down')), 'הפעולה נכשלה.');
     assert.equal(resolveMutationError(new Error('')), 'הפעולה נכשלה.');
     assert.equal(resolveMutationError(null), 'הפעולה נכשלה.');
     assert.equal(resolveMutationError(undefined), 'הפעולה נכשלה.');
@@ -580,7 +583,7 @@ describe('lessonDialogModel: resolveMutationError', () => {
     assert.match(error.message, /[֐-׿]/);
     assert.equal(resolveMutationError(error), 'לא ניתן היה לטעון את פרטי השירות כרגע. נסו שוב.');
     const unmapped = createSupportAwareApiError({ message: 'failed_to_do_something_new' }, 500);
-    assert.match(resolveMutationError(unmapped), /^[^A-Za-z]*$/);
+    assert.equal(resolveMutationError(unmapped), 'הפעולה נכשלה. (failed_to_do_something_new)');
   });
 });
 

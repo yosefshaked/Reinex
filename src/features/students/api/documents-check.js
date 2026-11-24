@@ -6,7 +6,7 @@
  * - Instructor documents
  * - Organization documents
  */
-import { createSupportAwareApiError, extractSupportCode } from '@/lib/error-support.js';
+import { createNetworkError, createSupportAwareApiError } from '@/lib/error-support.js';
 
 /**
  * Check for duplicate files before upload
@@ -40,8 +40,9 @@ export async function checkDocumentDuplicate({
     formData.append('org_id', orgId);
   }
 
+  let response;
   try {
-    const response = await fetch(
+    response = await fetch(
       `/api/documents-check?entity_type=${entityType}&entity_id=${entityId}`,
       {
         method: 'POST',
@@ -55,21 +56,20 @@ export async function checkDocumentDuplicate({
         signal,
       }
     );
-
-    const data = await response.json();
-
-    if (!response.ok) {
-      throw createSupportAwareApiError(data, response.status);
-    }
-
-    return data;
   } catch (error) {
-    if (error.name === 'AbortError') {
-      throw error; // Let caller handle abort
+    if (error?.name === 'AbortError') {
+      throw error; // The caller cancelled; it handles this itself.
     }
-    if (extractSupportCode(error)) {
-      throw error;
-    }
-    throw new Error(`Failed to check duplicates: ${error.message}`);
+    throw createNetworkError(error); // No server response: no status and no codes to keep.
   }
+
+  // A non-JSON body (for example a gateway error page) still keeps the HTTP status.
+  const data = await response.json().catch(() => null);
+
+  if (!response.ok) {
+    // Keep the status, the public code and any saved support code for the screen that shows it.
+    throw createSupportAwareApiError(data || {}, response.status);
+  }
+
+  return data;
 }
