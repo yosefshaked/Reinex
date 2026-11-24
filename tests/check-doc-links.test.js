@@ -103,6 +103,59 @@ describe('doc links: broken instructions fail', () => {
   });
 });
 
+describe('doc links: angle-bracket targets, reference links and inline code', () => {
+  it('accepts an existing target written in angle brackets, with a space in its name', () => {
+    const result = checkDocLinks(repo({ ...BASE, 'docs/project-rules/my guide.md': '# g\n', 'AGENTS.md': '[guide](<docs/project-rules/my guide.md>)\n' }));
+    assert.deepEqual(result.errors, []);
+    assert.equal(result.links, 1 + 2 + 2);
+  });
+
+  it('reports a missing target written in angle brackets', () => {
+    const { errors } = checkDocLinks(repo({ ...BASE, 'AGENTS.md': '[guide](<missing guide.md>)\n' }));
+    assert.deepEqual(errors, ['AGENTS.md:1: link "missing guide.md" -> missing target missing guide.md']);
+  });
+
+  it('accepts a reference link whose definition points to an existing file', () => {
+    const result = checkDocLinks(repo({
+      ...BASE,
+      'docs/project-rules/40-x.md': 'See [the core rules][core] and [core].\n\n[core]: 00-core-rules.md "Core"\n',
+    }));
+    assert.deepEqual(result.errors, []);
+  });
+
+  it('reports a reference definition with a missing target, on the definition line', () => {
+    const { errors } = checkDocLinks(repo({
+      ...BASE,
+      'docs/project-rules/40-x.md': 'See [guide][ref].\n\n[ref]: missing.md\n',
+    }));
+    assert.deepEqual(errors, ['docs/project-rules/40-x.md:3: link "missing.md" -> missing target docs/project-rules/missing.md']);
+  });
+
+  it('reports a reference definition in angle brackets with a missing target', () => {
+    const { errors } = checkDocLinks(repo({ ...BASE, 'AGENTS.md': '[guide][g]\n\n  [g]: <docs/no such.md>\n' }));
+    assert.deepEqual(errors, ['AGENTS.md:3: link "docs/no such.md" -> missing target docs/no such.md']);
+  });
+
+  it('ignores a link example inside inline code, including double-backtick spans', () => {
+    const result = checkDocLinks(repo({
+      ...BASE,
+      'docs/project-rules/40-x.md': 'Write `[x](missing.md)` or ``a ` [y](gone.md)`` in prose.\n',
+    }));
+    assert.deepEqual(result.errors, []);
+    assert.equal(result.links, 5);
+  });
+
+  it('still checks a link whose text is inline code', () => {
+    const { errors } = checkDocLinks(repo({ ...BASE, 'AGENTS.md': '[`99-missing.md`](docs/project-rules/99-missing.md)\n' }));
+    assert.equal(errors.length, 1);
+  });
+
+  it('skips footnote definitions', () => {
+    const result = checkDocLinks(repo({ ...BASE, 'docs/project-rules/40-x.md': 'Text[^1].\n\n[^1]: a note, not a link\n' }));
+    assert.deepEqual(result.errors, []);
+  });
+});
+
 describe('doc links: link extraction', () => {
   it('keeps the line number and drops anchors and queries from the target', () => {
     assert.deepEqual(extractLinks('x\n[a](b.md#c) [d](e/f.md?g=1)'), [

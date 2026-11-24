@@ -6,10 +6,15 @@
  * under docs/project-rules/. Each link is resolved from the folder of the file that contains it
  * and must point to an existing file or folder inside the repository.
  *
- * - Checked: `[text](target)` links whose target is a relative path (an optional `#anchor` or
- *   `?query` is ignored; anchors themselves are not checked).
+ * - Checked, when the target is a relative path (an optional `#anchor` or `?query` is ignored;
+ *   anchors themselves are not checked):
+ *   - inline links and images: `[text](target)` or `[text](<target with spaces>)`, with an
+ *     optional title;
+ *   - reference definitions: `[label]: target` or `[label]: <target>`. A reference link
+ *     `[text][label]` or `[label]` goes to its definition, so checking every definition covers it.
  * - Skipped: links with a scheme (`https:`, `mailto:`), anchor-only links (`#…`), absolute
- *   paths (`/…`), and anything inside a fenced code block.
+ *   paths (`/…`), footnotes (`[^1]: …`), anything inside a fenced code block, and examples
+ *   inside inline code (a code span such as `[x](y)`).
  *
  * Usage: node scripts/check-doc-links.js [--root <repository root>]
  * Exits 1 on any missing target and names the source file, line and target.
@@ -22,7 +27,19 @@ import { fileURLToPath } from 'node:url';
 export const ENTRY_FILE = 'AGENTS.md';
 export const RULES_DIR = path.join('docs', 'project-rules');
 
-const LINK = /\[(?:[^[\]]|\[[^\]]*\])*\]\(\s*<?([^)\s>]+)>?(?:\s+"[^"]*")?\s*\)/g;
+const TITLE = String.raw`(?:\s+(?:"[^"]*"|'[^']*'|\([^)]*\)))?`;
+// [text](target) or [text](<target>). Link text may hold escapes and one level of brackets; a bare
+// target may hold balanced parentheses, as in file(1).md.
+const INLINE_LINK = new RegExp(
+  String.raw`\[(?:[^[\]\\]|\\.|\[[^\]]*\])*\]\(\s*(?:<([^<>\n]*)>|((?:[^\s()<>]|\([^\s()<>]*\))+))`
+    + TITLE
+    + String.raw`\s*\)`,
+  'g',
+);
+// [label]: target or [label]: <target>, indented by at most three spaces.
+const DEFINITION = new RegExp(String.raw`^ {0,3}\[([^\]]+)\]:\s*(?:<([^<>\n]*)>|(\S+))` + TITLE + String.raw`\s*$`);
+// A code span: a run of backticks, its content, and a closing run of the same length.
+const CODE_SPAN = /(`+)(?:(?!\1)[\s\S])+?\1(?!`)/g;
 const FENCE = /^\s*(```|~~~)/;
 const SKIP = /^([a-z][a-z0-9+.-]*:|#|\/)/i;
 
@@ -41,6 +58,17 @@ function listMarkdown(dir) {
   return found;
 }
 
+function toLink(line, raw) {
+  if (raw === undefined || raw === '' || SKIP.test(raw)) return null;
+  let target = raw.split('#')[0].split('?')[0];
+  try {
+    target = decodeURI(target);
+  } catch {
+    // Keep the raw text; a malformed escape is reported as a missing target.
+  }
+  return target ? { line, raw, target } : null;
+}
+
 /** Returns the relative link targets of one Markdown text: [{ line, raw, target }]. */
 export function extractLinks(text) {
   const links = [];
@@ -51,16 +79,21 @@ export function extractLinks(text) {
       return;
     }
     if (inFence) return;
-    for (const match of lineText.matchAll(LINK)) {
-      const raw = match[1];
-      if (SKIP.test(raw)) continue;
-      let target = raw.split('#')[0].split('?')[0];
-      try {
-        target = decodeURI(target);
-      } catch {
-        // Keep the raw text; a malformed escape is reported as a missing target.
+    const line = index + 1;
+    const definition = DEFINITION.exec(lineText);
+    if (definition) {
+      if (!definition[1].startsWith('^')) {
+        const link = toLink(line, definition[2] ?? definition[3]);
+        if (link) links.push(link);
       }
-      if (target) links.push({ line: index + 1, raw, target });
+      return;
+    }
+    // Blank out each code span (same length, no brackets left), so an example inside inline code
+    // is not a link, while link text that contains code, as in [`a.js`](a.js), still is.
+    const scanned = lineText.replace(CODE_SPAN, (span) => 'x'.repeat(span.length));
+    for (const match of scanned.matchAll(INLINE_LINK)) {
+      const link = toLink(line, match[1] ?? match[2]);
+      if (link) links.push(link);
     }
   });
   return links;
