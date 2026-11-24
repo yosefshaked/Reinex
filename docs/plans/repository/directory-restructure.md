@@ -5,7 +5,7 @@
 Read this block first when you continue this plan in a new conversation.
 
 - **Plan status:** the overall status of this plan is recorded only in [`docs/plans/index.csv`](../index.csv). Check it with `npm run lint:plans`.
-- **Current stage:** 3 is done, including the review fixes and 3.9 ("Doc links"). Still open: 3.8 (each deletion needs owner approval) and the hard-limits item in 3.4 (it waits for D9). Next: joint review of the fixes, then stage 3F (F1). Do not start 3F before that review.
+- **Current stage:** 3F. Stage 3 is closed (3.9 gap fixed); F1.1–F1.4 are written up as a proposal under F1. Next: joint review of the F1 proposal, then F1.5. Still open in stage 3: 3.8 deletions (owner) and the 3.4 hard limits (D9).
 - **Execution branch:** `repository-reconstruction`, based on `origin/staging` `dce8f2e790e939b7f0805803d7d44e71a23346ba`. See [Planning base](#planning-base) and [Q1](#q1-execution-branch).
 - **Repository state:**
   - `test/` is now `tests/`; `agents-docs/` is now `docs/project-rules/`.
@@ -13,7 +13,7 @@ Read this block first when you continue this plan in a new conversation.
   - `docs/plans/index.csv` and `npm run lint:plans` exist.
   - The raw evidence is outside the repository, in `$env:TEMP\reinex-restructure\stage0\`, `stage1\`, `stage2\` and `stage3\`.
   - Nothing has been pushed; the owner decides on the push together with Claude.
-- **Last update:** 2026-11-24. Stage 3 review fixes: the endpoint flow follows C1, the `resolveTenantClient` name is gone from active guidance, the finance reading times are restored, and `lint:doc-links` with its "Doc links" CI were added.
+- **Last update:** 2026-11-24. `lint:doc-links` now checks angle-bracket and reference links and skips inline code; F1 findings and proposal recorded.
 
 Each stage appends to the [Progress log](#progress-log), ticks its subtasks and records answers under [Open decisions](#open-decisions). Keep this block at five bullets. It is a pointer, not a history.
 
@@ -1239,14 +1239,72 @@ Every line of the two old files, and where it is maintained at the end of stage 
   5. re-read the student.
 
 **Subtasks:**
-- [ ] F1.1 Record the existing explanation and its sources (above) in the Progress log.
-- [ ] F1.2 Record the real user flow from each caller: what the user did, what is created, and which earlier rows get linked.
-- [ ] F1.3 Plan the four updates through `withOrgScope(tenantClient, table, scopedOrgId).update(...)`, keeping the filters on `client_profile_id` and `student_id IS NULL`.
-- [ ] F1.4 Examine partial failure.
-  - **Today:** one failed link leaves rows unlinked, and the function still returns `created: true`.
-  - **On a retry:** the early exit for an existing student skips the link step, so those rows stay unlinked.
-  - **Review each caller's handling.** Then propose a solution for joint review before implementing it, without deciding on a new transaction mechanism in advance. One option to evaluate: the link step also runs on the early-exit path, which is safe to repeat because of `student_id IS NULL`, and it reports each error.
+- [x] F1.1 Record the existing explanation and its sources. Done 2026-11-24 against `e553f38`; see the F1 proposal below.
+- [x] F1.2 Record the real user flow from each caller. Done; see below.
+- [x] F1.3 Plan the four updates through `withOrgScope`. Done; see below.
+- [x] F1.4 Examine partial failure and propose a solution. Done; see below. **Joint review before F1.5.**
 - [ ] F1.5 Implement the approved solution, test first.
+
+##### F1 findings and proposal (for joint review)
+
+**F1.1 The existing explanation [V at `e553f38`]:**
+- The comment above the four updates in `api/_shared/client-profiles.js` reads: "Keyed by a profile just read in this organisation, so these touch only its own rows." It was added in #55 (`dce8f2e`).
+- **The evidence for it:** the profile is read with `withOrgScope(…, 'client_profiles', scopedOrgId)` earlier in the same function.
+- **Why that is not enough:** the comment assumes that no row of another organisation carries the same `client_profile_id`. The four tables have their own `org_id` column [V], and nothing in the update enforces it. Under C1, an ID read in the org does not replace the org filter.
+- **Unknown:** any motive beyond that evidence. No commit message or document explains it.
+
+**F1.2 The real flow [V]:**
+
+| Caller | What the user did | What `ensureStudentForClientProfile` does there | What happens on failure today |
+|---|---|---|---|
+| `api/import-commit-chunk/index.js:159` (`commitCustomer`) | Commits an import whose customer type is "student", after `createOrReuseClientProfile`. A reused profile can already have form submissions, OTP challenges, waiting-list entries or lesson participants. | Creates the student, or returns the existing one, and links those earlier rows. | A returned `error` is thrown. Any throw marks the candidate `failed`, and the user can retry only the failed IDs (the header comment, and the `catch` near line 754). On a retry the import ledger records `link` instead of `create` for the student. |
+| `api/lesson-templates/index.js:858` | Creates a fixed lesson template from a waiting-list entry, when the entry has no student yet. | Turns the entry's client profile into a student and links its rows, including that waiting-list entry. Then the entry is marked `matched` (near line 1140); `student_id` is not written there. | Returns `tracked500('failed_to_activate_student_from_waiting_list')`; no template is created. |
+| `api/lesson-templates/index.js:894` | Creates a template for a client profile directly, without a waiting-list entry. | As above. | Returns `tracked500('failed_to_create_lesson_template')`. |
+| `api/lesson-templates/index.js:1434` | Assigns a waiting-list entry to a template's free place (capacity assign). | Used only when `waitingEntry.student_id` is empty. | Returns `tracked500('failed_to_activate_student_from_waiting_list')`. |
+
+**Today's behaviour in a partial failure.** The four updates sit in a `Promise.all`, and no result's `error` is read.
+- A Supabase error comes back as `{ error }`, not as a rejection. A failed update is therefore silent: the student exists, some rows stay unlinked, and the caller receives `created: true` with no sign of a problem.
+- A network failure rejects instead. The function then throws after the student was created, and the caller fails as shown in the table.
+- **On any retry,** the early exit for an existing student (it returns before the link step) means rows that were left unlinked stay unlinked.
+- **The practical effect:** a `lesson_participants` row without `student_id` is missing from everything keyed by student. A waiting-list entry without `student_id` sends the capacity-assign path back through `ensureStudentForClientProfile`, which returns the existing student but still links nothing.
+
+**No second student is possible today, or after the change [V].** `src/lib/setup-sql.js` has `students_client_profile_id_uidx`, UNIQUE ON `students (org_id, client_profile_id)` WHERE `client_profile_id IS NOT NULL`. A concurrent second insert fails, and the function throws.
+
+**F1.3 and F1.4 Proposed solution:**
+1. **One link step, org-scoped.** Move the four updates into an internal `linkClientProfileRowsToStudent(client, orgId, clientProfileId, studentId)`. Each update is:
+
+   `withOrgScope(client, table, orgId).update({ student_id }).eq('client_profile_id', clientProfileId).is('student_id', null)`
+
+   Rows of another org, and rows that already have a student, are never touched.
+2. **Read every result.** Use `Promise.allSettled`, so all four are attempted. Collect a table as failed when its Supabase result has an `error` or its promise rejected.
+3. **Run the link step on both paths:**
+   - after creating the student;
+   - on the early exit for an existing student.
+
+   It is safe to repeat because of `student_id IS NULL`. When there is nothing left to link it is a no-op, at the cost of four small updates per call.
+4. **What the caller receives in a partial failure:** the function throws `Error('client_profile_link_failed')`, with `failedTables` and the first cause attached.
+   - The student stays created. There is no rollback and no new transaction mechanism.
+   - Every caller already treats a throw as failure: the import marks the candidate `failed` and allows a retry, and the template paths return a tracked 500 without creating the template.
+   - A returned `error` stays reserved for the business cases it already covers (`invalid_client_profile_id`, `client_profile_not_found`).
+5. **On a retry after the student was created:** the early exit finds the student, and the link step links the rows that are still unlinked. The function returns the same student with `created: false`. The unique index guarantees there is no second student.
+   - **Visible consequence:** the import ledger records `link`, and the template response reports `student_created: false`, for a student that the failed attempt created. Today's behaviour is the same after any throw.
+   - **Owner choice:** accept this, or add a follow-up that reports the original creation. The default proposal accepts it.
+6. **Also:** replace the comment with one that states the C1 reason, and keep the `scopedOrgId` UUID check.
+
+**How the proof works (Node tests, extending the fake client in `tests/org-scope-reads.test.js`):**
+- **The fake client:** it records each write's table, payload and filters, and can be told to return `{ error }` or reject for one table.
+- **Correct linking in the authorised org:** two orgs hold rows with the same `client_profile_id` value. After the call:
+  - only org A's rows with `student_id IS NULL` carry the new id;
+  - org B's rows and org A's already-linked rows are unchanged;
+  - each of the four recorded updates carries `org_id = ORG_A`.
+- **Partial failure:** `lesson_participants` returns `{ error }`. The call rejects with `client_profile_link_failed` and `failedTables: ['lesson_participants']`. The other three tables are linked, and exactly one student exists.
+- **Retry:** a second call with the failure removed returns the same student id with `created: false`, links `lesson_participants`, and still leaves exactly one student in org A.
+- **Existing student with leftovers:** the early-exit path links unlinked rows and creates nothing.
+- **Network-style rejection:** a rejected promise for one table is reported the same way as an `{ error }` result.
+- **Callers:**
+  - The existing `org-scope-reads` case (org B's profile from org A gives `client_profile_not_found` and no writes) keeps passing.
+  - The success path of a user flow does not change, so no tester scenario is needed (C7 rule). This is reviewed again if the review changes the caller contract.
+- **Checks:** `npm run test:finance-calendar` (the test file is in it; the identity changes only by the added tests), `npm run lint:api`, `npm run lint:upsert-conflicts` and `npm run lint:doc-links`.
 
 **Acceptance (Node tests, plus a tester scenario if a user flow changes):**
 - **Correct linking:** after creation, the profile's rows in all four tables in this org carry the new `student_id`. Rows that were already linked are unchanged.
@@ -2289,6 +2347,24 @@ Append one entry per stage. Newest last.
     - **3.4 hard limits:** they wait for D9.
   - **Not done:** 3F, no push.
   - **Joint review pending** before 3F.
+
+- **2026-11-24, 3.9 gap closed, and F1 planned** (owner request after the review of the fixes).
+  - **`lint:doc-links` gap, reproduced by the owner:**
+    - `[guide](<missing guide.md>)` passed, because the pattern did not accept a space inside `<…>`.
+    - `[guide][ref]` with `[ref]: missing.md` on its own line passed, because reference definitions were not read.
+    - A link example inside inline code was counted as a real link.
+  - **Fix in `e553f38`** (`fix(docs): check angle-bracket and reference links, skip inline code`). The parser was changed in place, keeping Node built-ins only:
+    - inline links accept `<target>` with spaces, an optional title, and balanced parentheses in a bare target;
+    - every reference definition (`[label]: target` or `<target>`, up to 3 spaces of indent) is checked on its own line, which covers `[text][label]` and `[label]`;
+    - footnotes (`[^1]: …`) are skipped;
+    - code spans of any backtick length are blanked to the same length before matching. An example inside inline code is therefore ignored, while link text that is code (`` [`a.js`](a.js) ``) is still checked.
+  - **Tests:** 20 of 20 pass (12 before, 8 new): an existing and a missing angle-bracket target; an existing and a missing reference definition, the second also in angle brackets; inline-code examples with single and double backticks; code as link text; footnotes.
+  - **Real instructions:** `npm run lint:doc-links` exits 0 with 319 links in 14 files, the same count as before.
+    - **Why the count did not change:** the old and new versions were compared file by file (`$env:TEMP\reinex-restructure\stage3\diff-extract.mjs`) and found the same 319 links, with no link only in the old or only in the new version. The instructions contain no angle-bracket target, no reference definition and no link example inside inline code.
+  - `npx eslint` on the script and the test: 0 problems.
+  - **Waiting for GitHub Actions:** as before, "Doc links" runs only after a push.
+  - **F1.1–F1.4** are done and written up in [F1 findings and proposal](#f1-findings-and-proposal-for-joint-review). No code was changed. **F1.5 waits for the joint review.**
+  - **Open:** 3.8 deletions (owner, per file); 3.4 hard limits (D9); required checks in the branch rules (owner).
 
 ---
 
