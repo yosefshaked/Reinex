@@ -5,7 +5,7 @@
 Read this block first when you continue this plan in a new conversation.
 
 - **Plan status:** the overall status of this plan is recorded only in [`docs/plans/index.csv`](../index.csv). Check it with `npm run lint:plans`.
-- **Current stage:** 3F. F1 (narrow) and F2 (the support code points to a saved record, Hebrew messages on the touched paths) are done. **Next: F3** (blocking error tracking in CI), after review. The follow-up plan [`students/atomic-student-operations.md`](../students/atomic-student-operations.md) (#63) can start now that F2 is done. Draft PR #64 stays a draft. Required checks are on `staging`; `main` waits for #64.
+- **Current stage:** 3F. F1 (narrow) and F2 are done, including the review refinements (the error display rule, the docs separation, the support search and the wrapper check). **Next:** joint review, then push the local commits to draft PR #64, then F3. The follow-up plan [`students/atomic-student-operations.md`](../students/atomic-student-operations.md) (#63) can start after F2.
 - **Execution branch:** `repository-reconstruction`, based on `origin/staging` `dce8f2e790e939b7f0805803d7d44e71a23346ba`. See [Planning base](#planning-base) and [Q1](#q1-execution-branch).
 - **Repository state:**
   - `test/` is now `tests/`; `agents-docs/` is now `docs/project-rules/`.
@@ -13,7 +13,7 @@ Read this block first when you continue this plan in a new conversation.
   - `docs/plans/index.csv` and `npm run lint:plans` exist.
   - The raw evidence is outside the repository, in `$env:TEMP\reinex-restructure\stage0\`, `stage1\`, `stage2\` and `stage3\`.
   - Nothing has been pushed; the owner decides on the push together with Claude.
-- **Last update:** 2026-11-24. Hebrew UI rule added; F1.5 review closed and published; F2 done.
+- **Last update:** 2026-11-24. F2 review completed: the shared error display, the docs separation rule, the support search proof and the six wrapper files.
 
 Each stage appends to the [Progress log](#progress-log), ticks its subtasks and records answers under [Open decisions](#open-decisions). Keep this block at five bullets. It is a pointer, not a history.
 
@@ -2457,6 +2457,63 @@ Append one entry per stage. Newest last.
 
     These are for a later pass under the Hebrew rule, not part of F2.
   - **Next:** F3, after review. #63 stays in the follow-up plan.
+
+- **2026-11-24, F2 review completed** (owner request; refined display rule and docs separation). Nothing was pushed.
+  - **Docs separation:**
+    - `AGENTS.md` "Keep documentation current" now says what goes where. `AGENTS.md` and `docs/project-rules/` hold the rule in force, its reason and the limits that affect the work. Milestones, completion marks, future tasks and verification history belong in `docs/plans/`.
+    - Applied to `30` "5xx responses and the support code". The "F2, done", "Fix F3" and "Until both land" lines were removed. The section now states the contract: when `respondTrackedError` is used, when `respondTracked` needs `attachErrorTracking` and where to attach it, when `error_id` is returned, what happens when tracking fails, and the exact enforcement level today (warn-only in `build` and in `integrity-checks` on `main`; wrappers accepted by name).
+  - **The shared display rule** is written once in `20` ("Showing an error"):
+    - a known code shows its dedicated Hebrew text;
+    - an unmapped code shows a general Hebrew message with `(public_code)`, or `(HTTP <status>)` when there is only a status;
+    - a request with no response shows the Hebrew connection message;
+    - a saved support code is shown only when one was returned;
+    - "פירוט השגיאה" and "העתקה לשליחה לתמיכה" come from one field set;
+    - the error object is kept until the display.
+  - **Code:**
+    - **`src/lib/error-support.js`:** `describeError`, `errorDetailRows`, `formatErrorDetailsForCopy`, `publicErrorCode` (only a `snake_case` `message` or `error` value; `details` and free text never count), `isNetworkError`, `createNetworkError`, `decorateErrorForDisplay`. `resolveUserErrorMessage` and `buildUserErrorMessage` follow the rule. `error.code` and `error.apiCode` keep their old meaning for code consumers; `error.publicCode` is new.
+    - **`src/components/ui/ErrorDetails.jsx`:** the details toggle (`aria-expanded`), the copy button and a Hebrew confirmation (`role="status"`). The time is shown in the org's zone (`formatLocalDateTime`).
+    - **`toast.apiError(error, { action, fallback })` in `src/lib/toast.jsx`:** it builds the toast from the error object, shows the support code when saved and the details, and stays open (`duration: Infinity`, a close button) so it cannot vanish while the details are read or copied.
+    - **`api-client.js`:** `decorateApiError` stamps the status, the public code and the time.
+  - **Display path 1, the duplicate check:**
+    - **Before (read in the old code):** `checkDocumentDuplicate` re-wrapped every error without a support code as `new Error('Failed to check duplicates: …')`, losing the status and the code. A non-JSON error body made `response.json()` throw, losing the status too. `OrgDocumentsManager` showed a 500 as "שגיאת שרת בעת בדיקת כפליות", even when it had a saved support code.
+    - **Fix:** a network failure becomes `createNetworkError`, an HTTP error keeps its status and codes (a non-JSON body becomes `{}`), and `AbortError` is rethrown unchanged. `OrgDocumentsManager` keeps the dedicated 401 and 403 messages, stays silent on a cancel, and sends everything else to `toast.apiError` (action "בדיקת כפילויות"). The student and instructor document screens keep their behaviour and now receive the status.
+  - **Display path 2, the lesson dialog:**
+    - **Before:** `resolveMutationError` returned `Failed to fetch` for a network failure and the raw code for an unmapped 422, and the dialog stored only the resulting string.
+    - **After:**
+      - the final fallback is `resolveUserErrorMessage(error, 'הפעולה נכשלה.')`, and the dedicated messages, the 409 handling and the code comparisons are unchanged;
+      - 7 dialog sites keep the error object, and the `Alert` renders the message plus `ErrorDetails` (action "עדכון השיעור");
+      - three English "Organization not found" strings became Hebrew.
+    - **Tests:** the old test that asserted the raw code and English text was replaced.
+  - **Support search:**
+    - `api/system-admin-error-events` exports `handleGet` for tests.
+    - A new test writes two events through `respondTrackedError` into one in-memory `error_events` store, then runs the real `handleGet`. Both by `support_code` (an exact match, one row, the right message and route) and by `q`, the returned `error_id` finds exactly its saved event.
+  - **F2.4, the remaining 6 wrapper files.** In each, tracking is attached before any path that can reach the wrapper. No gap was found.
+    - `employee-leave`: attach in the handler (`:275`). The early call is in `respondUnlessEmployeeInOrg`, which only the handlers call (`:482`, `:675`, `:738`).
+    - `form-submissions`: attach right after the client is created (`:2296`), before any dispatch. It is re-attached with the org and user (`:2323`, `:1825`, `:2047`).
+    - `instructors-link-user`: attach at `:687`. The early calls are in `directLinkFlow`, which is called at `:751`.
+    - `invitations`: attach right after the client (`:1480`), before the dispatch.
+    - `session-reports`: attach at `:1132`, after the auth and org checks. Before it, the handler returns only 401 and 400.
+    - `waiting-list-intake`: attach right after the client (`:1439`), before the dispatch. The public flows re-attach (`:756`, `:892`).
+  - **Browser check** (`$env:TEMP\reinex-restructure\stage3\f2-browser-check.txt`):
+    - **The page:** a temporary harness on the local Vite server, deleted afterwards. It ran the real `checkDocumentDuplicate`, the same branching and `toast.apiError` call as `OrgDocumentsManager`, and `ErrorDetails` under an `Alert` as in the lesson dialog.
+    - **Not the full screen:** there was no logged-in session in the pane, and the tester credentials were not read. The full org documents screen was therefore not driven.
+    - **Results:**
+      - API running, fake token: status 401 and the public code were kept, and the dedicated permission message was shown.
+      - API stopped (Vite proxy 500, empty body): "בדיקת הכפילויות נכשלה. (HTTP 500)". The details and the copied text had the same rows (action, time, status), the Hebrew confirmation appeared, and the toast stayed open.
+      - Raw DB text: shown and copied as `(HTTP 500)` only.
+      - Unmapped 422: shown and copied with the public code.
+      - Saved support code: the support code was shown, and the copy had both the error code and the support code.
+    - The Functions host was started for the check and stopped afterwards; it was down before.
+  - **Tests and checks:**
+    - `api/_shared/error-events.test.js`: 12 of 12.
+    - `tests/error-support.test.js`: 19 of 19.
+    - `tests/lesson-dialog-model.test.js`: 105 of 105.
+    - `npm run test:finance-calendar`: exit 0, 591 tests. Compared with the F2 identity, one test was replaced: the old "falls back to error.message" became the new display-rule test.
+    - `lint:upsert-conflicts`, `lint:plans` and `lint:doc-links` (321 links): OK.
+    - `npx eslint .`: 723 files, 0 problems.
+    - `npm run build`: exit 0, with 276 untracked 5xx, 21 SQL warnings and 3560 modules. The type check first reported 3088 issues, 7 of them new from my own JSDoc and component props; after fixing those, `npm run lint:types` reports 3075, with no new issue against the previous run.
+  - **Still open:** F3 (blocking error tracking); #63 (the follow-up plan); the Hebrew rule on paths outside F2 (`OrgContext.jsx` "An API error occurred", `ImpersonateUserDialog`, screens that show `error.message` directly); the unrelated note in `00` that applying migrations from CI "is planned".
+  - **Next:** joint review, then push the local commits to #64, then F3.
 
 ---
 
