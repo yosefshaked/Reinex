@@ -2189,7 +2189,7 @@ Append one entry per stage. Newest last.
     - 8 files under `implementations/`.
 
     `git grep agents-docs` outside `docs/plans/` now finds nothing.
-  - **Out-of-repo consumers, for owner approval** (not changed): the Claude memory files that name `agents-docs/`. The wiki was not checked.
+  - **Out-of-repo consumers:** no Claude memory file names `agents-docs/` (checked by grep). The wiki was not checked.
   - **After the content changes** (`after-content.json`): 158 files, 412 links, the same 17 baseline breaks.
     - `AGENTS.md`, `CLAUDE.md` and `docs/project-rules/**` have **0 broken links**. The one baseline break there, `api/backup-status`, was removed from the "Start here" list in `90`.
     - Every repository path quoted in backticks in `AGENTS.md` exists.
