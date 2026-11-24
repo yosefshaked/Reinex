@@ -5,7 +5,7 @@
 Read this block first when you continue this plan in a new conversation.
 
 - **Plan status:** the overall status of this plan is recorded only in [`docs/plans/index.csv`](../index.csv). Check it with `npm run lint:plans`.
-- **Current stage:** 3F. F1 (narrow org isolation) is done in `adc1439`. **Next: F2** (the support code must point to a saved record). The follow-up plan [`students/atomic-student-operations.md`](../students/atomic-student-operations.md) (#63) continues after F2, and F3 follows F2. Draft PR #64 (into `staging`) is open. The required checks are applied on `staging`; on `main` they wait for #64 to reach `staging`.
+- **Current stage:** 3F. F1 (narrow) and F2 (the support code points to a saved record, Hebrew messages on the touched paths) are done. **Next: F3** (blocking error tracking in CI), after review. The follow-up plan [`students/atomic-student-operations.md`](../students/atomic-student-operations.md) (#63) can start now that F2 is done. Draft PR #64 stays a draft. Required checks are on `staging`; `main` waits for #64.
 - **Execution branch:** `repository-reconstruction`, based on `origin/staging` `dce8f2e790e939b7f0805803d7d44e71a23346ba`. See [Planning base](#planning-base) and [Q1](#q1-execution-branch).
 - **Repository state:**
   - `test/` is now `tests/`; `agents-docs/` is now `docs/project-rules/`.
@@ -13,7 +13,7 @@ Read this block first when you continue this plan in a new conversation.
   - `docs/plans/index.csv` and `npm run lint:plans` exist.
   - The raw evidence is outside the repository, in `$env:TEMP\reinex-restructure\stage0\`, `stage1\`, `stage2\` and `stage3\`.
   - Nothing has been pushed; the owner decides on the push together with Claude.
-- **Last update:** 2026-11-24. Issue #63 and draft PR #64 opened, both checks passed on GitHub, the `staging` ruleset applied, and F1.5 done.
+- **Last update:** 2026-11-24. Hebrew UI rule added; F1.5 review closed and published; F2 done.
 
 Each stage appends to the [Progress log](#progress-log), ticks its subtasks and records answers under [Open decisions](#open-decisions). Keep this block at five bullets. It is a pointer, not a history.
 
@@ -1274,14 +1274,14 @@ It was moved because it is product-reliability work, wider than this restructure
   - the tracking failure is not tracked through the same mechanism.
 
 **Subtasks:**
-- [ ] F2.1 List every consumer and record each one's current behaviour:
+- [x] F2.1 List every consumer and record each one's current behaviour:
   - the return value of `trackErrorEvent`;
   - the API response of `respondTrackedError` and `respondTracked`;
   - the UI message (`src/lib/api-client.js:131-152`, `src/lib/error-support.js`, `SubmitFormPage.jsx`, `FormField.jsx`);
   - the support search (`api/system-admin-error-events`, `ErrorEventsView.jsx`).
-- [ ] F2.2 Write the tests first (acceptance below), and see them fail against the current code.
-- [ ] F2.3 Fix the runtime path to the contract.
-- [ ] F2.4 Check every local `respond<Name>Error` wrapper under `api/`. Each must call `respondTrackedError`, or call `respondTracked` after `attachErrorTracking` in that request. List each one with its result. Fix any that does not track.
+- [x] F2.2 Write the tests first (acceptance below), and see them fail against the current code.
+- [x] F2.3 Fix the runtime path to the contract.
+- [x] F2.4 Check every local `respond<Name>Error` wrapper under `api/`. Each must call `respondTrackedError`, or call `respondTracked` after `attachErrorTracking` in that request. List each one with its result. Fix any that does not track. F2.1–F2.4 were done on 2026-11-24; the results are in the Progress log.
 
 **Acceptance:**
 - **A successful write:** the response's `error_id` equals the saved `support_code`, and the support search finds it.
@@ -2392,6 +2392,71 @@ Append one entry per stage. Newest last.
       - `npm run test:finance-calendar`: exit 0, 590 tests (561 pass, 29 todo). Compared with the previous identity, the only difference is the one added test.
   - **Not done:** nothing merged, nothing pushed to `main`, and the new commits are not pushed. Partial failure and atomicity stay in the follow-up plan.
   - **Next:** F2. **Joint review pending** before it starts.
+
+- **2026-11-24, Hebrew UI rule, F1.5 review closed, and F2.**
+  - **Hebrew UI rule (owner product rule), `0a10878`:**
+    - It is written once in `20` ("The product speaks Hebrew", next to the quoting rule), with a pointer from the `AGENTS.md` description.
+    - It covers every text the product shows or reads out to users, keeps user input, trade names and support codes as they are, allows English only for developer diagnostics, and keeps API codes as stable English with a Hebrew message at the point of display.
+    - The helper names were added to the rule when F2 created them (D8).
+  - **F1.5 review closed:**
+    - `44ba0e4`: the comment in `client-profiles.js` now says that partial failure and retry are tracked in #63.
+    - Published to `repository-reconstruction`, so draft PR #64 now includes F1.5.
+    - CI on `44ba0e4`: [Plan registry](https://github.com/yosefshaked/Reinex/actions/runs/45467017976) and [Doc links](https://github.com/yosefshaked/Reinex/actions/runs/45467018034) both succeeded.
+  - **F2.1, the consumers [V]:**
+    - **Server:** `trackErrorEvent`'s return value is read only by `respondTrackedError`, which `respondTracked` calls, and by its own test. No other server code reads `error_id`.
+    - **Frontend, building the message:**
+      - `src/lib/api-client.js` builds `error.message` for every `authenticatedFetch*` call;
+      - `src/lib/error-support.js` `createSupportAwareApiError` is used by the document hooks and sections and by `useGuardians`.
+    - **Frontend, showing the message:**
+      - `resolveApiErrorMessage` is used as a **code** getter (22 call sites);
+      - 9 of those sites **display** its result: `Sidebar`, `LockedCorrectionPanel`, `MyPendingReportsCard`, `NewSessionModal` ×2, `PendingReportsPage`, `StudentReportsTab`, `WaitingListPage` ×2.
+    - **Consumers that branch on `error.message` as a code:** `lessonDialogModel.resolveMutationError` (including three 5xx codes), `AddLessonDialog`, `EmployeeWizardDialog`, `UnifiedEmployeeList` and `AccountPage`, all 4xx. Three document sections also look for `401`, `403` and `500` in the old `HTTP <status>` text.
+    - **Support search:** `api/system-admin-error-events` filters `support_code` by exact equality.
+  - **F2.2, before the fix (tests written first):**
+    - `api/_shared/error-events.test.js`: exit 1, 6 of 10 failing. A failed insert (an `{ error }` result, or a rejection) and a missing client each still returned the code, with no "tracking failed" log carrying the original error. `respondTracked` without an attach failed the same way. The existing test that asserted an `error_id` after a failed insert was the bug written as a test; it was corrected.
+    - **Frontend probe** (`f2-front-probe-before.txt`): with no support code, the user saw `internal_error`, the raw code `failed_to_update_lesson_template`, an English server sentence, or `HTTP 500`.
+    - `tests/error-support.test.js` could not load, because the new helpers did not exist.
+  - **F2.3, the fix:**
+    - **Server (`api/_shared/error-events.js`):**
+      - `trackErrorEvent` returns the code only after a saved insert, and `null` otherwise.
+      - Every tracking failure writes `context.log.error('error-events: tracking failed', { trackingError, status, publicMessage, route, method, originalError })`. It never tracks again.
+      - `respondTrackedError` adds `error_id` only when one was saved.
+      - `respondTracked` without `attachErrorTracking` logs `tracking_not_attached` with the original error.
+    - **Frontend (`src/lib/error-support.js`):**
+      - the API message map moved here from `api-client.js` as `API_ERROR_MESSAGES`;
+      - `buildUserErrorMessage` and `resolveUserErrorMessage` (display, always Hebrew: support-code message, mapped code, Hebrew server text, Hebrew fallback, or a Hebrew default for 5xx or 4xx);
+      - `buildApiErrorMessage` sets `error.message`. It is the same, except that an unmapped `snake_case` 4xx code stays as the message, so the existing code consumers keep working.
+    - **Consumers:**
+      - `api-client.js` uses the shared builder;
+      - the 9 display sites now use `resolveUserErrorMessage` with their Hebrew fallback;
+      - `lessonDialogModel` compares the kept API code instead of `error.message`;
+      - the three document sections also check `error.status`.
+    - **Docs (D8):** `30` "What the code does today" and the `20` rule.
+  - **F2.4, the wrappers:**
+    - 31 local `respond<Name>Error` wrappers. Every one calls a tracking helper in its body: 30 call `respondTracked`, and `system-admin-store` calls `respondTrackedError`.
+    - **Runtime order:** all 30 files attach tracking in the handler. A line-order scan flagged wrapper calls above the first attach in 8 files (`directory`, `employee-leave`, `form-submissions`, `instructors-link-user`, `invitations`, `org-memberships`, `session-reports`, `waiting-list-intake`). A spot check of `directory` and `org-memberships` showed those calls sit in helpers that run only after the attach.
+    - **No wrapper needed a fix.** A full runtime-order proof belongs to F3.2. If a wrapper ever runs before the attach, it now answers without a code and logs the original error.
+  - **After the fix:**
+    - `api/_shared/error-events.test.js`: 10 of 10.
+    - `tests/error-support.test.js` (new): 13 of 13.
+    - `tests/lesson-dialog-model.test.js`: 105 of 105, including a new case: an untracked 5xx still gets its specific Hebrew message. With the old `lessonDialogModel` that case fails (104 of 105).
+    - `npm run test:finance-calendar`: exit 0, 591 tests (562 pass, 29 todo). Compared with the F1.5 identity, the only difference is that one added test.
+    - `lint:upsert-conflicts`: passed. `lint:plans`: OK. `lint:doc-links`: 321 links, after two links in `20` became one.
+    - `lint:error-tracking`: still 276 warnings, which is F3's scope.
+    - `npx eslint .`: 722 files, 0 problems (721 plus the new test).
+    - `npm run build`: exit 0, with the same figures as stage 0 (276 untracked 5xx, 21 SQL warnings, 3081 type issues, 3559 modules).
+  - **The behaviour the user now gets:**
+    - **Saved event:** a Hebrew message with a support code equal to the saved `support_code`, which the exact-match search finds.
+    - **Failed save or no client:** a Hebrew message with no code.
+    - **Unknown code, English server text, or an empty response:** a Hebrew default.
+    - **Consumers that branch on codes** keep working.
+  - **Left as they were (outside the touched paths):**
+    - `src/org/OrgContext.jsx:192` builds its own `'An API error occurred'`.
+    - `ImpersonateUserDialog`'s English fallback (system-admin console).
+    - Sites that show `error.message` directly, which can still show an unmapped 4xx code.
+
+    These are for a later pass under the Hebrew rule, not part of F2.
+  - **Next:** F3, after review. #63 stays in the follow-up plan.
 
 ---
 
