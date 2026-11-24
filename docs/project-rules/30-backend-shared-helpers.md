@@ -48,7 +48,7 @@ RLS protects requests made with a user's token. The API uses the service-role cl
   - A local wrapper `respond<Name>Error` must call one of the two in its body. Its name proves nothing.
   - **Exception:** a failure before a suitable client exists (missing configuration, client creation failed) uses `respond(context, 500, ...)` with `// tracked-error-exempt: <reason>` on the same line or the line above. The reason must be a real one.
 - **What the code does today** (repository plan `docs/plans/repository/directory-restructure.md`, stage 3F):
-  - `trackErrorEvent` still returns a code when there is no client or when saving to `error_events` failed, so the user can be shown a code with no record. Fix F2 makes every code shown to the user point to a saved record.
+  - **Support codes (F2, done):** `trackErrorEvent` returns the support code only when the `error_events` row was saved, and `null` otherwise (no client, a failed insert, or `respondTracked` without `attachErrorTracking`). The response then has no `error_id`, and the operational log (`context.log.error`, "error-events: tracking failed") keeps the original error and the tracking failure. It never tracks again. The frontend shows a Hebrew message with no code in that case.
   - `npm run lint:error-tracking` only warns, in `npm run build` and in CI, and it accepts a `respond<Name>(` call by its name alone. Fix F3 makes `npm run lint:error-tracking:strict` a blocking CI check. Until both land, follow the rule above; the tools do not enforce it yet.
 
 ## Shared helpers to reuse

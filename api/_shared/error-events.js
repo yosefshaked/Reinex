@@ -100,6 +100,28 @@ async function cleanupExpiredErrorEvents(context, supabase, now = new Date()) {
   }
 }
 
+/**
+ * Writes the failure that tracking could not save to the operational log: the original error and
+ * why tracking failed. It never tries to track again, so a tracking failure cannot recurse.
+ */
+function logTrackingFailure(context, trackingError, { status, publicMessage, route, method, error }) {
+  const log = context?.log;
+  const write = typeof log?.error === 'function' ? log.error : log?.warn;
+  write?.call(log, 'error-events: tracking failed', {
+    trackingError,
+    status,
+    publicMessage,
+    route: route || null,
+    method: method || null,
+    originalError: serializeError(error),
+  });
+}
+
+/**
+ * Saves a failure to error_events and returns its support code, or null when nothing was saved
+ * (no client, or the insert failed). A caller shows a support code to the user only when one is
+ * returned, so every code the user sees points to a record that the support search can find.
+ */
 export async function trackErrorEvent(context, req, supabase, options = {}) {
   const status = normalizeStatus(options.status);
   const now = options.now instanceof Date ? options.now : new Date();
@@ -109,9 +131,10 @@ export async function trackErrorEvent(context, req, supabase, options = {}) {
   const publicMessage = normalizeString(options.message, 'internal_error');
   const expiresAt = new Date(now.getTime() + RETENTION_DAYS * 24 * 60 * 60 * 1000).toISOString();
 
+  const logged = { status, publicMessage, route, method, error: options.error };
   if (!supabase?.from) {
-    context?.log?.warn?.('error-events missing supabase client', { supportCode, publicMessage, status });
-    return supportCode;
+    logTrackingFailure(context, 'no_tracking_client', logged);
+    return null;
   }
 
   try {
@@ -135,13 +158,9 @@ export async function trackErrorEvent(context, req, supabase, options = {}) {
       expires_at: expiresAt,
     });
     if (error) throw error;
-  } catch (error) {
-    context?.log?.warn?.('error-events insert failed', {
-      message: error?.message,
-      supportCode,
-      publicMessage,
-      status,
-    });
+  } catch (trackingError) {
+    logTrackingFailure(context, String(trackingError?.message || trackingError || 'insert_failed'), logged);
+    return null;
   }
 
   return supportCode;
@@ -155,7 +174,7 @@ export async function respondTrackedError(context, req, supabase, options = {}) 
     status,
     message,
   });
-  return respond(context, status, { message, error_id: errorId });
+  return respond(context, status, errorId ? { message, error_id: errorId } : { message });
 }
 
 export function attachErrorTracking(context, req, supabase, options = {}) {
@@ -176,6 +195,13 @@ export function attachErrorTracking(context, req, supabase, options = {}) {
 export async function respondTracked(context, status, body, extraHeaders, options = {}) {
   const tracking = context?.__errorTracking || null;
   if (!tracking?.supabase?.from) {
+    // attachErrorTracking did not run in this request: answer without a support code, and keep
+    // the original error in the operational log instead of losing it.
+    logTrackingFailure(context, 'tracking_not_attached', {
+      status,
+      publicMessage: body?.message || body?.error || null,
+      error: options.error,
+    });
     return respond(context, status, body, extraHeaders);
   }
 
