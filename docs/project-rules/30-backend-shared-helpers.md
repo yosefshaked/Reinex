@@ -43,13 +43,17 @@ RLS protects requests made with a user's token. The API uses the service-role cl
 ## 5xx responses and the support code
 - **Responses** go through `respond(context, ...)` or a helper built on it.
 - **A 5xx is tracked.** Its detail is stored in `error_events`, and the user gets an `error_id` that support can find by that code. **Why:** a code shown to the user that support cannot find is worse than no code, and an untracked 5xx loses the detail.
-  - With a service-role client in hand: `respondTrackedError(context, req, client, { status, message, error })`.
-  - `respondTracked(...)` only after `attachErrorTracking(context, req, client, ...)` ran in the same request. Without it, `respondTracked` sends an untracked response.
-  - A local wrapper `respond<Name>Error` must call one of the two in its body. Its name proves nothing.
+  - **With a service-role client in hand:** `respondTrackedError(context, req, client, { status, message, error })`.
+  - **`respondTracked(...)`** only after `attachErrorTracking(context, req, client, ...)` ran earlier in the same request. Attach it right after the client, the auth and the org are resolved, before any code path that can answer 5xx.
+  - **A local wrapper `respond<Name>Error`** must call one of the two in its body. Its name proves nothing.
   - **Exception:** a failure before a suitable client exists (missing configuration, client creation failed) uses `respond(context, 500, ...)` with `// tracked-error-exempt: <reason>` on the same line or the line above. The reason must be a real one.
-- **What the code does today** (repository plan `docs/plans/repository/directory-restructure.md`, stage 3F):
-  - **Support codes (F2, done):** `trackErrorEvent` returns the support code only when the `error_events` row was saved, and `null` otherwise (no client, a failed insert, or `respondTracked` without `attachErrorTracking`). The response then has no `error_id`, and the operational log (`context.log.error`, "error-events: tracking failed") keeps the original error and the tracking failure. It never tracks again. The frontend shows a Hebrew message with no code in that case.
-  - `npm run lint:error-tracking` only warns, in `npm run build` and in CI, and it accepts a `respond<Name>(` call by its name alone. Fix F3 makes `npm run lint:error-tracking:strict` a blocking CI check. Until both land, follow the rule above; the tools do not enforce it yet.
+- **When `error_id` is returned.** `trackErrorEvent` returns the support code only after the `error_events` row was saved. The response then carries `{ message, error_id }`, and `error_id` equals the saved `support_code`; the system-admin search finds it by exact match.
+- **When tracking fails** (no client, a failed or rejected insert, or `respondTracked` without `attachErrorTracking`):
+  - the response is `{ message }`, with no `error_id`;
+  - the operational log gets one `context.log.error('error-events: tracking failed', …)` entry with the original error and the reason tracking failed;
+  - tracking is never attempted again, so a tracking failure cannot recurse;
+  - the frontend then shows a Hebrew message without a support code (`20`, "Showing an error").
+- **Enforcement today.** `npm run lint:error-tracking` flags a literal `respond(` with a 5xx status. It only warns, both in `npm run build` and in the `integrity-checks` CI on `main`, so neither blocks. It accepts any `respond<Name>(` call by its name, without reading the wrapper. Follow the rules above; the check does not yet enforce them.
 
 ## Shared helpers to reuse
 - `resolveBearerAuthorization`, `json`
