@@ -5,45 +5,45 @@
 - Any auth, membership, tenant resolution, validation, audit, settings, or storage helper change.
 
 ## Load these files first
-- [`../api/_shared/http.js`](../api/_shared/http.js)
-- [`../api/_shared/org-bff.js`](../api/_shared/org-bff.js)
-- [`../api/_shared/supabase-admin.js`](../api/_shared/supabase-admin.js)
-- [`../api/_shared/validation.js`](../api/_shared/validation.js)
-- [`../api/_shared/audit-log.js`](../api/_shared/audit-log.js)
-- [`../api/_shared/tenant-audit.js`](../api/_shared/tenant-audit.js)
-- [`../api/_shared/settings-utils.js`](../api/_shared/settings-utils.js)
-- [`../api/_shared/permissions-utils.js`](../api/_shared/permissions-utils.js)
-- [`../api/_shared/storage-encryption.js`](../api/_shared/storage-encryption.js)
-- [`../api/_shared/currency.js`](../api/_shared/currency.js)
-- [`../api/_shared/csv.js`](../api/_shared/csv.js)
-- [`../api/_shared/day-of-week.js`](../api/_shared/day-of-week.js)
-- [`../api/_shared/time-grid.js`](../api/_shared/time-grid.js)
-- [`../api/_shared/instructor-colors.js`](../api/_shared/instructor-colors.js)
-- [`../api/_shared/metadata-utils.js`](../api/_shared/metadata-utils.js)
-- [`../api/_shared/public-app-url.js`](../api/_shared/public-app-url.js)
-- [`../api/_shared/account-profile.js`](../api/_shared/account-profile.js)
+- [`../api/_shared/http.js`](../../api/_shared/http.js)
+- [`../api/_shared/org-bff.js`](../../api/_shared/org-bff.js)
+- [`../api/_shared/supabase-admin.js`](../../api/_shared/supabase-admin.js)
+- [`../api/_shared/validation.js`](../../api/_shared/validation.js)
+- [`../api/_shared/audit-log.js`](../../api/_shared/audit-log.js)
+- [`../api/_shared/tenant-audit.js`](../../api/_shared/tenant-audit.js)
+- [`../api/_shared/settings-utils.js`](../../api/_shared/settings-utils.js)
+- [`../api/_shared/permissions-utils.js`](../../api/_shared/permissions-utils.js)
+- [`../api/_shared/storage-encryption.js`](../../api/_shared/storage-encryption.js)
+- [`../api/_shared/currency.js`](../../api/_shared/currency.js)
+- [`../api/_shared/csv.js`](../../api/_shared/csv.js)
+- [`../api/_shared/day-of-week.js`](../../api/_shared/day-of-week.js)
+- [`../api/_shared/time-grid.js`](../../api/_shared/time-grid.js)
+- [`../api/_shared/instructor-colors.js`](../../api/_shared/instructor-colors.js)
+- [`../api/_shared/metadata-utils.js`](../../api/_shared/metadata-utils.js)
+- [`../api/_shared/public-app-url.js`](../../api/_shared/public-app-url.js)
+- [`../api/_shared/account-profile.js`](../../api/_shared/account-profile.js)
 
 ## Shared helpers to reuse
 - `resolveBearerAuthorization`, `json`
 - `readEnv`, `respond`, `parseRequestBody`, `normalizeString`, `normalizeNullableId`
 - `ensureMembership`, `isAdminRole`, `isAdminOrOffice`, `resolveOrgId`, `createSingleClient`, `withOrgScope`
 - `readSupabaseAdminConfig`, `createSupabaseAdminClient`
-- `parseJsonBodyWithLimit`, `validateSessionWrite`, instructor validators in [`../api/_shared/validation.js`](../api/_shared/validation.js)
+- `parseJsonBodyWithLimit`, `validateSessionWrite`, instructor validators in [`../api/_shared/validation.js`](../../api/_shared/validation.js)
 - `logAuditEvent`, `logTenantAuditEvent`
 - Settings/permissions/storage helper modules above
-- `ensureInstructorColors` in [`../api/_shared/instructor-colors.js`](../api/_shared/instructor-colors.js)
-- `mergeMetadata` in [`../api/_shared/metadata-utils.js`](../api/_shared/metadata-utils.js) — use for all nested metadata patch operations; do not hand-spread metadata
-- Day-name/number utilities in [`../api/_shared/day-of-week.js`](../api/_shared/day-of-week.js) — backend counterpart to `src/lib/day-of-week.js`
-- Dates and time zones in [`../api/_shared/local-time.js`](../api/_shared/local-time.js) — `localDateKey`, `todayKey`, `localDateRangeUtc`, `localMonthRangeUtc`, `localDateTimeToUtc`, date-only `addDays` / `enumerateDateKeys` / `firstDayOfMonth`, `formatInstant`, technical `utcDateKey`; the only place the org's zone is resolved (`resolveOrgTimeZone`). Rules in `00-core-rules.md` "Dates and time zones".
-- `ceilClockTimeToGrid`, `normalizePreferredTimesToGrid` in [`../api/_shared/time-grid.js`](../api/_shared/time-grid.js) — use these for 15-minute calendar/waiting-list time normalization
-- `findAuthUserByEmail`, `getAuthUserById`, `getAuthUsersByIds` in [`../api/_shared/auth-users.js`](../api/_shared/auth-users.js) — use these when auth user emails are needed; `profiles` is not the source of truth for auth email addresses
-- `resolvePublicAppBaseUrl`, `buildPublicAppHashRouteUrl`, `normalizeAbsoluteRedirectUrl` in [`../api/_shared/public-app-url.js`](../api/_shared/public-app-url.js) — use these for public links sent from backend flows
-- `resolveClientProfileDeliveryDestination` in [`../api/_shared/form-delivery-destination.js`](../api/_shared/form-delivery-destination.js) — use this for form invite destinations so WhatsApp/email delivery consistently falls back from explicit request values to client profile contact fields and then the primary guardian.
-- `buildAccountDisplayName`, `extractAuthDisplayName`, `getAuthNameParts`, `buildAccountUserMetadata`, `isAccountSetupComplete`, `ensureAccountProfileRow` in [`../api/_shared/account-profile.js`](../api/_shared/account-profile.js) — use these for canonical user profile bootstrap, setup-state checks, auth metadata sync, and derived display names after `profiles.full_name` removal
-- `deliverInvitationEmail` in [`../api/_shared/invitation-email.js`](../api/_shared/invitation-email.js) — use this for invitation email delivery; invite flows should use Brevo as the sender while keeping Supabase only as the source of secure generated invite links/tokens
-- `deliverPasswordResetEmail` in [`../api/_shared/password-reset-email.js`](../api/_shared/password-reset-email.js) — use this for password reset delivery; recovery emails should be generated via Supabase Auth links and sent through Brevo
-- `respondTrackedError`, `trackErrorEvent`, `attachErrorTracking`, `respondTracked` in [`../api/_shared/error-events.js`](../api/_shared/error-events.js) — use for 5xx API failures so the client receives a safe `error_id` while raw DB/provider/stack detail is stored in `error_events` for system-admin support. Prefer `respondTrackedError(...)` for local failures where `req`, `supabase`, `orgId`, and `userId` are all in scope; use `attachErrorTracking(...)` once after auth/org resolution plus `respondTracked(...)` inside nested endpoint helpers.
-- `logSystemAuditEvent` in [`../api/_shared/audit-log.js`](../api/_shared/audit-log.js) — use this when a backend lifecycle transition must be audited without a real authenticated actor (for example public-token expiry)
+- `ensureInstructorColors` in [`../api/_shared/instructor-colors.js`](../../api/_shared/instructor-colors.js)
+- `mergeMetadata` in [`../api/_shared/metadata-utils.js`](../../api/_shared/metadata-utils.js) — use for all nested metadata patch operations; do not hand-spread metadata
+- Day-name/number utilities in [`../api/_shared/day-of-week.js`](../../api/_shared/day-of-week.js) — backend counterpart to `src/lib/day-of-week.js`
+- Dates and time zones in [`../api/_shared/local-time.js`](../../api/_shared/local-time.js) — `localDateKey`, `todayKey`, `localDateRangeUtc`, `localMonthRangeUtc`, `localDateTimeToUtc`, date-only `addDays` / `enumerateDateKeys` / `firstDayOfMonth`, `formatInstant`, technical `utcDateKey`; the only place the org's zone is resolved (`resolveOrgTimeZone`). Rules in `00-core-rules.md` "Dates and time zones".
+- `ceilClockTimeToGrid`, `normalizePreferredTimesToGrid` in [`../api/_shared/time-grid.js`](../../api/_shared/time-grid.js) — use these for 15-minute calendar/waiting-list time normalization
+- `findAuthUserByEmail`, `getAuthUserById`, `getAuthUsersByIds` in [`../api/_shared/auth-users.js`](../../api/_shared/auth-users.js) — use these when auth user emails are needed; `profiles` is not the source of truth for auth email addresses
+- `resolvePublicAppBaseUrl`, `buildPublicAppHashRouteUrl`, `normalizeAbsoluteRedirectUrl` in [`../api/_shared/public-app-url.js`](../../api/_shared/public-app-url.js) — use these for public links sent from backend flows
+- `resolveClientProfileDeliveryDestination` in [`../api/_shared/form-delivery-destination.js`](../../api/_shared/form-delivery-destination.js) — use this for form invite destinations so WhatsApp/email delivery consistently falls back from explicit request values to client profile contact fields and then the primary guardian.
+- `buildAccountDisplayName`, `extractAuthDisplayName`, `getAuthNameParts`, `buildAccountUserMetadata`, `isAccountSetupComplete`, `ensureAccountProfileRow` in [`../api/_shared/account-profile.js`](../../api/_shared/account-profile.js) — use these for canonical user profile bootstrap, setup-state checks, auth metadata sync, and derived display names after `profiles.full_name` removal
+- `deliverInvitationEmail` in [`../api/_shared/invitation-email.js`](../../api/_shared/invitation-email.js) — use this for invitation email delivery; invite flows should use Brevo as the sender while keeping Supabase only as the source of secure generated invite links/tokens
+- `deliverPasswordResetEmail` in [`../api/_shared/password-reset-email.js`](../../api/_shared/password-reset-email.js) — use this for password reset delivery; recovery emails should be generated via Supabase Auth links and sent through Brevo
+- `respondTrackedError`, `trackErrorEvent`, `attachErrorTracking`, `respondTracked` in [`../api/_shared/error-events.js`](../../api/_shared/error-events.js) — use for 5xx API failures so the client receives a safe `error_id` while raw DB/provider/stack detail is stored in `error_events` for system-admin support. Prefer `respondTrackedError(...)` for local failures where `req`, `supabase`, `orgId`, and `userId` are all in scope; use `attachErrorTracking(...)` once after auth/org resolution plus `respondTracked(...)` inside nested endpoint helpers.
+- `logSystemAuditEvent` in [`../api/_shared/audit-log.js`](../../api/_shared/audit-log.js) — use this when a backend lifecycle transition must be audited without a real authenticated actor (for example public-token expiry)
 
 ## Known patterns / do not reinvent
 - API dependencies are installed and linted on Node 20; keep `api/package.json` engines, GitHub integrity checks, and the Azure Functions app Node setting aligned before upgrading packages that raise the runtime floor.

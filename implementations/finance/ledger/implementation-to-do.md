@@ -22,7 +22,7 @@ Why not another way: Jumping straight into edits causes accidental behavior chan
 		- HMO authorization coupling (create/update/delete all trigger window resync),
 		- frontend preview consumption and impact grouping.
 	- Included required step frame sections inside contract: objective, bounded file set, expected output schema, explicit non-goals, verification command set, rollback note.
-	- Linked the contract into the AGENTS instruction tree so agents discover it by default from AGENTS.md and agents-docs/80-finance-billing-payroll.md.
+	- Linked the contract into the AGENTS instruction tree so agents discover it by default from AGENTS.md and docs/project-rules/80-finance-billing-payroll.md.
 	- Verification pass 1 completed: contract structure quality and required sections present.
 	- Verification pass 2 completed: source alignment checks confirmed contract anchors still exist in code.
 - What to expect:
@@ -262,7 +262,7 @@ Why not another way: Single-agent “looks good” approvals are exactly where c
 		- AC-REL-002.
 	- Wired discoverability into instruction hubs:
 		- AGENTS.md now links finance-workflow-release-hardening-v1.md in Read By Task.
-		- agents-docs/80-finance-billing-payroll.md now includes release hardening baseline guidance.
+		- docs/project-rules/80-finance-billing-payroll.md now includes release hardening baseline guidance.
 	- Verification pass 1 completed: all focused contract tests pass.
 	- Verification pass 2 completed: Step 10 documentation anchors and diagnostics checks pass.
 - What to expect:

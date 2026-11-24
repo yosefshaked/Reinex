@@ -7,7 +7,7 @@ import { defineConfig, globalIgnores } from 'eslint/config'
 import importPlugin from 'eslint-plugin-import'
 
 // Dates and time zones: every local-date decision goes through api/_shared/local-time.js
-// (re-exported as src/lib/local-time.js). See agents-docs/00-core-rules.md "Dates and time zones".
+// (re-exported as src/lib/local-time.js). See docs/project-rules/00-core-rules.md "Dates and time zones".
 const LOCAL_TIME_MODULE_FILES = ['api/_shared/local-time.js', 'api/_shared/local-time.test.js']
 const NO_NAME_ASSIGNMENT = {
   selector:

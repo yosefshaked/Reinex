@@ -31,9 +31,9 @@ This implementation must preserve the existing finance architecture:
 Every agent working on this implementation must read these files before touching code:
 
 - `AGENTS.md`
-- `agents-docs/00-core-rules.md`
-- `agents-docs/60-calendar-and-sessions.md`
-- `agents-docs/80-finance-billing-payroll.md`
+- `docs/project-rules/00-core-rules.md`
+- `docs/project-rules/60-calendar-and-sessions.md`
+- `docs/project-rules/80-finance-billing-payroll.md`
 - `implementations/finance/ledger/finance-workflow-contract-v1.md`
 - `implementations/finance/ledger/finance-workflow-release-hardening-v1.md`
 - `src/lib/setup-sql.js`
@@ -869,7 +869,7 @@ Required:
 - Do not mutate ledger rows.
 - Do not create new HMO workflow tables unless this plan is amended.
 - Prefer shared helpers over endpoint-local finance logic.
-- Update `agents-docs/80-finance-billing-payroll.md` for every new invariant.
+- Update `docs/project-rules/80-finance-billing-payroll.md` for every new invariant.
 - Update this plan if implementation decisions change.
 
 Parallelization guidance:
@@ -1065,8 +1065,8 @@ Unsafe rollback options:
 
 Update:
 
-- `agents-docs/80-finance-billing-payroll.md`
-- `agents-docs/60-calendar-and-sessions.md` if lock/calendar behavior changes
+- `docs/project-rules/80-finance-billing-payroll.md`
+- `docs/project-rules/60-calendar-and-sessions.md` if lock/calendar behavior changes
 - `implementations/finance/ledger/finance-workflow-contract-v1.md` if existing baseline behavior changes
 - this document when implementation details change
 

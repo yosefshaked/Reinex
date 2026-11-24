@@ -6,34 +6,34 @@
 - Storage config, backup, or audit-log work.
 
 ## Load these files first
-- [`../src/pages/Settings.jsx`](../src/pages/Settings.jsx)
-- [`../src/components/settings/`](../src/components/settings/)
-- [`../src/features/settings/api/settings.js`](../src/features/settings/api/settings.js)
-- [`../src/features/settings/api/storage.js`](../src/features/settings/api/storage.js)
-- [`../src/hooks/useDocuments.js`](../src/hooks/useDocuments.js)
-- [`../api/settings/index.js`](../api/settings/index.js)
-- [`../api/org-settings-storage/index.js`](../api/org-settings-storage/index.js)
-- [`../api/documents/index.js`](../api/documents/index.js)
-- [`../api/documents-download/index.js`](../api/documents-download/index.js)
-- [`../api/backup/index.js`](../api/backup/index.js)
-- [`../api/backup-status/index.js`](../api/backup-status/index.js)
-- [`../api/local-export/index.js`](../api/local-export/index.js)
-- [`../api/local-import/index.js`](../api/local-import/index.js)
-- [`../api/audit-log/index.js`](../api/audit-log/index.js)
-- [`../api/cross-platform/storage-drivers/index.js`](../api/cross-platform/storage-drivers/index.js)
-- [`../api/_shared/backup-utils.js`](../api/_shared/backup-utils.js)
-- [`../api/_shared/local-export-import.js`](../api/_shared/local-export-import.js)
-- [`../api/_shared/storage-encryption.js`](../api/_shared/storage-encryption.js)
-- [`../api/_shared/history-quota.js`](../api/_shared/history-quota.js)
+- [`../src/pages/Settings.jsx`](../../src/pages/Settings.jsx)
+- [`../src/components/settings/`](../../src/components/settings/)
+- [`../src/features/settings/api/settings.js`](../../src/features/settings/api/settings.js)
+- [`../src/features/settings/api/storage.js`](../../src/features/settings/api/storage.js)
+- [`../src/hooks/useDocuments.js`](../../src/hooks/useDocuments.js)
+- [`../api/settings/index.js`](../../api/settings/index.js)
+- [`../api/org-settings-storage/index.js`](../../api/org-settings-storage/index.js)
+- [`../api/documents/index.js`](../../api/documents/index.js)
+- [`../api/documents-download/index.js`](../../api/documents-download/index.js)
+- [`../api/backup/index.js`](../../api/backup/index.js)
+- [`../api/backup-status/index.js`](../../api/backup-status/index.js)
+- [`../api/local-export/index.js`](../../api/local-export/index.js)
+- [`../api/local-import/index.js`](../../api/local-import/index.js)
+- [`../api/audit-log/index.js`](../../api/audit-log/index.js)
+- [`../api/cross-platform/storage-drivers/index.js`](../../api/cross-platform/storage-drivers/index.js)
+- [`../api/_shared/backup-utils.js`](../../api/_shared/backup-utils.js)
+- [`../api/_shared/local-export-import.js`](../../api/_shared/local-export-import.js)
+- [`../api/_shared/storage-encryption.js`](../../api/_shared/storage-encryption.js)
+- [`../api/_shared/history-quota.js`](../../api/_shared/history-quota.js)
 
 ## Shared helpers to reuse
 - `fetchSettings`, `fetchSettingsValue`, `fetchSettingsValueWithMeta`, `upsertSettings`, `upsertSetting`
 - `fetchStorageConfiguration`, `saveStorageConfiguration`, `deleteStorageConfiguration`, `reconnectStorageConfiguration`, `testStorageConnection`
 - `useDocuments` for document flows
-- `getStorageDriver` and provider adapters under [`../api/cross-platform/storage-drivers/`](../api/cross-platform/storage-drivers/). S3/R2 drivers expose `exists(path)` for cheap server-side object availability checks without downloading the file.
-- Backup helpers in [`../api/_shared/backup-utils.js`](../api/_shared/backup-utils.js)
-- Local export/import helpers in [`../api/_shared/local-export-import.js`](../api/_shared/local-export-import.js); use the explicit table allow-list and import sanitizer rather than ad hoc table iteration.
-- `ensureCapacity`, `computeApproxEntryBytes` in [`../api/_shared/history-quota.js`](../api/_shared/history-quota.js) — call before appending to versioned Settings keys; currently observe-only (logs when quota would be exceeded, never blocks)
+- `getStorageDriver` and provider adapters under [`../api/cross-platform/storage-drivers/`](../../api/cross-platform/storage-drivers/). S3/R2 drivers expose `exists(path)` for cheap server-side object availability checks without downloading the file.
+- Backup helpers in [`../api/_shared/backup-utils.js`](../../api/_shared/backup-utils.js)
+- Local export/import helpers in [`../api/_shared/local-export-import.js`](../../api/_shared/local-export-import.js); use the explicit table allow-list and import sanitizer rather than ad hoc table iteration.
+- `ensureCapacity`, `computeApproxEntryBytes` in [`../api/_shared/history-quota.js`](../../api/_shared/history-quota.js) — call before appending to versioned Settings keys; currently observe-only (logs when quota would be exceeded, never blocks)
 - `normalizeExternalHttpUrl`
 
 ## Known patterns / do not reinvent

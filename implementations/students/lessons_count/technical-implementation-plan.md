@@ -36,9 +36,9 @@ Do not silently diverge.
 Every implementer must read these files before editing code:
 
 - `AGENTS.md`
-- `agents-docs/40-students-and-clients.md`
-- `agents-docs/60-calendar-and-sessions.md`
-- `agents-docs/80-finance-billing-payroll.md`
+- `docs/project-rules/40-students-and-clients.md`
+- `docs/project-rules/60-calendar-and-sessions.md`
+- `docs/project-rules/80-finance-billing-payroll.md`
 - `implementations/finance/ledger/finance-workflow-contract-v1.md`
 - `src/features/students/components/StudentBillingWorkspace.jsx`
 - `api/billing/index.js`
@@ -498,8 +498,8 @@ Goal:
 
 Update required:
 
-- `agents-docs/80-finance-billing-payroll.md`
-- possibly `agents-docs/60-calendar-and-sessions.md` if new cross-domain coupling is introduced
+- `docs/project-rules/80-finance-billing-payroll.md`
+- possibly `docs/project-rules/60-calendar-and-sessions.md` if new cross-domain coupling is introduced
 
 ---
 
@@ -580,7 +580,7 @@ Every plan correction must be recorded here.
 |---|---|---|---|---|---|
 | 2026-04-27 | initial | created | Initial plan created | Planning baseline | `api/_shared/commitment-behavior.js`, `api/_shared/hmo.js`, `src/features/students/components/StudentBillingWorkspace.jsx` |
 | 2026-04-27 | 0 | implementation_discovery | Confirmed the currently active student billing surfaces do not yet render package/subscription lesson buckets, while `HmoAuthorizationManager` shows only `authorized_lessons`. Live entitlement counting therefore must be introduced in backend shared helpers first and then exposed explicitly to the HMO/student pages. | Repo audit of the active student pages and billing endpoints showed package/subscription counts are not surfaced in the modern UI, but stale commitment runtime logic still exists and must be corrected for future/current consumers. | `src/features/students/components/HmoAuthorizationManager.jsx`, `src/features/students/components/StudentBillingWorkspace.jsx`, `src/features/students/components/StudentOverviewTab.jsx`, `api\hmo-authorizations\index.js`, `api\_shared\commitment-behavior.js`, `api\_shared\BillingLedgerService.js` |
-| 2026-04-27 | 4/5/6/8/9 | implementation_discovery | Implemented HMO lesson-count buckets end-to-end first because that is the only active student detail surface currently exposing lesson-balance semantics. Package/subscription runtime helpers were upgraded for future/current compatibility, but no active package UI surface was found in the modern student pages during this batch. | The repo's active student pages load HMO authorization data directly and do not currently render package/subscription entitlement cards, so HMO needed the first end-to-end correction while commitment runtime was prepared as shared infrastructure. | `api\_shared\commitment-behavior.js`, `api\_shared\BillingLedgerService.js`, `api\hmo-authorizations\index.js`, `src\features\students\components\HmoAuthorizationManager.jsx`, `api\_shared\BillingLedgerService.test.js`, `agents-docs\80-finance-billing-payroll.md`, `agents-docs\40-students-and-clients.md` |
+| 2026-04-27 | 4/5/6/8/9 | implementation_discovery | Implemented HMO lesson-count buckets end-to-end first because that is the only active student detail surface currently exposing lesson-balance semantics. Package/subscription runtime helpers were upgraded for future/current compatibility, but no active package UI surface was found in the modern student pages during this batch. | The repo's active student pages load HMO authorization data directly and do not currently render package/subscription entitlement cards, so HMO needed the first end-to-end correction while commitment runtime was prepared as shared infrastructure. | `api\_shared\commitment-behavior.js`, `api\_shared\BillingLedgerService.js`, `api\hmo-authorizations\index.js`, `src\features\students\components\HmoAuthorizationManager.jsx`, `api\_shared\BillingLedgerService.test.js`, `docs/project-rules\80-finance-billing-payroll.md`, `docs/project-rules\40-students-and-clients.md` |
 | 2026-04-27 | 7/8 | clarification | Locked the cancellation edge-case behavior for HMO to match the approved rule set: `cancelled_student` and `cancelled_clinic` do not consume or reserve HMO entitlement, even if the student-side billing policy later charges privately. Added regression coverage and explanatory UI copy. | Human review clarified that HMOs should not lose entitlement on student/clinic cancellations, matching the existing approved no-show rule. | `api\_shared\BillingLedgerService.test.js`, `src\features\students\components\HmoAuthorizationManager.jsx` |
 | 2026-04-27 | 3/8 | implementation_discovery | Implemented and tested live package/subscription lesson-count semantics in the shared commitment runtime even though no active modern commitment entitlement card was found in the current student pages. This keeps future/current compatibility consumers from staying on stale entry-based counting. | The legacy `buildCommitmentRuntime(...)` path still existed and could otherwise continue returning stale `remaining_lessons` values for package/subscription consumers. | `api\_shared\commitment-behavior.js`, `api\_shared\BillingLedgerService.test.js` |
 

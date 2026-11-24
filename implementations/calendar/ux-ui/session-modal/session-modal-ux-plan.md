@@ -88,7 +88,7 @@ Fix these first. Each one is small and independently shippable. Ranked by user i
 - Decision: `Do` · Status: `Deferred to the redesign` (error placement changes with the new layout)
 
 ### A9. Cancel dialog's financial rows ignore the server preview — `Confirmed (code)`
-- The "הלקוח/ה יחויב / המדריך/ה יקבל שכר" rows are computed from client-side org policy (`:2693-2716`). That contradicts the server-backed-preview contract in `agents-docs/60-calendar-and-sessions.md` and ignores HMO/grace nuances.
+- The "הלקוח/ה יחויב / המדריך/ה יקבל שכר" rows are computed from client-side org policy (`:2693-2716`). That contradicts the server-backed-preview contract in `docs/project-rules/60-calendar-and-sessions.md` and ignores HMO/grace nuances.
 - **Fix**: render from the `preview-cancel-instance` payload. Extend `buildCancelInstancePreview` with per-participant billing/payroll impacts if they're missing. Verify what it returns first.
 - Decision: `Do` · Status: `Deferred to the redesign` (the cancel dialog is rebuilt there)
 
@@ -163,7 +163,7 @@ The dialog holds ~40 `useState`s and passes ~45 props into the roster, including
 - `utils/lessonDialogModel.js`: pure helpers (display instance/participants, labels, workflow decisions, conflict diff lines, impact grouping) plus `node --test` coverage.
 - Hooks: `useLessonAttendance`, `useLessonReminders`, `useLessonEdit`, `useLessonCancel`, `useLessonSessionReports`.
 - Components: `LessonDialogHeader`, `LessonOpenActionsStrip`, `LessonEditForm`, `LessonCancelDialog`, `LessonFooterActions`.
-- No UX change in this step. Update `agents-docs/60-calendar-and-sessions.md` with the new module map (AGENTS.md "keep the hub alive").
+- No UX change in this step. Update `docs/project-rules/60-calendar-and-sessions.md` with the new module map (AGENTS.md "keep the hub alive").
 
 ---
 
@@ -193,7 +193,7 @@ Owner answers, 2026-09-14. An interactive prototype of the approved direction is
 - **D3** Remove status from edit mode → **Approved**.
 - **D4** Skip the closure rewrite when only `evaluated_at` changed → **Approved**.
 - **D5** Instructor view of locks/closure → **Pending**. The owner leans toward "doesn't matter to them". The prototype's "צפייה בתור מדריך/ה" toggle shows the reduced view.
-- **D6** Doc drift: `AGENTS.md` / `agents-docs/00-core-rules.md` say instructors are self-scoped unless `admin`/`owner`, but frontend and backend both treat `office` as manage-all (`isAdminOrOffice`). Update the docs?
+- **D6** Doc drift: `AGENTS.md` / `docs/project-rules/00-core-rules.md` say instructors are self-scoped unless `admin`/`owner`, but frontend and backend both treat `office` as manage-all (`isAdminOrOffice`). Update the docs?
 
 ## Prototype Feedback — Round 1 (2026-09-14)
 
@@ -274,7 +274,7 @@ Uncommitted, on the working branch.
   - No existing scenario touched the changed dialog UI.
   - `setup.js` now probes `Services.report_form_id`, so `node setup.js` re-applies the schema when the local DB is missing the Session Reports columns. The local tester DB was stale and made `GET /api/services` fail with `failed_to_load_services`. It was brought up to date by applying `SETUP_SQL_SCRIPT` (0 SQL errors).
 
-**Docs:** `agents-docs/60-calendar-and-sessions.md` now records the closure-sync write rule and the dialog's refresh-versions-after-own-writes rule.
+**Docs:** `docs/project-rules/60-calendar-and-sessions.md` now records the closure-sync write rule and the dialog's refresh-versions-after-own-writes rule.
 
 **Found during Phase 1 (out of scope, spun off as a separate task):**
 - `evaluateLessonClosureState` treats instructor pay as resolved only via `payroll_run` locks, but no production code creates them. Only claim-batch locks are written (`BillingLedgerService.js:~2527`), plus the debug UAT tool.
@@ -294,7 +294,7 @@ The refactor is behavior-preserving.
 | De-duplication (A12) | `LockedCorrectionPanel.jsx` imports `getDisplayInstance` / `getDisplayParticipants` from the model instead of keeping its own copies. |
 | Hooks | `src/features/calendar/hooks/useLessonDialogData.js` holds `useLessonSessionReports`, `useLessonFinancePolicies`, `useAbsenceRequirements` (keyed results replace four manual resets) and `useLessonVersions`. Wired in by an assert-every-match script. |
 | Size | `LessonInstanceDialog.jsx`: 2,760 → 2,274 lines. |
-| Docs | `agents-docs/60` lists the new building blocks. |
+| Docs | `docs/project-rules/60` lists the new building blocks. |
 
 | Tests | `tests/lesson-dialog-model.test.js`: 89 characterization tests for the model, wired into `test:finance-calendar`. |
 

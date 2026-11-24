@@ -45,10 +45,10 @@ Relevant current source areas:
 - `api/_shared/lesson-instance-status.js`
 
 Implementation rules:
-- Read `agents-docs/60-calendar-and-sessions.md` before calendar work.
+- Read `docs/project-rules/60-calendar-and-sessions.md` before calendar work.
 - Calendar writes must preserve org scope, membership checks, instructor self-scope, expected-version conflict handling, locked-state handling, audit logging, billing sync, payroll sync, and workflow closure sync.
 - Risky UX changes should use existing backend helpers before creating new patterns.
-- If a new shared helper, architectural pattern, or cross-domain side effect is created, update the relevant `agents-docs` file.
+- If a new shared helper, architectural pattern, or cross-domain side effect is created, update the relevant `docs/project-rules` file.
 
 ## UX Principles
 

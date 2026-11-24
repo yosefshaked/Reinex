@@ -6,28 +6,28 @@
 - Org selection, active org, or auth lifecycle changes.
 
 ## Load these files first
-- [`../src/main.jsx`](../src/main.jsx)
-- [`../src/runtime/config.js`](../src/runtime/config.js)
-- [`../src/context/SupabaseContext.jsx`](../src/context/SupabaseContext.jsx)
-- [`../src/lib/supabase-manager.js`](../src/lib/supabase-manager.js)
-- [`../src/auth/AuthContext.jsx`](../src/auth/AuthContext.jsx)
-- [`../src/auth/AuthGuard.jsx`](../src/auth/AuthGuard.jsx)
-- [`../src/account/AccountContext.jsx`](../src/account/AccountContext.jsx)
-- [`../src/org/OrgContext.jsx`](../src/org/OrgContext.jsx)
-- [`../src/pages/Login.jsx`](../src/pages/Login.jsx)
-- [`../src/pages/OrgSelection.jsx`](../src/pages/OrgSelection.jsx)
-- [`../src/pages/AccountSetupPage.jsx`](../src/pages/AccountSetupPage.jsx)
-- [`../src/pages/AccountReactivationPage.jsx`](../src/pages/AccountReactivationPage.jsx)
-- [`../src/api/organizations.js`](../src/api/organizations.js)
+- [`../src/main.jsx`](../../src/main.jsx)
+- [`../src/runtime/config.js`](../../src/runtime/config.js)
+- [`../src/context/SupabaseContext.jsx`](../../src/context/SupabaseContext.jsx)
+- [`../src/lib/supabase-manager.js`](../../src/lib/supabase-manager.js)
+- [`../src/auth/AuthContext.jsx`](../../src/auth/AuthContext.jsx)
+- [`../src/auth/AuthGuard.jsx`](../../src/auth/AuthGuard.jsx)
+- [`../src/account/AccountContext.jsx`](../../src/account/AccountContext.jsx)
+- [`../src/org/OrgContext.jsx`](../../src/org/OrgContext.jsx)
+- [`../src/pages/Login.jsx`](../../src/pages/Login.jsx)
+- [`../src/pages/OrgSelection.jsx`](../../src/pages/OrgSelection.jsx)
+- [`../src/pages/AccountSetupPage.jsx`](../../src/pages/AccountSetupPage.jsx)
+- [`../src/pages/AccountReactivationPage.jsx`](../../src/pages/AccountReactivationPage.jsx)
+- [`../src/api/organizations.js`](../../src/api/organizations.js)
 
 ## Shared helpers to reuse
-- `loadRuntimeConfig`, `activateConfig`, `getCurrentConfig`, `waitConfigReady` in [`../src/runtime/config.js`](../src/runtime/config.js)
-- `initializeAuthClient`, `getAuthClient` in [`../src/lib/supabase-manager.js`](../src/lib/supabase-manager.js)
+- `loadRuntimeConfig`, `activateConfig`, `getCurrentConfig`, `waitConfigReady` in [`../src/runtime/config.js`](../../src/runtime/config.js)
+- `initializeAuthClient`, `getAuthClient` in [`../src/lib/supabase-manager.js`](../../src/lib/supabase-manager.js)
 - `useSupabase`, `useAuth`, `useAccount`, `useOrg`
-- Org creation wrapper in [`../src/api/organizations.js`](../src/api/organizations.js)
+- Org creation wrapper in [`../src/api/organizations.js`](../../src/api/organizations.js)
 
 ## Known patterns / do not reinvent
-- App boot starts in [`../src/main.jsx`](../src/main.jsx); auth/org providers are part of the main route tree.
+- App boot starts in [`../src/main.jsx`](../../src/main.jsx); auth/org providers are part of the main route tree.
 - Single-DB auth client is initialized from runtime config once; do not create extra global Supabase auth clients.
 - `SupabaseContext` exposes one runtime client for both auth and data access.
 - `AccountProvider` is the canonical runtime source for the signed-in user's personal profile/setup state; load personal-account state through it instead of duplicating `/api/me` calls inside layout code.
@@ -38,7 +38,7 @@
 - Disabled accounts are enforced at the app-account layer: authenticated disabled users are redirected to `/account/reactivate` until they reactivate themselves.
 - Auth emails should not be sent directly from the frontend runtime client. Invitation and password-reset emails should go through backend endpoints that use Brevo for delivery, while the frontend continues to use Supabase only for session/token verification and password update.
 - `organizations.setup_completed` is intentionally retained as an onboarding/readiness flag. Do not remove it as "legacy" even in single-DB mode.
-- Frontend API calls carry org context using `x-org-id` (via [`../src/lib/api-client.js`](../src/lib/api-client.js)).
+- Frontend API calls carry org context using `x-org-id` (via [`../src/lib/api-client.js`](../../src/lib/api-client.js)).
 - If you need org-aware frontend data, use `useOrg()` and existing wrappers instead of rebuilding org/session lookup.
 - Personal account management is a first-class header action under `/account`; org switching moved to the logo click target rather than living in org settings.
 - The top-header account button is user-scoped, not org-scoped. Keep personal settings separate from organization settings and org switching.

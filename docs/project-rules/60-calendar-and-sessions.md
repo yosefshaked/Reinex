@@ -5,49 +5,49 @@
 - Lesson instances, templates, overrides, attendance, corrections, conflicts, or pending reports work.
 
 ## Load these files first
-- [`../src/features/calendar/pages/CalendarPage.jsx`](../src/features/calendar/pages/CalendarPage.jsx)
-- [`../src/features/calendar/hooks/useCalendar.js`](../src/features/calendar/hooks/useCalendar.js)
-- [`../src/features/calendar/hooks/useTemplates.js`](../src/features/calendar/hooks/useTemplates.js)
-- [`../src/features/calendar/components/`](../src/features/calendar/components/)
-- [`../src/features/calendar/utils/`](../src/features/calendar/utils/)
-- [`../src/features/sessions/pages/PendingReportsPage.jsx`](../src/features/sessions/pages/PendingReportsPage.jsx)
-- [`../src/features/sessions/components/NewSessionModal.jsx`](../src/features/sessions/components/NewSessionModal.jsx)
-- [`../src/features/sessions/components/ReportView.jsx`](../src/features/sessions/components/ReportView.jsx)
-- [`../src/features/sessions/config/session-reports-permission.js`](../src/features/sessions/config/session-reports-permission.js)
-- [`../api/calendar/index.js`](../api/calendar/index.js)
-- [`../api/calendar-attendance/index.js`](../api/calendar-attendance/index.js)
-- [`../api/calendar-corrections/index.js`](../api/calendar-corrections/index.js)
-- [`../api/calendar-conflicts/index.js`](../api/calendar-conflicts/index.js)
-- [`../api/lesson-instances/index.js`](../api/lesson-instances/index.js)
-- [`../api/lesson-templates/index.js`](../api/lesson-templates/index.js)
-- [`../api/lesson-template-overrides/index.js`](../api/lesson-template-overrides/index.js)
-- [`../api/session-reports/index.js`](../api/session-reports/index.js)
-- [`../api/_shared/BillingLedgerService.js`](../api/_shared/BillingLedgerService.js)
-- [`../api/_shared/calendar-editing.js`](../api/_shared/calendar-editing.js)
-- [`../api/_shared/calendar-workflow.js`](../api/_shared/calendar-workflow.js)
-- [`../api/_shared/calendar-corrections.js`](../api/_shared/calendar-corrections.js)
-- [`../api/_shared/calendar-workflow-decisions.js`](../api/_shared/calendar-workflow-decisions.js)
-- [`../api/_shared/lesson-instance-status.js`](../api/_shared/lesson-instance-status.js)
-- [`../api/_shared/session-metadata.js`](../api/_shared/session-metadata.js)
-- [`../api/_shared/session-reports-guards.js`](../api/_shared/session-reports-guards.js)
+- [`../src/features/calendar/pages/CalendarPage.jsx`](../../src/features/calendar/pages/CalendarPage.jsx)
+- [`../src/features/calendar/hooks/useCalendar.js`](../../src/features/calendar/hooks/useCalendar.js)
+- [`../src/features/calendar/hooks/useTemplates.js`](../../src/features/calendar/hooks/useTemplates.js)
+- [`../src/features/calendar/components/`](../../src/features/calendar/components/)
+- [`../src/features/calendar/utils/`](../../src/features/calendar/utils/)
+- [`../src/features/sessions/pages/PendingReportsPage.jsx`](../../src/features/sessions/pages/PendingReportsPage.jsx)
+- [`../src/features/sessions/components/NewSessionModal.jsx`](../../src/features/sessions/components/NewSessionModal.jsx)
+- [`../src/features/sessions/components/ReportView.jsx`](../../src/features/sessions/components/ReportView.jsx)
+- [`../src/features/sessions/config/session-reports-permission.js`](../../src/features/sessions/config/session-reports-permission.js)
+- [`../api/calendar/index.js`](../../api/calendar/index.js)
+- [`../api/calendar-attendance/index.js`](../../api/calendar-attendance/index.js)
+- [`../api/calendar-corrections/index.js`](../../api/calendar-corrections/index.js)
+- [`../api/calendar-conflicts/index.js`](../../api/calendar-conflicts/index.js)
+- [`../api/lesson-instances/index.js`](../../api/lesson-instances/index.js)
+- [`../api/lesson-templates/index.js`](../../api/lesson-templates/index.js)
+- [`../api/lesson-template-overrides/index.js`](../../api/lesson-template-overrides/index.js)
+- [`../api/session-reports/index.js`](../../api/session-reports/index.js)
+- [`../api/_shared/BillingLedgerService.js`](../../api/_shared/BillingLedgerService.js)
+- [`../api/_shared/calendar-editing.js`](../../api/_shared/calendar-editing.js)
+- [`../api/_shared/calendar-workflow.js`](../../api/_shared/calendar-workflow.js)
+- [`../api/_shared/calendar-corrections.js`](../../api/_shared/calendar-corrections.js)
+- [`../api/_shared/calendar-workflow-decisions.js`](../../api/_shared/calendar-workflow-decisions.js)
+- [`../api/_shared/lesson-instance-status.js`](../../api/_shared/lesson-instance-status.js)
+- [`../api/_shared/session-metadata.js`](../../api/_shared/session-metadata.js)
+- [`../api/_shared/session-reports-guards.js`](../../api/_shared/session-reports-guards.js)
 
 ## Shared helpers to reuse
 - Lesson dialog building blocks (reuse them instead of re-deriving inside components):
-  - [`../src/features/calendar/utils/lessonDialogModel.js`](../src/features/calendar/utils/lessonDialogModel.js): pure helpers. Display-state derivation with correction overlays (`getDisplayInstance`, `getDisplayParticipants`), Hebrew status/decision/reason labels, `resolveMutationError` (API code → Hebrew), `buildConflictLines`, `groupPreviewImpacts`, scheduling-override metadata, and the default finance policies. It has no React and no `@/` aliases, so `node:test` can import it (`tests/lesson-dialog-model.test.js`).
-  - [`../src/features/calendar/hooks/useLessonDialogData.js`](../src/features/calendar/hooks/useLessonDialogData.js): `useLessonSessionReports`, `useLessonFinancePolicies`, `useAbsenceRequirements` (results keyed by participant+status; never reset them by hand) and `useLessonVersions` (fresh versions after the dialog's own writes).
+  - [`../src/features/calendar/utils/lessonDialogModel.js`](../../src/features/calendar/utils/lessonDialogModel.js): pure helpers. Display-state derivation with correction overlays (`getDisplayInstance`, `getDisplayParticipants`), Hebrew status/decision/reason labels, `resolveMutationError` (API code → Hebrew), `buildConflictLines`, `groupPreviewImpacts`, scheduling-override metadata, and the default finance policies. It has no React and no `@/` aliases, so `node:test` can import it (`tests/lesson-dialog-model.test.js`).
+  - [`../src/features/calendar/hooks/useLessonDialogData.js`](../../src/features/calendar/hooks/useLessonDialogData.js): `useLessonSessionReports`, `useLessonFinancePolicies`, `useAbsenceRequirements` (results keyed by participant+status; never reset them by hand) and `useLessonVersions` (fresh versions after the dialog's own writes).
   - Dialog pieces (session-modal v4): `LessonDialogHeader.jsx` (service · date/time · instructor, tabs on the bottom edge), `LessonParticipantRoster.jsx` (list rows: status pill, HMO tooltip, reminder bell, report signal, ✓ / ✕ / ⋯ with `data-participant-row` / `data-mark-attended` hooks for tests), `LessonImpactStrip.jsx` (the one-line confirm for **every** participant status change, fed by the server preview through `summarizePreviewImpacts`; amounts use Hebrew verbs, never +/- signs) and `LessonHistoryTab.jsx` (`GET lesson-instances/{id}?view=history`). Participant status labels/tones come from `PARTICIPANT_STATUS_DISPLAY` in the model; don't add local copies.
 - HMO closure rule: `calendar-attendance` stores `hmo_claim.decision = 'pending'` for **every** attended participant, so `evaluateParticipantSettlement` never treats `pending` as "claim required". A claim is required only with an HMO ledger row (`hmo_provider_id`), an open `hmo_claim_submission` task, or an explicit `required` decision. Stored `workflow_state` is recalculated only when the lesson is written to, so a rule change leaves already-evaluated lessons stale until something re-syncs them. Re-sync them from the system-admin console (Admin Tools → Lesson closure re-sync, `lesson_closure_resync`). `syncLessonClosureState` is `planLessonClosureSync` (evaluate, no write) followed by `applyLessonClosurePlan` (org-scoped write, only when changed); reuse those two for any preview/apply flow.
 - `useCalendarInstances`, `useCalendarInstructors`
 - `useTemplates`, `useTemplateMutations`, `useTemplateOverrides`
-- Local date and adapter helpers in [`../src/features/calendar/utils/`](../src/features/calendar/utils/)
+- Local date and adapter helpers in [`../src/features/calendar/utils/`](../../src/features/calendar/utils/)
 - `fetchLessonMutationState`, `parseExpectedVersion`, `respondWithLockedMutation`, `respondWithVersionConflict`
 - `syncLessonClosureState`, correction helpers, lesson-status helpers
-- `enrichLessonInstancesWithHmoCoverage` in [`../api/_shared/calendar-hmo-coverage.js`](../api/_shared/calendar-hmo-coverage.js) for read-only calendar response enrichment of participant HMO coverage context. `hmo_coverage` also carries display-only `authorization_reference`, `authorized_lessons`, `expires_at` (null when no authorization applies); billing never reads them.
-- `buildLessonHistoryEvents` / `collectLessonHistoryReferenceIds` in [`../api/_shared/lesson-history.js`](../api/_shared/lesson-history.js): pure mapping from lesson/participant `audit_log` rows + `calendar_instance_corrections` rows to the lesson dialog history contract (`GET /api/lesson-instances/{id}?view=history`, admin/office only). It merges the duplicate rows one action writes (control `logAuditEvent` + tenant `logTenantAuditEvent` + attendance status-transition rows). New lesson/participant audit event types must be added to its mapping, or they surface as a generic `other` entry.
-- `cancelLessonInstanceWithParticipants`, `completeLessonInstanceWithParticipants`, and `cancelSelectedScheduledParticipantsAndReconcileInstance` in [`../api/_shared/lesson-instance-status.js`](../api/_shared/lesson-instance-status.js) are RPC wrappers over org-scoped SQL functions and must always receive `orgId` alongside `instanceId`
+- `enrichLessonInstancesWithHmoCoverage` in [`../api/_shared/calendar-hmo-coverage.js`](../../api/_shared/calendar-hmo-coverage.js) for read-only calendar response enrichment of participant HMO coverage context. `hmo_coverage` also carries display-only `authorization_reference`, `authorized_lessons`, `expires_at` (null when no authorization applies); billing never reads them.
+- `buildLessonHistoryEvents` / `collectLessonHistoryReferenceIds` in [`../api/_shared/lesson-history.js`](../../api/_shared/lesson-history.js): pure mapping from lesson/participant `audit_log` rows + `calendar_instance_corrections` rows to the lesson dialog history contract (`GET /api/lesson-instances/{id}?view=history`, admin/office only). It merges the duplicate rows one action writes (control `logAuditEvent` + tenant `logTenantAuditEvent` + attendance status-transition rows). New lesson/participant audit event types must be added to its mapping, or they surface as a generic `other` entry.
+- `cancelLessonInstanceWithParticipants`, `completeLessonInstanceWithParticipants`, and `cancelSelectedScheduledParticipantsAndReconcileInstance` in [`../api/_shared/lesson-instance-status.js`](../../api/_shared/lesson-instance-status.js) are RPC wrappers over org-scoped SQL functions and must always receive `orgId` alongside `instanceId`
 - `useSessionReportsEnabled`, `openSessionReportModal`
 - `findBlockingReportParticipantIds`, `hasBlockingReportForParticipants`
-- `normalizeWorkflowDecision`, `readParticipantWorkflowMetadata`, `shouldParticipantTriggerInstructorCompensation` in [`../api/_shared/calendar-workflow-decisions.js`](../api/_shared/calendar-workflow-decisions.js)
+- `normalizeWorkflowDecision`, `readParticipantWorkflowMetadata`, `shouldParticipantTriggerInstructorCompensation` in [`../api/_shared/calendar-workflow-decisions.js`](../../api/_shared/calendar-workflow-decisions.js)
 
 ## Known patterns / do not reinvent
 - Calendar writes must enforce membership scope and instructor self-scope for non-admin users.
@@ -59,14 +59,14 @@
 - External service drag-to-template-manager follows the same pattern: drag opens the existing add-template dialog prefilled with service/instructor/day/time, and the API remains responsible for final validation and service-derived duration.
 - Service catalog duration changes do not retroactively mutate already-created lesson instances. They affect only future instance creation and explicit service changes during instance editing.
 - Manual template generation must resolve `lesson_participants.client_profile_id` from `students.client_profile_id` during proposal building, not only at apply time; preview and apply must follow the same participant-validity rules.
-- Manual template generation must treat template `target_date` + `time_of_day` as the org's local time (`localDateTimeToUtc` in [`../api/_shared/local-time.js`](../api/_shared/local-time.js)) when creating or comparing `lesson_instances.datetime_start`; never compare or insert using raw naive timestamps. See "Dates and time zones" in [`00-core-rules.md`](00-core-rules.md).
-- Clock changes (daylight saving): a lesson may not START in a skipped hour — the calendar sends `start_local_date` + `start_local_time` with `datetime_start` and `api/calendar` (create/update/preview) and `POST api/lesson-instances` refuse it with 422 `lesson_time_skipped_by_clock_change`; template generation skips that one occurrence and reports it as a `clock_change_skipped_time` conflict; a repeated hour is saved at the first occurrence with a notice; the day/week grid draws non-interactive bands over both intervals. Rules and helpers: [`../api/_shared/clock-change-rules.js`](../api/_shared/clock-change-rules.js); see "Dates and time zones" in [`00-core-rules.md`](00-core-rules.md).
+- Manual template generation must treat template `target_date` + `time_of_day` as the org's local time (`localDateTimeToUtc` in [`../api/_shared/local-time.js`](../../api/_shared/local-time.js)) when creating or comparing `lesson_instances.datetime_start`; never compare or insert using raw naive timestamps. See "Dates and time zones" in [`00-core-rules.md`](00-core-rules.md).
+- Clock changes (daylight saving): a lesson may not START in a skipped hour — the calendar sends `start_local_date` + `start_local_time` with `datetime_start` and `api/calendar` (create/update/preview) and `POST api/lesson-instances` refuse it with 422 `lesson_time_skipped_by_clock_change`; template generation skips that one occurrence and reports it as a `clock_change_skipped_time` conflict; a repeated hour is saved at the first occurrence with a notice; the day/week grid draws non-interactive bands over both intervals. Rules and helpers: [`../api/_shared/clock-change-rules.js`](../../api/_shared/clock-change-rules.js); see "Dates and time zones" in [`00-core-rules.md`](00-core-rules.md).
 - Manual template generation apply is intentionally partial-success, not all-or-nothing. The backend must return a structured actionable issue list with student/template identifiers and retry metadata so the frontend can persist a repair review and offer retry-failed-only flows.
 - The manual generation UI must gate every apply behind a fresh preview for the exact same scope. If the scope changes, the previous preview is stale and apply must be disabled until preview runs again.
 - Manual generation opens on the next Sunday-Saturday week by default, independent of the currently selected calendar date. Generation warnings/issues must render user-facing Hebrew labels and person/service names; never expose raw UUIDs or backend enum strings as primary frontend text.
 - Manual generation must not warn only because no HMO authorization exists for a student/service. Missing HMO authorization means regular/private billing unless existing HMO finance data is present but inactive, out of range, conflicting, exhausted, or malformed.
 - Repair/retry review state for manual generation lives in frontend session storage; users may navigate to student or template screens to fix issues and then return to the saved review without losing the issue list.
-- Version conflict and locked-state payloads already exist in [`../api/_shared/calendar-editing.js`](../api/_shared/calendar-editing.js).
+- Version conflict and locked-state payloads already exist in [`../api/_shared/calendar-editing.js`](../../api/_shared/calendar-editing.js).
 - Billing is centralized. Calendar endpoints must not compute lesson prices or write `ledger_transactions` directly; they call `BillingLedgerService.syncLessonInstanceCharges(...)` or another service method after the lesson mutation succeeds.
 - Attendance changes, lesson edits, and HMO authorization changes are coupled to ledger resync. Skipping the ledger service will create billing drift even if the lesson mutation succeeds.
 - Calendar UI may display scheduled HMO-covered participants as "expected claim" from read-only coverage context, but claim-required closure state remains ledger/task-driven after attendance.
@@ -80,7 +80,7 @@
 - Templates and date-specific overrides are separate resources; do not collapse them into one model.
 - Template management is rendered as a recurring weekly FullCalendar resource-timegrid view, not as real dated lesson instances. Use a fixed synthetic week/day model for display only; persisted templates still store `day_of_week` + `time_of_day`, and add/edit actions must continue through the template dialogs and `lesson-templates` API.
 - Template management defaults to week view. Its calendar hides instructors without availability in the current view by default, but keeps instructors visible when they have visible templates there. The "show unavailable" and "show inactive" toggles live under template display options.
-- Instructor WhatsApp schedule messages are built by [`../src/features/calendar/utils/instructor-whatsapp.js`](../src/features/calendar/utils/instructor-whatsapp.js). Keep lesson rows grouped by service, use "משתתפים" terminology, and let breaks interrupt service groups so the message remains scannable.
+- Instructor WhatsApp schedule messages are built by [`../src/features/calendar/utils/instructor-whatsapp.js`](../../src/features/calendar/utils/instructor-whatsapp.js). Keep lesson rows grouped by service, use "משתתפים" terminology, and let breaks interrupt service groups so the message remains scannable.
 - Template creation must not silently auto-move an unavailable day/time to another available slot. Calendar slot selection and service drag should block immediately on unavailable instructor days/service windows and offer a path to edit instructor availability; dialogs may show validation but must not rewrite the user's selected day/time.
 - Template creation UI should also warn/block before submit when the selected instructor/day/time overlaps an existing active template; the backend remains the final source of truth for overlap enforcement.
 - Cancellation modal uses a server-backed preview action (`PUT /api/calendar/instances` with `action: 'preview-cancel-instance'`) before submitting cancellation, so UI impact text is based on current server state.

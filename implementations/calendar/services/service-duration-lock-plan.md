@@ -104,7 +104,7 @@ Small details:
 - If staff want old instances updated, they must enter and edit the relevant instances manually.
 
 ### 5. Documentation update
-File: `agents-docs/60-calendar-and-sessions.md`
+File: `docs/project-rules/60-calendar-and-sessions.md`
 
 Implemented:
 - Added the calendar invariant that duration is service-derived in normal create/edit flows.
