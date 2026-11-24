@@ -13,7 +13,7 @@ Read this block first when you continue this plan in a new conversation.
   - `docs/plans/index.csv` and `npm run lint:plans` exist.
   - The raw evidence is outside the repository, in `$env:TEMP\reinex-restructure\stage0\`, `stage1\`, `stage2\` and `stage3\`.
   - Nothing has been pushed; the owner decides on the push together with Claude.
-- **Last update:** 2026-11-24. F2 review completed: the shared error display, the docs separation rule, the support search proof and the six wrapper files.
+- **Last update:** 2026-11-24. F2 refinements: the public code stays in the title next to the support code, errors are kept to the display on the F2 paths, server text is shown by its source, and a real-component check was done.
 
 Each stage appends to the [Progress log](#progress-log), ticks its subtasks and records answers under [Open decisions](#open-decisions). Keep this block at five bullets. It is a pointer, not a history.
 
@@ -2514,6 +2514,58 @@ Append one entry per stage. Newest last.
     - `npm run build`: exit 0, with 276 untracked 5xx, 21 SQL warnings and 3560 modules. The type check first reported 3088 issues, 7 of them new from my own JSDoc and component props; after fixing those, `npm run lint:types` reports 3075, with no new issue against the previous run.
   - **Still open:** F3 (blocking error tracking); #63 (the follow-up plan); the Hebrew rule on paths outside F2 (`OrgContext.jsx` "An API error occurred", `ImpersonateUserDialog`, screens that show `error.message` directly); the unrelated note in `00` that applying migrations from CI "is planned".
   - **Next:** joint review, then push the local commits to #64, then F3.
+
+- **2026-11-24, F2 refinements after review** (owner: a consistent product experience for unmapped errors). Nothing was pushed.
+  - **Docs:**
+    - `AGENTS.md` no longer gives the specific example "F2, done"; the general rule stays.
+    - `00` keeps today's migration procedure (by hand, in order, before the snapshot) and drops the statement that CI application is planned. The migration research stays deferred.
+    - `20` "Showing an error":
+      - a saved support code is an extra field, and the public code stays in the title;
+      - which server text may be shown is decided by its source;
+      - `withErrorContext` is attached at the `catch`, with `ErrorMessageText showDetails` at the display.
+    - `30`: no raw DB or provider text in a 4xx `message` either.
+  - **Gap 1, the support code hid the public code:**
+    - **Before:** a 500 with an unmapped public code and an `error_id` titled "הפעולה נכשלה…" without the code.
+    - **After:** `buildUserErrorMessage` and `describeError` keep `(public_code)` in the title, and the support code is a separate field. The copy has both rows.
+    - **Tests:** `error-support` (24 of 24). The dialog test that asserted the old replacement now asserts that the dedicated explanation stays, with the support code added.
+  - **Gap 2, errors turned into strings before the display:**
+    - **New:** `withErrorContext(error, { action, fallback })` carries the action and the wording on the error object. `ErrorMessageText` gains opt-in `showDetails`. `ErrorDetails` gains `message`, so the copied "הודעה" equals the text on screen.
+    - **Lesson dialog:** the student search and the cancel preview keep the object, the `Alert` shows the screen text, and `ErrorDetails` copies that same text. `resolveMutationError(error, fallback)` gets the action wording at 5 more sites (absence requirements, status update, both previews, lesson history). These still display a string.
+    - **Waiting list update:** both toasts use `toast.apiError` with the action and wording.
+    - **Other F2 sites now keep the object to the display:** Sidebar admin re-authentication, `MyPendingReportsCard`, `PendingReportsPage`, `StudentReportsTab`, `NewSessionModal` (context and submit, through `NewSessionForm`), and `LockedCorrectionPanel` (`{ text, error }`).
+  - **Gap 3, the Hebrew-character test:**
+    - **Before:** any server text containing a Hebrew letter was shown as it was, including mixed technical text.
+    - **After:** server text is shown only from a source the product controls:
+      - a code in `API_ERROR_MESSAGES`;
+      - the `message` of a 4xx;
+      - an error the app threw.
+
+      A 5xx text and `details`, `description` and `title` are never shown.
+    - **Regression tests:** mixed Hebrew and technical 5xx text, Hebrew in `details` of a 4xx, a deliberate 4xx Hebrew message, and an app-thrown Hebrew error. Each is checked on screen and in the copy.
+  - **Through a real product component** (`$env:TEMP\reinex-restructure\stage3\f2-component-check.txt`):
+    - **The component:** `StudentReportsTab`, unmodified, built with `vite build` under a temporary config. The config replaced only `useSupabase` and `useOrg` with stable test doubles, and `fetch` returned a controlled `/api/session-reports` response. Its own `catch`, `withErrorContext` and `ErrorMessageText showDetails` ran as in the product. The page was opened through the running Vite server and the files deleted afterwards.
+    - **Results:**
+      - Saved code: "טעינת הדוחות נכשלה. (failed_to_load_reports)" with the support code shown separately. The copy has the message, the action "טעינת דוחות התלמיד", the time, the status, the public code and the support code.
+      - No support code: the same title, and the copy has no support-code row.
+      - Mixed technical text: "(HTTP 500)", with nothing leaked on screen or in the copy.
+      - Network failure: the connection message.
+      - In every case the copied "הודעה" equalled the title on screen.
+    - **A problem in my own setup, fixed:** the first build created new context values on every render, which looped the component's effect. The real provider keeps them stable.
+  - **Checks:**
+    - `error-events`: 12 of 12. `error-support`: 24 of 24. `lesson-dialog-model`: 105 of 105.
+    - `npm run test:finance-calendar`: exit 0, 591 tests. One test was replaced against the previous identity.
+    - `lint:plans` and `lint:doc-links`: OK.
+    - `npx eslint .`: 723 files, 0 problems.
+    - `npm run build`: exit 0, with 276 untracked 5xx, 21 SQL warnings and 3560 modules.
+    - The type check first reported 16 new issues: my `ErrorMessageText` rewrite had dropped the prop defaults, which made the props required, and `toast.apiError` had a typing problem. After the fix, `npm run lint:types` reports 3064, against 3075 before, with no new issue.
+  - **Where the shared display is still pending** (outside the F2 paths, for a later pass):
+    - the dialog's secondary messages (the absence form, the status update result and the attendance preview), which show strings, so they have the wording but not the details;
+    - `LockedCorrectionPanel`'s "`code`: names" branch, which still shows a raw code as a prefix;
+    - the student and instructor document sections, which use `toast.error` with a string;
+    - `OrgContext.jsx` "An API error occurred";
+    - `ImpersonateUserDialog`'s English fallback;
+    - any screen that shows `error.message` directly.
+  - **Next:** joint review, then push to draft PR #64, then F3.
 
 ---
 
