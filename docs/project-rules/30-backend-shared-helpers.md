@@ -4,46 +4,74 @@
 - Any `api/*` endpoint change.
 - Any auth, membership, tenant resolution, validation, audit, settings, or storage helper change.
 
-## Load these files first
-- [`../api/_shared/http.js`](../../api/_shared/http.js)
-- [`../api/_shared/org-bff.js`](../../api/_shared/org-bff.js)
-- [`../api/_shared/supabase-admin.js`](../../api/_shared/supabase-admin.js)
-- [`../api/_shared/validation.js`](../../api/_shared/validation.js)
-- [`../api/_shared/audit-log.js`](../../api/_shared/audit-log.js)
-- [`../api/_shared/tenant-audit.js`](../../api/_shared/tenant-audit.js)
-- [`../api/_shared/settings-utils.js`](../../api/_shared/settings-utils.js)
-- [`../api/_shared/permissions-utils.js`](../../api/_shared/permissions-utils.js)
-- [`../api/_shared/storage-encryption.js`](../../api/_shared/storage-encryption.js)
-- [`../api/_shared/currency.js`](../../api/_shared/currency.js)
-- [`../api/_shared/csv.js`](../../api/_shared/csv.js)
-- [`../api/_shared/day-of-week.js`](../../api/_shared/day-of-week.js)
-- [`../api/_shared/time-grid.js`](../../api/_shared/time-grid.js)
-- [`../api/_shared/instructor-colors.js`](../../api/_shared/instructor-colors.js)
-- [`../api/_shared/metadata-utils.js`](../../api/_shared/metadata-utils.js)
-- [`../api/_shared/public-app-url.js`](../../api/_shared/public-app-url.js)
-- [`../api/_shared/account-profile.js`](../../api/_shared/account-profile.js)
+## Start here
+These files are an entry point, not a boundary: follow imports, callers (grep the symbol), dependencies, cross-domain effects and tests as far as the change needs.
+- [`../../api/_shared/http.js`](../../api/_shared/http.js)
+- [`../../api/_shared/org-bff.js`](../../api/_shared/org-bff.js)
+- [`../../api/_shared/supabase-admin.js`](../../api/_shared/supabase-admin.js)
+- [`../../api/_shared/validation.js`](../../api/_shared/validation.js)
+- [`../../api/_shared/audit-log.js`](../../api/_shared/audit-log.js)
+- [`../../api/_shared/tenant-audit.js`](../../api/_shared/tenant-audit.js)
+- [`../../api/_shared/settings-utils.js`](../../api/_shared/settings-utils.js)
+- [`../../api/_shared/permissions-utils.js`](../../api/_shared/permissions-utils.js)
+- [`../../api/_shared/storage-encryption.js`](../../api/_shared/storage-encryption.js)
+- [`../../api/_shared/currency.js`](../../api/_shared/currency.js)
+- [`../../api/_shared/csv.js`](../../api/_shared/csv.js)
+- [`../../api/_shared/day-of-week.js`](../../api/_shared/day-of-week.js)
+- [`../../api/_shared/time-grid.js`](../../api/_shared/time-grid.js)
+- [`../../api/_shared/instructor-colors.js`](../../api/_shared/instructor-colors.js)
+- [`../../api/_shared/metadata-utils.js`](../../api/_shared/metadata-utils.js)
+- [`../../api/_shared/public-app-url.js`](../../api/_shared/public-app-url.js)
+- [`../../api/_shared/account-profile.js`](../../api/_shared/account-profile.js)
+
+## Org isolation in the API
+RLS protects requests made with a user's token. The API uses the service-role client, which bypasses RLS, so the API itself keeps each org's data apart, in two separate steps.
+
+1. **Authorisation: who may act.** Each route uses its own verified mechanism:
+   - **A member's request:** authenticate the caller, call `ensureMembership(client, orgId, userId)`, check the result and stop when it is `null`. Then enforce the role the action needs (`isAdminRole`, `isAdminOrOffice`, ...) and the instructor's self-scope (an instructor sees and changes only their own data unless the role is `admin` or `owner`).
+   - **A system-admin request:** `ensureSystemAdmin(...)` (see [`95-system-admin-console.md`](95-system-admin-console.md)). When it acts on one org, it names that org explicitly.
+   - **A public or token flow:** the verified token or record that the flow issued. The org comes from that record, never from the request body alone.
+   - **A timer or machine call:** its trigger or its shared secret.
+2. **Org scoping: which rows.** After authorisation, every operation on a tenant table is limited to the authorised org.
+   - New or changed code uses `withOrgScope(client, table, orgId)` for every select, insert, update, upsert and delete it supports. It filters reads, updates and deletes by `org_id`, and sets the authorised `org_id` on every inserted or upserted row.
+   - An upsert also keeps its `onConflict` contract: a matching unique index or constraint in the schema, and an entry in `scripts/validate-upsert-conflicts.js` (see "Upsert contract" in [`00-core-rules.md`](00-core-rules.md)).
+   - An operation that needs another interface, such as an RPC, a storage call or an auth admin call, documents next to it where and how the org is enforced on that path. A plain CRUD query that the helper supports uses the helper.
+   - An ID that was read in this org does not replace the org filter.
+
+**Why:** one missing filter reads or changes another org's rows, and nothing below the API catches it. Guard test: [`../../tests/org-scope-reads.test.js`](../../tests/org-scope-reads.test.js).
+
+## 5xx responses and the support code
+- **Responses** go through `respond(context, ...)` or a helper built on it.
+- **A 5xx is tracked.** Its detail is stored in `error_events`, and the user gets an `error_id` that support can find by that code. **Why:** a code shown to the user that support cannot find is worse than no code, and an untracked 5xx loses the detail.
+  - With a service-role client in hand: `respondTrackedError(context, req, client, { status, message, error })`.
+  - `respondTracked(...)` only after `attachErrorTracking(context, req, client, ...)` ran in the same request. Without it, `respondTracked` sends an untracked response.
+  - A local wrapper `respond<Name>Error` must call one of the two in its body. Its name proves nothing.
+  - **Exception:** a failure before a suitable client exists (missing configuration, client creation failed) uses `respond(context, 500, ...)` with `// tracked-error-exempt: <reason>` on the same line or the line above. The reason must be a real one.
+- **What the code does today** (repository plan `docs/plans/repository/directory-restructure.md`, stage 3F):
+  - `trackErrorEvent` still returns a code when there is no client or when saving to `error_events` failed, so the user can be shown a code with no record. Fix F2 makes every code shown to the user point to a saved record.
+  - `npm run lint:error-tracking` only warns, in `npm run build` and in CI, and it accepts a `respond<Name>(` call by its name alone. Fix F3 makes `npm run lint:error-tracking:strict` a blocking CI check. Until both land, follow the rule above; the tools do not enforce it yet.
 
 ## Shared helpers to reuse
 - `resolveBearerAuthorization`, `json`
 - `readEnv`, `respond`, `parseRequestBody`, `normalizeString`, `normalizeNullableId`
 - `ensureMembership`, `isAdminRole`, `isAdminOrOffice`, `resolveOrgId`, `createSingleClient`, `withOrgScope`
 - `readSupabaseAdminConfig`, `createSupabaseAdminClient`
-- `parseJsonBodyWithLimit`, `validateSessionWrite`, instructor validators in [`../api/_shared/validation.js`](../../api/_shared/validation.js)
+- `parseJsonBodyWithLimit`, `validateSessionWrite`, instructor validators in [`../../api/_shared/validation.js`](../../api/_shared/validation.js)
 - `logAuditEvent`, `logTenantAuditEvent`
 - Settings/permissions/storage helper modules above
-- `ensureInstructorColors` in [`../api/_shared/instructor-colors.js`](../../api/_shared/instructor-colors.js)
-- `mergeMetadata` in [`../api/_shared/metadata-utils.js`](../../api/_shared/metadata-utils.js) — use for all nested metadata patch operations; do not hand-spread metadata
-- Day-name/number utilities in [`../api/_shared/day-of-week.js`](../../api/_shared/day-of-week.js) — backend counterpart to `src/lib/day-of-week.js`
-- Dates and time zones in [`../api/_shared/local-time.js`](../../api/_shared/local-time.js) — `localDateKey`, `todayKey`, `localDateRangeUtc`, `localMonthRangeUtc`, `localDateTimeToUtc`, date-only `addDays` / `enumerateDateKeys` / `firstDayOfMonth`, `formatInstant`, technical `utcDateKey`; the only place the org's zone is resolved (`resolveOrgTimeZone`). Rules in `00-core-rules.md` "Dates and time zones".
-- `ceilClockTimeToGrid`, `normalizePreferredTimesToGrid` in [`../api/_shared/time-grid.js`](../../api/_shared/time-grid.js) — use these for 15-minute calendar/waiting-list time normalization
-- `findAuthUserByEmail`, `getAuthUserById`, `getAuthUsersByIds` in [`../api/_shared/auth-users.js`](../../api/_shared/auth-users.js) — use these when auth user emails are needed; `profiles` is not the source of truth for auth email addresses
-- `resolvePublicAppBaseUrl`, `buildPublicAppHashRouteUrl`, `normalizeAbsoluteRedirectUrl` in [`../api/_shared/public-app-url.js`](../../api/_shared/public-app-url.js) — use these for public links sent from backend flows
-- `resolveClientProfileDeliveryDestination` in [`../api/_shared/form-delivery-destination.js`](../../api/_shared/form-delivery-destination.js) — use this for form invite destinations so WhatsApp/email delivery consistently falls back from explicit request values to client profile contact fields and then the primary guardian.
-- `buildAccountDisplayName`, `extractAuthDisplayName`, `getAuthNameParts`, `buildAccountUserMetadata`, `isAccountSetupComplete`, `ensureAccountProfileRow` in [`../api/_shared/account-profile.js`](../../api/_shared/account-profile.js) — use these for canonical user profile bootstrap, setup-state checks, auth metadata sync, and derived display names after `profiles.full_name` removal
-- `deliverInvitationEmail` in [`../api/_shared/invitation-email.js`](../../api/_shared/invitation-email.js) — use this for invitation email delivery; invite flows should use Brevo as the sender while keeping Supabase only as the source of secure generated invite links/tokens
-- `deliverPasswordResetEmail` in [`../api/_shared/password-reset-email.js`](../../api/_shared/password-reset-email.js) — use this for password reset delivery; recovery emails should be generated via Supabase Auth links and sent through Brevo
-- `respondTrackedError`, `trackErrorEvent`, `attachErrorTracking`, `respondTracked` in [`../api/_shared/error-events.js`](../../api/_shared/error-events.js) — use for 5xx API failures so the client receives a safe `error_id` while raw DB/provider/stack detail is stored in `error_events` for system-admin support. Prefer `respondTrackedError(...)` for local failures where `req`, `supabase`, `orgId`, and `userId` are all in scope; use `attachErrorTracking(...)` once after auth/org resolution plus `respondTracked(...)` inside nested endpoint helpers.
-- `logSystemAuditEvent` in [`../api/_shared/audit-log.js`](../../api/_shared/audit-log.js) — use this when a backend lifecycle transition must be audited without a real authenticated actor (for example public-token expiry)
+- `ensureInstructorColors` in [`../../api/_shared/instructor-colors.js`](../../api/_shared/instructor-colors.js)
+- `mergeMetadata` in [`../../api/_shared/metadata-utils.js`](../../api/_shared/metadata-utils.js) — use for all nested metadata patch operations; do not hand-spread metadata
+- Day-name/number utilities in [`../../api/_shared/day-of-week.js`](../../api/_shared/day-of-week.js) — backend counterpart to `src/lib/day-of-week.js`
+- Dates and time zones in [`../../api/_shared/local-time.js`](../../api/_shared/local-time.js) — `localDateKey`, `todayKey`, `localDateRangeUtc`, `localMonthRangeUtc`, `localDateTimeToUtc`, date-only `addDays` / `enumerateDateKeys` / `firstDayOfMonth`, `formatInstant`, technical `utcDateKey`; the only place the org's zone is resolved (`resolveOrgTimeZone`). Rules in `00-core-rules.md` "Dates and time zones".
+- `ceilClockTimeToGrid`, `normalizePreferredTimesToGrid` in [`../../api/_shared/time-grid.js`](../../api/_shared/time-grid.js) — use these for 15-minute calendar/waiting-list time normalization
+- `findAuthUserByEmail`, `getAuthUserById`, `getAuthUsersByIds` in [`../../api/_shared/auth-users.js`](../../api/_shared/auth-users.js) — use these when auth user emails are needed; `profiles` is not the source of truth for auth email addresses
+- `resolvePublicAppBaseUrl`, `buildPublicAppHashRouteUrl`, `normalizeAbsoluteRedirectUrl` in [`../../api/_shared/public-app-url.js`](../../api/_shared/public-app-url.js) — use these for public links sent from backend flows
+- `resolveClientProfileDeliveryDestination` in [`../../api/_shared/form-delivery-destination.js`](../../api/_shared/form-delivery-destination.js) — use this for form invite destinations so WhatsApp/email delivery consistently falls back from explicit request values to client profile contact fields and then the primary guardian.
+- `buildAccountDisplayName`, `extractAuthDisplayName`, `getAuthNameParts`, `buildAccountUserMetadata`, `isAccountSetupComplete`, `ensureAccountProfileRow` in [`../../api/_shared/account-profile.js`](../../api/_shared/account-profile.js) — use these for canonical user profile bootstrap, setup-state checks, auth metadata sync, and derived display names after `profiles.full_name` removal
+- `deliverInvitationEmail` in [`../../api/_shared/invitation-email.js`](../../api/_shared/invitation-email.js) — use this for invitation email delivery; invite flows should use Brevo as the sender while keeping Supabase only as the source of secure generated invite links/tokens
+- `deliverPasswordResetEmail` in [`../../api/_shared/password-reset-email.js`](../../api/_shared/password-reset-email.js) — use this for password reset delivery; recovery emails should be generated via Supabase Auth links and sent through Brevo
+- `respondTrackedError`, `trackErrorEvent`, `attachErrorTracking`, `respondTracked` in [`../../api/_shared/error-events.js`](../../api/_shared/error-events.js) — use for 5xx API failures so the client receives a safe `error_id` while raw DB/provider/stack detail is stored in `error_events` for system-admin support. Prefer `respondTrackedError(...)` for local failures where `req`, `supabase`, `orgId`, and `userId` are all in scope; use `attachErrorTracking(...)` once after auth/org resolution plus `respondTracked(...)` inside nested endpoint helpers.
+- `logSystemAuditEvent` in [`../../api/_shared/audit-log.js`](../../api/_shared/audit-log.js) — use this when a backend lifecycle transition must be audited without a real authenticated actor (for example public-token expiry)
 
 ## Known patterns / do not reinvent
 - API dependencies are installed and linted on Node 20; keep `api/package.json` engines, GitHub integrity checks, and the Azure Functions app Node setting aligned before upgrading packages that raise the runtime floor.
@@ -58,10 +86,10 @@
 - Always set `context.res` through `respond`.
 - JSON API responses sent through `respond` include default security headers (`nosniff`, referrer policy, permissions policy, HSTS). Keep endpoint-specific response headers additive unless a route has a concrete reason to override one.
 - Keep frontend-facing error responses stable: never return raw DB/provider `message`, `details`, `stack`, `type`, or `debug` fields on 5xx responses. Use stable snake_case codes that the frontend can translate, or Hebrew user copy where direct copy is unavoidable. `npm run lint:api-responses` enforces the 5xx leak contract and reports legacy English prose; `npm run lint:api-responses:strict-ux` fails on English prose after that backlog is cleaned.
-- 5xx responses that have a service-role client available should prefer `respondTrackedError(...)` or the attached-context `respondTracked(...)` wrapper. This stores full internal detail in service-role-only `error_events` for 90 days and returns `{ message, error_id }` to the frontend. Pre-client configuration failures may remain direct `respond(context, 500, ...)` because there is no reliable service-role client for tracking.
+- 5xx responses follow "5xx responses and the support code" above. A tracked 5xx keeps its detail in service-role-only `error_events` for 90 days and returns `{ message, error_id }` to the frontend.
 - Use `resolveOrgId` or `parseRequestBody` instead of ad hoc request parsing.
 - Use body-size-aware parsing for write endpoints.
-- Auth/membership checks happen first; tenant reads/writes must always be org-scoped in the shared single DB.
+- Auth/membership checks happen first; tenant reads and writes are always org-scoped (see "Org isolation in the API" above).
 - Exact user email lookup must go through the auth admin API (`auth.users`) via shared helpers. Do not query `profiles.email` — that column is not part of the canonical schema.
 - `public.profiles` no longer stores `full_name`. Canonical user profile fields are `first_name`, `last_name`, `identity_number`, `phone`, `setup_completed_at`, `account_status`, and `deactivated_at`. Any display name returned from APIs should be derived from first/last name with auth/email fallback.
 - User-scoped profile mutations should go through `/api/me`, not ad hoc writes in unrelated endpoints. If another flow needs to ensure a profile row exists or derive a user display name, use `account-profile.js` helpers instead of duplicating bootstrap logic.

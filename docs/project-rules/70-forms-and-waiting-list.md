@@ -5,31 +5,32 @@
 - Shared block work.
 - Form submission or waiting-list intake/suggestions work.
 
-## Load these files first
-- [`../src/features/forms/pages/FormsListPage.jsx`](../../src/features/forms/pages/FormsListPage.jsx)
-- [`../src/features/forms/pages/FormBuilderPage.jsx`](../../src/features/forms/pages/FormBuilderPage.jsx)
-- [`../src/features/forms/pages/FormBlocksPage.jsx`](../../src/features/forms/pages/FormBlocksPage.jsx)
-- [`../src/features/forms/components/SectionedFormRenderer.jsx`](../../src/features/forms/components/SectionedFormRenderer.jsx)
-- [`../src/features/forms/lib/form-schema.js`](../../src/features/forms/lib/form-schema.js)
-- [`../src/features/waiting-list/pages/WaitingListPage.jsx`](../../src/features/waiting-list/pages/WaitingListPage.jsx)
-- [`../api/forms/index.js`](../../api/forms/index.js)
-- [`../api/form-blocks/index.js`](../../api/form-blocks/index.js)
-- [`../api/form-submissions/index.js`](../../api/form-submissions/index.js)
-- [`../api/waiting-list-intake/index.js`](../../api/waiting-list-intake/index.js)
-- [`../api/waiting-list/index.js`](../../api/waiting-list/index.js)
-- [`../api/waiting-list-suggestions/index.js`](../../api/waiting-list-suggestions/index.js)
-- [`../api/_shared/forms-runtime.js`](../../api/_shared/forms-runtime.js)
-- [`../api/_shared/client-profiles.js`](../../api/_shared/client-profiles.js)
-- [`../api/_shared/brevo.js`](../../api/_shared/brevo.js)
+## Start here
+These files are an entry point, not a boundary: follow imports, callers (grep the symbol), dependencies, cross-domain effects and tests as far as the change needs.
+- [`../../src/features/forms/pages/FormsListPage.jsx`](../../src/features/forms/pages/FormsListPage.jsx)
+- [`../../src/features/forms/pages/FormBuilderPage.jsx`](../../src/features/forms/pages/FormBuilderPage.jsx)
+- [`../../src/features/forms/pages/FormBlocksPage.jsx`](../../src/features/forms/pages/FormBlocksPage.jsx)
+- [`../../src/features/forms/components/SectionedFormRenderer.jsx`](../../src/features/forms/components/SectionedFormRenderer.jsx)
+- [`../../src/features/forms/lib/form-schema.js`](../../src/features/forms/lib/form-schema.js)
+- [`../../src/features/waiting-list/pages/WaitingListPage.jsx`](../../src/features/waiting-list/pages/WaitingListPage.jsx)
+- [`../../api/forms/index.js`](../../api/forms/index.js)
+- [`../../api/form-blocks/index.js`](../../api/form-blocks/index.js)
+- [`../../api/form-submissions/index.js`](../../api/form-submissions/index.js)
+- [`../../api/waiting-list-intake/index.js`](../../api/waiting-list-intake/index.js)
+- [`../../api/waiting-list/index.js`](../../api/waiting-list/index.js)
+- [`../../api/waiting-list-suggestions/index.js`](../../api/waiting-list-suggestions/index.js)
+- [`../../api/_shared/forms-runtime.js`](../../api/_shared/forms-runtime.js)
+- [`../../api/_shared/client-profiles.js`](../../api/_shared/client-profiles.js)
+- [`../../api/_shared/brevo.js`](../../api/_shared/brevo.js)
 
 ## Shared helpers to reuse
-- Builder-side schema helpers in [`../src/features/forms/lib/form-schema.js`](../../src/features/forms/lib/form-schema.js)
-- Runtime schema helpers in [`../api/_shared/forms-runtime.js`](../../api/_shared/forms-runtime.js)
+- Builder-side schema helpers in [`../../src/features/forms/lib/form-schema.js`](../../src/features/forms/lib/form-schema.js)
+- Runtime schema helpers in [`../../api/_shared/forms-runtime.js`](../../api/_shared/forms-runtime.js)
 - `resolvePublicFormState`, `prepareAnswersForStorage`, `evaluateAlertFlags`, `materializeSchemaForSnapshot`
-- Delivery contact helpers: frontend `resolveSubjectFormDeliveryContact` / `normalizeFormDeliveryPhone` in [`../src/features/forms/lib/delivery-contact.js`](../../src/features/forms/lib/delivery-contact.js), backend `resolveClientProfileDeliveryDestination` in [`../api/_shared/form-delivery-destination.js`](../../api/_shared/form-delivery-destination.js). Use these instead of hand-reading `student.phone` or `clientProfile.phone`; form sends must fall back through client profile and primary guardian consistently.
-- WhatsApp message wording for form access, required-form invites, and waiting-list invites lives in [`../src/lib/whatsapp-message-templates.js`](../../src/lib/whatsapp-message-templates.js). Reuse it for send/resend flows so organization signatures and waiting-list text do not drift.
+- Delivery contact helpers: frontend `resolveSubjectFormDeliveryContact` / `normalizeFormDeliveryPhone` in [`../../src/features/forms/lib/delivery-contact.js`](../../src/features/forms/lib/delivery-contact.js), backend `resolveClientProfileDeliveryDestination` in [`../../api/_shared/form-delivery-destination.js`](../../api/_shared/form-delivery-destination.js). Use these instead of hand-reading `student.phone` or `clientProfile.phone`; form sends must fall back through client profile and primary guardian consistently.
+- WhatsApp message wording for form access, required-form invites, and waiting-list invites lives in [`../../src/lib/whatsapp-message-templates.js`](../../src/lib/whatsapp-message-templates.js). Reuse it for send/resend flows so organization signatures and waiting-list text do not drift.
 - Shared block helpers: `buildSharedBlockMap`, `collectSharedBlockIds`, `resolveSchemaWithSharedBlocks`
-- Waiting-list/client-profile helpers in [`../api/_shared/client-profiles.js`](../../api/_shared/client-profiles.js)
+- Waiting-list/client-profile helpers in [`../../api/_shared/client-profiles.js`](../../api/_shared/client-profiles.js)
 - `sendBrevoEmail`
 
 ## Known patterns / do not reinvent

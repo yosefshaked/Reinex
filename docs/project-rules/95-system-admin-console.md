@@ -6,12 +6,13 @@
 - Changes to the `AnnouncementBanner` or `AppShell` header.
 - Adding or wiring a new admin module.
 
-## Load these files first
-- [`../src/admin/AdminApp.jsx`](../../src/admin/AdminApp.jsx)
-- [`../src/admin/ui/navConfig.js`](../../src/admin/ui/navConfig.js)
-- [`../src/admin/lib/useAdminStore.js`](../../src/admin/lib/useAdminStore.js)
-- [`../api/_shared/org-bff.js`](../../api/_shared/org-bff.js) — `ensureSystemAdmin`
-- [`../implementations/admin-page/admin-page-implementation.md`](../../implementations/admin-page/admin-page-implementation.md) — full design record
+## Start here
+These files are an entry point, not a boundary: follow imports, callers (grep the symbol), dependencies, cross-domain effects and tests as far as the change needs.
+- [`../../src/admin/AdminApp.jsx`](../../src/admin/AdminApp.jsx)
+- [`../../src/admin/ui/navConfig.js`](../../src/admin/ui/navConfig.js)
+- [`../../src/admin/lib/useAdminStore.js`](../../src/admin/lib/useAdminStore.js)
+- [`../../api/_shared/org-bff.js`](../../api/_shared/org-bff.js) — `ensureSystemAdmin`
+- [`../../implementations/admin-page/admin-page-implementation.md`](../../implementations/admin-page/admin-page-implementation.md) — full design record
 
 ## Architecture Overview
 
@@ -47,7 +48,7 @@ Current example: `Admin Tools` lives at `/system-admin/admin-tools` and is backe
 
 Admin Tools has two kinds of tool:
 - **Read-only diagnostics** use `GET`, for example `hmo_claim_readiness`.
-- **Write jobs** use `POST` with `tool` in the body. The first is `lesson_closure_resync` (logic in [`../api/_shared/lesson-closure-maintenance.js`](../../api/_shared/lesson-closure-maintenance.js), UI in `src/admin/modules/LessonClosureResyncTool.jsx`). It re-evaluates stored lesson closure state in keyset pages. `preview` never writes. `apply` writes only changed lessons, which bumps their versions, and logs `system_admin.lesson_closure_resync` to `audit_log`.
+- **Write jobs** use `POST` with `tool` in the body. The first is `lesson_closure_resync` (logic in [`../../api/_shared/lesson-closure-maintenance.js`](../../api/_shared/lesson-closure-maintenance.js), UI in `src/admin/modules/LessonClosureResyncTool.jsx`). It re-evaluates stored lesson closure state in keyset pages. `preview` never writes. `apply` writes only changed lessons, which bumps their versions, and logs `system_admin.lesson_closure_resync` to `audit_log`.
 
 New write jobs follow the same pattern: preview then apply, one page per request (the console loops on `next_cursor`), shared plan/apply code with the product flow, and an audit row for every apply page that changes data.
 
