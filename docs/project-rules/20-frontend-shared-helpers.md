@@ -49,8 +49,26 @@ These files are an entry point, not a boundary: follow imports, callers (grep th
 - **The product speaks Hebrew.** Every text the product writes and shows or reads out to a user is in Hebrew. This covers admin screens, public forms, error and confirmation messages, loading and empty states, placeholders, tooltips, and accessibility labels such as `aria-label`. **Why:** the users work in Hebrew, and a mixed or English message is a message they cannot act on.
   - **Kept as they are:** what the user typed, trade names, and technical identifiers meant to be passed on by the user, such as a support code.
   - **English is allowed** only for technical diagnostics meant explicitly for developers. The rest of the UI stays in Hebrew in developer mode too.
-  - **API codes stay stable English** (`snake_case`). Where a message reaches the user, a known code gets its Hebrew message, and an unknown code, an English server message or a response with no message gets a safe Hebrew default. Display a caught error with `resolveUserErrorMessage(error, '<Hebrew fallback>')` from [`../../src/lib/error-support.js`](../../src/lib/error-support.js), and add new codes to `API_ERROR_MESSAGES` there. The original code stays on the error (`error.code`, `error.apiCode`, `resolveApiErrorMessage(error)`) for consumers that branch on it; branch on that, never on the display text. For compatibility, an unmapped `snake_case` 4xx code still appears as `error.message`, so do not show `error.message` directly.
+  - **API codes stay stable English** (`snake_case`). How a failed call is shown is the next rule.
   - This is a product rule. It does not set the language of conversations with agents or of development documentation.
+- **Showing an error.** One shared behaviour, in [`../../src/lib/error-support.js`](../../src/lib/error-support.js). **Why:** the user should read a useful Hebrew message, and support needs the same few facts every time, without anything internal.
+  - **A known error** shows its dedicated Hebrew explanation (`API_ERROR_MESSAGES`, or a Hebrew message from the server).
+  - **An unmapped error** shows a general Hebrew message, followed in parentheses by the public error code when one was received, or `(HTTP <status>)` when there is only a status.
+  - **A request with no server response** shows the Hebrew connection message.
+  - **Never invent a code or a status.**
+  - **A saved support code** (`error_id`) is shown only when the server returned one, which means the event was saved. A public error code is not a support code.
+  - **The public error code** is a `snake_case` value of the response's `message` or `error` (`publicErrorCode`). Free text, `details`, DB or provider messages are never shown or copied.
+  - **"פירוט השגיאה" and "העתקה לשליחה לתמיכה"** come with every error the user may report.
+    - Both come from the same fields (`describeError`, `errorDetailRows`, `formatErrorDetailsForCopy`): the failed action, the time, the HTTP status, the public error code and the saved support code, each only when available.
+    - Copying works without a support code, and confirms in Hebrew.
+    - Never copy or show the error object, the request or response body, user data, tokens, stack traces or DB/provider text.
+  - **Keep the error object until the display.**
+    - Do not turn it into a string early; that loses the status and the codes.
+    - Use `ErrorDetails` (`src/components/ui/ErrorDetails.jsx`) under an `Alert`, or `toast.apiError(error, { action, fallback })`. That toast stays open until the user closes it, so it cannot vanish while being read or copied.
+    - `resolveUserErrorMessage(error, '<Hebrew fallback>')` gives the same message as one string.
+  - **Branch on the code, not on the text.** The original code stays on the error (`error.code`, `error.apiCode`, `error.publicCode`, `resolveApiErrorMessage(error)`) for consumers that branch on it.
+    - For compatibility, an unmapped `snake_case` 4xx code still appears as `error.message`, so do not show `error.message` directly.
+    - Add new codes to `API_ERROR_MESSAGES`.
 - **Quoting UI names in Hebrew text.** When UI text or UI-writing guidance quotes the name of a button, field or status, use straight double quotes, for example: לחצו על "בטל שיעור". Do not use „…” or “…”. **Why:** one consistent quote character keeps names easy to search and avoids mixed marks in RTL text.
 - Default to [`../../src/lib/api-client.js`](../../src/lib/api-client.js) for authenticated requests.
 - Public auth-email initiation flows (for example password reset) should still use shared frontend API wrappers rather than direct Supabase email-sending methods, so delivery stays centralized on backend Brevo helpers.

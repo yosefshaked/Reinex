@@ -1,5 +1,5 @@
 import { getAuthClient } from '@/lib/supabase-manager.js';
-import { buildApiErrorMessage as buildApiErrorText } from '@/lib/error-support.js';
+import { buildApiErrorMessage as buildApiErrorText, decorateErrorForDisplay } from '@/lib/error-support.js';
 
 const ACTIVE_ORG_STORAGE_KEY = 'active_org_id';
 
@@ -69,7 +69,8 @@ function buildApiErrorMessage(payload, status) {
 }
 
 function decorateApiError(error, payload, status) {
-  error.status = status;
+  // Status, public code and time for describeError ("פירוט השגיאה" and the support copy).
+  decorateErrorForDisplay(error, payload, status);
   if (payload) {
     error.data = payload;
   }
