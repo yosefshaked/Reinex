@@ -181,25 +181,25 @@ export function resolveMutationError(error) {
   if (supportMessage === 'cancel_instance_requires_dedicated_action') {
     return 'ביטול שיעור נעשה דרך "בטל שיעור" ולא דרך העריכה.';
   }
-  if (error?.message === 'missing_instructor_service_capability') {
+  if (supportMessage === 'missing_instructor_service_capability') {
     return 'למדריך/ה שנבחר/ה אין יכולת שירות פעילה עבור השירות הזה.';
   }
-  if (error?.message === 'missing_instructor_service_availability') {
+  if (supportMessage === 'missing_instructor_service_availability') {
     return 'לשירות הזה עדיין לא הוגדרה זמינות אצל המדריך/ה שנבחר/ה.';
   }
-  if (error?.message === 'outside_instructor_service_availability') {
+  if (supportMessage === 'outside_instructor_service_availability') {
     return 'המועד שנבחר נמצא מחוץ לחלונות הזמינות של השירות אצל המדריך/ה.';
   }
-  if (error?.message === 'failed_to_validate_instructor_availability') {
+  if (supportMessage === 'failed_to_validate_instructor_availability') {
     return 'לא הצלחנו לבדוק את זמינות המדריך/ה כרגע. נסו שוב.';
   }
-  if (error?.message === 'invalid_service_duration') {
+  if (supportMessage === 'invalid_service_duration') {
     return 'לשירות שנבחר אין משך תקין. יש לעדכן את משך השירות לפני שמירת השיעור.';
   }
-  if (error?.message === 'failed_to_load_service') {
+  if (supportMessage === 'failed_to_load_service') {
     return 'לא ניתן היה לטעון את פרטי השירות כרגע. נסו שוב.';
   }
-  if (error?.message === 'failed_to_build_status_change_preview') {
+  if (supportMessage === 'failed_to_build_status_change_preview') {
     return 'לא ניתן היה לבנות תצוגה מקדימה לשינוי הסטטוס.';
   }
   const cancellationConflictMessage = resolveApiErrorMessage(error);

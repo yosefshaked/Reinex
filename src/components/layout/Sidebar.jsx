@@ -7,7 +7,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import ErrorMessageText from '@/components/ui/ErrorMessageText.jsx';
 import { cn } from '@/lib/utils';
 import { authenticatedFetch } from '@/lib/api-client.js';
-import { resolveApiErrorMessage } from '@/lib/error-support.js';
+import { resolveUserErrorMessage } from '@/lib/error-support.js';
 import HiddenUatAdminToolsDialog from '@/features/admin/components/HiddenUatAdminToolsDialog.jsx';
 import { useOrg } from '@/org/OrgContext.jsx';
 import { normalizeMembershipRole, isAdminOrOffice, isAdminRole } from '@/features/students/utils/endpoints.js';
@@ -180,7 +180,7 @@ export default function Sidebar({ hidden = false, onToggleHidden }) {
       setAuthDialogOpen(false);
       setAdminToolsOpen(true);
     } catch (error) {
-      setAuthError(resolveApiErrorMessage(error, 'אימות נכשל.'));
+      setAuthError(resolveUserErrorMessage(error, 'אימות נכשל.'));
     } finally {
       setIsAuthenticating(false);
     }

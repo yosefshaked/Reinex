@@ -572,6 +572,16 @@ describe('lessonDialogModel: resolveMutationError', () => {
     const error = apiError({ message: 'forbidden' }, 403, { translatedMessage: 'אין לכם הרשאה לבצע את הפעולה.' });
     assert.equal(resolveMutationError(error), 'אין לכם הרשאה לבצע את הפעולה.');
   });
+
+  it('an untracked 5xx (no support code) still gets its specific Hebrew message from the API code (F2)', () => {
+    // After F2, a 5xx whose tracking failed has no error_id and a Hebrew error.message, so the
+    // specific messages must come from the API code kept on the error, not from error.message.
+    const error = createSupportAwareApiError({ message: 'failed_to_load_service' }, 500);
+    assert.match(error.message, /[֐-׿]/);
+    assert.equal(resolveMutationError(error), 'לא ניתן היה לטעון את פרטי השירות כרגע. נסו שוב.');
+    const unmapped = createSupportAwareApiError({ message: 'failed_to_do_something_new' }, 500);
+    assert.match(resolveMutationError(unmapped), /^[^A-Za-z]*$/);
+  });
 });
 
 // ---------------------------------------------------------------------------

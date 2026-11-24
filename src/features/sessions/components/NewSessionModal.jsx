@@ -7,7 +7,7 @@ import { toast } from '@/lib/toast.jsx';
 import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { useOrg } from '@/org/OrgContext.jsx';
 import { authenticatedFetch } from '@/lib/api-client.js';
-import { resolveApiErrorMessage } from '@/lib/error-support.js';
+import { resolveUserErrorMessage } from '@/lib/error-support.js';
 import NewSessionForm, { NewSessionFormFooter } from './NewSessionForm.jsx';
 import { buildInitialAnswers } from '@/features/forms/lib/form-schema.js';
 
@@ -99,7 +99,7 @@ export default function NewSessionModal({
       console.error('Failed to load session report context', error);
       setReportContext(null);
       setContextState(REQUEST_STATE.error);
-      setContextError(resolveApiErrorMessage(error) || 'טעינת נתוני הדיווח נכשלה.');
+      setContextError(resolveUserErrorMessage(error, 'טעינת נתוני הדיווח נכשלה.'));
     }
   }, [canFetchContext, session, activeOrgId, lessonParticipantId]);
 
@@ -170,7 +170,7 @@ export default function NewSessionModal({
     } catch (error) {
       console.error('Failed to save session report', error);
       setSubmitState(REQUEST_STATE.error);
-      setSubmitError(resolveApiErrorMessage(error) || 'שמירת הדיווח נכשלה.');
+      setSubmitError(resolveUserErrorMessage(error, 'שמירת הדיווח נכשלה.'));
     }
   }, [session, activeOrgId, lessonParticipantId, onCreated]);
 

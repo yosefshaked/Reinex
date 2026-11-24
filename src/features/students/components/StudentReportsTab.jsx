@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Skeleton } from '@/components/ui/skeleton';
 import { authenticatedFetch } from '@/lib/api-client.js';
-import { resolveApiErrorMessage } from '@/lib/error-support.js';
+import { resolveUserErrorMessage } from '@/lib/error-support.js';
 import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { useOrg } from '@/org/OrgContext.jsx';
 import ReportView from '@/features/sessions/components/ReportView.jsx';
@@ -67,7 +67,7 @@ export default function StudentReportsTab({ studentId }) {
     } catch (err) {
       if (err?.name === 'AbortError') return;
       console.error('Failed to load student reports', err);
-      setError(resolveApiErrorMessage(err) || 'טעינת הדוחות נכשלה.');
+      setError(resolveUserErrorMessage(err, 'טעינת הדוחות נכשלה.'));
       setState('error');
     }
   }, [canFetch, session, activeOrgId, studentId]);

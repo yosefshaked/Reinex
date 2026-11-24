@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { useOrg } from '@/org/OrgContext.jsx';
 import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { authenticatedFetch } from '@/lib/api-client.js';
-import { resolveApiErrorMessage } from '@/lib/error-support.js';
+import { resolveUserErrorMessage } from '@/lib/error-support.js';
 import { useSessionReportsEnabled } from '@/features/sessions/config/session-reports-permission.js';
 import {
   buildSessionReportContinuationQueue,
@@ -80,7 +80,7 @@ export default function MyPendingReportsCard({ onCountChange } = {}) {
     } catch (err) {
       if (err?.name === 'AbortError') return;
       console.error('Failed to load pending reports', err);
-      setError(resolveApiErrorMessage(err) || 'טעינת הדיווחים הממתינים נכשלה.');
+      setError(resolveUserErrorMessage(err, 'טעינת הדיווחים הממתינים נכשלה.'));
       setState(REQUEST_STATE.error);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

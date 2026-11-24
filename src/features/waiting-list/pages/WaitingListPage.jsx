@@ -29,7 +29,7 @@ import { cn } from '@/lib/utils';
 import { useOrg } from '@/org/OrgContext.jsx';
 import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { authenticatedFetch } from '@/lib/api-client.js';
-import { extractSupportCode, resolveApiErrorMessage } from '@/lib/error-support.js';
+import { extractSupportCode, resolveApiErrorMessage, resolveUserErrorMessage } from '@/lib/error-support.js';
 import { buildWaitingListInviteWhatsAppMessage } from '@/lib/whatsapp-message-templates.js';
 import { normalizeMembershipRole, isAdminOrOffice, isAdminRole } from '@/features/students/utils/endpoints.js';
 import AddStudentForm, { AddStudentFormFooter } from '@/features/admin/components/AddStudentForm.jsx';
@@ -1166,9 +1166,9 @@ export default function WaitingListPage() {
       }
     } catch (error) {
       if (showLoadingToast) {
-        toast.error(resolveApiErrorMessage(error, 'עדכון רשומת ההמתנה נכשל.'), { id: toastId });
+        toast.error(resolveUserErrorMessage(error, 'עדכון רשומת ההמתנה נכשל.'), { id: toastId });
       } else {
-        toast.error(resolveApiErrorMessage(error, 'עדכון רשומת ההמתנה נכשל.'));
+        toast.error(resolveUserErrorMessage(error, 'עדכון רשומת ההמתנה נכשל.'));
       }
     }
   }, [activeOrgId, session]);

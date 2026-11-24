@@ -16,7 +16,7 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { authenticatedFetch } from '@/lib/api-client.js'
-import { extractSupportCode, resolveApiErrorMessage } from '@/lib/error-support.js'
+import { extractSupportCode, resolveApiErrorMessage, resolveUserErrorMessage } from '@/lib/error-support.js'
 import { AlertTriangle, Loader2, Lock, ShieldAlert } from 'lucide-react'
 import { getParticipantDisplayName } from '../utils/participantDisplay.js'
 import { getDisplayInstance, getDisplayParticipants } from '../utils/lessonDialogModel.js'
@@ -95,7 +95,7 @@ function resolveCorrectionErrorMessage(error, participantsById = new Map()) {
     return `${code}: ${details.participant_ids.length} משתתפים דורשים טיפול.`
   }
 
-  return resolveApiErrorMessage(error, 'יצירת תצוגת מקדימה נכשלה.')
+  return resolveUserErrorMessage(error, 'יצירת תצוגת מקדימה נכשלה.')
 }
 
 export function LockedCorrectionPanel({ instance, orgId, forceOpen = false, onApplied }) {

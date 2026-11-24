@@ -506,9 +506,9 @@ export default function InstructorDocumentsSection({ instructor, session, orgId,
         console.error('Duplicate check error:', error);
         
         const errorMessage = error?.message || '';
-        if (errorMessage.includes('401') || errorMessage.includes('Unauthorized')) {
+        if (error?.status === 401 || errorMessage.includes('401') || errorMessage.includes('Unauthorized')) {
           toast.error('שגיאת הרשאה. נא להתחבר מחדש');
-        } else if (errorMessage.includes('403') || errorMessage.includes('can_only_check_own')) {
+        } else if (error?.status === 403 || errorMessage.includes('403') || errorMessage.includes('can_only_check_own')) {
           toast.error('ניתן לבדוק רק קבצים ששייכים לך');
         } else if (extractSupportCode(error)) {
           toast.error(errorMessage);

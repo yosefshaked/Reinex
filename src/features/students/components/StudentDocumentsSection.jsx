@@ -531,9 +531,9 @@ export default function StudentDocumentsSection({ student, session, orgId, onRef
         console.error('Duplicate check error:', error);
         
         const errorMessage = error?.message || '';
-        if (errorMessage.includes('401') || errorMessage.includes('Unauthorized')) {
+        if (error?.status === 401 || errorMessage.includes('401') || errorMessage.includes('Unauthorized')) {
           toast.error('שגיאת הרשאה. נא להתחבר מחדש');
-        } else if (errorMessage.includes('403') || errorMessage.includes('Forbidden')) {
+        } else if (error?.status === 403 || errorMessage.includes('403') || errorMessage.includes('Forbidden')) {
           toast.error('אין לך הרשאה לבצע בדיקה זו');
         } else if (extractSupportCode(error)) {
           toast.error(errorMessage);

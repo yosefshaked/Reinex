@@ -7,7 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { useOrg } from '@/org/OrgContext.jsx';
 import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { authenticatedFetch } from '@/lib/api-client.js';
-import { resolveApiErrorMessage } from '@/lib/error-support.js';
+import { resolveUserErrorMessage } from '@/lib/error-support.js';
 import { normalizeMembershipRole, isAdminOrOffice } from '@/features/students/utils/endpoints.js';
 import { useSessionReportsEnabled } from '@/features/sessions/config/session-reports-permission.js';
 import {
@@ -90,7 +90,7 @@ export default function PendingReportsPage() {
     } catch (err) {
       if (err?.name === 'AbortError') return;
       console.error('Failed to load pending reports', err);
-      setError(resolveApiErrorMessage(err) || 'טעינת הדיווחים הממתינים נכשלה.');
+      setError(resolveUserErrorMessage(err, 'טעינת הדיווחים הממתינים נכשלה.'));
       setState(REQUEST_STATE.error);
     }
   }, [canFetch, activeOrgId, session, scope]);
