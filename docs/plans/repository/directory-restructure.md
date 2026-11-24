@@ -48,7 +48,7 @@ Today that knowledge is spread over seven documentation folders and two instruct
 - changing CI triggers or behaviour. The owner-approved exceptions are:
   - the "Plan registry" workflow (Q9, stage 2);
   - making error tracking a blocking CI check (3.1 C2, stage 3F subtask F3), approved on 2026-11-24;
-- automating migrations in deployment. Stage 4R only researches the workflow and ends in a recommendation for the owner;
+- automating migrations in deployment. The research on it (stage 4R) is deferred by the owner;
 - performance work;
 - moving off Azure;
 - commitlint, Git hooks or CI checks on commit messages (the commit policy itself is in stage 3).
@@ -866,7 +866,7 @@ The enforcement line is updated when F3 lands (D8).
   - `tests/dated-settings.test.js` reads a migration file (`:387`, migration 0002);
   - no general checker validates every migration file.
 
-**Decision (owner).** Record the current state exactly. Add one research task before stage 5 (stage 4R).
+**Decision (owner).** Record the current state exactly. Add one research task (stage 4R). *Updated 2026-11-24: the owner deferred 4R and Q11; they are not preconditions for stage 5.*
 
 **Wording:**
 
@@ -887,7 +887,7 @@ Stage 5 updates both paths.
 
 **Agent memory.** The plan to apply migrations from CI on deploy comes from agent memory (`db-migrations-decision`). Nothing beyond what `migrations/README.md` already says is written as fact.
 
-**Follow-up:** stage 4R.
+**Follow-up:** stage 4R (deferred), and the practical check in 5.0.
 
 ##### C5 One validation table
 
@@ -1025,7 +1025,7 @@ The aim is to fix what the change made stale. It does not require a full documen
 | Never push or merge to `main` without the owner | Needs an owner decision before it becomes policy. Not written in 3.4 until then. |
 | The preview environment uses the production DB (`pp-pr62-open`) | A claim about an environment. Written only with a verified configuration source (D9). |
 | Straight quotes in UI terms (`straight-quotes-feedback`) | Needs an owner decision before it becomes policy |
-| Migrations applied from CI on deploy (`db-migrations-decision`) | Not written as fact; stage 4R ends in an owner decision |
+| Migrations applied from CI on deploy (`db-migrations-decision`) | Not written as fact; the research (4R) and the decision (Q11) are deferred |
 | Conversation language (`narration-language-feedback`) | Personal preference; stays outside the repository |
 
 **Still open after 3.1:**
@@ -1035,7 +1035,7 @@ The aim is to fix what the change made stale. It does not require a full documen
 - the F1 fix design, after the callers are reviewed;
 - the F3 workflow, confirmed at its review;
 - making "Plan registry" and the F3 check required checks (Q9, F3);
-- the migration workflow decision (Q11, after 4R);
+- the migration workflow decision (Q11), deferred with 4R by the owner on 2026-11-24;
 - Q2 and Q4–Q8.
 
 #### 3.2 Subtasks
@@ -1386,11 +1386,19 @@ Otherwise summarise the finding in the PR, the issue or the plan's progress log,
 - `Limits` keeps an unverified legal conclusion from becoming a rule.
 - **There is no index:** it would go stale, and `git grep` covers search. The one-document-per-topic rule is what prevents overlap.
 
-### Stage 4R: Migration workflow research (before stage 5)
+### Stage 4R: Migration workflow research (deferred)
 
-**Goal:** the owner gets a recommendation and decides how Reinex identifies, shows and applies migrations. The decision is recorded in [Q11](#q11-migration-workflow).
+**Status: deferred by the owner on 2026-11-24.**
+- There is no plan today for another database beyond preprod.
+- The research resumes only by a future owner decision.
+- It is **not** a precondition for stage 5 or for any other stage.
+- This plan continues, and its status in `index.csv` stays `active`.
 
-**Depends on:** stage 4.3, which creates `docs/research/README.md`.
+The scope below is kept so that the research can resume without being planned again.
+
+**Goal (when resumed):** the owner gets a recommendation and decides how Reinex identifies, shows and applies migrations. The decision is recorded in [Q11](#q11-migration-workflow).
+
+**Depends on (when resumed):** `docs/research/README.md` exists (stage 4.3).
 
 **Read-only.** No migration or other command runs against any non-local database. The research reads documentation and code only.
 
@@ -1440,10 +1448,9 @@ Check the details in Vikunja's official code where needed. Record the version or
 
 **Depends on:**
 - stage 3 (C4);
-- stage 4R (the Q11 decision is recorded);
 - stage 4, if it edited `setup-sql.js:6801`.
 
-The move keeps deployment behaviour unchanged whatever Q11 decides.
+Stage 4R and Q11 are deferred and are **not** preconditions (owner, 2026-11-24). The move must keep today's way of applying the schema and the migrations unchanged.
 
 **Consumers of `src/lib/setup-sql.js` [V]:**
 
@@ -1474,6 +1481,11 @@ The move keeps deployment behaviour unchanged whatever Q11 decides.
 - Migrations are applied by hand. The tester does not apply them.
 
 **Subtasks:**
+- [ ] 5.0 **Practical check before the move** (owner, 2026-11-24):
+  - Identify again every current consumer of the schema and of the migrations, starting from the two lists above, at the then-current HEAD.
+  - Find which paths the preprod process uses to apply the schema and the migrations: workflows, scripts, documented manual steps, and any setting that names a path.
+  - Record the result. If a path cannot be verified from a source, ask the owner before moving.
+  - Read-only: no command runs against preprod or production.
 - [ ] 5.1 Confirm Q2. The default is a relative import from `SetupAssistant.jsx`.
 - [ ] 5.2 Measure the baseline for this stage:
   - the standard checks;
@@ -1502,6 +1514,7 @@ The move keeps deployment behaviour unchanged whatever Q11 decides.
 | App bundle | `npm run build`, then search `dist/assets/*.js` for a marker from the SQL (for example `schema_migrations`) | Same build result as 5.2; marker present |
 | Type check reach | `npx tsc -p tsconfig.typecheck.json --listFilesOnly` | Lists `database/setup-sql.js` (followed through the import) |
 | Tester | `node tests/automatic-tester/setup.js --dry-run` | Reports the new path |
+| Preprod paths | The paths found in 5.0 | Each one names the new location, or is documented as a manual step that now uses it; how preprod applies the schema and migrations is unchanged |
 | Real local apply (optional) | Apply the snapshot twice to the local `automatic-tester` DB | No errors either time |
 
 **Rollback:** revert. There is no data change.
@@ -1738,8 +1751,9 @@ These are the questions whose answers change the plan. Record each answer direct
 - **Known:** the owner decided on 2026-11-23 that this question is settled separately from the commit policy (stage 3.3). Claude currently appends a `Co-Authored-By:` trailer by default.
 - **Missing:** whether the policy requires, allows or forbids the trailer for agents.
 - **Who:** the owner.
-- **When:** before 3.10 is closed. The policy is written without the topic until then.
+- **When:** open; not a precondition for 3.10 (owner, 2026-11-24).
 - **Still open after 3.1 (2026-11-24).**
+- **Owner decision (2026-11-24):** the commit policy and 3.10 are completed without deciding this question. The existing attribution settings stay as they are. The policy says nothing about the trailer.
 
 ### Q11 Migration workflow
 - **Known [V at `0339f45`]:**
@@ -1750,7 +1764,7 @@ These are the questions whose answers change the plan. Record each answer direct
   - whether Reinex gets a read-only `status` and an explicit `apply` step;
   - how QA, promotion of the tested version, target verification and recovery work.
 - **Who:** the owner, on the stage 4R recommendation.
-- **When:** before stage 5.
+- **When:** deferred (owner, 2026-11-24). No plan today for another database beyond preprod. Not a precondition for stage 5.
 
 **Recorded from the Codex review on `index.csv`.** The columns `path,title,status` and the four statuses stay as agreed. Titles may contain commas and quotes under standard CSV quoting. The earlier proposal to forbid them was dropped. The validator parses quoted fields itself, with no new dependency (stage 2).
 
@@ -2101,7 +2115,7 @@ Append one entry per stage. Newest last.
 | Test-scope rule (entry points, affected files, no coverage growth) | Purpose; stages 0, 1, 5; Dependencies |
 | 3.1 decisions C1–C7, D8 (documentation currency), D9 | Stage 3: 3.1, subtasks 3.3–3.7 and 3.11–3.12, stage acceptance |
 | Code fixes from 3.1: client-profiles writes, support-code bug, strict error tracking in CI | Stage 3F (F1, F2, F3); Non-goals; Dependencies |
-| Migration workflow research (Vikunja) and decision | Stage 4R; Q11; stage 5 dependency |
+| Migration workflow research (Vikunja) and decision | Stage 4R and Q11, both deferred; stage 5.0 practical check |
 | Test classification (purpose, environment, entry point) | Migration map: Test classification; 7.3 |
 | Silent-failure cases | Dependencies beyond imports |
 | Open questions and Codex recommendations | Open decisions |
