@@ -545,12 +545,13 @@ describe('lessonDialogModel: resolveMutationError', () => {
     assert.equal(resolveMutationError(apiError({ message: 'instance_not_in_reportable_state' }, 409)), GENERIC_409_MESSAGE);
   });
 
-  it('passes a support-code message through verbatim, ahead of any code mapping', () => {
+  it('a known code with a saved support code keeps its explanation; the support code is an extra field', () => {
+    // docs/project-rules/20 "Showing an error": the support code never replaces the explanation.
     const error = createSupportAwareApiError(
       { message: 'capacity_exceeded', error_id: 'ERR-20260914-ABC123' },
       500,
     );
-    assert.equal(resolveMutationError(error), 'הפעולה נכשלה. קוד תמיכה: ERR-20260914-ABC123');
+    assert.equal(resolveMutationError(error), 'השיעור מלא — אין מקום פנוי למשתתף/ת נוסף/ת. קוד תמיכה: ERR-20260914-ABC123');
   });
 
   it('passes a support code embedded in a plain error message through verbatim', () => {

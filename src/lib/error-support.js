@@ -88,13 +88,28 @@ function payloadCode(payload) {
   return payload.message || payload.error || payload.details || payload.description || payload.title || '';
 }
 
-/** The Hebrew text for a code or server message, or '' when there is none. */
-function hebrewForCode(code) {
+/** The dedicated Hebrew message for an API code from API_ERROR_MESSAGES, or ''. */
+function mappedMessage(code) {
   if (typeof code !== 'string' || !code.trim()) return '';
   const trimmed = code.trim();
-  if (Object.prototype.hasOwnProperty.call(API_ERROR_MESSAGES, trimmed)) return API_ERROR_MESSAGES[trimmed];
-  return isHebrewText(trimmed) ? trimmed : '';
+  return Object.prototype.hasOwnProperty.call(API_ERROR_MESSAGES, trimmed) ? API_ERROR_MESSAGES[trimmed] : '';
 }
+
+/**
+ * Server text that may be shown as it is. The source decides, not the characters: only the
+ * `message` of a 4xx response, where endpoints write deliberate business copy. A 5xx text, and any
+ * `details`, `description` or `title`, may hold raw DB or provider text and is never shown, even
+ * when it contains Hebrew. A 4xx message is shown only when it is Hebrew prose (the language rule),
+ * never when it is a code.
+ */
+function serverPublicMessage(payload, status) {
+  if (!(Number(status) >= 400 && Number(status) < 500)) return '';
+  const value = payload && typeof payload === 'object' ? payload.message : '';
+  if (typeof value !== 'string' || !value.trim() || API_CODE_SHAPE.test(value.trim())) return '';
+  return isHebrewText(value) ? value.trim() : '';
+}
+
+const API_CODE_SHAPE = /^[a-z][a-z0-9_]*$/;
 
 const SUPPORT_CODE_PATTERN = /\bERR-\d{8}-[A-Z0-9]{6}\b/i;
 
@@ -240,7 +255,7 @@ export function decorateErrorForDisplay(error, payload, status) {
 export function buildApiErrorMessage(payload, status, fallback = '') {
   const code = payloadCode(payload);
   if (Number(status) < 500 && !extractSupportCode(payload) && typeof code === 'string'
-    && API_CODE.test(code.trim()) && !hebrewForCode(code)) {
+    && API_CODE.test(code.trim()) && !mappedMessage(code)) {
     return code.trim();
   }
   return buildUserErrorMessage(payload, status, fallback);
@@ -253,23 +268,35 @@ function withReference(message, publicCode, status) {
 }
 
 /**
- * The message shown to the user for an API response:
- * - a 5xx with a saved support code: the general message with that code;
- * - a known code, or a Hebrew message from the server: that text;
+ * The message shown to the user for an API response, as one string:
+ * - a known code (API_ERROR_MESSAGES), or the Hebrew `message` of a 4xx response: that text;
  * - anything else: the Hebrew fallback or a general Hebrew message, followed by the public code in
  *   parentheses, or by "(HTTP <status>)" when there is only a status. Nothing is invented.
+ * A saved support code is a separate field, appended as "קוד תמיכה: …"; it never replaces the
+ * public code in the title.
  */
 export function buildUserErrorMessage(payload, status, fallback = '') {
-  const errorId = extractSupportCode(payload);
-  if (Number(status) >= 500 && errorId) {
-    return `הפעולה נכשלה. קוד תמיכה: ${errorId}`;
-  }
-  const specific = hebrewForCode(payloadCode(payload));
-  if (specific) return specific;
-  const general = isHebrewText(fallback) ? fallback : defaultMessageForStatus(status);
   const numericStatus = Number(status);
-  return withReference(general, publicErrorCodeFromPayload(payload),
-    Number.isInteger(numericStatus) && numericStatus >= 100 ? numericStatus : null);
+  const httpStatus = Number.isInteger(numericStatus) && numericStatus >= 100 ? numericStatus : null;
+  const publicCode = publicErrorCodeFromPayload(payload);
+  const title = mappedMessage(publicCode)
+    || serverPublicMessage(payload, httpStatus)
+    || withReference(isHebrewText(fallback) ? fallback : defaultMessageForStatus(status), publicCode, httpStatus);
+  const errorId = extractSupportCode(payload);
+  return errorId ? `${title} קוד תמיכה: ${errorId}` : title;
+}
+
+/**
+ * Attaches the failed action and a Hebrew fallback message to a caught error, so that whatever
+ * finally displays it (ErrorMessageText, ErrorDetails, toast.apiError) shows and copies the same
+ * wording. Returns the same error object; a non-object is wrapped in an Error.
+ */
+export function withErrorContext(error, { action = '', fallback = '' } = {}) {
+  /** @type {any} */
+  const target = error && typeof error === 'object' ? error : new Error(typeof error === 'string' ? error : '');
+  if (action) target.displayAction = action;
+  if (fallback) target.displayFallback = fallback;
+  return target;
 }
 
 /**
@@ -282,7 +309,9 @@ export function buildUserErrorMessage(payload, status, fallback = '') {
  * @returns {{ message: string, specific: boolean, network: boolean, action: string,
  *   occurredAt: string, status: number|null, publicCode: string, supportCode: string }}
  */
-export function describeError(error, { fallback = '', action = '', occurredAt = '' } = {}) {
+export function describeError(error, { fallback: givenFallback = '', action: givenAction = '', occurredAt = '' } = {}) {
+  const fallback = givenFallback || (typeof error?.displayFallback === 'string' ? error.displayFallback : '');
+  const action = givenAction || (typeof error?.displayAction === 'string' ? error.displayAction : '');
   const network = isNetworkError(error);
   const status = network ? null : httpStatusOf(error);
   const publicCode = network ? '' : publicErrorCode(error);
@@ -293,18 +322,17 @@ export function describeError(error, { fallback = '', action = '', occurredAt = 
   if (network) {
     return { ...base, message: NETWORK_ERROR_MESSAGE, specific: false };
   }
-  const specific = hebrewForCode(error?.data?.message)
-    || hebrewForCode(error?.data?.error)
-    || hebrewForCode(error?.publicCode)
-    || hebrewForCode(typeof error?.code === 'string' && API_CODE.test(error.code) ? error.code : '')
-    || (supportCode || status ? '' : hebrewForCode(stripSupportCode(error?.message)));
+  // Shown as it is only from a trusted source: our own code map, a 4xx `message` from the server,
+  // or an error our own app threw (no HTTP status and no response data).
+  const isApiError = Boolean(status) || Boolean(error?.data) || Boolean(supportCode);
+  const specific = mappedMessage(publicCode)
+    || mappedMessage(typeof error?.code === 'string' && API_CODE.test(error.code) ? error.code : '')
+    || serverPublicMessage(error?.data, status)
+    || (!isApiError && isHebrewText(error?.message) ? stripSupportCode(error.message) : '');
   if (specific) {
     return { ...base, message: specific, specific: true };
   }
   const general = isHebrewText(fallback) ? fallback : (status ? defaultMessageForStatus(status) : GENERAL_ERROR_MESSAGE);
-  if (supportCode) {
-    return { ...base, message: general, specific: false };
-  }
   return { ...base, message: withReference(general, publicCode, status), specific: false };
 }
 

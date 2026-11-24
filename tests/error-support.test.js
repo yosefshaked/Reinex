@@ -15,6 +15,7 @@ import {
   publicErrorCodeFromPayload,
   resolveApiErrorMessage,
   resolveUserErrorMessage,
+  withErrorContext,
 } from '../src/lib/error-support.js';
 
 const HEBREW = /[֐-׿]/;
@@ -22,8 +23,11 @@ const CODE = 'ERR-20261124-ABC123';
 const AT = '2026-11-24T16:05:00.000Z';
 
 describe('the message a user reads after a failed API call', () => {
-  it('a saved 5xx shows a Hebrew message with the support code', () => {
-    assert.equal(buildUserErrorMessage({ message: 'failed_to_update_lesson_template', error_id: CODE }, 500), `הפעולה נכשלה. קוד תמיכה: ${CODE}`);
+  it('a saved 5xx keeps the public code in the title, and the support code as a separate field', () => {
+    assert.equal(
+      buildUserErrorMessage({ message: 'failed_to_update_lesson_template', error_id: CODE }, 500),
+      `הפעולה נכשלה. נסו שוב בעוד כמה דקות. (failed_to_update_lesson_template) קוד תמיכה: ${CODE}`,
+    );
   });
 
   it('a known code shows only its Hebrew explanation', () => {
@@ -92,7 +96,7 @@ describe('details and the text copied for support', () => {
     const error = createSupportAwareApiError({ message: 'failed_to_check_duplicates', error_id: CODE, stack: 'at db.query', internal_error: { message: 'pg says no' } }, 500);
     error.occurredAt = AT;
     const details = describeError(error, { action: 'בדיקת כפילויות' });
-    assert.equal(details.message, 'הפעולה נכשלה. נסו שוב בעוד כמה דקות.');
+    assert.equal(details.message, 'הפעולה נכשלה. נסו שוב בעוד כמה דקות. (failed_to_check_duplicates)');
     assert.deepEqual(errorDetailRows(details).map((row) => [row.key, row.value]), [
       ['action', 'בדיקת כפילויות'],
       ['occurredAt', AT],
@@ -103,7 +107,7 @@ describe('details and the text copied for support', () => {
     const copied = formatErrorDetailsForCopy(details);
     assert.equal(copied, [
       'פרטי שגיאה לתמיכה',
-      'הודעה: הפעולה נכשלה. נסו שוב בעוד כמה דקות.',
+      'הודעה: הפעולה נכשלה. נסו שוב בעוד כמה דקות. (failed_to_check_duplicates)',
       'פעולה: בדיקת כפילויות',
       `זמן: ${AT}`,
       'סטטוס HTTP: 500',
@@ -162,10 +166,59 @@ describe('resolveUserErrorMessage, for display as one string', () => {
 
   it('a saved support code is appended so alerts and toasts lift it into their code chip', () => {
     const error = createSupportAwareApiError({ message: 'internal_error_x', error_id: CODE }, 500);
-    assert.equal(resolveUserErrorMessage(error), `הפעולה נכשלה. נסו שוב בעוד כמה דקות. קוד תמיכה: ${CODE}`);
+    assert.equal(resolveUserErrorMessage(error), `הפעולה נכשלה. נסו שוב בעוד כמה דקות. (internal_error_x) קוד תמיכה: ${CODE}`);
   });
 
   it('a Hebrew error thrown by the app itself is shown as it is', () => {
     assert.equal(resolveUserErrorMessage(new Error('יש לבחור קובץ.')), 'יש לבחור קובץ.');
+  });
+});
+
+describe('server text is shown only from a trusted source, never because it contains Hebrew', () => {
+  const MIXED = 'שגיאה: duplicate key value violates unique constraint "students_pkey" (SQLSTATE 23505)';
+
+  it('a 5xx with mixed Hebrew and technical text shows the default, and the copy has none of it', () => {
+    const error = createSupportAwareApiError({ message: MIXED }, 500);
+    const details = describeError(error, { action: 'שמירת תלמיד' });
+    assert.equal(details.message, 'הפעולה נכשלה. נסו שוב בעוד כמה דקות. (HTTP 500)');
+    const copied = formatErrorDetailsForCopy(details);
+    for (const leak of ['duplicate key', 'students_pkey', 'SQLSTATE', 'שגיאה:']) {
+      assert.ok(!details.message.includes(leak) && !copied.includes(leak), leak);
+    }
+    assert.ok(!error.message.includes('duplicate key'), 'error.message does not carry it either');
+  });
+
+  it('Hebrew in details or description of a 4xx is not shown either', () => {
+    const error = createSupportAwareApiError({ message: 'invalid_payload', details: MIXED }, 400);
+    const details = describeError(error);
+    assert.ok(!details.message.includes('duplicate'));
+    assert.ok(!formatErrorDetailsForCopy(details).includes('duplicate'));
+    assert.ok(details.message.endsWith('(invalid_payload)'));
+  });
+
+  it('the Hebrew message a 4xx endpoint wrote for users is kept, on screen and in the copy', () => {
+    const error = createSupportAwareApiError({ message: 'התלמיד כבר משובץ בשיעור אחר בזמן זה.' }, 409);
+    const details = describeError(error);
+    assert.equal(details.message, 'התלמיד כבר משובץ בשיעור אחר בזמן זה.');
+    assert.ok(formatErrorDetailsForCopy(details).includes('הודעה: התלמיד כבר משובץ בשיעור אחר בזמן זה.'));
+  });
+
+  it('a Hebrew error thrown by the app keeps its text; the same text from a server 500 does not', () => {
+    assert.equal(resolveUserErrorMessage(new Error('יש לבחור קובץ.')), 'יש לבחור קובץ.');
+    assert.ok(resolveUserErrorMessage(createSupportAwareApiError({ message: 'יש לבחור קובץ.' }, 500)).endsWith('(HTTP 500)'));
+  });
+});
+
+describe('withErrorContext carries the action wording to the display and to the copy', () => {
+  it('the fallback and action attached at the catch are used later, with no string conversion', () => {
+    const error = withErrorContext(new TypeError('Failed to fetch'), { action: 'חיפוש תלמידים', fallback: 'חיפוש תלמידים נכשל.' });
+    assert.equal(describeError(error).action, 'חיפוש תלמידים');
+    const api = withErrorContext(createSupportAwareApiError({ message: 'search_failed' }, 500), { action: 'חיפוש תלמידים', fallback: 'חיפוש תלמידים נכשל.' });
+    const details = describeError(api);
+    assert.equal(details.message, 'חיפוש תלמידים נכשל. (search_failed)');
+    assert.equal(resolveUserErrorMessage(api), 'חיפוש תלמידים נכשל. (search_failed)');
+    assert.ok(formatErrorDetailsForCopy(details).startsWith(
+      ['פרטי שגיאה לתמיכה', 'הודעה: חיפוש תלמידים נכשל. (search_failed)', 'פעולה: חיפוש תלמידים'].join('\n'),
+    ));
   });
 });
