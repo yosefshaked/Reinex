@@ -66,7 +66,9 @@ function createFakeClient(tables) {
     const api = {
       select() { return api; },
       insert(payload) { pendingWrite = { op: 'insert', table, payload }; writes.push(pendingWrite); return api; },
-      update(payload) { pendingWrite = { op: 'update', table, payload }; writes.push(pendingWrite); return api; },
+      // An update records its filters (filled in as the chain adds them) and, when awaited, applies
+      // the payload to the matching rows, so a test can see which rows it changed.
+      update(payload) { pendingWrite = { op: 'update', table, payload, filters }; writes.push(pendingWrite); return api; },
       upsert(payload) { pendingWrite = { op: 'upsert', table, payload }; writes.push(pendingWrite); return api; },
       delete() { pendingWrite = { op: 'delete', table }; writes.push(pendingWrite); return api; },
       eq(column, value) { filters.push((row) => row[column] === value); return api; },
@@ -93,6 +95,11 @@ function createFakeClient(tables) {
         return Promise.resolve({ data: row, error: row ? null : { message: 'no rows' } });
       },
       then(resolve, reject) {
+        if (pendingWrite?.op === 'update') {
+          for (const row of tables[table] || []) {
+            if (filters.every((filter) => filter(row))) Object.assign(row, pendingWrite.payload);
+          }
+        }
         const data = pendingWrite ? [] : rowsNow();
         return Promise.resolve({ data, error: null }).then(resolve, reject);
       },
@@ -296,6 +303,37 @@ describe('client, student and billing helpers read one organisation', () => {
     const result = await ensureStudentForClientProfile(client, ORG_A, PROFILE_B);
     assert.deepEqual(result, { student: null, created: false, error: 'client_profile_not_found' });
     assert.equal(client.writes.length, 0);
+  });
+
+  it('a new student is linked only to the earlier rows of its own organisation', async () => {
+    // Both organisations hold unlinked rows with the same client_profile_id value, listed B first.
+    // Creating the student in org A must link org A's unlinked rows and nothing else.
+    const LINK_TABLES = ['form_submissions', 'otp_challenges', 'waiting_list_entries', 'lesson_participants'];
+    const linkRows = Object.fromEntries(LINK_TABLES.map((table) => [table, [
+      { id: `${table}-b`, org_id: ORG_B, client_profile_id: PROFILE_A, student_id: null },
+      { id: `${table}-a`, org_id: ORG_A, client_profile_id: PROFILE_A, student_id: null },
+      { id: `${table}-a-linked`, org_id: ORG_A, client_profile_id: PROFILE_A, student_id: 'student-earlier' },
+    ]]));
+    const tables = { ...profileTables(), ...linkRows };
+    const client = createFakeClient(tables);
+
+    const result = await ensureStudentForClientProfile(client, ORG_A, PROFILE_A);
+    assert.equal(result.created, true);
+    const newStudentId = result.student.id;
+
+    for (const table of LINK_TABLES) {
+      const byId = Object.fromEntries(tables[table].map((row) => [row.id, row]));
+      assert.equal(byId[`${table}-a`].student_id, newStudentId, `${table}: org A's unlinked row is linked`);
+      assert.equal(byId[`${table}-b`].student_id, null, `${table}: org B's row is unchanged`);
+      assert.equal(byId[`${table}-a-linked`].student_id, 'student-earlier', `${table}: an already linked row is unchanged`);
+
+      const update = client.writes.find((write) => write.op === 'update' && write.table === table);
+      assert.ok(update, `${table}: one update was sent`);
+      assert.ok(
+        update.filters.some((filter) => filter({ org_id: ORG_A }) && !filter({ org_id: ORG_B })),
+        `${table}: the update is limited to org A`,
+      );
+    }
   });
 
   it('org B\'s ledger transaction cannot be reversed from org A', async () => {
