@@ -571,9 +571,8 @@
 
 ## Documentation
 - When editing files in `ProjectDoc/`, keep `Eng.md` and `Heb.md` in sync and update their version and last-updated fields.
-- See `docs/AI-Coder-Gotchas.md` for a concise checklist of common pitfalls (RTL/Hebrew alignment,
-  dialog footers, Select/Popover inside dialogs, CSV/Forms patterns). Keep it updated when you
-  discover recurring issues so future AI coding passes avoid regressions.
+- Common frontend pitfalls (dialog footers, Select/Popover inside dialogs) are kept in
+  `docs/project-rules/20-frontend-shared-helpers.md`.
 
 ## Notes
 - Instructors are managed in the tenant `tuttiud."Instructors"` table. Records are not deleted; set `is_active=false` to disable. Clients should hide inactive instructors from selection.
