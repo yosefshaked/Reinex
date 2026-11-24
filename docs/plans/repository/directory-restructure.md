@@ -5,14 +5,15 @@
 Read this block first when you continue this plan in a new conversation.
 
 - **Plan status:** the overall status of this plan is recorded only in [`docs/plans/index.csv`](../index.csv). Check it with `npm run lint:plans`.
-- **Current stage:** 3. Subtask 3.1 is decided: the owner's answers to C1–C7 and D8–D9 are in [3.1](#31-decisions-c1c7-and-d8d9-owner-2026-11-24). Next: joint review of this plan update, then 3.2. Nothing in stage 3, 3F or 4R may start before that review.
+- **Current stage:** 3 is done except three open items: 3.8 (each deletion needs owner approval), 3.9 (an owner decision) and the hard-limits item in 3.4 (it waits for D9). Next: joint review of stage 3, then stage 3F (F1). Do not start 3F before that review.
 - **Execution branch:** `repository-reconstruction`, based on `origin/staging` `dce8f2e790e939b7f0805803d7d44e71a23346ba`. See [Planning base](#planning-base) and [Q1](#q1-execution-branch).
 - **Repository state:**
-  - `test/` is now `tests/`.
+  - `test/` is now `tests/`; `agents-docs/` is now `docs/project-rules/`.
+  - `AGENTS.md` is the binding entry point, and `CLAUDE.md` is `@AGENTS.md`.
   - `docs/plans/index.csv` and `npm run lint:plans` exist.
-  - The raw evidence is outside the repository, in `$env:TEMP\reinex-restructure\stage0\`, `stage1\` and `stage2\`.
+  - The raw evidence is outside the repository, in `$env:TEMP\reinex-restructure\stage0\`, `stage1\`, `stage2\` and `stage3\`.
   - Nothing has been pushed; the owner decides on the push together with Claude.
-- **Last update:** 2026-11-24. 3.1 decisions recorded. Stage 3F (code fixes: F1 client-profiles writes, F2 error-tracking runtime, F3 strict error tracking in CI) and stage 4R (migration workflow research) were added.
+- **Last update:** 2026-11-24. Stage 3 executed: the move, the new `AGENTS.md`, the rules from 3.1, the commit policy, and the C3 hints. Stage 4R and Q11 are deferred.
 
 Each stage appends to the [Progress log](#progress-log), ticks its subtasks and records answers under [Open decisions](#open-decisions). Keep this block at five bullets. It is a pointer, not a history.
 
@@ -995,7 +996,7 @@ The aim is to fix what the change made stale. It does not require a full documen
 - **Claims about the preview and production environments** need a verified configuration source before they are written as rules.
 - **Working rules about `main`,** and other preferences that come from agent memory, need an owner decision before they become policy.
 
-**Rules found in only one file** must be kept once, in the right place:
+**Rules found in only one file** must be kept once, in the right place. *Correction found in stage 3:* the `IF NOT EXISTS` DDL rules, the money ESLint rule, the general `function.json` rule and "`onConflict` explicitly" were **only** in `CLAUDE.md`, not in agents-docs as listed below. They were moved to `00` ("Schema", "Money in code", "Known patterns").
 - **In `CLAUDE.md` and also in agents-docs**, keep them in agents-docs:
   - the `function.json` sibling (`95`);
   - the `IF NOT EXISTS` rules (`00`);
@@ -1041,30 +1042,32 @@ The aim is to fix what the change made stale. It does not require a full documen
 #### 3.2 Subtasks
 
 - [x] 3.1 Present the conflicts with the proposed wording; joint review; record the answers. Done: proposal on 2026-11-23 against `0339f45`, owner decisions on 2026-11-24, recorded in [3.1](#31-decisions-c1c7-and-d8d9-owner-2026-11-24).
-- [ ] 3.2 `git mv agents-docs docs/project-rules`, keeping the file names.
-- [ ] 3.3 Rewrite the 262 relative links inside them (`../api` becomes `../../api`, and so on). Also rewrite every inbound link:
+- [x] 3.2 `git mv agents-docs docs/project-rules`, keeping the file names. Done in `c576742`.
+- [x] 3.3 Rewrite the 262 relative links inside them (`../api` becomes `../../api`, and so on). Also rewrite every inbound link:
   - `AGENTS.md`;
   - `CLAUDE.md`;
   - the comment at `eslint.config.js:10`;
   - `implementations/**`.
 
   Verify that every rewritten link resolves to the right target. That includes links between files that moved together, whose relative form does not change (C6).
-- [ ] 3.4 Rewrite `AGENTS.md`, at most about 100 lines:
+
+  Done in `c576742`. The current tree had 285 links inside the folder, not 262: 275 leave it and were rewritten, and 10 stay inside it and were left unchanged. All 393 links in the repository resolve to the same file as before. See the stage 3 Progress log entry.
+- [x] 3.4 Rewrite `AGENTS.md`, at most about 100 lines. Done in `83d4b1a` and `0d52f96`: 58 lines. Item 2 is left open; see below.
   1. what Reinex is;
-  2. hard limits: only limits the owner has decided, each claim about an environment backed by a verified configuration source (D9);
+  2. hard limits: only limits the owner has decided, each claim about an environment backed by a verified configuration source (D9). **Open:** no limit has both an owner decision and a verified source yet, so `AGENTS.md` has no hard-limits section. It is added once D9's open items are decided;
   3. always-on rules, each with a one-line why. These include the C1 and C2 lines, the binding test rule (C7) and "Keep documentation current" (D8);
   4. the reading rule (C6), written once;
   5. a routing table (task → `project-rules` → `product` → tests → start files), including "committing work → `docs/project-rules/commits.md`";
   6. the validation table, the only copy (C5): npm script names, with every `lint:upsert-conflicts` condition and a link to the upsert contract;
   7. how to continue a plan: "Resume here", then `docs/plans/index.csv`.
-- [ ] 3.5 Make `CLAUDE.md` exactly `@AGENTS.md`, plus Claude-only notes if any remain. Remove the validation table copy in `00-core-rules.md`, leaving a link (C5).
-- [ ] 3.6 Add a "Start here" list to each `project-rules` file (C6). Write the full C1 and C2 rules in `30-backend-shared-helpers.md`.
-- [ ] 3.7 Fix the four C3 hints, found by their text (`git grep -n "resolveTenantClient" -- eslint.config.js scripts docs/api-validation-tool.md`). Remove `AGENTS.md:9`.
-- [ ] 3.8 Delete the retired instruction sources after owner confirmation.
-- [ ] 3.9 Decide whether the link check becomes `scripts/check-doc-links.js`. It resolves relative Markdown links and the `implementations/`, `docs/`, `tests/` and `database/` paths cited in code comments.
-- [ ] 3.10 Define one commit policy for every development agent in Reinex. The owner requested it on 2026-11-23. See 3.3.
-- [ ] 3.11 Write the C7 test guidance ("Finding and running tests") in `00-core-rules.md`, with a short pointer from `80-finance-billing-payroll.md`. Put no counts in the guidance.
-- [ ] 3.12 Write the C4 schema contract in `00-core-rules.md`, in place of "Schema SSOT".
+- [x] 3.5 Make `CLAUDE.md` exactly `@AGENTS.md`, plus Claude-only notes if any remain. Remove the validation table copy in `00-core-rules.md`, leaving a link (C5). Done in `83d4b1a`. No Claude-only notes remained.
+- [x] 3.6 Add a "Start here" list to each `project-rules` file (C6). Write the full C1 and C2 rules in `30-backend-shared-helpers.md`. Done in `83d4b1a`: each "Load these files first" list was renamed "Start here" with the C6 sentence. In `0d52f96`, the deleted `api/backup-status/index.js` was removed from the list in `90`.
+- [x] 3.7 Fix the four C3 hints, found by their text (`git grep -n "resolveTenantClient" -- eslint.config.js scripts docs/api-validation-tool.md`). Remove `AGENTS.md:9`. Done in `f74bdf4` (the hints) and `83d4b1a` (`AGENTS.md`). The output of `node scripts/validate-api-endpoints.js` is identical before and after; it exits 1 on both sides because of pre-existing findings.
+- [ ] 3.8 Delete the retired instruction sources after owner confirmation. **Open:** each file needs its own owner approval. The preparation is done; see [3.8 Retirement candidates](#38-retirement-candidates).
+- [ ] 3.9 Decide whether the link check becomes `scripts/check-doc-links.js`. **Open, owner decision.** Recommendation: yes, as a local npm script outside `build`. It would be the stage 3 link-map script (`$env:TEMPeinex-restructurestage3linkmap.cjs`) plus a check of paths cited in code comments, with tests. Stages 5–7 need it again. It resolves relative Markdown links and the `implementations/`, `docs/`, `tests/` and `database/` paths cited in code comments.
+- [x] 3.10 Define one commit policy for every development agent in Reinex. The owner requested it on 2026-11-23. See 3.3. Done in `83d4b1a` (`docs/project-rules/commits.md`) and `0d52f96` (the pointer in `AGENTS.md`). Q10 stays open; the policy says nothing about trailers.
+- [x] 3.11 Write the C7 test guidance ("Finding and running tests") in `00-core-rules.md`, with a short pointer from `80-finance-billing-payroll.md`. Put no counts in the guidance. Done in `83d4b1a`.
+- [x] 3.12 Write the C4 schema contract in `00-core-rules.md`, in place of "Schema SSOT". Done in `83d4b1a`. The section also holds the DDL idempotency rules and the upsert contract.
 
 #### 3.3 Commit policy (subtask 3.10)
 
@@ -1108,6 +1111,67 @@ The aim is to fix what the change made stale. It does not require a full documen
   - `git grep -n "Conventional Commits" -- AGENTS.md CLAUDE.md docs/project-rules` finds the rules in one file and a single link line in `AGENTS.md`.
 - The policy links to the 1.0.0 specification URL above.
 - No commitlint configuration, hook or CI change is added.
+
+#### 3.8 Retirement candidates
+
+Prepared on 2026-11-24 against `0d52f96`. Nothing was deleted, because each file needs its own owner approval.
+
+| Path | Kept from it, and where | Consumers left [V] | Recommendation |
+|---|---|---|---|
+| `.github/chatmodes/Azure_function_codegen_and_deployment.chatmode.md` (145 lines) | Nothing. It is a generic Copilot workflow for Azure Functions and IaC, naming "Claude Sonnet 4". It contains no Reinex rule: 0 mentions of Reinex, TutTiud, `org_id` or Supabase. | None | Delete |
+| `docs/AI-Coder-Gotchas.md` (115 lines) | **Moved to `20-frontend-shared-helpers.md`** (`0eb74a2`), each checked against the code: the dialog `footer` prop, scrolling a `Select` or `Popover` inside a `Dialog` and `PopoverTrigger` with an input, and the mobile Select-in-Dialog guard. **Already covered:** `admin` route names (`00`, `AGENTS.md`), `ensureInstructorColors` (`30`), lint and build commands (`AGENTS.md`). **Dropped as stale or unverified:** `rtl-embed-text` (used in one component only); `org_settings.permissions` (table removed); `/api/backup-run` and `/api/backup-list` (no such endpoints); the auth-redirect line (points to routes `AGENTS.md` never had). | `docs/README.md:71,94,140,156`; `ProjectDoc/TutTiud_Agents.md:574` | Delete after the owner approves. In the same change, remove its 4 lines in `docs/README.md` (that file is triaged in stage 7) |
+| `ProjectDoc/TutTiud_Agents.md` (1104 lines) | Nothing merged yet. Its first heading is "Legacy notes (Tuttiud) — DO NOT FOLLOW". Most of it is dated feature notes from 2025 (documents, storage, audit, forms, onboarding tour). Reading it fully belongs to the stage 7.1 triage of `ProjectDoc/`. | `implementations/backup/rebuild.md:100-164` (line references); `ProjectDoc/Conventions.md` | Do not delete in stage 3. Triage in 7.1, then ask again |
+| `ProjectDoc/Conventions.md` (297 lines) | Nothing merged yet. These are the "TutTiud Repository Conventions" (2025-10-26): folder layout, naming, API, settings. `AGENTS.md` and `project-rules` now own these topics; any still-valid item is extracted in 7.1. | `ProjectDoc/Eng.md:6`, `ProjectDoc/Heb.md:6`, `ProjectDoc/TutTiud_Agents.md:135` | As above |
+
+#### 3.13 Instruction mapping: old `CLAUDE.md` and `AGENTS.md` (at `0339f45`)
+
+Every line of the two old files, and where it is maintained at the end of stage 3. `00`, `20`, `30` and `80` are files in `docs/project-rules/`.
+
+**Old `CLAUDE.md` (45 lines):**
+
+| Old lines | Content | Now |
+|---|---|---|
+| 1 | Title | Removed. `CLAUDE.md` is `@AGENTS.md`. |
+| 3-15 | Validation table | `AGENTS.md` "After writing code — required validation", the only copy. The build step list (line 15) is replaced by a pointer to `package.json` (C5). |
+| 19-23 | `IF NOT EXISTS` / guarded `UNIQUE` DDL rules | `00` "Schema". These were only in `CLAUDE.md`. |
+| 24-25 | Upsert unique index and `EXPECTED_CONFLICTS_BY_TABLE` | `00` "Upsert contract"; the `AGENTS.md` table row links to it |
+| 28 | Writes only through `withOrgScope` | `30` "Org isolation in the API" (C1 wording); one line in `AGENTS.md` |
+| 29 | `onConflict` stated explicitly | `00` "Upsert contract", first sentence |
+| 30 | `function.json` sibling | `00` "Known patterns"; `AGENTS.md` "Endpoint shape" |
+| 32-33 | Dates and time zones | `00` "Dates and time zones" (unchanged); `AGENTS.md` "Dates and money" |
+| 36 | Agorot and currency helpers | `00` "Money in code"; helper lists in `20` and `80` |
+| 37 | `authenticatedFetch` | `AGENTS.md` "One database, many orgs"; `20` |
+| 38 | ESLint money rule | `00` "Money in code" |
+| 41-43 | `api/`, `api/_shared/`, `src/` | `AGENTS.md` "What Reinex is"; the helper lists in `30` |
+| 44 | "`setup-sql.js` — single source of truth" | Replaced by `00` "Schema" (C4) |
+| 45 | "`scripts/` — run as part of build" | Dropped as inaccurate: not every script is in `build`. The validation table names the scripts. |
+
+**Old `AGENTS.md` (67 lines):**
+
+| Old lines | Content | Now |
+|---|---|---|
+| 1-3 | Title and intro | `AGENTS.md` intro and routing |
+| 6 | Single DB; "RLS is the primary isolation mechanism" | `AGENTS.md` "One database, many orgs". The RLS sentence is corrected in `00` "Architecture" and in `30` (C1). |
+| 7 | Schema `public` only | `AGENTS.md` "One database, many orgs" |
+| 8 | Isolation through `ensureMembership` and `.eq` / `withOrgScope` | `30` "Org isolation in the API"; one line in `AGENTS.md` (C1) |
+| 9 | Never `resolveTenantClient` | `00` "Architecture", once (C3) |
+| 10 | `x-org-id` | `AGENTS.md` "One database, many orgs" |
+| 11 | No `reinex` in routes | `AGENTS.md` "Routes"; `00` |
+| 12 | Instructors self-scoped | `AGENTS.md`; `00`; `30` (authorisation) |
+| 13 | `respond`, `resolveBearerAuthorization` | `AGENTS.md` "Endpoint shape"; `30` "5xx responses and the support code" |
+| 14 | `getUser` return shape | `00` "Known patterns" |
+| 15 | `is_active` | `AGENTS.md` "Disable, don't delete"; `00` |
+| 18 | Context economy ("Load ONLY") | Replaced by `AGENTS.md` "Where to start" (C6) and "Start here" in each file |
+| 19-20 | Do not reinvent; respect coupling | `AGENTS.md` "Do not reinvent" |
+| 21 | Escape hatch | `AGENTS.md` "Escape hatch". The marker is kept as `NEW PATTERN PROPOSAL:`, without the emoji. |
+| 22 | Keep the Hub Alive | `AGENTS.md` "Keep documentation current" (D8), with `DOC UPDATE REQUIRED:` |
+| 24-37 | Read by task, including the finance contract and hardening links | `AGENTS.md` routing table, which gains a tests column and rows for commits and plans |
+| 40 | Workflow tree "verified against pre-prod (May 2026)" | The link is kept. The environment claim is dropped (D9). |
+| 42-56 | Validation table | `AGENTS.md` table, the only copy (C5) |
+| 58-62 | Upsert contract | `00` "Upsert contract" |
+| 65-67 | Read the domain file; check helper docs; keep page code thin | `AGENTS.md` "Where to start" and "Do not reinvent" |
+
+**Also removed:** the copy of the validation table in `00` (old lines 69-81). It now links to `AGENTS.md`.
 
 **Acceptance (stage 3 as a whole):**
 - A checklist maps every line of the old `CLAUDE.md` and `AGENTS.md` to its new location.
@@ -2093,6 +2157,85 @@ Append one entry per stage. Newest last.
     - no settings change;
     - no push.
   - **Joint review pending** before 3.2.
+- **2026-11-24, owner decisions before stage 3.**
+  - **Q10:** stays open. The commit policy and 3.10 are completed without it, and the existing attribution settings stay. Recorded in `0ce043b`.
+  - **4R and Q11:** deferred, because there is no plan today for another database beyond preprod. Stage 5 gained the practical check 5.0 instead. The plan stays `active`. Recorded in `0ce043b`.
+- **2026-11-24, stage 3: one instruction source.** The owner approved 3.2–3.12.
+  - **Commits** (local, on top of `cc97a82`):
+    - `0ce043b` `docs(plans): defer the migration research and record the Q10 decision`
+    - `c576742` `refactor(docs): move agents-docs to docs/project-rules`
+    - `f74bdf4` `fix(lint): point deprecated tenant-client hints to createSingleClient`
+    - `83d4b1a` `docs(agents): make AGENTS.md the single entry point`
+    - `0eb74a2` `docs(agents): keep the still-valid dialog gotchas in the frontend rules`
+    - `0d52f96` `docs(agents): name Conventional Commits in the pointer and drop a deleted start file`
+    - plus the commit that records this entry.
+  - **Link map before the move** (`$env:TEMP\reinex-restructure\stage3\before.json`, script `linkmap.cjs`), over tracked `.md` files at `cc97a82`:
+    - 157 files, 393 relative links: 376 resolve and 17 are broken at the baseline.
+    - Inside `agents-docs/` there were 285 links. The plan's 262 counted only `../`. Of these, 275 leave the folder, 10 stay inside it, and 1 was already broken.
+  - **Baseline broken links** (17, recorded separately and not fixed by the move):
+    - `ProjectDoc/TutTiud_Agents.md:135`;
+    - `README.md:82`;
+    - `Reinex-Refactor-and-Migration-Plan.md:783`;
+    - `agents-docs/90:19` (`api/backup-status`, deleted in `bd7c90a`);
+    - `docs/README.md:59`;
+    - `docs/employee-leave-ledger-reference-review.md:18-19` (absolute `C:/dev` paths);
+    - `docs/guardian-integration-implementation-summary.md:462-463`;
+    - `implementations/calendar/workflow/README.md:65-71` and `phase-01-foundation.md:79` (absolute `C:/dev` paths).
+  - **After the move** (`after-move.json`, compared by `compare.cjs`): 393 of 393 links resolve to the same file as before, with the 17 baseline breaks unchanged. Nothing is missing or extra.
+    - `git` shows 11 renames, from `R054` to `R100`. `20-frontend-shared-helpers.md` shows as delete and add because more than half of its lines are links.
+  - **Inbound references** were rewritten from `agents-docs` to `docs/project-rules`:
+    - `AGENTS.md`, `CLAUDE.md`;
+    - `eslint.config.js:10`, `api/_shared/leave-entitlement.js:37` (comments);
+    - 8 files under `implementations/`.
+
+    `git grep agents-docs` outside `docs/plans/` now finds nothing.
+  - **Out-of-repo consumers, for owner approval** (not changed): the Claude memory files that name `agents-docs/`. The wiki was not checked.
+  - **After the content changes** (`after-content.json`): 158 files, 412 links, the same 17 baseline breaks.
+    - `AGENTS.md`, `CLAUDE.md` and `docs/project-rules/**` have **0 broken links**. The one baseline break there, `api/backup-status`, was removed from the "Start here" list in `90`.
+    - Every repository path quoted in backticks in `AGENTS.md` exists.
+    - The link labels in `project-rules` still showed `../api/…` after the move. 261 labels were aligned with their targets (`83d4b1a`).
+  - **What was written:**
+    - `AGENTS.md` is 58 lines, and `CLAUDE.md` is `@AGENTS.md`.
+    - `00` gained "Schema" (C4, plus the DDL rules), "Money in code", "Finding and running tests" (C7) and the upsert contract. Its validation table copy was removed.
+    - `30` gained "Org isolation in the API" (C1) and "5xx responses and the support code" (C2). The second states that F2 and F3 are still needed.
+    - `80` gained a tests pointer.
+    - `commits.md` was added.
+    - "Start here" is now in each domain file.
+    - The mapping of every old line is in [3.13](#313-instruction-mapping-old-claudemd-and-agentsmd-at-0339f45).
+  - **One-place checks (`git grep`):**
+    - "Conventional Commits" appears in `commits.md` and on one link line in `AGENTS.md`;
+    - `withOrgScope(client, table, orgId)` appears in `30` and on one line in `AGENTS.md`;
+    - one validation table, in `AGENTS.md`;
+    - `resolveTenantClient` appears only in `00`, as the prohibition.
+  - **Checks** (Node v25.2.1):
+
+    | Check | Result | vs. stage 2 |
+    |---|---|---|
+    | `npm run test:finance-calendar` | exit 0; tests 589, pass 560, fail 0, todo 29; identity SHA-256 `4BF71F11…C0CC3E4` | identical |
+    | `npm run lint:sql` | exit 0; 0 errors, 21 warnings | identical |
+    | `npm run lint:upsert-conflicts` | passed | identical |
+    | `npm run lint:plans` | OK, 1 plan, active | identical |
+    | `npm run lint:error-tracking` | 276 untracked 5xx in 100 files (warn-only) | identical; F2 and F3 not started |
+    | `node scripts/validate-api-endpoints.js` | exit 1, the same 93 output lines before and after the C3 edit | pre-existing findings; message text only |
+    | `npx eslint` on the 3 code files touched | 0 problems | — |
+    | `npm run lint` (`eslint .`) | exit 0; 719 files; 0 errors, 0 warnings | identical (719) |
+    | `npm run lint:api` (`eslint api/`) | exit 0; 220 files; 0 problems | identical |
+  - **Findability tests through `AGENTS.md`.** Two new read-only agents were told to start from `AGENTS.md`, not to read `docs/plans/`, and to use no outside memory.
+    - **Commits:** passed. It found `commits.md` through `AGENTS.md` and proposed `refactor(tests): move test/ to tests/` together with the npm, ESLint and ignore updates, and a separate `test(<area>): …` commit for the new test, with the reason.
+    - **D8 (three cases):** passed.
+      - The renamed script: update the instructions that cite it (`AGENTS.md`, `00`, `95`).
+      - The approved product decision: record it in its domain source (`80` until stage 4 creates `docs/product/`).
+      - The internal refactor: no documentation edit.
+    - **C7:** passed. It named `tests/pay-calculation.test.js`, `payroll-rules`, `pay-summary`, and the tester scenario `pay-summary`. It gave the run commands and said that neither `build` nor CI runs them.
+    - **C1:** passed. Its order was `ensureMembership`, then a stop on `null`, then `isAdminRole`, then `withOrgScope` for each read and update, plus `respondTrackedError`, `function.json` and `lint:api`.
+    - **Limit of the test.** The agents ran inside this session, which had loaded the old `CLAUDE.md` before the change. One agent therefore reported a stale validation table in `CLAUDE.md`; on disk and in `HEAD` the file is only `@AGENTS.md`. A truly fresh run is stage 8.1, in a new session.
+  - **Open, with reasons:**
+    - **3.8:** each deletion needs owner approval per file. The preparation is in [3.8 Retirement candidates](#38-retirement-candidates).
+    - **3.9:** an owner decision; the recommendation is recorded there.
+    - **3.4 item 2 (hard limits):** it waits for the D9 decisions (`main`, preview and production claims).
+  - **Plan correction:** the `IF NOT EXISTS`, money ESLint, `function.json` and explicit `onConflict` rules were only in `CLAUDE.md`, not in agents-docs as 3.1 listed them. They were moved to `00`.
+  - **Not done:** 3F, no push, no settings change.
+  - **Joint review pending** before 3F.
 
 ---
 
