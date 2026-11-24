@@ -1,0 +1,38 @@
+name: Doc links
+
+# Checks the relative links in AGENTS.md and docs/project-rules/ (scripts/check-doc-links.js).
+# No path filter on purpose: a PR that only changes documentation must run it too.
+on:
+  push:
+    branches:
+      - staging
+      - main
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches:
+      - staging
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  doc_links:
+    name: Doc links
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # Both commands use only Node built-ins, so no npm install is needed.
+      - name: Check links in the agent instructions
+        run: npm run lint:doc-links
+
+      - name: Run the link checker tests
+        run: node --test tests/check-doc-links.test.js
