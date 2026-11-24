@@ -5,6 +5,9 @@ The binding entry point for every agent working in this repository. `CLAUDE.md` 
 ## What Reinex is
 A multi-tenant management system for therapeutic riding farms and clinics: scheduling, students and clients, billing and HMO claims, staff payroll, forms and messaging. The UI is in Hebrew (right to left). The API is Azure Functions (Node, ESM) in `api/`; the frontend is React and Vite in `src/`; data is in one Supabase Postgres project.
 
+## Hard limits
+- **`main` needs explicit owner approval.** Never push to `main` or merge into it without the owner's explicit approval for that push or merge. **Why:** a push to `main` runs the Azure Static Web Apps deployment workflow.
+
 ## Always-on rules
 - **Where to start.** Read the [`docs/project-rules/`](docs/project-rules/) document for your task (routing table below) and start from its "Start here" files. Continue as far as the change needs: imports, callers (grep the symbol), dependencies, cross-domain effects and tests. **Why:** a fixed file list misses callers and existing tests.
 - **One database, many orgs.** Every tenant table has `org_id`; tenant schema is `public` only. The frontend sends `x-org-id` on every API call through `authenticatedFetch` (`src/lib/api-client.js`). **Why:** all orgs share one project, so the org travels with every request.

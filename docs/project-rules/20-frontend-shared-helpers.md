@@ -46,6 +46,7 @@ These files are an entry point, not a boundary: follow imports, callers (grep th
 - WhatsApp message text helpers in [`../../src/lib/whatsapp-message-templates.js`](../../src/lib/whatsapp-message-templates.js) for organization signatures and shared form / waiting-list / reminder wording.
 
 ## Known patterns / do not reinvent
+- **Quoting UI names in Hebrew text.** When UI text or UI-writing guidance quotes the name of a button, field or status, use straight double quotes, for example: לחצו על "בטל שיעור". Do not use „…” or “…”. **Why:** one consistent quote character keeps names easy to search and avoids mixed marks in RTL text.
 - Default to [`../../src/lib/api-client.js`](../../src/lib/api-client.js) for authenticated requests.
 - Public auth-email initiation flows (for example password reset) should still use shared frontend API wrappers rather than direct Supabase email-sending methods, so delivery stays centralized on backend Brevo helpers.
 - Personal-account screens should use `AccountContext` + `src/api/me.js`; do not read/write `profiles` directly from page components.
