@@ -17,7 +17,6 @@ These files are an entry point, not a boundary: follow imports, callers (grep th
 - [`../../api/documents/index.js`](../../api/documents/index.js)
 - [`../../api/documents-download/index.js`](../../api/documents-download/index.js)
 - [`../../api/backup/index.js`](../../api/backup/index.js)
-- [`../../api/backup-status/index.js`](../../api/backup-status/index.js)
 - [`../../api/local-export/index.js`](../../api/local-export/index.js)
 - [`../../api/local-import/index.js`](../../api/local-import/index.js)
 - [`../../api/audit-log/index.js`](../../api/audit-log/index.js)

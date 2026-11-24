@@ -19,7 +19,7 @@ A multi-tenant management system for therapeutic riding farms and clinics: sched
 - **Escape hatch.** If the existing helpers are inadequate, or you see a clearly better approach, do not hack around the rules: stop, write `NEW PATTERN PROPOSAL:` with a short explanation, and wait for approval.
 - **Tests for every behaviour change.** Identify which test proves the behaviour that changed. Update or add a Node test for logic, and a tester scenario (`tests/automatic-tester/`) when a user flow is affected; if both are affected, cover both. If existing coverage already proves the requirement, run it. A documentation change gets the verification that fits it. How to find and run tests: [`00`](docs/project-rules/00-core-rules.md) "Finding and running tests". **Why:** a change is done only when something proves it.
 - **Keep documentation current.** When a change makes an existing instruction, product rule, command, path, or plan checkpoint inaccurate, update its authoritative document in the same change. Record new shared contracts and cross-domain effects in the relevant domain guide. Review the documents referenced by the work you touched. If they remain accurate, no documentation edit is needed. If you are unsure where a rule belongs, end your response with `DOC UPDATE REQUIRED:` and what is missing.
-- **Commits** follow [`docs/project-rules/commits.md`](docs/project-rules/commits.md).
+- **Commits** use Conventional Commits; the policy is [`docs/project-rules/commits.md`](docs/project-rules/commits.md).
 
 ## Routing: read by task
 
