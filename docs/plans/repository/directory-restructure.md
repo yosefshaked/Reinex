@@ -5,7 +5,7 @@
 Read this block first when you continue this plan in a new conversation.
 
 - **Plan status:** the overall status of this plan is recorded only in [`docs/plans/index.csv`](../index.csv). Check it with `npm run lint:plans`.
-- **Current stage:** 3 is done except three open items: 3.8 (each deletion needs owner approval), 3.9 (an owner decision) and the hard-limits item in 3.4 (it waits for D9). Next: joint review of stage 3, then stage 3F (F1). Do not start 3F before that review.
+- **Current stage:** 3 is done, including the review fixes and 3.9 ("Doc links"). Still open: 3.8 (each deletion needs owner approval) and the hard-limits item in 3.4 (it waits for D9). Next: joint review of the fixes, then stage 3F (F1). Do not start 3F before that review.
 - **Execution branch:** `repository-reconstruction`, based on `origin/staging` `dce8f2e790e939b7f0805803d7d44e71a23346ba`. See [Planning base](#planning-base) and [Q1](#q1-execution-branch).
 - **Repository state:**
   - `test/` is now `tests/`; `agents-docs/` is now `docs/project-rules/`.
@@ -13,7 +13,7 @@ Read this block first when you continue this plan in a new conversation.
   - `docs/plans/index.csv` and `npm run lint:plans` exist.
   - The raw evidence is outside the repository, in `$env:TEMP\reinex-restructure\stage0\`, `stage1\`, `stage2\` and `stage3\`.
   - Nothing has been pushed; the owner decides on the push together with Claude.
-- **Last update:** 2026-11-24. Stage 3 executed: the move, the new `AGENTS.md`, the rules from 3.1, the commit policy, and the C3 hints. Stage 4R and Q11 are deferred.
+- **Last update:** 2026-11-24. Stage 3 review fixes: the endpoint flow follows C1, the `resolveTenantClient` name is gone from active guidance, the finance reading times are restored, and `lint:doc-links` with its "Doc links" CI were added.
 
 Each stage appends to the [Progress log](#progress-log), ticks its subtasks and records answers under [Open decisions](#open-decisions). Keep this block at five bullets. It is a pointer, not a history.
 
@@ -48,6 +48,7 @@ Today that knowledge is spread over seven documentation folders and two instruct
 - widening coverage. The coverage gap found in C7 stays tracked in this plan (3.1, C7); closing it is a separate initiative;
 - changing CI triggers or behaviour. The owner-approved exceptions are:
   - the "Plan registry" workflow (Q9, stage 2);
+  - the "Doc links" workflow (3.9), approved at the stage 3 review on 2026-11-24;
   - making error tracking a blocking CI check (3.1 C2, stage 3F subtask F3), approved on 2026-11-24;
 - automating migrations in deployment. The research on it (stage 4R) is deferred by the owner;
 - performance work;
@@ -77,7 +78,7 @@ Today that knowledge is spread over seven documentation folders and two instruct
   - **Another worktree** exists: `C:\Developement\Repositories\Reinex-attendance-grid`, on `attendance-month-grid` at `616b645`. It is unrelated.
 - **PR #62** (`staging` → `main`) is open by owner decision.
   - Every push to `staging` runs the integrity checks and the SWA build. It also redeploys a preview that uses the production DB.
-  - PRs into `staging` themselves get no CI. Triggers are on `main` only [V]. Since stage 2 the one exception is the "Plan registry" workflow, which also runs on PRs and pushes to `staging`.
+  - PRs into `staging` themselves get no CI. Triggers are on `main` only [V]. Since stage 2 the exceptions are the "Plan registry" workflow and, since the stage 3 review, "Doc links". Both also run on PRs and pushes to `staging`.
 - **Local machine.**
   - Node is `v25.2.1`; CI uses Node 20.
   - `NODE_OPTIONS` accepts `--test-reporter` and `--test-reporter-destination` on the local Node [V].
@@ -172,7 +173,7 @@ root/
 | `api/` | Stays (colocated tests stay). `.test.js` files: 21 in `api/`; 11 are run by `test:finance-calendar` [V]. | Owner decision 6 | SWA `api_location: "api"` [V] | — | — (comments edited in stages 4, 5, 7) |
 | `src/` | Stays, except `src/lib/setup-sql.js`. Colocated tests `src/lib/analytics/posthog.test.js` and `src/runtime/config.test.js` stay [V]. | Owner decision 6 | Vite | — | 5 (setup-sql only) |
 | `public/` | Stays | Copied into `dist/` | Vite, SWA `output_location: "dist"` [V] | — | — |
-| `.github/workflows/*`, `.github/actions/run-integrity-checks/` | Stay | They never referenced `test/` [V]. Triggers at `dce8f2e`: `main` only [V]. Since stage 2, `plan-registry.yml` also runs on `staging` and runs `tests/validate-plans-index.test.js` directly. Stage 3F (F3) adds a blocking error-tracking check. | GitHub Actions | — | 2, 3F |
+| `.github/workflows/*`, `.github/actions/run-integrity-checks/` | Stay | They never referenced `test/` [V]. Triggers at `dce8f2e`: `main` only [V]. Since stage 2, `plan-registry.yml` also runs on `staging` and runs `tests/validate-plans-index.test.js` directly. Since the stage 3 review, `doc-links.yml` does the same for `tests/check-doc-links.test.js`. Stage 3F (F3) adds a blocking error-tracking check. | GitHub Actions | — | 2, 3, 3F |
 | `.github/chatmodes/Azure_function_codegen_and_deployment.chatmode.md` | Delete candidate | A competing instruction source: Copilot, naming "Claude Sonnet 4" [V] | Copilot chat | Owner confirms unused | 3 |
 | `.vscode/extensions.json` | Stays | Editor recommendation | VS Code | — | — |
 | `test/` (all of it) | `tests/` | Owner decision 1. Contents and consumers are in stage 1.1. | see 1.1 | Stage 1 | 1 |
@@ -851,7 +852,7 @@ The enforcement line is updated when F3 lands (D8).
 
 **Decision (owner).** Fix the four stale hints in 3.7. Find them by their text at execution time, not by line number.
 - **The new hint:** `createSingleClient(env)` creates the client, and `withOrgScope(client, table, orgId)` scopes tenant table access. Each helper is named for its own role.
-- **The rule "never `resolveTenantClient`"** is kept once, in `docs/project-rules/00-core-rules.md:20`.
+- **The rule "never `resolveTenantClient`"** is kept once, in `docs/project-rules/00-core-rules.md:20`. *Updated at the stage 3 review (owner, 2026-11-24):* the function no longer exists in any code, so the name was removed from `00`. The ban on per-org credentials and the `createSingleClient(env)` and `withOrgScope` guidance remain. See the review log entry.
 - **`AGENTS.md:9`** is removed.
 
 **Why:** a hint that names a removed function sends an agent looking for deleted code.
@@ -1064,7 +1065,11 @@ The aim is to fix what the change made stale. It does not require a full documen
 - [x] 3.6 Add a "Start here" list to each `project-rules` file (C6). Write the full C1 and C2 rules in `30-backend-shared-helpers.md`. Done in `83d4b1a`: each "Load these files first" list was renamed "Start here" with the C6 sentence. In `0d52f96`, the deleted `api/backup-status/index.js` was removed from the list in `90`.
 - [x] 3.7 Fix the four C3 hints, found by their text (`git grep -n "resolveTenantClient" -- eslint.config.js scripts docs/api-validation-tool.md`). Remove `AGENTS.md:9`. Done in `f74bdf4` (the hints) and `83d4b1a` (`AGENTS.md`). The output of `node scripts/validate-api-endpoints.js` is identical before and after; it exits 1 on both sides because of pre-existing findings.
 - [ ] 3.8 Delete the retired instruction sources after owner confirmation. **Open:** each file needs its own owner approval. The preparation is done; see [3.8 Retirement candidates](#38-retirement-candidates).
-- [ ] 3.9 Decide whether the link check becomes `scripts/check-doc-links.js`. **Open, owner decision.** Recommendation: yes, as a local npm script outside `build`. It would be the stage 3 link-map script (`$env:TEMPeinex-restructurestage3linkmap.cjs`) plus a check of paths cited in code comments, with tests. Stages 5–7 need it again. It resolves relative Markdown links and the `implementations/`, `docs/`, `tests/` and `database/` paths cited in code comments.
+- [x] 3.9 Decide whether the link check becomes `scripts/check-doc-links.js`. **Decided at the stage 3 review (owner, 2026-11-24): yes.** Done in `fdebc18` and `2d71c48`.
+  - **Command:** `npm run lint:doc-links`, outside `npm run build`.
+  - **Scope:** every relative Markdown link in `AGENTS.md` and `docs/project-rules/**/*.md`, resolved from the file that contains it, to a file or folder in the repository.
+  - **CI:** `.github/workflows/doc-links.yml` ("Doc links"), on PRs and pushes to `staging` and `main`, with no path filter.
+  - **Not covered yet:** paths cited in code comments, and Markdown outside the instructions. Widen it in stages 5–7 if they need it.
 - [x] 3.10 Define one commit policy for every development agent in Reinex. The owner requested it on 2026-11-23. See 3.3. Done in `83d4b1a` (`docs/project-rules/commits.md`) and `0d52f96` (the pointer in `AGENTS.md`). Q10 stays open; the policy says nothing about trailers.
 - [x] 3.11 Write the C7 test guidance ("Finding and running tests") in `00-core-rules.md`, with a short pointer from `80-finance-billing-payroll.md`. Put no counts in the guidance. Done in `83d4b1a`.
 - [x] 3.12 Write the C4 schema contract in `00-core-rules.md`, in place of "Schema SSOT". Done in `83d4b1a`. The section also holds the DDL idempotency rules and the upsert contract.
@@ -1759,7 +1764,7 @@ These are the questions whose answers change the plan. Record each answer direct
 
 ### Q3 Evidence without CI
 - **Known:**
-  - Stage PRs into `staging` get no CI before merge, apart from "Plan registry" since stage 2.
+  - Stage PRs into `staging` get no CI before merge, apart from "Plan registry" (since stage 2) and "Doc links" (since the stage 3 review).
   - PR #62 runs CI after each push to `staging`.
 - **Codex recommendation:** for the pilot, local evidence is enough when before and after record the same environment (Node version, OS), the same commands, and the test identities and results. No CI change is needed before the pilot.
 - **Answer (2026-11-23, owner):** approved. Local evidence is enough for the pilot under the plan's comparison conditions.
@@ -2235,6 +2240,54 @@ Append one entry per stage. Newest last.
     - **3.4 item 2 (hard limits):** it waits for the D9 decisions (`main`, preview and production claims).
   - **Plan correction:** the `IF NOT EXISTS`, money ESLint, `function.json` and explicit `onConflict` rules were only in `CLAUDE.md`, not in agents-docs as 3.1 listed them. They were moved to `00`.
   - **Not done:** 3F, no push, no settings change.
+  - **Joint review pending** before 3F.
+- **2026-11-24, stage 3 review fixes** (owner request after the joint review).
+  - **Commits** (local, on top of `a49188d`):
+    - `5853c5d` `docs(agents): use withOrgScope in the standard endpoint flow`
+    - `b40beea` `docs(agents): drop the removed resolveTenantClient name from active guidance`
+    - `9b0453c` `docs(agents): restore when to read the finance contract and hardening protocol`
+    - `fdebc18` `feat(docs): add lint:doc-links for the agent instruction links`
+    - `2d71c48` `ci(docs): add the Doc links check`
+    - plus the commit that records this entry.
+  - **1. Endpoint flow and C1.** The "Standard endpoint flow" in `30` offered `.eq('org_id', orgId)` as a normal alternative to `withOrgScope`.
+    - It now has two separate steps: authorisation (`ensureMembership` for a member, stop on `null`, then role and instructor checks) and org scoping (`withOrgScope` for every supported operation). RPC, storage and auth-admin calls point to the C1 section.
+    - A `git grep` over `AGENTS.md`, `CLAUDE.md` and `docs/project-rules/` found no other instruction that offers a manual filter.
+    - Reviewing the implementations and changing API code stay in 3F.
+  - **2. `resolveTenantClient`.** `git grep -n resolveTenantClient` over every tracked file at `a49188d` matched 10 files.
+    - No file under `api/`, `src/`, `tests/` or `scripts/` defines, exports, imports or calls it, and neither do `eslint.config.js`, `package.json` or `.github/`. **The function has been removed.**
+    - **Removed:**
+      - `docs/project-rules/00-core-rules.md`: the name was removed from the list of retired patterns. The shared-database rule, the ban on per-org credentials, and the `createSingleClient(env)` and `withOrgScope` guidance remain.
+      - `docs/api-validation-tool.md`: the bracketed note was removed. The old import path `../_shared/supabase-tenant.js`, which the validator still detects, and the current guidance remain.
+    - **Kept, and why:**
+      - `refactor-phase1.js` and `refactor-phase1.py`: one-time migration scripts that look for the name as a string, to rewrite old endpoints. They do not call it. They are already delete candidates in stage 6 (migration map, root files).
+      - `implementations/database/one-db-refactor/one-db-refactor.md`: the migration log. It records what was removed and when (57 endpoints, the shim removed on 2026-04-18). Removing the name would lose that history. Stage 7 triage.
+      - `Reinex-Refactor-and-Migration-Plan.md:775`: a completed TutTiud-to-Reinex plan that describes the old design. Already mapped to `docs/plans/repository/` as `completed` in stage 7.
+      - `docs/plans/repository/directory-restructure.md`: this plan's own record of C3.
+    - **Waiting for stage 7, with a recommendation:**
+      - `docs/guardians-api-fixes-summary.md:56,61,114`: a fix report whose code samples call the removed function. **Recommendation:** delete it, or move it to `docs/research/` with a banner. It is a point-in-time report and no instruction depends on it.
+      - `implementations/admin-page/org-nuke/README.md:695`: a "No `resolveTenantClient()`" row in the org-purge spec, which code comments cite. **Recommendation:** drop the row when the spec moves to `docs/project-rules/` in stage 7; the rest of the row already says to use `createSingleClient(env)`.
+      - `implementations/finance/hmo-claims/technical-implementation-plan.md:868`: "Do not use `resolveTenantClient`." inside an implementation plan. **Recommendation:** leave it, or trim it, when the plan is triaged in 7.1. It is not an active instruction file.
+  - **3. Finance reading times in `AGENTS.md`.** The routing row now reads: before a change to finance behaviour, the finance workflow contract; before a finance rollout, the release hardening protocol. This matches the two headings in `80`. Both links resolve (checked by `lint:doc-links`).
+  - **4. Subtask 3.9.** Recorded under 3.9:
+    - the command `npm run lint:doc-links` (`scripts/check-doc-links.js`), with tests in `tests/check-doc-links.test.js`;
+    - the workflow "Doc links".
+
+    The command and its scope are documented in the `AGENTS.md` validation table and in `00` "Finding and running tests".
+  - **Verified locally** (Node v25.2.1):
+    - `npm run lint:doc-links` on the real tree: exit 0, "Doc links OK: 319 relative link(s) in 14 file(s)". The stage 3 link map gives the same scope: 319 links, 0 broken.
+    - **Broken-link case on the real tree.** In a throwaway worktree (`git worktree add`, removed afterwards), one link to `../../api/no-such-endpoint/index.js` was added to `30`. The check exited 1 with `docs/project-rules/30-backend-shared-helpers.md:106: link "../../api/no-such-endpoint/index.js" -> missing target api/no-such-endpoint/index.js`.
+    - `node --test tests/check-doc-links.test.js`: 12 of 12 pass. They cover file, folder, sibling and anchor links; skipped external, anchor-only, absolute and fenced links; nested folders; a missing target with source, line and target; resolving from the containing file; a broken link in `AGENTS.md`; a link that leaves the repository; a missing `AGENTS.md`; and the command line (exit 0 and exit 1).
+    - The workflow YAML parses (js-yaml) to the intended name, triggers, permissions and steps.
+    - `npx eslint` on the new script and test: 0 problems.
+    - `npm run lint` (`eslint .`): exit 0, 0 problems over 721 files. That is the stage 3 count of 719 plus exactly the two new files.
+    - `npm run test:finance-calendar`: exit 0, 589 tests, the identity SHA-256 `4BF71F11…C0CC3E4` unchanged.
+    - `tests/validate-plans-index.test.js`: 24 of 24 pass. `npm run lint:plans`: OK.
+  - **Waiting for GitHub Actions** (after a push): the first runs of "Doc links" and of "Plan registry". The first push to `staging` also runs them on PR #62. Neither has run on Node 20 yet; they use only built-ins available there.
+  - **Not decided:** making "Doc links" (like "Plan registry") a required check in the branch rules. That needs separate owner approval; no settings were changed.
+  - **Still open:**
+    - **3.8:** each deletion needs a separate owner decision.
+    - **3.4 hard limits:** they wait for D9.
+  - **Not done:** 3F, no push.
   - **Joint review pending** before 3F.
 
 ---
