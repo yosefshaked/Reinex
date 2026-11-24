@@ -92,7 +92,7 @@ Missing step 2 causes PostgreSQL error `42P10` at runtime — silent in code rev
 - Node tests use `node --test`. A unit test may sit next to its module (`api/**`, `src/**`); shared tests are in `tests/`; browser and API scenarios are in `tests/automatic-tester/` (runner: `node tests/automatic-tester/runner.js --script <name>`).
 - Find the tests for a module with `git grep -l "<module or function name>" -- "*.test.js" tests/automatic-tester/scripts`.
 - `npm run test:finance-calendar` runs a fixed list of files (finance and others); `npm run verify:beta` runs it too. Neither `npm run build` nor CI runs it.
-- CI runs `tests/validate-plans-index.test.js` in the "Plan registry" workflow.
+- CI runs `tests/validate-plans-index.test.js` ("Plan registry" workflow) and `tests/check-doc-links.test.js` ("Doc links" workflow) directly.
 - Every other test file has no entry point: run it with `node --test <file>` when you change the code it covers. Not being in an npm list does not mean a test is obsolete.
 - Which tests a change needs is the "Tests for every behaviour change" rule in [`../../AGENTS.md`](../../AGENTS.md).
 

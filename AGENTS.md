@@ -55,4 +55,5 @@ Run the matching npm scripts (defined in `package.json`) before the task is done
 | `src/**/*.js`, `src/**/*.jsx` | `npm run lint` |
 | Finance, billing or payroll logic | `npm run test:finance-calendar`, plus the tests of the changed module |
 | A plan or `docs/plans/index.csv` | `npm run lint:plans` |
+| `AGENTS.md` or `docs/project-rules/**` | `npm run lint:doc-links` (every relative link, resolved from its own file, must reach an existing file or folder) |
 | Before a deploy, or a full check | `npm run build` (its steps are the `build` script in `package.json`; it runs no tests and not `lint:upsert-conflicts`) |
