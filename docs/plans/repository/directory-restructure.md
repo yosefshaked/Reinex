@@ -5,7 +5,7 @@
 Read this block first when you continue this plan in a new conversation.
 
 - **Plan status:** the overall status of this plan is recorded only in [`docs/plans/index.csv`](../index.csv). Check it with `npm run lint:plans`.
-- **Current stage:** 3F. Stage 3 is closed, and the reliability work is now its own plan ([`students/atomic-student-operations.md`](../students/atomic-student-operations.md), `planned`). **Next task here: F1.5**, the narrow org scoping of the four link writes, test first. Then F2 (the follow-up plan continues after F2), then F3. Waiting for a push: the first GitHub Actions runs of "Doc links" and "Plan registry", after which they become required checks.
+- **Current stage:** 3F. F1 (narrow org isolation) is done in `adc1439`. **Next: F2** (the support code must point to a saved record). The follow-up plan [`students/atomic-student-operations.md`](../students/atomic-student-operations.md) (#63) continues after F2, and F3 follows F2. Draft PR #64 (into `staging`) is open. The required checks are applied on `staging`; on `main` they wait for #64 to reach `staging`.
 - **Execution branch:** `repository-reconstruction`, based on `origin/staging` `dce8f2e790e939b7f0805803d7d44e71a23346ba`. See [Planning base](#planning-base) and [Q1](#q1-execution-branch).
 - **Repository state:**
   - `test/` is now `tests/`; `agents-docs/` is now `docs/project-rules/`.
@@ -13,7 +13,7 @@ Read this block first when you continue this plan in a new conversation.
   - `docs/plans/index.csv` and `npm run lint:plans` exist.
   - The raw evidence is outside the repository, in `$env:TEMP\reinex-restructure\stage0\`, `stage1\`, `stage2\` and `stage3\`.
   - Nothing has been pushed; the owner decides on the push together with Claude.
-- **Last update:** 2026-11-24. Reliability work split into its own plan; F1 narrowed to org isolation; the 3.8 deletions, the `main` and straight-quote rules, and `attribution.commit` applied.
+- **Last update:** 2026-11-24. Issue #63 and draft PR #64 opened, both checks passed on GitHub, the `staging` ruleset applied, and F1.5 done.
 
 Each stage appends to the [Progress log](#progress-log), ticks its subtasks and records answers under [Open decisions](#open-decisions). Keep this block at five bullets. It is a pointer, not a history.
 
@@ -1244,7 +1244,7 @@ It was moved because it is product-reliability work, wider than this restructure
 
 **Subtasks:**
 - [x] F1.1–F1.4 and F1.6–F1.9 (the analysis and the wider design): moved to the follow-up plan.
-- [ ] F1.5 Write the test first, then route the four updates through `withOrgScope`.
+- [x] F1.5 Write the test first, then route the four updates through `withOrgScope`. Done in `adc1439`; see the Progress log.
 
 **Acceptance:**
 - **A test in `tests/org-scope-reads.test.js`.** Org A and org B each hold rows in the four tables with the same `client_profile_id` value and `student_id IS NULL`. After `ensureStudentForClientProfile(client, ORG_A, …)` creates a student:
@@ -1814,6 +1814,8 @@ These are the questions whose answers change the plan. Record each answer direct
   - The registry is enforced in CI on every PR to `staging` or `main` and every push to them, through its own workflow, `.github/workflows/plan-registry.yml`. Its check is "Plan registry".
   - `npm run lint:plans` stays available locally and separate from `npm run build`.
   - **Decided (owner, 2026-11-24):** "Plan registry" and "Doc links" become required checks for merging into `staging` and `main`, after their first successful run on GitHub Actions. That needs a push first. The branch settings are changed only then, and the change is reported.
+  - **Applied to `staging` (2026-11-24):** ruleset [28011773](https://github.com/yosefshaked/Reinex/rules/28011773), with only the `required_status_checks` rule for both checks, pinned to GitHub Actions. Both passed first on draft PR #64.
+  - **`main` is not applied yet:** PR #62 (`staging` → `main`) cannot produce the checks until `staging` contains the two workflows, which arrive with #64. The `main` rule is added once #62 shows both checks green.
 
 ### Q10 Co-authored-by trailer
 - **Known:** the owner decided on 2026-11-23 that this question is settled separately from the commit policy (stage 3.3). Claude currently appends a `Co-Authored-By:` trailer by default.
@@ -2366,6 +2368,30 @@ Append one entry per stage. Newest last.
     - the first GitHub Actions runs of "Doc links" and "Plan registry", after which both become required checks for `staging` and `main`;
     - the issue "Prevent partial student creation during imports and lesson scheduling" (follow-up plan, 0.1).
   - **Next task here:** F1.5, the narrow org scoping, test first. **Joint review pending** before it starts.
+
+- **2026-11-24, published, checked on GitHub, and F1.5 done.** The owner pushed `repository-reconstruction` at `d0aeaf3`.
+  - **Issue [#63](https://github.com/yosefshaked/Reinex/issues/63)** opened, after a duplicate search; #35 is the broader import migration. Recorded in the follow-up plan (0.1).
+  - **Draft PR [#64](https://github.com/yosefshaked/Reinex/pull/64)**, from `repository-reconstruction` into `staging`. It is not to be merged until the joint reviews.
+  - **First GitHub Actions runs, on `d0aeaf3`, both successful (app `github-actions`, id 15368):**
+    - "Doc links": [run 45463128027](https://github.com/yosefshaked/Reinex/actions/runs/45463128027), 9 s.
+    - "Plan registry": [run 45463127979](https://github.com/yosefshaked/Reinex/actions/runs/45463127979), 12 s.
+  - **Protections:**
+    - **Before:** neither `staging` nor `main` had any branch protection or ruleset (`GET …/branches/<b>/protection` gave 404, and `GET …/rulesets` gave `[]`). There was nothing to preserve.
+    - **Applied:** ruleset [28011773](https://github.com/yosefshaked/Reinex/rules/28011773) on `refs/heads/staging`. It is active, has no bypass actors, and holds one rule, `required_status_checks`: "Doc links" and "Plan registry" from GitHub Actions, without the up-to-date (strict) requirement. `GET …/rules/branches/staging` returns that rule, and #64 stays `MERGEABLE`/`CLEAN`.
+    - **Effect:** a merge into `staging`, or a direct push to it, needs both checks to have passed on the commit.
+    - **Not applied to `main`:** #62's head (`staging`) has no copy of the two workflows yet, so the checks cannot run on #62. Requiring them on `main` now would leave #62 waiting for checks that never run. `GET …/rules/branches/main` returns `[]`. Apply it after #64 reaches `staging` and #62 shows both checks green.
+  - **F1.5 (narrow org isolation), `adc1439`:**
+    - **Test first:** `tests/org-scope-reads.test.js` gains "a new student is linked only to the earlier rows of its own organisation". The fake client now applies an awaited update to the rows that match its filters, and records those filters.
+    - **The fixture:** org B and org A each hold, in all four link tables, an unlinked row with the same `client_profile_id`, B listed first. Org A also has an already linked row.
+    - **Before the fix:** exit 1, 20 of 21 pass. The new test failed on "form_submissions: org B's row is unchanged", because the old code linked org B's row (`$env:TEMP\reinex-restructure\stage3\f1-before.txt`).
+    - **The fix:** the four updates go through `withOrgScope(tenantClient, table, scopedOrgId)`, keeping `.eq('client_profile_id', …)` and `.is('student_id', null)`. The comment now states the C1 reason and points partial failure to the follow-up plan.
+    - **After the fix:** 21 of 21 pass. For every table, org A's unlinked row is linked, org B's row and org A's linked row are unchanged, and the update carries the org A filter (`f1-after.txt`).
+    - **Checks:**
+      - `npx eslint api/ tests/org-scope-reads.test.js`: 221 files, 0 problems.
+      - `npm run lint:upsert-conflicts`: passed.
+      - `npm run test:finance-calendar`: exit 0, 590 tests (561 pass, 29 todo). Compared with the previous identity, the only difference is the one added test.
+  - **Not done:** nothing merged, nothing pushed to `main`, and the new commits are not pushed. Partial failure and atomicity stay in the follow-up plan.
+  - **Next:** F2. **Joint review pending** before it starts.
 
 ---
 

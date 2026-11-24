@@ -7,8 +7,8 @@ Read this block first when you continue this plan in a new conversation.
 - **Plan status:** the overall status of this plan is recorded only in [`docs/plans/index.csv`](../index.csv).
 - **Current stage:** not started; waiting for F2 in the [repository restructure plan](../repository/directory-restructure.md) (stage 3F). The first subtask after F2 is 1.1 (design review).
 - **Origin:** split on 2026-11-24 out of the restructure plan's F1. That plan keeps only the narrow org-isolation fix of the four link writes. This plan owns the reliability work. The evidence gathered there is moved here, not copied. Its history stays in that plan's Progress log.
-- **GitHub issue:** not opened yet. Subtask 0.1 waits until this plan is published on GitHub at a stable link.
-- **Last update:** 2026-11-24. Plan created from the restructure plan's F1.6–F1.9.
+- **GitHub issue:** [#63](https://github.com/yosefshaked/Reinex/issues/63), opened on 2026-11-24 with a permanent link to this plan at `d0aeaf3`.
+- **Last update:** 2026-11-24. Issue #63 opened (0.1). The plan stays `planned`.
 
 ---
 
@@ -39,7 +39,7 @@ The user always learns the real outcome, even when a response is lost.
 
 ## Subtasks
 
-- [ ] 0.1 When this plan is on GitHub at a stable link, open one issue titled "Prevent partial student creation during imports and lesson scheduling". The body has a short example of the failure, the outcome the user should get, and a link to this plan. Then add the issue link to "Resume here". **Waiting for this plan to be published** (a push, which needs owner approval).
+- [x] 0.1 Done on 2026-11-24: [#63](https://github.com/yosefshaked/Reinex/issues/63). When this plan is on GitHub at a stable link, open one issue titled "Prevent partial student creation during imports and lesson scheduling". The body has a short example of the failure, the outcome the user should get, and a link to this plan. Then add the issue link to "Resume here". The owner pushed `d0aeaf3`; before opening, a search found no duplicate (#35 covers the broader import migration, not partial writes).
 - [ ] 1.1 Design review of the [proposed solution](#f17-proposed-solution-one-database-transaction-per-user-operation) against the decisions above. Points the review must settle:
   - **Operation identity.** Decision 3 needs a per-operation id that the UI creates and the server stores with the result, so that the UI can ask for that operation's outcome. The earlier `already_applied` idea and the earlier "accept a 409 on a lost direct create" option are both superseded by decision 3.
   - **The success fingerprint (decision 4)** is stored in the same transaction as the success. The earlier idea of computing the import fingerprint again from `candidate_data` later is superseded.
@@ -67,6 +67,8 @@ Proved against local PostgreSQL. The method is in [F1.8](#f18-proof-against-the-
 ## Progress log
 
 - **2026-11-24, plan created.** Moved from the restructure plan's stage 3F (F1.1–F1.9) when the owner split the narrow isolation fix from this reliability work. Nothing is implemented yet. The design in the moved sections predates decisions 3 and 4, and subtask 1.1 reconciles it with them.
+
+- **2026-11-24, issue opened.** [#63](https://github.com/yosefshaked/Reinex/issues/63): "Prevent partial student creation during imports and lesson scheduling". It has one failure example (a template from a waiting-list entry with a missing required form), the expected result for the user, and the permanent plan link at `d0aeaf3`. Before opening, the open and closed issues were searched for a duplicate.
 
 ---
 
