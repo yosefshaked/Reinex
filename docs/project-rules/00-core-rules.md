@@ -76,7 +76,7 @@ Reinex serves Israeli organisations; stored instants stay UTC for data integrity
 - **Two parts, applied in this order:**
   - `src/lib/setup-sql.js` is the target snapshot. A new database is set up from it alone.
   - On an existing database, run the new migrations from `migrations/` in order, then the snapshot.
-  - The procedure is in [`../../migrations/README.md`](../../migrations/README.md): migrations are applied by hand today; applying them from CI is planned.
+  - The procedure is in [`../../migrations/README.md`](../../migrations/README.md): migrations are applied by hand, in order, before the snapshot.
   - **Why:** a new database needs only the target state; an existing one must first lose what the snapshot no longer defines.
 - **The snapshot is safe to run again.** Every `CREATE TABLE`, `CREATE INDEX` and `ALTER TABLE ... ADD COLUMN` uses `IF NOT EXISTS`; every `ADD CONSTRAINT ... UNIQUE` sits inside a `DO $$ BEGIN IF NOT EXISTS ... END $$` guard. **Why:** the same file is applied to new and existing databases, repeatedly.
 - **Checks:** `npm run lint:sql` checks the snapshot. Some tests read a migration file (for example `tests/dated-settings.test.js`). No general checker validates every migration file yet.
