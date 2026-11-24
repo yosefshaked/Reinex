@@ -15,6 +15,7 @@ import { toast } from '@/lib/toast.jsx';
 import { AlertCircle, AlertTriangle, Check, Clock, Loader2, Lock, MoreHorizontal, Pencil, Search, ShieldCheck, UserPlus, Users, X } from 'lucide-react';
 import { Alert, AlertDescription } from '../../../components/ui/alert';
 import ErrorDetails from '../../../components/ui/ErrorDetails.jsx';
+import { stripSupportCode, withErrorContext } from '../../../lib/error-support.js';
 import { Textarea } from '../../../components/ui/textarea';
 import { Checkbox } from '../../../components/ui/checkbox';
 import { LockedCorrectionPanel } from './LockedCorrectionPanel';
@@ -180,7 +181,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
     instanceId: instance?.id,
     participantId: absenceForm?.participantId,
     status: absenceForm?.status,
-    onError: (loadError) => setAbsenceFormError(resolveMutationError(loadError) || 'לא ניתן היה לטעון את דרישות אי-ההגעה.'),
+    onError: (loadError) => setAbsenceFormError(resolveMutationError(loadError, 'לא ניתן היה לטעון את דרישות אי-ההגעה.')),
   });
   // { participantId, targetStatus } of the one-line confirm strip currently shown under a row.
   const [attendancePreviewTarget, setAttendancePreviewTarget] = useState(null);
@@ -731,7 +732,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
         isExcused: options.isExcused === true,
       });
       if (!handled) {
-        const resolvedError = resolveMutationError(err) || 'עדכון הסטטוס נכשל.';
+        const resolvedError = resolveMutationError(err, 'עדכון הסטטוס נכשל.');
         return { ok: false, error: resolvedError };
       }
       return { ok: false, error: null };
@@ -878,10 +879,10 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
         return;
       }
       console.error('Error building cancel preview:', err);
-      const resolvedError = resolveMutationError(err) || 'טעינת תצוגת ההשפעה לביטול נכשלה.';
+      const failure = withErrorContext(err, { action: 'תצוגת ההשפעה לביטול', fallback: 'טעינת תצוגת ההשפעה לביטול נכשלה.' });
       setCancelPreview(null);
-      setCancelPreviewError(resolvedError);
-      setError(resolvedError);
+      setCancelPreviewError(resolveMutationError(failure));
+      setError(failure);
     } finally {
       if (requestId === latestCancelPreviewRequestIdRef.current) {
         setCancelPreviewLoading(false);
@@ -968,7 +969,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
         return;
       }
       setAddStudentResults([]);
-      setError(resolveMutationError(err) || 'חיפוש תלמידים נכשל');
+      setError(withErrorContext(err, { action: 'חיפוש תלמידים', fallback: 'חיפוש תלמידים נכשל.' }));
     } finally {
       if (requestId === latestStudentSearchRequestIdRef.current) {
         setIsSearchingStudents(false);
@@ -1022,7 +1023,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
         return;
       }
       console.error('Error building attendance preview:', err);
-      const resolvedError = resolveMutationError(err) || 'טעינת תצוגת ההשפעה נכשלה.';
+      const resolvedError = resolveMutationError(err, 'טעינת תצוגת ההשפעה נכשלה.');
       if (targetStatus !== 'scheduled' && absenceForm?.participantId === participant.id) {
         // Keep the user in the absence form and show the problem there.
         setAttendancePreviewTarget(null);
@@ -2062,9 +2063,16 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
             {error ? (
               <Alert variant="destructive">
                 <AlertCircle className="h-4 w-4" />
-                {/* The error object is kept until here, so its status and codes reach the details. */}
+                {/* The error object is kept until here, so its status and codes reach the details, and
+                    the copied message is the one shown (support code moved to its own chip). */}
                 <AlertDescription>{typeof error === 'string' ? error : resolveMutationError(error)}</AlertDescription>
-                {typeof error === 'object' ? <ErrorDetails error={error} action="עדכון השיעור" fallback="הפעולה נכשלה." /> : null}
+                {typeof error === 'object' ? (
+                  <ErrorDetails
+                    error={error}
+                    action={error.displayAction || 'עדכון השיעור'}
+                    message={stripSupportCode(resolveMutationError(error))}
+                  />
+                ) : null}
               </Alert>
             ) : null}
             {conflictAlert}

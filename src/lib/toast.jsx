@@ -62,8 +62,12 @@ export const toast = Object.assign(
      * (docs/project-rules/20, "Showing an error"). It shows the Hebrew message, the saved support
      * code when there is one, "פירוט השגיאה" and "העתקה לשליחה לתמיכה". It stays open until the
      * user closes it, so it cannot vanish while the details are read or copied.
+     *
+     * @param {any} error
+     * @param {any} [options] { action, fallback, ...sonner options such as id }
      */
-    apiError(error, { action = '', fallback = '', ...data } = {}) {
+    apiError(error, options = {}) {
+      const { action = '', fallback = '', ...data } = options;
       const details = describeError(error, { action, fallback });
       return baseToast.error(details.message, {
         duration: Infinity,

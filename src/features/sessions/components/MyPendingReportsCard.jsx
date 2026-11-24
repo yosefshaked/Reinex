@@ -7,7 +7,8 @@ import { Button } from '@/components/ui/button';
 import { useOrg } from '@/org/OrgContext.jsx';
 import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { authenticatedFetch } from '@/lib/api-client.js';
-import { resolveUserErrorMessage } from '@/lib/error-support.js';
+import ErrorMessageText from '@/components/ui/ErrorMessageText.jsx';
+import { withErrorContext } from '@/lib/error-support.js';
 import { useSessionReportsEnabled } from '@/features/sessions/config/session-reports-permission.js';
 import {
   buildSessionReportContinuationQueue,
@@ -80,7 +81,7 @@ export default function MyPendingReportsCard({ onCountChange } = {}) {
     } catch (err) {
       if (err?.name === 'AbortError') return;
       console.error('Failed to load pending reports', err);
-      setError(resolveUserErrorMessage(err, 'טעינת הדיווחים הממתינים נכשלה.'));
+      setError(withErrorContext(err, { action: 'טעינת דיווחים ממתינים', fallback: 'טעינת הדיווחים הממתינים נכשלה.' }));
       setState(REQUEST_STATE.error);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -139,7 +140,7 @@ export default function MyPendingReportsCard({ onCountChange } = {}) {
           </div>
         ) : hasError ? (
           <div className="rounded-lg bg-red-50 p-4 text-sm text-red-700">
-            {error || 'טעינת הדיווחים נכשלה.'}
+            <ErrorMessageText as="span" error={error} fallback="טעינת הדיווחים נכשלה." showDetails supportClassName="text-red-700" />
           </div>
         ) : items.length === 0 ? (
           <div className="text-center py-8 text-neutral-500">

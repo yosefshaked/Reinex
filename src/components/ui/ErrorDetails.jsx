@@ -13,13 +13,14 @@ const formatTime = (iso) => formatLocalDateTime(iso) || iso;
  * error"). The rows on screen and the copied text come from the same fields, so the user sees
  * exactly what they send. Copying works with or without a support code.
  *
- * Pass either `error` (with optional `action`) or precomputed `details` from describeError.
+ * Pass either `error` (with optional `action`) or precomputed `details` from describeError. Pass
+ * `message` when the screen shows its own wording, so the copied text matches what the user reads.
  */
-export default function ErrorDetails({ error = null, details: givenDetails = null, action = '', fallback = '', defaultOpen = false, className = '' }) {
-  const details = React.useMemo(
-    () => givenDetails || describeError(error, { action, fallback }),
-    [givenDetails, error, action, fallback],
-  );
+export default function ErrorDetails({ error = null, details: givenDetails = null, action = '', fallback = '', message = '', defaultOpen = false, className = '' }) {
+  const details = React.useMemo(() => {
+    const base = givenDetails || describeError(error, { action, fallback });
+    return message ? { ...base, message } : base;
+  }, [givenDetails, error, action, fallback, message]);
   const [open, setOpen] = React.useState(defaultOpen);
   const [copied, setCopied] = React.useState(false);
   const panelId = React.useId();

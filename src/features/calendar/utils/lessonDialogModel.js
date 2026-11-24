@@ -167,7 +167,11 @@ export function pickMissingRateForSelection(stored, selectionKey) {
   return stored.selectionKey === selectionKey ? stored.missingRate : null;
 }
 
-export function resolveMutationError(error) {
+/**
+ * The dialog's message for a failed request. `fallback` is the wording for this action; it can also
+ * travel on the error itself (withErrorContext), so the display and the support copy agree.
+ */
+export function resolveMutationError(error, fallback = '') {
   const supportMessage = resolveApiErrorMessage(error);
   if (extractSupportCode(supportMessage)) {
     return supportMessage;
@@ -225,7 +229,7 @@ export function resolveMutationError(error) {
   }
   // Anything not explained above: a general Hebrew message with the public code or HTTP status in
   // parentheses, or the connection message when the request got no response (docs/project-rules/20).
-  return resolveUserErrorMessage(error, 'הפעולה נכשלה.');
+  return resolveUserErrorMessage(error, fallback || error?.displayFallback || 'הפעולה נכשלה.');
 }
 
 export const ATTENDANCE_MARK_UNCHANGED_REASON = 'אין שינוי לשמור';

@@ -52,11 +52,16 @@ These files are an entry point, not a boundary: follow imports, callers (grep th
   - **API codes stay stable English** (`snake_case`). How a failed call is shown is the next rule.
   - This is a product rule. It does not set the language of conversations with agents or of development documentation.
 - **Showing an error.** One shared behaviour, in [`../../src/lib/error-support.js`](../../src/lib/error-support.js). **Why:** the user should read a useful Hebrew message, and support needs the same few facts every time, without anything internal.
-  - **A known error** shows its dedicated Hebrew explanation (`API_ERROR_MESSAGES`, or a Hebrew message from the server).
-  - **An unmapped error** shows a general Hebrew message, followed in parentheses by the public error code when one was received, or `(HTTP <status>)` when there is only a status.
+  - **A known error** shows its dedicated Hebrew explanation.
+  - **An unmapped error** shows a general Hebrew message, or the wording of the failed action, followed in parentheses by the public error code when one was received, or `(HTTP <status>)` when there is only a status.
   - **A request with no server response** shows the Hebrew connection message.
   - **Never invent a code or a status.**
-  - **A saved support code** (`error_id`) is shown only when the server returned one, which means the event was saved. A public error code is not a support code.
+  - **A saved support code** (`error_id`) is shown only when the server returned one, which means the event was saved. It is an extra field: the public code stays in the title next to it. A public error code is not a support code.
+  - **Which server text may be shown is decided by its source, not by its characters:**
+    - a code in `API_ERROR_MESSAGES`;
+    - the `message` of a 4xx response, where endpoints write deliberate Hebrew copy;
+    - an error the app itself threw.
+    - A 5xx text, and any `details`, `description` or `title`, may hold raw DB or provider text. It is never shown, even when it contains Hebrew. Server code must not put raw DB or provider text in a 4xx `message` either.
   - **The public error code** is a `snake_case` value of the response's `message` or `error` (`publicErrorCode`). Free text, `details`, DB or provider messages are never shown or copied.
   - **"פירוט השגיאה" and "העתקה לשליחה לתמיכה"** come with every error the user may report.
     - Both come from the same fields (`describeError`, `errorDetailRows`, `formatErrorDetailsForCopy`): the failed action, the time, the HTTP status, the public error code and the saved support code, each only when available.
@@ -65,6 +70,8 @@ These files are an entry point, not a boundary: follow imports, callers (grep th
   - **Keep the error object until the display.**
     - Do not turn it into a string early; that loses the status and the codes.
     - Use `ErrorDetails` (`src/components/ui/ErrorDetails.jsx`) under an `Alert`, or `toast.apiError(error, { action, fallback })`. That toast stays open until the user closes it, so it cannot vanish while being read or copied.
+    - At the `catch`, attach the screen's wording with `withErrorContext(error, { action, fallback })`, and store the object. `ErrorMessageText error={error} showDetails` then shows it with the details, and the copied "הודעה" equals the text on screen.
+    - Where a screen builds its own text, pass that text as `message` to `ErrorDetails`.
     - `resolveUserErrorMessage(error, '<Hebrew fallback>')` gives the same message as one string.
   - **Branch on the code, not on the text.** The original code stays on the error (`error.code`, `error.apiCode`, `error.publicCode`, `resolveApiErrorMessage(error)`) for consumers that branch on it.
     - For compatibility, an unmapped `snake_case` 4xx code still appears as `error.message`, so do not show `error.message` directly.

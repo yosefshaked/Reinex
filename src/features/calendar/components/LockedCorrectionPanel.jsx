@@ -16,7 +16,8 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { authenticatedFetch } from '@/lib/api-client.js'
-import { extractSupportCode, resolveApiErrorMessage, resolveUserErrorMessage } from '@/lib/error-support.js'
+import { extractSupportCode, resolveApiErrorMessage, resolveUserErrorMessage, stripSupportCode, withErrorContext } from '@/lib/error-support.js'
+import ErrorDetails from '@/components/ui/ErrorDetails.jsx'
 import { AlertTriangle, Loader2, Lock, ShieldAlert } from 'lucide-react'
 import { getParticipantDisplayName } from '../utils/participantDisplay.js'
 import { getDisplayInstance, getDisplayParticipants } from '../utils/lessonDialogModel.js'
@@ -173,7 +174,7 @@ export function LockedCorrectionPanel({ instance, orgId, forceOpen = false, onAp
       })
       setPreview(payload)
     } catch (err) {
-      setError(resolveCorrectionErrorMessage(err, participantNamesById))
+      setError({ text: resolveCorrectionErrorMessage(err, participantNamesById), error: withErrorContext(err, { action: 'תצוגת התיקון לשיעור נעול', fallback: 'יצירת תצוגת מקדימה נכשלה.' }) })
     } finally {
       setIsPreviewLoading(false)
     }
@@ -198,7 +199,7 @@ export function LockedCorrectionPanel({ instance, orgId, forceOpen = false, onAp
       if (err?.status === 423 && err?.data?.preview) {
         setPreview(err.data.preview)
       }
-      setError(resolveCorrectionErrorMessage(err, participantNamesById))
+      setError({ text: resolveCorrectionErrorMessage(err, participantNamesById), error: withErrorContext(err, { action: 'תצוגת התיקון לשיעור נעול', fallback: 'יצירת תצוגת מקדימה נכשלה.' }) })
       setConfirmOpen(false)
     } finally {
       setIsApplyLoading(false)
@@ -248,7 +249,9 @@ export function LockedCorrectionPanel({ instance, orgId, forceOpen = false, onAp
           {error && (
             <Alert variant="destructive">
               <AlertTriangle className="h-4 w-4" />
-              <AlertDescription>{error}</AlertDescription>
+              <AlertDescription>{error.text}</AlertDescription>
+              {/* The caught error is kept with the shown text, so the details and the copy match it. */}
+              <ErrorDetails error={error.error} message={stripSupportCode(error.text)} />
             </Alert>
           )}
 

@@ -96,7 +96,7 @@ export function LessonHistoryTab({ orgId, instanceId, version, exceptionReason, 
     } catch (err) {
       if (requestId !== requestIdRef.current) return;
       console.error('Failed to load lesson history', err);
-      setState({ status: 'error', events: [], error: resolveMutationError(err) || 'טעינת ההיסטוריה נכשלה.' });
+      setState({ status: 'error', events: [], error: resolveMutationError(err, 'טעינת ההיסטוריה נכשלה.') });
     }
   }, [instanceId, orgId]);
 
