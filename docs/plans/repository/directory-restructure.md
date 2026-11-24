@@ -5,7 +5,7 @@
 Read this block first when you continue this plan in a new conversation.
 
 - **Plan status:** the overall status of this plan is recorded only in [`docs/plans/index.csv`](../index.csv). Check it with `npm run lint:plans`.
-- **Current stage:** 3F, F1 re-planned. The owner requires each user operation to commit whole or not at all; F1.6–F1.9 hold the boundary map, the atomic RPC proposal, the proof and the attempt measurement. Next: owner answers to F1-Q1 to F1-Q4, then F1.5. Approved but not yet executed: the 3.8 deletions, the D9 rules (`main`, straight quotes), and Q10 (`attribution.commit`).
+- **Current stage:** 3F. Stage 3 is closed, and the reliability work is now its own plan ([`students/atomic-student-operations.md`](../students/atomic-student-operations.md), `planned`). **Next task here: F1.5**, the narrow org scoping of the four link writes, test first. Then F2 (the follow-up plan continues after F2), then F3. Waiting for a push: the first GitHub Actions runs of "Doc links" and "Plan registry", after which they become required checks.
 - **Execution branch:** `repository-reconstruction`, based on `origin/staging` `dce8f2e790e939b7f0805803d7d44e71a23346ba`. See [Planning base](#planning-base) and [Q1](#q1-execution-branch).
 - **Repository state:**
   - `test/` is now `tests/`; `agents-docs/` is now `docs/project-rules/`.
@@ -13,7 +13,7 @@ Read this block first when you continue this plan in a new conversation.
   - `docs/plans/index.csv` and `npm run lint:plans` exist.
   - The raw evidence is outside the repository, in `$env:TEMP\reinex-restructure\stage0\`, `stage1\`, `stage2\` and `stage3\`.
   - Nothing has been pushed; the owner decides on the push together with Claude.
-- **Last update:** 2026-11-24. F1 revised to atomic operations (awaiting scope approval); owner decisions on 3.8, required checks, `main`, straight quotes and Q10 recorded.
+- **Last update:** 2026-11-24. Reliability work split into its own plan; F1 narrowed to org isolation; the 3.8 deletions, the `main` and straight-quote rules, and `attribution.commit` applied.
 
 Each stage appends to the [Progress log](#progress-log), ticks its subtasks and records answers under [Open decisions](#open-decisions). Keep this block at five bullets. It is a pointer, not a history.
 
@@ -1024,9 +1024,9 @@ The aim is to fix what the change made stale. It does not require a full documen
 | Rule (memory file) | Status |
 |---|---|
 | Every behaviour change is covered by tests (`keep-tests-current`) | **Binding**, in the C7 wording (owner, 2026-11-24) |
-| Never push or merge to `main` without the owner | **Binding** (owner, 2026-11-24): every push or merge to `main` needs explicit owner approval. To be written in the `AGENTS.md` hard limits (3.4 item 2). |
+| Never push or merge to `main` without the owner | **Binding** (owner, 2026-11-24): every push or merge to `main` needs explicit owner approval. Written in `AGENTS.md` "Hard limits" (`00f0952`). |
 | The preview environment uses the production DB (`pp-pr62-open`) | A claim about an environment. Written only with a verified configuration source (D9). |
-| Straight quotes in UI terms (`straight-quotes-feedback`) | **Binding** (owner, 2026-11-24): in UI-writing guidance, a quoted Hebrew button, field or status name uses straight quotes, for example: לחצו על "בטל שיעור". To be written in `20-frontend-shared-helpers.md`. |
+| Straight quotes in UI terms (`straight-quotes-feedback`) | **Binding** (owner, 2026-11-24): in UI-writing guidance, a quoted Hebrew button, field or status name uses straight quotes, for example: לחצו על "בטל שיעור". Written in `20-frontend-shared-helpers.md` (`00f0952`). |
 | Migrations applied from CI on deploy (`db-migrations-decision`) | Not written as fact; the research (4R) and the decision (Q11) are deferred |
 | Conversation language (`narration-language-feedback`) | Personal preference; stays outside the repository |
 
@@ -1055,7 +1055,7 @@ The aim is to fix what the change made stale. It does not require a full documen
   Done in `c576742`. The current tree had 285 links inside the folder, not 262: 275 leave it and were rewritten, and 10 stay inside it and were left unchanged. All 393 links in the repository resolve to the same file as before. See the stage 3 Progress log entry.
 - [x] 3.4 Rewrite `AGENTS.md`, at most about 100 lines. Done in `83d4b1a` and `0d52f96`: 58 lines. Item 2 is left open; see below.
   1. what Reinex is;
-  2. hard limits: only limits the owner has decided, each claim about an environment backed by a verified configuration source (D9). **Open:** no limit had both an owner decision and a verified source when stage 3 ran, so `AGENTS.md` has no hard-limits section yet. *Update 2026-11-24:* the `main` rule is now decided (D9 table) and is written in the next approved round. The preview and production claim still needs a verified configuration source;
+  2. hard limits: only limits the owner has decided, each claim about an environment backed by a verified configuration source (D9). **Open:** no limit had both an owner decision and a verified source when stage 3 ran, so `AGENTS.md` has no hard-limits section yet. *Update 2026-11-24:* `AGENTS.md` now has a "Hard limits" section with the `main` rule (`00f0952`). The preview and production claim still needs a verified configuration source before it is added;
   3. always-on rules, each with a one-line why. These include the C1 and C2 lines, the binding test rule (C7) and "Keep documentation current" (D8);
   4. the reading rule (C6), written once;
   5. a routing table (task → `project-rules` → `product` → tests → start files), including "committing work → `docs/project-rules/commits.md`";
@@ -1064,9 +1064,9 @@ The aim is to fix what the change made stale. It does not require a full documen
 - [x] 3.5 Make `CLAUDE.md` exactly `@AGENTS.md`, plus Claude-only notes if any remain. Remove the validation table copy in `00-core-rules.md`, leaving a link (C5). Done in `83d4b1a`. No Claude-only notes remained.
 - [x] 3.6 Add a "Start here" list to each `project-rules` file (C6). Write the full C1 and C2 rules in `30-backend-shared-helpers.md`. Done in `83d4b1a`: each "Load these files first" list was renamed "Start here" with the C6 sentence. In `0d52f96`, the deleted `api/backup-status/index.js` was removed from the list in `90`.
 - [x] 3.7 Fix the four C3 hints, found by their text (`git grep -n "resolveTenantClient" -- eslint.config.js scripts docs/api-validation-tool.md`). Remove `AGENTS.md:9`. Done in `f74bdf4` (the hints) and `83d4b1a` (`AGENTS.md`). The output of `node scripts/validate-api-endpoints.js` is identical before and after; it exits 1 on both sides because of pre-existing findings.
-- [ ] 3.8 Delete the retired instruction sources after owner confirmation. **Owner decisions (2026-11-24):**
-  - `.github/chatmodes/Azure_function_codegen_and_deployment.chatmode.md`: **deletion approved**. Not executed yet.
-  - `docs/AI-Coder-Gotchas.md`: **deletion approved** after checking that the valid guidance moved (done in `0eb74a2`) and after updating the references to it: `docs/README.md:71,94,140,156` and `ProjectDoc/TutTiud_Agents.md:574`. Not executed yet.
+- [x] 3.8 Delete the retired instruction sources after owner confirmation. **Done in `d5cccef`** for the two approved files. The two `ProjectDoc/` files move to the 7.1 triage. **Owner decisions (2026-11-24):**
+  - `.github/chatmodes/Azure_function_codegen_and_deployment.chatmode.md`: **deletion approved**; deleted in `d5cccef`.
+  - `docs/AI-Coder-Gotchas.md`: **deletion approved** after checking that the valid guidance moved (done in `0eb74a2`) and after updating the references to it: `docs/README.md:71,94,140,156` and `ProjectDoc/TutTiud_Agents.md:574`. The references now point to `docs/project-rules/20-frontend-shared-helpers.md`, and the file was deleted in `d5cccef`.
   - `ProjectDoc/TutTiud_Agents.md`, `ProjectDoc/Conventions.md`: still left to the stage 7.1 triage.
   - The preparation is in [3.8 Retirement candidates](#38-retirement-candidates).
 - [x] 3.9 Decide whether the link check becomes `scripts/check-doc-links.js`. **Decided at the stage 3 review (owner, 2026-11-24): yes.** Done in `fdebc18` and `2d71c48`.
@@ -1821,7 +1821,7 @@ These are the questions whose answers change the plan. Record each answer direct
 - **Who:** the owner.
 - **When:** decided on 2026-11-24, see below.
 - **Still open after 3.1 (2026-11-24).**
-- **Answer (2026-11-24, owner):** Claude's commits in this project carry no `Co-Authored-By` line. This is set through `attribution.commit` as an empty string in the shared project settings (`.claude/settings.json`). It applies to commits only. The owner knows this changes how GitHub shows Claude as a co-author. **Not applied yet:** the settings change is an implementation step for the next approved round. Until then, the commit policy keeps saying nothing about trailers.
+- **Answer (2026-11-24, owner):** Claude's commits in this project carry no `Co-Authored-By` line. This is set through `attribution.commit` as an empty string in the shared project settings (`.claude/settings.json`). It applies to commits only. The owner knows this changes how GitHub shows Claude as a co-author. **Applied in `4185a43`:** `.claude/settings.json` is now versioned (a `.gitignore` exception; `settings.local.json` and `launch.json` stay ignored). Commits from `4185a43` on carry no trailer. The commit policy still says nothing about trailers, because the setting holds the rule.
 - **Earlier decision (2026-11-24):** the commit policy and 3.10 are completed without deciding this question. The existing attribution settings stay as they are. The policy says nothing about the trailer.
 
 ### Q11 Migration workflow
@@ -2331,6 +2331,41 @@ Append one entry per stage. Newest last.
     - **D9:** every push or merge to `main` needs explicit owner approval (binding); straight quotes for quoted Hebrew UI names in UI-writing guidance (binding). Both are to be written in the next approved round.
     - **Q10:** `attribution.commit` is set to an empty string in the shared project settings, for commits only. Not applied yet.
     - **4R and Q11:** still deferred.
+
+- **2026-11-24, the reliability work split out, and approved decisions applied.**
+  - **Commits** (local, on top of `3bca317`):
+    - `d5cccef` `docs(agents): retire the Copilot chat mode and the AI coder gotchas`
+    - `ffe3ea0` `docs(plans): move the student reliability work to its own plan`
+    - `00f0952` `docs(agents): require owner approval for main and straight quotes for UI names`
+    - `4185a43` `chore(claude): drop the Co-Authored-By trailer from Claude commits`. This is the first commit without the trailer.
+    - plus the commit that records this entry.
+  - **The split:**
+    - The new plan `docs/plans/students/atomic-student-operations.md` is registered as `planned`. It holds the owner's decisions (F2 first; all or nothing; outcome lookup after a lost response; measurement), the four review cases, the pending issue (0.1), and the evidence F1.1–F1.9. The evidence was moved, not copied.
+    - Here, F1 is narrowed to org-scoping the four link writes, with a test that org B's rows stay unchanged.
+    - Q10 and the earlier log entries stay as history. The one log link to a moved section now points to the new plan.
+    - F3 keeps its place in stage 3F.
+  - **Retirement (3.8):**
+    - The two approved files were deleted.
+    - The 4 references in `docs/README.md` and the one in `ProjectDoc/TutTiud_Agents.md` now point to `docs/project-rules/20-frontend-shared-helpers.md`, which holds the still-valid gotchas since `0eb74a2`.
+    - The link map shows the same 17 baseline breaks, with no new one.
+  - **Rules:**
+    - `AGENTS.md` gains "Hard limits", with the `main` rule.
+    - `20` gains the straight-quote rule for quoted Hebrew UI names.
+    - Both were memory-only before.
+  - **Settings:**
+    - `.gitignore` now ignores `.claude/*` but versions `/.claude/settings.json`. The exception sits after the general `settings.json` rule, which still ignores any other `settings.json`.
+    - `.claude/settings.json` sets `attribution.commit` to `""`.
+    - Checked with `git check-ignore`: `.claude/settings.local.json`, `.claude/launch.json`, `.vscode/settings.json` and `api/settings.json` stay ignored.
+  - **Checks:**
+    - `npm run lint:plans`: OK, 2 plans (planned 1, active 1).
+    - `npm run lint:doc-links`: OK, 319 links in 14 files.
+    - Anchor check: 0 broken in both plans.
+    - The JSON parses.
+    - No JavaScript changed in this round, so ESLint and the test suites were not re-run.
+  - **Waiting for publication (a push, which needs owner approval):**
+    - the first GitHub Actions runs of "Doc links" and "Plan registry", after which both become required checks for `staging` and `main`;
+    - the issue "Prevent partial student creation during imports and lesson scheduling" (follow-up plan, 0.1).
+  - **Next task here:** F1.5, the narrow org scoping, test first. **Joint review pending** before it starts.
 
 ---
 
