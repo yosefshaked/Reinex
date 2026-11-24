@@ -18,7 +18,7 @@ These files are an entry point, not a boundary: follow imports, callers (grep th
 - All tenant tables live in one Supabase project. Every tenant table has `org_id uuid NOT NULL REFERENCES organizations(id)`.
 - RLS protects requests made with a user's token (policies use the `get_active_org_id()` SECURITY DEFINER function, which reads `x-org-id` from request headers and verifies `org_memberships`).
 - The API uses the `service_role` key, which bypasses RLS, so the API itself keeps each org's data apart: authorise first, then scope every tenant table operation to the org. The rule is in [`30-backend-shared-helpers.md`](30-backend-shared-helpers.md) "Org isolation in the API".
-- **Never** reintroduce per-org database credentials (`dedicated_key`, `supabase_url` on orgs), BYOD patterns, `resolveTenantClient()`, or `org_settings` table — all are deprecated and removed. Create the client with `createSingleClient(env)` from `api/_shared/org-bff.js`.
+- **Never** reintroduce per-org database credentials (`dedicated_key`, `supabase_url` on orgs), BYOD patterns, or the `org_settings` table — all are deprecated and removed. Create the client with `createSingleClient(env)` from `api/_shared/org-bff.js`, and scope tenant table access with `withOrgScope(client, table, orgId)`.
 - The schema is defined by a snapshot plus migrations; see "Schema" below.
 
 ## Shared helpers to reuse
