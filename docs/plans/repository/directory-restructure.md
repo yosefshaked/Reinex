@@ -5,14 +5,14 @@
 Read this block first when you continue this plan in a new conversation.
 
 - **Plan status:** the overall status of this plan is recorded only in [`docs/plans/index.csv`](../index.csv). Check it with `npm run lint:plans`.
-- **Current stage:** 2 is done (the registry and `lint:plans`); results are in the Progress log. Next: joint review of stage 2, then stage 3 (subtask 3.1). Stage 3 must not start before that review.
+- **Current stage:** 3. Subtask 3.1 is decided: the owner's answers to C1–C7 and D8–D9 are in [3.1](#31-decisions-c1c7-and-d8d9-owner-2026-11-24). Next: joint review of this plan update, then 3.2. Nothing in stage 3, 3F or 4R may start before that review.
 - **Execution branch:** `repository-reconstruction`, based on `origin/staging` `dce8f2e790e939b7f0805803d7d44e71a23346ba`. See [Planning base](#planning-base) and [Q1](#q1-execution-branch).
 - **Repository state:**
   - `test/` is now `tests/`.
   - `docs/plans/index.csv` and `npm run lint:plans` exist.
   - The raw evidence is outside the repository, in `$env:TEMP\reinex-restructure\stage0\`, `stage1\` and `stage2\`.
   - Nothing has been pushed; the owner decides on the push together with Claude.
-- **Last update:** 2026-11-23. Stage 2 completed after review: checker fixes and the "Plan registry" CI workflow.
+- **Last update:** 2026-11-24. 3.1 decisions recorded. Stage 3F (code fixes: F1 client-profiles writes, F2 error-tracking runtime, F3 strict error tracking in CI) and stage 4R (migration workflow research) were added.
 
 Each stage appends to the [Progress log](#progress-log), ticks its subtasks and records answers under [Open decisions](#open-decisions). Keep this block at five bullets. It is a pointer, not a history.
 
@@ -38,15 +38,17 @@ Today that knowledge is spread over seven documentation folders and two instruct
 2. **Affected files.** A stage also runs a test file directly, before and after, when that stage moves the file or changes a path the file reads. This applies even when no npm script runs the file. Examples:
    - stage 1 runs the 7 unscripted `test/*.test.js` files it moves;
    - stage 5 runs `api/org-purge/purge-manifest.test.js`, which reads the schema file by path.
-3. **No coverage growth.** Nothing else is added to what is run.
+3. **No coverage growth in the move stages.** Nothing else is added to what is run. The exception is stage 3F: each code fix there adds the tests that prove its own behaviour (3.1, D7 test rule).
 
 **Non-goals.** Each of these is a separate initiative:
 
 - adding `npm test`;
 - running the unscripted test files as a whole;
-- widening coverage;
-- changing CI triggers or behaviour. The one owner-approved exception is the "Plan registry" workflow (Q9);
-- automating migrations in deployment;
+- widening coverage. The coverage gap found in C7 stays tracked in this plan (3.1, C7); closing it is a separate initiative;
+- changing CI triggers or behaviour. The owner-approved exceptions are:
+  - the "Plan registry" workflow (Q9, stage 2);
+  - making error tracking a blocking CI check (3.1 C2, stage 3F subtask F3), approved on 2026-11-24;
+- automating migrations in deployment. Stage 4R only researches the workflow and ends in a recommendation for the owner;
 - performance work;
 - moving off Azure;
 - commitlint, Git hooks or CI checks on commit messages (the commit policy itself is in stage 3).
@@ -169,13 +171,13 @@ root/
 | `api/` | Stays (colocated tests stay). `.test.js` files: 21 in `api/`; 11 are run by `test:finance-calendar` [V]. | Owner decision 6 | SWA `api_location: "api"` [V] | — | — (comments edited in stages 4, 5, 7) |
 | `src/` | Stays, except `src/lib/setup-sql.js`. Colocated tests `src/lib/analytics/posthog.test.js` and `src/runtime/config.test.js` stay [V]. | Owner decision 6 | Vite | — | 5 (setup-sql only) |
 | `public/` | Stays | Copied into `dist/` | Vite, SWA `output_location: "dist"` [V] | — | — |
-| `.github/workflows/*`, `.github/actions/run-integrity-checks/` | Stay | They run npm scripts only and never reference `test/` [V]. Triggers: `main` only [V]. | GitHub Actions | — | — |
+| `.github/workflows/*`, `.github/actions/run-integrity-checks/` | Stay | They never referenced `test/` [V]. Triggers at `dce8f2e`: `main` only [V]. Since stage 2, `plan-registry.yml` also runs on `staging` and runs `tests/validate-plans-index.test.js` directly. Stage 3F (F3) adds a blocking error-tracking check. | GitHub Actions | — | 2, 3F |
 | `.github/chatmodes/Azure_function_codegen_and_deployment.chatmode.md` | Delete candidate | A competing instruction source: Copilot, naming "Claude Sonnet 4" [V] | Copilot chat | Owner confirms unused | 3 |
 | `.vscode/extensions.json` | Stays | Editor recommendation | VS Code | — | — |
 | `test/` (all of it) | `tests/` | Owner decision 1. Contents and consumers are in stage 1.1. | see 1.1 | Stage 1 | 1 |
 | `test/verify-backup.cjs` | Moves with `test/` in stage 1, then to `tools/backup/` | Not a test: a manual check needing `<orgId> <date>` and a real backup [V] | Its own usage text | Stage 6 | 1, then 6 |
 | `test/automatic-tester/supabase/.branches/_current_branch` | Moves with `test/` in stage 1; untracked in stage 6 | Tracked although its own `.gitignore` ignores `.branches` [V] | Supabase CLI | `git check-ignore` | 1, then 6 |
-| `implementations/database/one-db-refactor/{e2e-smoke,rls-isolation}.test.js`, `isolation-stress-test.js` | `tests/integration/` | Integration tests needing a running DB and API [V]. `e2e-smoke` was maintained in #55 [V]. | `package.json` `test:isolation-stress-test` [V]; they import `../../../api/…` [V] | [P] Fix import depth; `node --check`; npm script path exists | 7 |
+| `implementations/database/one-db-refactor/{e2e-smoke,rls-isolation}.test.js`, `isolation-stress-test.js` | `tests/integration/` candidates; confirmed per file by the [test classification](#test-classification) in 7.3 | Integration tests needing a running DB and API [V]. `e2e-smoke` was maintained in #55 [V]. | `package.json` `test:isolation-stress-test` [V]; they import `../../../api/…` [V] | [P] Fix import depth; `node --check`; npm script path exists; every consumer still resolves | 7 |
 | `implementations/database/one-db-refactor/*.cjs` (3) | Delete candidates | One-time `setup-sql.js` rewrites [V] | none | `git grep` | 7 |
 | `implementations/business-process/*` | Rules → `docs/product/payroll.md`; documents → `docs/plans/payroll/` | Owner decision 4; pilot domain | `test/payroll-rules.test.js:2`, `api/_shared/rate-history.js:4`, `src/lib/setup-sql.js:6801`, `agents-docs/80:120` [V] | Stage 4 | 4 |
 | `implementations/session-reports/*` | Cited rules → `docs/product/session-reports.md`; the plan → `docs/plans/session-reports/` | 16 code-comment references in `api/` and `src/`, plus 3 in `setup-sql.js`, cite it as a spec [V] | Those comments | Link check | 7 |
@@ -203,6 +205,40 @@ root/
 | `src/lib/setup-sql.js` | `database/setup-sql.js` | Owner decision 7 | see stage 5 | Stage 5 | 5 |
 | `supabase/functions/get_org_public_keys.sql` | Follow Q5 | Tracked although `/supabase` is ignored [V]. Referenced only by the control-DB docs and archive. Never called from `api/` or `src/` [V]. | docs/ssot | — | 7 |
 | `supabase-tenant/` | Clarify, see [Q7](#q7-supabase-tenant) | `project_id = "reinex-tenant"`. Its CLI state (`.branches/`, `.temp/`) is tracked [V]. The running stack is `automatic-tester` [V], but tester messages still say "in the supabase-tenant directory" (`diagnostics.js:195,268`, `setup.js:1257`) [V]. | tester messages | Q7 | 6 |
+
+### Test classification
+
+Owner decision, 2026-11-24 (3.1, C7). Where a test file lives follows from three things, not from its suffix:
+
+- **Purpose:** a unit test of one module, a contract or workflow test across modules, or an integration test.
+- **Environment it needs:** none (pure Node), a running local DB, or a running DB and API.
+- **Entry point:** an npm script, a CI workflow, the tester runner, or a direct `node --test <file>` only.
+
+Rules:
+- A unit test next to the module it tests is a valid location. It stays there (owner decision 1).
+- A test that needs a running DB or API goes to `tests/integration/`.
+- A move keeps every entry point and consumer: npm script paths, workflow steps, imports, and docs that cite the path.
+
+**Counts at `0339f45` (C7):** 52 tracked `*.test.js` files.
+
+| Group | Files | How they run |
+|---|---|---|
+| In `test:finance-calendar` | 30 | By hand, and through `verify:beta`, which runs `test:finance-calendar` first. Not in `npm run build`, not in CI. |
+| In no npm script, run directly by CI | 1 | `tests/validate-plans-index.test.js`, in the "Plan registry" workflow |
+| In no npm script and in no checked workflow | 21 | Only directly, with `node --test <file>`. Two of them (`tests/supabase-client.test.js`, `tests/whatsapp-message-templates.test.js`) fail at the stage 0 baseline. |
+
+The count by suffix does not cover every test tool. It leaves out, for example:
+- `isolation-stress-test.js` (`test:isolation-stress-test`);
+- `scripts/test-validator.js` (`test:validator`);
+- the tester scenarios under `tests/automatic-tester/`.
+
+**To classify in 7.3** (purpose, environment, entry point and consumers checked per file before any move):
+
+| File | Expected class | Entry point today | Consumers to keep |
+|---|---|---|---|
+| `implementations/database/one-db-refactor/e2e-smoke.test.js` | integration (DB and API) | direct only | imports of `../../../api/…`; any doc citing the path |
+| `implementations/database/one-db-refactor/rls-isolation.test.js` | integration (DB) | direct only | as above |
+| `implementations/database/one-db-refactor/isolation-stress-test.js` | integration (DB) | `npm run test:isolation-stress-test` | the npm script path; imports |
 
 ### Root coverage check [V]
 
@@ -684,17 +720,280 @@ Then confirm that the local data is back, using the report count and the `.env` 
 
 **Depends on:** stage 2.
 
-#### 3.1 Conflicts to resolve before shortening `CLAUDE.md` [V]
+#### 3.1 Decisions C1–C7 and D8–D9 (owner, 2026-11-24)
 
-| # | Topic | Sources | Proposed rule (for joint review) |
-|---|---|---|---|
-| C1 | Org isolation | `CLAUDE.md`: "All DB writes must go through `withOrgScope` — never raw `client.from`". `AGENTS.md:8` and `agents-docs/00:19`: `ensureMembership()` + `.eq('org_id', orgId)` or `withOrgScope`; "every query must filter by `org_id`". `agents-docs/30:55-64`: auth and membership checks first; "tenant reads/writes must always be org-scoped". `withOrgScope` (`org-bff.js` ~310-324) adds `.eq('org_id')` to select, update and delete, and stamps `org_id` on insert and upsert rows. | **Rule.** Every tenant endpoint first verifies membership in the request's org (`ensureMembership`). Every tenant table operation is then limited to that org, through `withOrgScope(client, table, orgId)` or an explicit equivalent that fits the operation: `.eq('org_id', orgId)` on select, update and delete; `org_id: orgId` on inserted or upserted rows. **Why:** the API uses the service-role client, which bypasses RLS, so a missing filter crosses orgs. **Existing case for review:** `api/_shared/client-profiles.js:459-464` updates four tables by `client_profile_id` without an org filter, with the comment that the profile was just read in this org. It is recorded as an existing case that needs a point review. It is **not** a general permission to omit org scoping. Guard test: `test/org-scope-reads.test.js`. |
-| C2 | 5xx responses | `AGENTS.md`: "must return through `respond(context, ...)`". `agents-docs/30:61`: 5xx with a service-role client available should use `respondTrackedError(...)` or `respondTracked(...)`; pre-client configuration failures may stay direct `respond(context, 500, ...)`. `scripts/validate-error-tracking.js:1-29`: it accepts `respondTracked`, `respondTrackedError` or a `respond<Name>Error` wrapper that delegates to them, plus a `tracked-error-exempt` comment for a 5xx raised before the client exists. It is **warn-only** (exits 0 unless `--strict`), both in build and in CI. | **Rule for writers.** Responses go through `respond`. A 5xx that has a service-role client available goes through `respondTrackedError`, `respondTracked`, or a documented `respond<Name>Error` wrapper. A configuration failure raised before a suitable client exists may use `respond(context, 500, …)` with a `tracked-error-exempt` comment. **Why:** a tracked 5xx stores the internal detail in `error_events` and returns an `error_id` support code; an untracked one loses both. **Separate fact, stated separately:** the validator currently only warns, so the build does not enforce this. |
-| C3 | Tenant client | `AGENTS.md`: "Never use `resolveTenantClient()`". `eslint.config.js:103,143` and `scripts/validate-api-endpoints.js:27` say "Use resolveTenantClient from org-bff.js instead". It is no longer exported: `org-bff.js:272` exports `createSingleClient`, used in 21 API files. | Fix the three messages to name `createSingleClient`. This is a message-only code edit. |
-| C4 | Schema source | `CLAUDE.md`: "`setup-sql.js` — single source of truth for the entire DB schema". `migrations/README.md`: the snapshot plus numbered migrations; on an existing DB the migrations run first. Neither instruction file mentions `migrations/`. | **Rule.** The schema is the snapshot plus the migrations, applied in the documented order. **Why:** a new DB needs only the snapshot; an existing DB needs the one-time changes first. Paths are updated in stage 5. |
-| C5 | Build description | `CLAUDE.md` lists 4 build steps. `package.json` `build` runs 6. | The validation table names npm scripts only. |
-| C6 | Context scope | `AGENTS.md`: "Load ONLY the source files listed there". | "Start from these files. They are an entry point, not a boundary: follow imports, callers (grep the symbol), dependencies and tests." |
-| C7 | Test coverage | Both files present `test:finance-calendar` as the finance check. 21 `*.test.js` files are in no npm script (10 in `api/`, 2 in `src/`, 7 in `test/`, 2 in `implementations/`) [V], including `api/_shared/employee-finance.test.js`. | State the gap in `project-rules/80` with an issue number. Fixing it is a non-goal here. |
+- **Process.** Claude proposed the decisions on 2026-11-23, against `0339f45` [V]. The owner and Codex reviewed them, and the owner decided on 2026-11-24.
+- **Paths.** "Sources" gives today's paths. "Maintained in" gives the paths after 3.2, where `agents-docs/` becomes `docs/project-rules/` with the same file names.
+- **Wording.** The quoted blocks are the binding wording for 3.4–3.6 and 3.11–3.12. They can still be shortened when written, as long as the meaning does not change.
+- **Counts that depend on a version** carry their SHA here and in the Progress log.
+
+##### C1 Org isolation and `withOrgScope`
+
+**Sources [V at `0339f45`]:**
+- **`CLAUDE.md:28`:** "All DB writes must go through `withOrgScope` — never raw `client.from`".
+- **`AGENTS.md`:**
+  - line 6: "RLS is the primary isolation mechanism";
+  - line 8: `ensureMembership()` plus `.eq('org_id', orgId)`, or `withOrgScope`.
+- **`agents-docs/00-core-rules.md:17-19`:** every query filters by `org_id`.
+- **`agents-docs/30-backend-shared-helpers.md`:**
+  - lines 50-57: the endpoint flow;
+  - line 64: auth and membership first, then org-scoped reads and writes.
+- **`api/_shared/org-bff.js`:**
+  - `ensureMembership` (line 97) returns the member's role, or `null` when there is no active membership.
+  - `withOrgScope` (lines 307-326) supports `select`, `insert`, `update`, `upsert` and `delete`. It adds `.eq('org_id', orgId)` to select, update and delete, and sets `org_id` on every inserted or upserted row.
+- **Endpoints without `ensureMembership`:** 41 `api/*/index.js` files have no call to it. By pattern:
+  - `ensureSystemAdmin`: the `system-admin-*` endpoints and `config`;
+  - their own `org_memberships` lookup: `directory`, `invitations`, `org-memberships`;
+  - a shared secret or a timer: `backup`, `storage-cleanup-expired`;
+  - user-level endpoints: `me`, `user-context`, `users-me`, `organizations`, `health`, `announcement`, `password-reset`.
+
+  They were classified by pattern only, not audited one by one.
+
+**Decision (owner).** `withOrgScope` is the binding default, in new or changed code, for every CRUD operation on a tenant table that the helper supports.
+
+**Wording:**
+
+```md
+- **Org isolation in the API.** RLS protects requests made with a user's token. The API uses the service-role client, which bypasses RLS, so the API itself keeps each org's data apart, in two separate steps.
+  1. **Authorisation: who may act.** Each route uses its own verified mechanism:
+     - **A member's request:** authenticate the caller, call `ensureMembership(client, orgId, userId)`, check the result and stop when it is `null`. Then enforce the role the action needs, and the instructor's self-scope.
+     - **A system-admin request:** `ensureSystemAdmin(...)`. When it acts on one org, it names that org explicitly.
+     - **A public or token flow:** the verified token or record that the flow issued. The org comes from that record, never from the request body alone.
+     - **A timer or machine call:** its trigger or its shared secret.
+  2. **Org scoping: which rows.** After authorisation, every operation on a tenant table is limited to the authorised org.
+     - New or changed code uses `withOrgScope(client, table, orgId)` for every select, insert, update, upsert and delete it supports. It filters reads, updates and deletes by `org_id`, and sets the authorised `org_id` on every inserted or upserted row.
+     - An upsert also keeps its `onConflict` contract: a matching unique index or constraint in the schema, and an entry in `scripts/validate-upsert-conflicts.js`.
+     - An operation that needs another interface, such as an RPC, a storage call or an auth admin call, documents next to it where and how the org is enforced on that path. A plain CRUD query that the helper supports uses the helper.
+     - An ID that was read in this org does not replace the org filter.
+  - **Why:** one missing filter reads or changes another org's rows, and nothing below the API catches it.
+```
+
+**Maintained in:**
+- The full rule: `docs/project-rules/30-backend-shared-helpers.md`.
+- `AGENTS.md`: one always-on line with a link.
+- `00-core-rules.md:19` becomes a link to it.
+- Removed: `CLAUDE.md:28`, and the sentences at `AGENTS.md:6,8`.
+- Guard test: `tests/org-scope-reads.test.js`.
+
+**Why:**
+- It describes the real mechanism (the service role bypasses RLS).
+- It keeps authorisation apart from org scoping.
+- It makes one form the default.
+
+**Follow-up:** stage 3F, subtask F1. It covers the four writes in `ensureStudentForClientProfile`.
+
+##### C2 5xx responses, the support code, and strict tracking
+
+**Sources [V at `0339f45`]:**
+- **The instructions:**
+  - `AGENTS.md:13`: every response through `respond(context, ...)`.
+  - `agents-docs/30-backend-shared-helpers.md:58,61`: a 5xx with a client prefers `respondTrackedError` or `respondTracked`; a pre-client configuration failure may use `respond` directly.
+- **`scripts/validate-error-tracking.js:1-29`:**
+  - It flags only a literal `respond(` with a 5xx. Any `respond<Name>(` passes by its name, and the wrapper's body is not checked.
+  - It honours a `tracked-error-exempt` comment.
+  - It is warn-only. It exits 0 unless `--strict` is passed.
+- **`api/_shared/error-events.js`:**
+  - `trackErrorEvent` (line 103) creates the support code first. It returns the code even when there is no client (lines 112-115), and even when the insert into `error_events` fails, after only a warning (lines 139-146).
+  - `respondTrackedError` (line 150) returns that code to the user as `error_id`.
+  - `respondTracked` (line 176) sends a plain `respond` when `attachErrorTracking` (line 161) did not run in that request.
+- **Consumers of `error_id`:**
+  - `src/lib/api-client.js:131-152` shows "קוד תמיכה: <id>" for a 5xx and attaches the code to the error.
+  - Also `src/lib/error-support.js:4,50`, `src/pages/SubmitFormPage.jsx` and `src/components/ui/forms-ui/FormField.jsx`.
+- **Support search:** `api/system-admin-error-events/index.js` and `src/admin/modules/ErrorEventsView.jsx`.
+- **Enforcement today:**
+  - `npm run build` runs `lint:error-tracking` warn-only.
+  - `integrity-checks.yml` runs it as "Validate error tracking (warn-only)" with `continue-on-error`, on `main` only.
+  - 276 untracked 5xx responses in 100 files, the same at `dce8f2e` and `0339f45`.
+  - 0 `tracked-error-exempt` comments under `api/`.
+
+**Decision (owner).** The writer rule below applies. Moving to blocking enforcement **is part of this initiative**. This replaces the earlier proposal to keep the validator warn-only and treat strict mode as a separate initiative.
+
+The work is two separate units, in this order:
+1. **F2:** the runtime bug in the support code.
+2. **F3:** strict static enforcement in CI.
+
+**Wording:**
+
+```md
+- **Responses** go through `respond(context, ...)` or a helper built on it.
+- **A 5xx is tracked.** Its detail is stored in `error_events`, and the user gets an `error_id` that support can find by that code.
+  - With a service-role client in hand: `respondTrackedError(context, req, client, { status, message, error })`.
+  - `respondTracked(...)` only after `attachErrorTracking(context, req, client, ...)` ran in the same request. Without it, `respondTracked` sends an untracked response.
+  - A local wrapper `respond<Name>Error` must call one of the two in its body. Its name proves nothing.
+  - **Exception:** a failure before a suitable client exists (missing configuration, client creation failed) uses `respond(context, 500, ...)` with `// tracked-error-exempt: <reason>`. The reason must be a real one.
+- **Enforcement:** `npm run lint:error-tracking:strict` is a blocking CI check (once F3 lands; until then the check only warns).
+```
+
+**Maintained in:**
+- `docs/project-rules/30-backend-shared-helpers.md`;
+- one always-on line in `AGENTS.md`.
+
+The enforcement line is updated when F3 lands (D8).
+
+**Why:**
+- A code shown to the user that support cannot find is worse than no code.
+- A name-only check lets untracked paths through.
+
+##### C3 `createSingleClient` and the stale `resolveTenantClient` hints
+
+**Sources [V at `0339f45`]:**
+- `AGENTS.md:9` is correct: use `createSingleClient(env)`.
+- **The name `createSingleClient` appears in 21 files under `api/`:**
+  - 20 endpoint `index.js` files that call it;
+  - `api/_shared/org-bff.js:272`, which defines it.
+
+  The two counts describe different sets, and both are correct.
+- **Stale hints,** found by their text:
+  - `eslint.config.js:103` and `:143`: "Use resolveTenantClient from org-bff.js instead";
+  - `scripts/validate-api-endpoints.js:27`: the same text;
+  - `docs/api-validation-tool.md:49`: the same hint, with the names in backticks.
+
+**Decision (owner).** Fix the four stale hints in 3.7. Find them by their text at execution time, not by line number.
+- **The new hint:** `createSingleClient(env)` creates the client, and `withOrgScope(client, table, orgId)` scopes tenant table access. Each helper is named for its own role.
+- **The rule "never `resolveTenantClient`"** is kept once, in `docs/project-rules/00-core-rules.md:20`.
+- **`AGENTS.md:9`** is removed.
+
+**Why:** a hint that names a removed function sends an agent looking for deleted code.
+
+##### C4 Schema contract (current state) and the migration research
+
+**Sources [V at `0339f45`]:**
+- `CLAUDE.md:44` and `agents-docs/00-core-rules.md:21` call `setup-sql.js` the single source.
+- `migrations/README.md` describes the snapshot plus numbered migrations. Migrations are applied by hand today, and applying them from CI is planned.
+- **5 migration files.**
+- **What checks the migrations:**
+  - `lint:sql` checks only the snapshot;
+  - `tests/dated-settings.test.js` reads a migration file (`:387`, migration 0002);
+  - no general checker validates every migration file.
+
+**Decision (owner).** Record the current state exactly. Add one research task before stage 5 (stage 4R).
+
+**Wording:**
+
+```md
+- **Schema.**
+  - `src/lib/setup-sql.js` is the target snapshot. A new database is set up from it alone.
+  - On an existing database, run the new migrations from `migrations/` in order, then the snapshot.
+  - `migrations/README.md` holds the procedure: migrations are applied by hand today; applying them from CI is planned.
+  - `npm run lint:sql` checks the snapshot. Some tests read a migration file (for example `tests/dated-settings.test.js`). No general checker validates every migration file yet.
+  - **Why:** a new database needs only the target state; an existing one must first lose what the snapshot no longer defines.
+```
+
+**Maintained in:**
+- the schema rules in `docs/project-rules/00-core-rules.md`, in place of line 21;
+- the procedure only in `migrations/README.md`.
+
+Stage 5 updates both paths.
+
+**Agent memory.** The plan to apply migrations from CI on deploy comes from agent memory (`db-migrations-decision`). Nothing beyond what `migrations/README.md` already says is written as fact.
+
+**Follow-up:** stage 4R.
+
+##### C5 One validation table
+
+**Sources [V]:** the validation table appears three times:
+- `CLAUDE.md:3-15`;
+- `AGENTS.md:42-62`;
+- `agents-docs/00-core-rules.md:70-85`.
+
+Two of the copies are out of date:
+- `CLAUDE.md:15` lists 4 build steps, while the `build` script in `package.json` runs 6.
+- `lint:upsert-conflicts` is not in `build`.
+
+**Decision (owner).**
+- The table is maintained once, in `AGENTS.md`, and names npm script names from `package.json`. It does not copy what a script runs.
+- Every condition that requires `npm run lint:upsert-conflicts` is kept:
+  - `setup-sql.js` plus a migration;
+  - any `.upsert({ onConflict })` added or changed under `api/`;
+  - an edit to `scripts/validate-upsert-conflicts.js`.
+- The upsert contract (the three simultaneous changes) is kept once, in the domain rules (`00-core-rules.md`). `AGENTS.md` links to it.
+
+**Why:** a list copied from a script goes stale, and here it did.
+
+##### C6 Reading by task
+
+**Source [V]:** `AGENTS.md:18`: "Load ONLY the source files listed there".
+
+**Decision (owner).**
+- `AGENTS.md` explains the reading rule once.
+- Each domain document keeps its own "Start here" list.
+- During the move, every rewritten link must resolve to the right target, including links between files that moved together (3.3).
+
+**Wording** (in `AGENTS.md`):
+
+```md
+- **Where to start.** Read the `docs/project-rules/` document for your task and start from its "Start here" files. Continue as far as the change needs: imports, callers (grep the symbol), dependencies, cross-domain effects and tests.
+```
+
+**Why:** a fixed file list missed callers and existing tests.
+
+##### C7 Where tests live, how they run, and the binding test rule
+
+**Counts [V at `0339f45`]:** 52 tracked `*.test.js` files.
+- 30 are in `test:finance-calendar`. They run by hand and through `verify:beta` (`package.json:34`), not in `build` and not in CI.
+- 1 runs directly in the "Plan registry" CI.
+- 21 are in no npm script and in no workflow that was checked. They can be run directly.
+
+The count by suffix does not cover every test tool (see [Test classification](#test-classification)).
+
+**Decision (owner):**
+- **Location of the test guidance:**
+  - the general guidance goes in `docs/project-rules/00-core-rules.md`;
+  - `80-finance-billing-payroll.md` gets a short pointer for finance.
+- **The guidance explains how to find and run tests.** The counts live in the Progress log, with their SHA, not in the guidance.
+- **Classification:** the migration map classifies tests by purpose, environment and entry point ([Test classification](#test-classification)).
+  - A unit test next to its module is a valid location.
+  - The three `one-db-refactor` files are candidates for `tests/integration/`.
+  - Entry points and consumers are kept when files move.
+- **The coverage gap** stays tracked in this plan. No GitHub issue in this round.
+- **The test rule is binding.** It was formerly agent memory only (`keep-tests-current`); the owner approved it on 2026-11-24 in this wording.
+
+**Wording:**
+- the test rule, in `AGENTS.md` among the always-on rules;
+- the guidance, in `00`.
+
+```md
+- **Tests for every behaviour change.** Identify which test proves the behaviour that changed.
+  - Update or add a Node test for logic.
+  - Update or add a tester scenario (`tests/automatic-tester/`) when a user flow is affected. If both are affected, cover both.
+  - If existing coverage already proves the requirement, run it.
+  - A documentation change gets the verification that fits it.
+```
+
+```md
+- **Finding and running tests.**
+  - Node tests use `node --test`. A unit test may sit next to its module (`api/**`, `src/**`). Shared tests are in `tests/`, and browser scenarios are in `tests/automatic-tester/`.
+  - `npm run test:finance-calendar` runs a fixed list; `verify:beta` runs it too. Neither `npm run build` nor CI runs it.
+  - CI runs `tests/validate-plans-index.test.js` ("Plan registry").
+  - Every other test file has no entry point: run it with `node --test <file>` when you change the code it covers.
+```
+
+**Why:**
+- "Not in an npm list" is not the same as "never run".
+- "In an npm list" is not the same as "run automatically".
+
+##### D8 Keep documentation current
+
+**Decision (owner).** One binding rule in `AGENTS.md`. It extends "Keep the Hub Alive":
+
+```md
+- **Keep documentation current.** When a change makes an existing instruction, product rule, command, path, or plan checkpoint inaccurate, update its authoritative document in the same change. Record new shared contracts and cross-domain effects in the relevant domain guide. Review the documents referenced by the work you touched. If they remain accurate, no documentation edit is needed.
+```
+
+**Acceptance** (part of stage 3 acceptance):
+- A change to a run command updates the instruction that cites it.
+- An approved product decision is recorded in its domain source.
+- An internal refactor that keeps behaviour and instructions may finish with no documentation edit.
+
+The aim is to fix what the change made stale. It does not require a full documentation scan on every task.
+
+##### D9 Other decisions
+
+- **`AGENTS.md`** stays the main entry point. `CLAUDE.md` points to it (3.5).
+- **The commit policy** (Conventional Commits 1.0.0) is maintained in `docs/project-rules/commits.md`. `AGENTS.md` links to it (3.10, section 3.3).
+- **The conversation language** is a personal preference, outside the repository. [Q10](#q10-co-authored-by-trailer) (`Co-authored-by`) is still open.
+- **Claims about the preview and production environments** need a verified configuration source before they are written as rules.
+- **Working rules about `main`,** and other preferences that come from agent memory, need an owner decision before they become policy.
 
 **Rules found in only one file** must be kept once, in the right place:
 - **In `CLAUDE.md` and also in agents-docs**, keep them in agents-docs:
@@ -710,7 +1009,7 @@ Then confirm that the local data is back, using the report count and the `.env` 
   - the instructor self-scope;
   - `is_active`;
   - the Escape Hatch;
-  - Keep the Hub Alive.
+  - Keep the Hub Alive (extended by D8).
 
 **Instruction sources to retire** (merge any valid items first):
 - `.github/chatmodes/…chatmode.md`;
@@ -718,34 +1017,54 @@ Then confirm that the local data is back, using the report count and the `.env` 
 - `ProjectDoc/Conventions.md`;
 - `docs/AI-Coder-Gotchas.md`.
 
-**Rules that exist only in agent memory.** Each needs owner confirmation before it becomes binding:
-- every change updates node tests and tester scenarios;
-- never push or merge to `main` without the owner;
-- the preview environment uses the production DB;
-- straight quotes in UI terms.
+**Rules that came from agent memory, and their status after 3.1:**
+
+| Rule (memory file) | Status |
+|---|---|
+| Every behaviour change is covered by tests (`keep-tests-current`) | **Binding**, in the C7 wording (owner, 2026-11-24) |
+| Never push or merge to `main` without the owner | Needs an owner decision before it becomes policy. Not written in 3.4 until then. |
+| The preview environment uses the production DB (`pp-pr62-open`) | A claim about an environment. Written only with a verified configuration source (D9). |
+| Straight quotes in UI terms (`straight-quotes-feedback`) | Needs an owner decision before it becomes policy |
+| Migrations applied from CI on deploy (`db-migrations-decision`) | Not written as fact; stage 4R ends in an owner decision |
+| Conversation language (`narration-language-feedback`) | Personal preference; stays outside the repository |
+
+**Still open after 3.1:**
+- Q10;
+- the two memory rules above that need an owner decision;
+- a verified source for the preview and production claims;
+- the F1 fix design, after the callers are reviewed;
+- the F3 workflow, confirmed at its review;
+- making "Plan registry" and the F3 check required checks (Q9, F3);
+- the migration workflow decision (Q11, after 4R);
+- Q2 and Q4–Q8.
 
 #### 3.2 Subtasks
 
-- [ ] 3.1 Present the conflicts table with the proposed wording. **Joint review.** Record the answers to C1–C7.
+- [x] 3.1 Present the conflicts with the proposed wording; joint review; record the answers. Done: proposal on 2026-11-23 against `0339f45`, owner decisions on 2026-11-24, recorded in [3.1](#31-decisions-c1c7-and-d8d9-owner-2026-11-24).
 - [ ] 3.2 `git mv agents-docs docs/project-rules`, keeping the file names.
 - [ ] 3.3 Rewrite the 262 relative links inside them (`../api` becomes `../../api`, and so on). Also rewrite every inbound link:
   - `AGENTS.md`;
   - `CLAUDE.md`;
   - the comment at `eslint.config.js:10`;
   - `implementations/**`.
+
+  Verify that every rewritten link resolves to the right target. That includes links between files that moved together, whose relative form does not change (C6).
 - [ ] 3.4 Rewrite `AGENTS.md`, at most about 100 lines:
   1. what Reinex is;
-  2. hard limits (`main`, the production DB, the preview environment);
-  3. always-on rules, each with a one-line why;
-  4. a routing table (task → `project-rules` → `product` → tests → start files);
-  5. the validation table (npm script names);
-  6. how to continue a plan: "Resume here", then `docs/plans/index.csv`.
-- [ ] 3.5 Make `CLAUDE.md` exactly `@AGENTS.md`, plus Claude-only notes if any remain.
-- [ ] 3.6 Add a "Start here" list to each `project-rules` file, with the C6 wording.
-- [ ] 3.7 Fix the C3 messages.
+  2. hard limits: only limits the owner has decided, each claim about an environment backed by a verified configuration source (D9);
+  3. always-on rules, each with a one-line why. These include the C1 and C2 lines, the binding test rule (C7) and "Keep documentation current" (D8);
+  4. the reading rule (C6), written once;
+  5. a routing table (task → `project-rules` → `product` → tests → start files), including "committing work → `docs/project-rules/commits.md`";
+  6. the validation table, the only copy (C5): npm script names, with every `lint:upsert-conflicts` condition and a link to the upsert contract;
+  7. how to continue a plan: "Resume here", then `docs/plans/index.csv`.
+- [ ] 3.5 Make `CLAUDE.md` exactly `@AGENTS.md`, plus Claude-only notes if any remain. Remove the validation table copy in `00-core-rules.md`, leaving a link (C5).
+- [ ] 3.6 Add a "Start here" list to each `project-rules` file (C6). Write the full C1 and C2 rules in `30-backend-shared-helpers.md`.
+- [ ] 3.7 Fix the four C3 hints, found by their text (`git grep -n "resolveTenantClient" -- eslint.config.js scripts docs/api-validation-tool.md`). Remove `AGENTS.md:9`.
 - [ ] 3.8 Delete the retired instruction sources after owner confirmation.
 - [ ] 3.9 Decide whether the link check becomes `scripts/check-doc-links.js`. It resolves relative Markdown links and the `implementations/`, `docs/`, `tests/` and `database/` paths cited in code comments.
 - [ ] 3.10 Define one commit policy for every development agent in Reinex. The owner requested it on 2026-11-23. See 3.3.
+- [ ] 3.11 Write the C7 test guidance ("Finding and running tests") in `00-core-rules.md`, with a short pointer from `80-finance-billing-payroll.md`. Put no counts in the guidance.
+- [ ] 3.12 Write the C4 schema contract in `00-core-rules.md`, in place of "Schema SSOT".
 
 #### 3.3 Commit policy (subtask 3.10)
 
@@ -795,6 +1114,14 @@ Then confirm that the local data is back, using the report count and the `.env` 
 - The link check over `AGENTS.md`, `CLAUDE.md` and `docs/project-rules/**` finds 0 broken links.
 - `npm run lint` and `npm run lint:api` show the stage 2 counts.
 - The commit policy acceptance in 3.3 passes.
+- Each rule decided in 3.1 appears in exactly one maintained place, with a pointer wherever else it is needed. For example, `git grep -n "withOrgScope(client, table, orgId)" -- AGENTS.md CLAUDE.md docs/project-rules` finds the rule in `30` and only a link line in `AGENTS.md`.
+- **A new agent with no memory passes these short tasks through `AGENTS.md` alone:**
+  - **(D8) Three cases:**
+    - a renamed npm script: it updates the instruction that cites the script;
+    - an approved product decision: it records the decision in its domain source;
+    - an internal refactor that keeps behaviour and instructions: it ends with no documentation edit.
+  - **(C7)** Given a behaviour change, it names the test that proves it. It picks a Node test, a tester scenario, or both, by what the change affects.
+  - **(C1)** Given a new CRUD endpoint on a tenant table, it uses `ensureMembership` with a null check, then `withOrgScope`.
 
 **Rollback:** revert.
 
@@ -803,6 +1130,134 @@ Then confirm that the local data is back, using the report count and the `.env` 
 - the link-check output;
 - the resolved conflicts;
 - the commit-policy agent test: the task given, and the agent's titles and grouping.
+
+### Stage 3F: Code fixes decided in 3.1
+
+**Goal:** the code matches the C1 and C2 rules written in stage 3.
+
+**How the work is split:**
+- Each subtask is a separate unit of work, with its own commits, evidence and joint review.
+- No file moves here.
+- Each fix adds the tests that prove its behaviour (C7), as the exception to scope rule 3.
+
+**Depends on:** stage 3 reviewed, so the rules exist where agents read them.
+
+**Order:**
+- **F1** stands on its own.
+- **F2 must land before F3.** F3 routes many more 5xx responses through the tracking helpers. Without F2, each of them could show the user a code that support cannot find.
+- **Default sequence:** 3 → F1 → F2 → F3 → 4.
+- **Possible change at the stage 3 review:** F3 is large (276 findings at `0339f45`), so the owner may move it after stage 4. Its commits never mix with a move stage.
+
+#### F1 Org scoping of the four writes in `ensureStudentForClientProfile`
+
+**Facts [V at `0339f45`]:**
+- **The function:** `api/_shared/client-profiles.js:397-472`.
+- **The four updates (lines 459-464).** They update `form_submissions`, `otp_challenges`, `waiting_list_entries` and `lesson_participants`:
+  - with `tenantClient.from(...)`, by `client_profile_id` and `student_id IS NULL`;
+  - with no `org_id` filter;
+  - inside one `Promise.all`, without reading each Supabase result's `error`.
+- **The comment above them** says the profile was "just read in this organisation". It was added in #55 (`dce8f2e`, per `git log -L`).
+  - The evidence for that claim is the org-scoped read of the profile earlier in the function.
+  - The original motive beyond that evidence is unknown.
+- **Callers:**
+  - the import, `api/import-commit-chunk/index.js:159`;
+  - lesson templates, `api/lesson-templates/index.js:858`, `:894` and `:1434`.
+- **The flow:**
+  1. validate the IDs;
+  2. return the student that already exists for the profile, if there is one (early exit, lines 412-422);
+  3. otherwise read the profile in the org and create the student;
+  4. link the profile's earlier rows in the four tables to the new student;
+  5. re-read the student.
+
+**Subtasks:**
+- [ ] F1.1 Record the existing explanation and its sources (above) in the Progress log.
+- [ ] F1.2 Record the real user flow from each caller: what the user did, what is created, and which earlier rows get linked.
+- [ ] F1.3 Plan the four updates through `withOrgScope(tenantClient, table, scopedOrgId).update(...)`, keeping the filters on `client_profile_id` and `student_id IS NULL`.
+- [ ] F1.4 Examine partial failure.
+  - **Today:** one failed link leaves rows unlinked, and the function still returns `created: true`.
+  - **On a retry:** the early exit for an existing student skips the link step, so those rows stay unlinked.
+  - **Review each caller's handling.** Then propose a solution for joint review before implementing it, without deciding on a new transaction mechanism in advance. One option to evaluate: the link step also runs on the early-exit path, which is safe to repeat because of `student_id IS NULL`, and it reports each error.
+- [ ] F1.5 Implement the approved solution, test first.
+
+**Acceptance (Node tests, plus a tester scenario if a user flow changes):**
+- **Correct linking:** after creation, the profile's rows in all four tables in this org carry the new `student_id`. Rows that were already linked are unchanged.
+- **Isolation between two orgs:** a row in another org with the same `client_profile_id` value stays unchanged, and each of the four queries carries `org_id`. The assertion style is that of `tests/org-scope-reads.test.js`.
+- **Partial failure and retry:**
+  - a failing link is reported, not silently ignored;
+  - a retry, including the early-exit path, ends with all four tables linked;
+  - no second student is created.
+- `npm run lint:api` exits 0, and `npm run lint:upsert-conflicts` passes.
+- The callers' existing tests pass. The new tests are run directly or added to the right entry point, as the C7 guidance says.
+
+#### F2 The support code must point to a saved record
+
+**Facts:** see [C2](#c2-5xx-responses-the-support-code-and-strict-tracking).
+- `trackErrorEvent` returns a code when there is no client, and when the insert into `error_events` failed.
+- `respondTrackedError` then shows the user an `error_id` that has no record.
+- `respondTracked` without `attachErrorTracking` sends an untracked response.
+- The only direct caller of `trackErrorEvent` outside `error-events.js` is its test, `api/_shared/error-events.test.js:89`. That test file is in no npm script.
+
+**Contract:**
+- When the user is shown an `error_id`, a saved record exists, and support can find it by that code.
+- If saving failed, or there was no client:
+  - the user gets a safe, useful response without a code;
+  - the tracking failure is written to the operational log (`context.log`);
+  - the original operation error is kept in that log;
+  - the tracking failure is not tracked through the same mechanism.
+
+**Subtasks:**
+- [ ] F2.1 List every consumer and record each one's current behaviour:
+  - the return value of `trackErrorEvent`;
+  - the API response of `respondTrackedError` and `respondTracked`;
+  - the UI message (`src/lib/api-client.js:131-152`, `src/lib/error-support.js`, `SubmitFormPage.jsx`, `FormField.jsx`);
+  - the support search (`api/system-admin-error-events`, `ErrorEventsView.jsx`).
+- [ ] F2.2 Write the tests first (acceptance below), and see them fail against the current code.
+- [ ] F2.3 Fix the runtime path to the contract.
+- [ ] F2.4 Check every local `respond<Name>Error` wrapper under `api/`. Each must call `respondTrackedError`, or call `respondTracked` after `attachErrorTracking` in that request. List each one with its result. Fix any that does not track.
+
+**Acceptance:**
+- **A successful write:** the response's `error_id` equals the saved `support_code`, and the support search finds it.
+- **A failed write:** there is no `error_id`; the message is safe; the operational log holds the original error and the tracking failure; there is no recursive tracking.
+- **No client:** the same as a failed write.
+- **The UI:** with a code, it shows "קוד תמיכה: <code>"; without one, it shows the stable message with no code.
+- `api/_shared/error-events.test.js` and the new tests pass when run directly, and `npm run lint:api` exits 0.
+
+#### F3 Strict error tracking as a blocking CI check
+
+**Subtasks:**
+- [ ] F3.1 Measure again at execution time with `npm run lint:error-tracking`. The baseline at `0339f45` is 276 untracked 5xx in 100 files. Classify each finding by route and handling:
+  - a client is available: `respondTrackedError`;
+  - tracking is attached: `respondTracked`;
+  - a failure before a suitable client exists: exempt, with the real reason;
+  - other.
+- [ ] F3.2 Audit the validator: what it detects and what it misses. Known: a literal `respond(` with a 5xx is flagged, and any `respond<Name>(` passes by its name. Check status values held in variables, and wrappers that look right by name only. Strengthen the validator where it misses, with tests. **Never close a finding by:**
+  - renaming;
+  - blanket exemptions;
+  - hiding warnings.
+- [ ] F3.3 Fix the routes with the helpers, in reviewable commits by area. Give each `tracked-error-exempt` a real reason.
+- [ ] F3.4 Give the validator a directory option and tests, like `lint:plans`:
+  - a clean fixture exits 0;
+  - a fixture with a bare `respond(context, 500, …)` exits 1;
+  - a fixture with a wrapper that does not track also exits 1, if F3.2 extends the validator to check wrapper bodies.
+- [ ] F3.5 Make it blocking in CI. **Proposal, confirmed at this subtask's review:**
+  - **Workflow:** a new `.github/workflows/error-tracking.yml`, named "Error tracking", following "Plan registry":
+    - **Events:** `pull_request` (opened, synchronize, reopened) and `push`, to `staging` and `main`. No path filter.
+    - **Setup:** Node 20, `permissions: contents: read`, no install; the validator uses only Node built-ins [V].
+    - **Steps:** `npm run lint:error-tracking:strict` and the F3.4 tests.
+  - **Effect on the job:** any finding exits non-zero, so the step and the job fail. There is no `continue-on-error`.
+  - **Left unchanged:**
+    - the warn-only step in `integrity-checks.yml` keeps reporting;
+    - `npm run build` keeps the warn-only command, so the deploy build does not run this gate twice.
+- [ ] F3.6 Update the C2 enforcement line in `30-backend-shared-helpers.md` and `AGENTS.md` (D8).
+
+**Acceptance:**
+- The tree after F3.3 passes `npm run lint:error-tracking:strict`: exit 0, 0 findings.
+- A controlled invalid case (the F3.4 fixture) fails the check.
+- After a push, GitHub runs the "Error tracking" job. It is recorded green on the valid tree and red on a controlled invalid commit (on a throwaway branch, never merged).
+- **A failing job is not the same as a required check.** A red job marks the PR but blocks merging only if "Error tracking" is set as a required status check in the branch rules. That setting is a separate owner decision, like "Plan registry" (Q9), and this plan does not make it.
+- The F2 behaviour and the F3 enforcement are verified separately, each with its own evidence.
+
+**Rollback:** revert per subtask. F3.5 is reverted alone if the workflow needs to be withdrawn.
 
 ### Stage 4: `docs/product/` and `docs/research/`, first domain: payroll and leave
 
@@ -931,6 +1386,51 @@ Otherwise summarise the finding in the PR, the issue or the plan's progress log,
 - `Limits` keeps an unverified legal conclusion from becoming a rule.
 - **There is no index:** it would go stale, and `git grep` covers search. The one-document-per-topic rule is what prevents overlap.
 
+### Stage 4R: Migration workflow research (before stage 5)
+
+**Goal:** the owner gets a recommendation and decides how Reinex identifies, shows and applies migrations. The decision is recorded in [Q11](#q11-migration-workflow).
+
+**Depends on:** stage 4.3, which creates `docs/research/README.md`.
+
+**Read-only.** No migration or other command runs against any non-local database. The research reads documentation and code only.
+
+**Starting sources** (official Vikunja documentation):
+- https://vikunja.io/docs/installing/#updating
+- https://vikunja.io/docs/cli/#migrate
+- https://vikunja.io/docs/security-hardening/#backups
+
+Check the details in Vikunja's official code where needed. Record the version or the date read for each source.
+
+**Questions about Vikunja:**
+- How does it know which migrations already ran?
+- What does a version upgrade trigger?
+- What do `migrate list` and `migrate` show and do?
+- What can a rollback really restore?
+- When is a backup required?
+
+**Questions for Reinex:**
+- **A read-only `status` command.** It would show which database it is pointed at (environment identity), which migrations were applied (`schema_migrations`), and which are pending.
+- **`apply` as an explicit deployment step,** separate from `status`.
+- **The risk we care about:** a version that did not pass QA, or a preview run against an unexpected database, changes data. Examine:
+  - QA on an isolated database;
+  - promoting the same version that was tested;
+  - verifying the target before applying;
+  - recovery after a failure (backup and restore).
+
+**Subtasks:**
+- [ ] 4R.1 Research the Vikunja questions, with sources and versions or dates.
+- [ ] 4R.2 Map the Reinex options, against today's procedure in `migrations/README.md`.
+- [ ] 4R.3 Write `docs/research/migration-workflow.md`, in the research README shape: Status, Updated, a sub-question per section with Conclusion, Evidence and Limits. End with a recommendation and the decision the owner must make.
+- [ ] 4R.4 **Joint review.** Record the owner's decision in Q11.
+
+**Acceptance:**
+- Every question above has a conclusion with a source and a version or date, or is listed under Limits.
+- The document ends with one recommendation and one decision for the owner.
+- Q11 holds the decision.
+- Whatever is decided, moving the files to `database/` in stage 5 is possible without changing deployment behaviour. Building the chosen workflow is a separate initiative (Non-goals).
+
+**Evidence:** the research document and the Q11 answer.
+
 ### Stage 5: Database assets into `database/`
 
 **Goal:** the snapshot and the migrations live in `database/`.
@@ -938,7 +1438,12 @@ Otherwise summarise the finding in the PR, the issue or the plan's progress log,
 - An existing DB is still upgraded with the migrations first, then the snapshot.
 - No bridge file is left behind.
 
-**Depends on:** stage 3 (C4), and stage 4 if it edited `setup-sql.js:6801`.
+**Depends on:**
+- stage 3 (C4);
+- stage 4R (the Q11 decision is recorded);
+- stage 4, if it edited `setup-sql.js:6801`.
+
+The move keeps deployment behaviour unchanged whatever Q11 decides.
 
 **Consumers of `src/lib/setup-sql.js` [V]:**
 
@@ -1078,7 +1583,8 @@ Otherwise summarise the finding in the PR, the issue or the plan's progress log,
   - 16 for session-reports in `api/` and `src/`;
   - 3 in the schema file;
   - 2 for org-nuke.
-- [ ] 7.3 Move the integration tests from `implementations/database/one-db-refactor/` to `tests/integration/`:
+- [ ] 7.3 Classify `e2e-smoke.test.js`, `rls-isolation.test.js` and `isolation-stress-test.js` by purpose, environment and entry point ([Test classification](#test-classification)). Move those confirmed as integration tests from `implementations/database/one-db-refactor/` to `tests/integration/`:
+  - keep every entry point and consumer;
   - fix the import depth;
   - update `test:isolation-stress-test`;
   - run `node --check` on each file.
@@ -1125,14 +1631,15 @@ Otherwise summarise the finding in the PR, the issue or the plan's progress log,
 |---|---|---|
 | A checker runs but stops scanning, or applies different rules to, a moved file | `eslint.config.js` per-folder blocks (`scripts/**`, `test/**`) set globals and rules. `validate-setup-sql.js:449-455` scans `src/` and excludes the schema by suffix. `tsconfig.typecheck.json` has `"include": ["src"]`. | Compare `npx eslint --print-config <moved file>` before and after; run `npx tsc -p tsconfig.typecheck.json --listFilesOnly`. |
 | A report points to the old path | `validate-setup-sql.js:747` (GitHub annotations) and `:754` (JSON `file`). Tester messages name `supabase-tenant` and the schema path. API hints show the schema path to users. | Run each report format and check the reported path exists (stage 5 acceptance). `git grep` for old paths in `scripts/`, `api/`, `src/` and `tests/`. |
-| A test leaves the run without failing | `test:finance-calendar` is an explicit list. 21 `*.test.js` files are in no npm script, among them `purge-manifest.test.js`, which reads the schema by path. `test:isolation-stress-test` points into `implementations/`. | Run the real npm script with the identity reporter and compare identities, not just exit codes. Run the stage's affected unscripted files directly (scope rule 2). Check that every file path named in `package.json` scripts exists. |
+| A test leaves the run without failing | `test:finance-calendar` is an explicit list (30 files at `0339f45`). 21 `*.test.js` files are in no npm script and no checked workflow at `0339f45`, among them `purge-manifest.test.js`, which reads the schema by path. `tests/validate-plans-index.test.js` is in no npm script but runs in CI. `test:isolation-stress-test` points into `implementations/`. | Run the real npm script with the identity reporter and compare identities, not just exit codes. Run the stage's affected unscripted files directly (scope rule 2). Check that every file path named in `package.json` scripts exists. |
 | A test passes but reads a different file | `dated-settings.test.js:387` (migration 0002); `pay-calculation.test.js:699` (`api/calendar-attendance/index.js`) | A missing file throws, so a pass after the move proves the new path. Confirm through the identity comparison. |
 | A blanket replace corrupts a non-path string | `https://app.test/…` fixtures in `src/lib/analytics/posthog.test.js` and `api/_shared/error-events.test.js` | Only the anchored inventory grep and targeted edits are used. The identity and results of those two suites stay unchanged when they are in scope. |
 | A tracked file drops out on staging | `reports/.gitkeep` and `supabase/.branches/_current_branch` are tracked but matched by ignore rules | Stage the explicit tracked list with `-f`, and compare the path lists (stage 1.3 steps 5, 7 and 8). |
 | Local data gets staged after a move | `.gitignore:44` is path-specific. Also `/manual-db-backup/backups` and `/test-data`. | Add the new rule before the move; run `git check-ignore -v` at the new path; never use `git add -A` over the folder. |
 | The app builds but bundles a different schema | `SetupAssistant.jsx` bundles `SETUP_SQL_SCRIPT` | Compare the hash, and check the `dist/assets` marker. |
 | Docs and comments point to moved specs | 16 session-reports comment references (plus 3 in the schema), `purge-manifest.js:6`, `payroll-rules.test.js:2`, `AGENTS.md:34-35`, and 262 relative links in agents-docs | The stage 3 link check |
-| An instruction names a helper that is gone | `eslint.config.js:103,143` and `validate-api-endpoints.js:27` recommend the removed `resolveTenantClient` | `git grep` each helper named in the rules and check that it is exported. |
+| An instruction names a helper that is gone | `eslint.config.js:103,143`, `validate-api-endpoints.js:27` and `docs/api-validation-tool.md:49` recommend the removed `resolveTenantClient` (fixed in 3.7) | `git grep` each helper named in the rules and check that it is exported. |
+| A check passes by name only | `validate-error-tracking.js` accepts any `respond<Name>(` without reading the wrapper; `respondTracked` without `attachErrorTracking` is untracked | Stage 3F, F2.4 and F3.2 |
 
 **npm scripts that execute code from `implementations/` [V]:** only `test:isolation-stress-test`.
 
@@ -1232,6 +1739,18 @@ These are the questions whose answers change the plan. Record each answer direct
 - **Missing:** whether the policy requires, allows or forbids the trailer for agents.
 - **Who:** the owner.
 - **When:** before 3.10 is closed. The policy is written without the topic until then.
+- **Still open after 3.1 (2026-11-24).**
+
+### Q11 Migration workflow
+- **Known [V at `0339f45`]:**
+  - migrations are applied by hand, after which `setup-sql.js` runs (`migrations/README.md`);
+  - each migration records itself in `schema_migrations`;
+  - applying them from CI is planned but not built.
+- **Missing:**
+  - whether Reinex gets a read-only `status` and an explicit `apply` step;
+  - how QA, promotion of the tested version, target verification and recovery work.
+- **Who:** the owner, on the stage 4R recommendation.
+- **When:** before stage 5.
 
 **Recorded from the Codex review on `index.csv`.** The columns `path,title,status` and the four statuses stay as agreed. Titles may contain commas and quotes under standard CSV quoting. The earlier proposal to forbid them was dropped. The validator parses quoted fields itself, with no new dependency (stage 2).
 
@@ -1527,6 +2046,39 @@ Append one entry per stage. Newest last.
     - **On Node 20 itself.** Its APIs (`node:test` `describe`/`it`/`after`, `fs.mkdtempSync`, `spawnSync`) are available in Node 20, but this was not run under Node 20 locally.
   - **Branch rules.** Making "Plan registry" a required check is a separate owner decision. No branch settings were changed.
   - **Joint review pending.**
+- **2026-11-23, stage 2 review outcome.** Passed the joint review. The owner approved subtask 3.1 only: a proposal, with no edits to the instruction files.
+- **2026-11-24, subtask 3.1 decided (plan-only update).**
+  - **Proposal:** presented on 2026-11-23 against `0339f45`. The owner and Codex reviewed it, and the owner decided on 2026-11-24. The decisions are recorded in [3.1](#31-decisions-c1c7-and-d8d9-owner-2026-11-24).
+  - **Facts re-verified at `0339f45`:**
+    - **C1:** 41 `api/*/index.js` files have no `ensureMembership` call. They were classified by pattern, not audited one by one. `ensureMembership` returns the role or `null`.
+    - **C2:**
+      - 276 untracked 5xx in 100 files;
+      - 0 `tracked-error-exempt` comments;
+      - `trackErrorEvent` returns a code with no client and after a failed insert;
+      - `respondTracked` is untracked without `attachErrorTracking`.
+    - **C3:** `createSingleClient` appears in 21 files under `api/`: 20 endpoint `index.js` files plus its definition in `org-bff.js:272`. The stale hint is at `validate-api-endpoints.js:27`. The "26" given in the 2026-11-23 proposal was wrong; the original plan's 27 was right. A fourth stale hint was found in `docs/api-validation-tool.md:49`.
+    - **C4:** 5 migration files. Only `tests/dated-settings.test.js` reads one. No general migration checker exists.
+    - **C7:** 52 tracked `*.test.js` files. 30 are in `test:finance-calendar`, which `verify:beta` also runs. 1 runs directly in "Plan registry" CI. 21 are in no npm script and in no checked workflow (10 `api/`, 2 `src/`, 7 `tests/`, 2 `implementations/`).
+  - **Plan changes:**
+    - the 3.1 table was replaced by the decisions C1–C7, D8 (keep documentation current) and D9;
+    - subtasks 3.3–3.7 were updated, and 3.11–3.12 added;
+    - the stage 3 acceptance gains the D8, C7 and C1 agent tasks;
+    - new **stage 3F**: F1 (the client-profiles writes), F2 (the support-code runtime bug) and F3 (strict error tracking as a blocking CI check);
+    - new **stage 4R** (the migration workflow research) and [Q11](#q11-migration-workflow); stage 5 now depends on 4R;
+    - a [Test classification](#test-classification) section in the migration map; 7.3 classifies before moving;
+    - **contradictions corrected:**
+      - the Non-goals now list the error-tracking CI exception and the plan-tracked coverage gap;
+      - scope rule 3 allows 3F's own tests;
+      - the 3.4 hard-limits item no longer asserts memory-only rules;
+      - the workflows row in the migration map.
+  - **Agent-memory rules:** their status is in the D9 table. Only the test rule became binding.
+  - **Not done in this round:**
+    - no edit to `AGENTS.md`, `CLAUDE.md` or `agents-docs/`;
+    - no move;
+    - no code fix;
+    - no settings change;
+    - no push.
+  - **Joint review pending** before 3.2.
 
 ---
 
@@ -1547,6 +2099,10 @@ Append one entry per stage. Newest last.
 | Owner decision 9: per-stage report and joint review | Shared execution rules, item 9 |
 | Commit policy (Conventional Commits 1.0.0, one place, found through `AGENTS.md`) | Stage 3: subtask 3.10, section 3.3, stage acceptance; Non-goals; Q10; stage 1.3 step 10 |
 | Test-scope rule (entry points, affected files, no coverage growth) | Purpose; stages 0, 1, 5; Dependencies |
+| 3.1 decisions C1–C7, D8 (documentation currency), D9 | Stage 3: 3.1, subtasks 3.3–3.7 and 3.11–3.12, stage acceptance |
+| Code fixes from 3.1: client-profiles writes, support-code bug, strict error tracking in CI | Stage 3F (F1, F2, F3); Non-goals; Dependencies |
+| Migration workflow research (Vikunja) and decision | Stage 4R; Q11; stage 5 dependency |
+| Test classification (purpose, environment, entry point) | Migration map: Test classification; 7.3 |
 | Silent-failure cases | Dependencies beyond imports |
 | Open questions and Codex recommendations | Open decisions |
 | Three success tests | Success tests |
