@@ -13,7 +13,7 @@ Read this block first when you continue this plan in a new conversation.
   - `docs/plans/index.csv` and `npm run lint:plans` exist.
   - The raw evidence is outside the repository, in `$env:TEMP\reinex-restructure\stage0\`, `stage1\`, `stage2\` and `stage3\`.
   - Nothing has been pushed; the owner decides on the push together with Claude.
-- **Last update:** 2026-11-24. F2 refinements: the public code stays in the title next to the support code, errors are kept to the display on the F2 paths, server text is shown by its source, and a real-component check was done.
+- **Last update:** 2026-11-25. F2 closed its last targeted gaps: the explicit user-message marker, the duplicate check on all three documents screens, and the locked-correction participants branch.
 
 Each stage appends to the [Progress log](#progress-log), ticks its subtasks and records answers under [Open decisions](#open-decisions). Keep this block at five bullets. It is a pointer, not a history.
 
@@ -2566,6 +2566,41 @@ Append one entry per stage. Newest last.
     - `ImpersonateUserDialog`'s English fallback;
     - any screen that shows `error.message` directly.
   - **Next:** joint review, then push to draft PR #64, then F3.
+
+- **2026-11-25, F2: the last three targeted gaps** (owner review). Nothing was pushed.
+  - **1. An explicit marker for server text shown to users.**
+    - **Before:** any Hebrew `message` in a 4xx was shown and copied. The owner's case (422 with "DB detail: דוגמה פנימית") reached both the screen and the copy. `api/consumption-entries/index.js:126` forwards `error.message` into a 400, so a status and a field name do not prove a public source.
+    - **Decision (implemented):** a server marks its own business copy with `withUserMessage(body)` (`api/_shared/org-bff.js`), which adds `message_kind: 'user'`. The frontend (`serverPublicMessage` in `src/lib/error-support.js`) shows a 4xx `message` as it is only with that marker. Everything else gets the general message with the public code or `(HTTP <status>)`. The payload's `code` field now also counts as a public code.
+    - **The existing deliberate messages are kept.** An inventory of every `respond(context, 4xx, …)` call (`$env:TEMP\…\scratchpad\scan-4xx-hebrew.cjs`) found 6 Hebrew literal messages, 4 in `students-bulk-create` and 2 in `students-maintenance-import`, and all 6 are marked. The 34 messages built at runtime are codes or English, so none needed the marker.
+    - **Not changed:** the `consumption-entries` forward itself (a server leak to fix separately). It is no longer shown or copied.
+    - **Tests (`tests/error-support.test.js`, 29 of 29):** the owner's 422 case, a forwarded exception in a 400, the marker not approving a code or English text, a marked message kept on screen and in the copy, `withUserMessage` setting exactly the marker the frontend reads, and `code` as a public code.
+  - **2. The duplicate check in student and instructor documents, as in organisation documents.**
+    - **New shared module:** `src/features/students/api/duplicate-check-result.js`, used by all three screens.
+      - A cancel is silent.
+      - 401 and 403 keep each screen's message.
+      - Anything else shows one toast per upload (`id: duplicate-check-failed`) through `toast.apiError`, with "בדיקת הכפילויות לא הושלמה. הקבצים יועלו בלי בדיקת כפילויות." plus the public code, details and copy.
+      - A network failure gets its own title ("…כי אין חיבור לשרת…"). `toast.apiError` now accepts a screen `message`, which is also the copied "הודעה".
+    - **Telling the outcomes apart:** the result keeps the success shape and adds `check_failed` (and `failure_kind`), so a caller can tell a failed check from zero duplicates. The student and instructor bulk flows carry it as `checkFailed`.
+    - **Upload behaviour is unchanged:** a failed check still does not block the upload. Whether it should is an open owner decision.
+  - **3. The participants branch in `LockedCorrectionPanel`.**
+    - The function moved to `src/features/calendar/utils/correctionErrorMessage.js`, so it can be tested.
+    - An unmapped code now gives the Hebrew title with `(public_code)` (or `(HTTP <status>)`), followed by "משתתפים שדורשים טיפול: <names>." or "<N> משתתפים דורשים טיפול.". The raw "`code`: names" prefix is gone.
+    - The known codes keep their dedicated text. A saved support code is appended separately. The panel passes the text without the code to `ErrorDetails`, so the copy matches.
+  - **Tests (`tests/error-display-paths.test.js`, new, 10 of 10):**
+    - **Duplicate check:** a 500 with and without a support code, a network failure (the title and the copy), the 401 and 403 messages, a silent cancel, and the failure result against a success.
+    - **Locked correction:** names, counts, a support code with the copy matching the screen, a dedicated code, and technical text replaced by `(HTTP 500)`.
+  - **Checks:**
+    - `error-events`: 12 of 12. `lesson-dialog-model`: 105 of 105.
+    - `npm run test:finance-calendar`: exit 0, 591 tests, the identity unchanged from the previous run.
+    - `lint:upsert-conflicts`, `lint:plans` and `lint:doc-links`: OK.
+    - `npx eslint .`: 726 files, 0 problems, after one fix in the new test (a cancel error built with `DOMException` instead of assigning `.name`).
+    - `npm run build`: exit 0, with 276 untracked 5xx, 21 SQL warnings and 3562 modules.
+    - The type check reports 3064 issues, with no new issue.
+  - **Docs:**
+    - `20` "Showing an error": the marker rule, and `code` as a public code.
+    - `30`: Hebrew business copy in a 4xx goes out through `withUserMessage`, and no exception text in a 4xx `message`.
+  - **Still outside this round:** the screens already listed in the previous entry; the `consumption-entries` forward; the open decision on blocking an upload when the duplicate check fails.
+  - **Next:** joint review, then push to #64, then F3.
 
 ---
 
