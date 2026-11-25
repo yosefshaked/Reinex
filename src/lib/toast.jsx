@@ -64,11 +64,12 @@ export const toast = Object.assign(
      * user closes it, so it cannot vanish while the details are read or copied.
      *
      * @param {any} error
-     * @param {any} [options] { action, fallback, ...sonner options such as id }
+     * @param {any} [options] { action, fallback, message (the screen's own title, also copied), ...sonner options such as id }
      */
     apiError(error, options = {}) {
-      const { action = '', fallback = '', ...data } = options;
-      const details = describeError(error, { action, fallback });
+      const { action = '', fallback = '', message = '', ...data } = options;
+      const described = describeError(error, { action, fallback });
+      const details = message ? { ...described, message } : described;
       return baseToast.error(details.message, {
         duration: Infinity,
         closeButton: true,

@@ -7,6 +7,7 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { toast } from '@/lib/toast.jsx';
+import { reportDuplicateCheckFailure } from '@/features/students/api/duplicate-check-result.js';
 import { FileText, Upload, Download, Trash2, ChevronDown, ChevronUp, Loader2, AlertCircle, CheckCircle2, Eye, ArrowUpDown, ArrowUp, ArrowDown, Calendar, CalendarX, CheckCircle, Edit } from 'lucide-react';
 import { fetchSettingsValue } from '@/features/settings/api/settings.js';
 import { format, parseISO, isBefore, startOfDay } from 'date-fns';
@@ -15,7 +16,7 @@ import { useOrg } from '@/org/OrgContext.jsx';
 import { getAuthClient } from '@/lib/supabase-manager.js';
 import { useDocuments } from '@/hooks/useDocuments';
 import { checkDocumentDuplicate } from '@/features/students/api/documents-check.js';
-import { createSupportAwareApiError, extractSupportCode } from '@/lib/error-support.js';
+import { createSupportAwareApiError } from '@/lib/error-support.js';
 import {
   Dialog,
   DialogContent,
@@ -529,18 +530,9 @@ export default function StudentDocumentsSection({ student, session, orgId, onRef
         return result;
       } catch (error) {
         console.error('Duplicate check error:', error);
-        
-        const errorMessage = error?.message || '';
-        if (error?.status === 401 || errorMessage.includes('401') || errorMessage.includes('Unauthorized')) {
-          toast.error('שגיאת הרשאה. נא להתחבר מחדש');
-        } else if (error?.status === 403 || errorMessage.includes('403') || errorMessage.includes('Forbidden')) {
-          toast.error('אין לך הרשאה לבצע בדיקה זו');
-        } else if (extractSupportCode(error)) {
-          toast.error(errorMessage);
-        } else if (!errorMessage.includes('AbortError')) {
-          console.warn('Duplicate check error details:', error);
-        }
-        return { has_duplicates: false, duplicates: [] };
+        // Silent on cancel; 401/403 keep their messages; anything else says the check did not
+        // complete, with details and a support copy. check_failed lets the caller tell it apart.
+        return reportDuplicateCheckFailure(error, { toast, forbiddenMessage: 'אין לך הרשאה לבצע בדיקה זו' });
       }
     },
     [session, orgId, student?.id]
@@ -1207,6 +1199,7 @@ export default function StudentDocumentsSection({ student, session, orgId, onRef
           return {
             file,
             hasDuplicates: result.has_duplicates,
+            checkFailed: result.check_failed === true,
             duplicates: result.duplicates || []
           };
         })

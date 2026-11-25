@@ -7,6 +7,7 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { toast } from '@/lib/toast.jsx';
+import { reportDuplicateCheckFailure } from '@/features/students/api/duplicate-check-result.js';
 import { 
   FileText, 
   Upload, 
@@ -512,19 +513,9 @@ export default function OrgDocumentsManager({ session, orgId, membershipRole }) 
         return result;
       } catch (error) {
         console.error('Duplicate check error:', error);
-        
-        if (error?.name === 'AbortError') {
-          // A cancelled check is not an error for the user.
-        } else if (error?.status === 401) {
-          toast.error('שגיאת הרשאה. נא להתחבר מחדש');
-        } else if (error?.status === 403) {
-          toast.error('רק בעלי/ות הרשאות מנהל יכולים/ות להעלות מסמכים ארגוניים');
-        } else {
-          // Everything else, including a 500 with or without a saved support code and a network
-          // failure: the Hebrew message, the support code when saved, and the support details.
-          toast.apiError(error, { action: 'בדיקת כפילויות', fallback: 'בדיקת הכפילויות נכשלה.' });
-        }
-        return { has_duplicates: false, duplicates: [] };
+        // Silent on cancel; 401/403 keep their messages; anything else says the check did not
+        // complete, with details and a support copy. check_failed lets the caller tell it apart.
+        return reportDuplicateCheckFailure(error, { toast, forbiddenMessage: 'רק בעלי/ות הרשאות מנהל יכולים/ות להעלות מסמכים ארגוניים' });
       }
     },
     [session, orgId]

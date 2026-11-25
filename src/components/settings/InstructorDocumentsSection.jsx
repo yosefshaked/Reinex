@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { toast } from '@/lib/toast.jsx';
+import { reportDuplicateCheckFailure } from '@/features/students/api/duplicate-check-result.js';
 import { FileText, Upload, Download, Trash2, Loader2, AlertCircle, CheckCircle, CheckCircle2, ArrowUpDown, ArrowUp, ArrowDown, Calendar, CalendarX, Edit } from 'lucide-react';
 import { fetchSettingsValue } from '@/features/settings/api/settings.js';
 import { format, parseISO, isBefore, startOfDay } from 'date-fns';
@@ -13,7 +14,7 @@ import { he } from 'date-fns/locale';
 import { getAuthClient } from '@/lib/supabase-manager.js';
 import { useDocuments } from '@/hooks/useDocuments';
 import { checkDocumentDuplicate } from '@/features/students/api/documents-check.js';
-import { createSupportAwareApiError, extractSupportCode } from '@/lib/error-support.js';
+import { createSupportAwareApiError } from '@/lib/error-support.js';
 import {
   Dialog,
   DialogContent,
@@ -504,18 +505,9 @@ export default function InstructorDocumentsSection({ instructor, session, orgId,
         return result;
       } catch (error) {
         console.error('Duplicate check error:', error);
-        
-        const errorMessage = error?.message || '';
-        if (error?.status === 401 || errorMessage.includes('401') || errorMessage.includes('Unauthorized')) {
-          toast.error('שגיאת הרשאה. נא להתחבר מחדש');
-        } else if (error?.status === 403 || errorMessage.includes('403') || errorMessage.includes('can_only_check_own')) {
-          toast.error('ניתן לבדוק רק קבצים ששייכים לך');
-        } else if (extractSupportCode(error)) {
-          toast.error(errorMessage);
-        } else if (!errorMessage.includes('AbortError')) {
-          console.warn('Duplicate check error details:', error);
-        }
-        return { has_duplicates: false, duplicates: [] };
+        // Silent on cancel; 401/403 keep their messages; anything else says the check did not
+        // complete, with details and a support copy. check_failed lets the caller tell it apart.
+        return reportDuplicateCheckFailure(error, { toast, forbiddenMessage: 'ניתן לבדוק רק קבצים ששייכים לך' });
       }
     },
     [session, orgId, instructor]
@@ -976,6 +968,7 @@ export default function InstructorDocumentsSection({ instructor, session, orgId,
         return {
           file,
           hasDuplicates: result.has_duplicates,
+          checkFailed: result.check_failed === true,
           duplicates: result.duplicates || []
         };
       })
