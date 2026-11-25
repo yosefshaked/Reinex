@@ -17,6 +17,7 @@ import {
   resolveUserErrorMessage,
   withErrorContext,
 } from '../src/lib/error-support.js';
+import { withUserMessage } from '../api/_shared/org-bff.js';
 
 const HEBREW = /[֐-׿]/;
 const CODE = 'ERR-20261124-ABC123';
@@ -56,8 +57,8 @@ describe('the message a user reads after a failed API call', () => {
     assert.equal(publicErrorCodeFromPayload({ details: 'some_code_like_text' }), '', 'details is never a public code');
   });
 
-  it('a Hebrew message from the server is shown as it is', () => {
-    assert.equal(buildUserErrorMessage({ message: 'השיעור כבר בוטל.' }, 409), 'השיעור כבר בוטל.');
+  it('a server message marked for users (withUserMessage) is shown as it is', () => {
+    assert.equal(buildUserErrorMessage({ message: 'השיעור כבר בוטל.', message_kind: 'user' }, 409), 'השיעור כבר בוטל.');
   });
 
   it('a Hebrew fallback replaces the general message', () => {
@@ -196,8 +197,8 @@ describe('server text is shown only from a trusted source, never because it cont
     assert.ok(details.message.endsWith('(invalid_payload)'));
   });
 
-  it('the Hebrew message a 4xx endpoint wrote for users is kept, on screen and in the copy', () => {
-    const error = createSupportAwareApiError({ message: 'התלמיד כבר משובץ בשיעור אחר בזמן זה.' }, 409);
+  it('the Hebrew message a 4xx endpoint marked for users is kept, on screen and in the copy', () => {
+    const error = createSupportAwareApiError({ code: 'student_slot_conflict', message: 'התלמיד כבר משובץ בשיעור אחר בזמן זה.', message_kind: 'user' }, 409);
     const details = describeError(error);
     assert.equal(details.message, 'התלמיד כבר משובץ בשיעור אחר בזמן זה.');
     assert.ok(formatErrorDetailsForCopy(details).includes('הודעה: התלמיד כבר משובץ בשיעור אחר בזמן זה.'));
@@ -206,6 +207,41 @@ describe('server text is shown only from a trusted source, never because it cont
   it('a Hebrew error thrown by the app keeps its text; the same text from a server 500 does not', () => {
     assert.equal(resolveUserErrorMessage(new Error('יש לבחור קובץ.')), 'יש לבחור קובץ.');
     assert.ok(resolveUserErrorMessage(createSupportAwareApiError({ message: 'יש לבחור קובץ.' }, 500)).endsWith('(HTTP 500)'));
+  });
+});
+
+describe('an unmarked 4xx message is never shown, whatever its language', () => {
+  it('422 with "DB detail: דוגמה פנימית" and no marker gets the safe default, on screen and in the copy', () => {
+    const error = createSupportAwareApiError({ message: 'DB detail: דוגמה פנימית' }, 422);
+    const details = describeError(error, { action: 'שמירת רישום' });
+    assert.equal(details.message, 'הפעולה לא הושלמה. בדקו את הפרטים ונסו שוב. (HTTP 422)');
+    const copied = formatErrorDetailsForCopy(details);
+    for (const leak of ['DB detail', 'דוגמה פנימית']) {
+      assert.ok(!details.message.includes(leak) && !copied.includes(leak), leak);
+    }
+    assert.ok(!resolveUserErrorMessage(error).includes('DB detail'));
+  });
+
+  it('a forwarded exception in a 400 (as consumption-entries does) is not shown either', () => {
+    const error = createSupportAwareApiError({ message: 'invalid input syntax for type uuid: "x" ערך לא תקין' }, 400);
+    assert.ok(!describeError(error).message.includes('invalid input'));
+  });
+
+  it('the marker does not approve a code or an English text', () => {
+    assert.equal(describeError(createSupportAwareApiError({ message: 'some_code', message_kind: 'user' }, 400)).message,
+      'הפעולה לא הושלמה. בדקו את הפרטים ונסו שוב. (some_code)');
+    assert.ok(describeError(createSupportAwareApiError({ message: 'Plain English', message_kind: 'user' }, 400)).message.endsWith('(HTTP 400)'));
+  });
+
+  it('the server helper withUserMessage sets exactly the marker the frontend reads', () => {
+    const body = withUserMessage({ code: 'unmatched_tags', message: 'חלק מהתוויות בקובץ לא נמצאו בקטלוג.' });
+    assert.equal(body.message_kind, 'user');
+    assert.equal(describeError(createSupportAwareApiError(body, 400)).message, 'חלק מהתוויות בקובץ לא נמצאו בקטלוג.');
+  });
+
+  it('the payload code field is a public code', () => {
+    const error = createSupportAwareApiError({ code: 'unmatched_tags', message: 'raw text' }, 400);
+    assert.ok(describeError(error).message.endsWith('(unmatched_tags)'));
   });
 });
 

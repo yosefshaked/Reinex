@@ -57,12 +57,12 @@ These files are an entry point, not a boundary: follow imports, callers (grep th
   - **A request with no server response** shows the Hebrew connection message.
   - **Never invent a code or a status.**
   - **A saved support code** (`error_id`) is shown only when the server returned one, which means the event was saved. It is an extra field: the public code stays in the title next to it. A public error code is not a support code.
-  - **Which server text may be shown is decided by its source, not by its characters:**
+  - **Which server text may be shown is decided by an explicit marker, not by the status, the field or the characters:**
     - a code in `API_ERROR_MESSAGES`;
-    - the `message` of a 4xx response, where endpoints write deliberate Hebrew copy;
+    - the `message` of a 4xx response whose body carries `message_kind: 'user'`, which the server sets with `withUserMessage(body)` (`api/_shared/org-bff.js`) for deliberate Hebrew business copy;
     - an error the app itself threw.
-    - A 5xx text, and any `details`, `description` or `title`, may hold raw DB or provider text. It is never shown, even when it contains Hebrew. Server code must not put raw DB or provider text in a 4xx `message` either.
-  - **The public error code** is a `snake_case` value of the response's `message` or `error` (`publicErrorCode`). Free text, `details`, DB or provider messages are never shown or copied.
+    - **Never shown, even when it contains Hebrew:** any other server text. That includes an unmarked 4xx `message`, which may be a forwarded exception; any 5xx text; and `details`, `description` or `title`. The user gets the general message with the public code or `(HTTP <status>)` instead.
+  - **The public error code** is a `snake_case` value of the response's `message`, `error` or `code` (`publicErrorCode`). Free text, `details`, DB or provider messages are never shown or copied.
   - **"פירוט השגיאה" and "העתקה לשליחה לתמיכה"** come with every error the user may report.
     - Both come from the same fields (`describeError`, `errorDetailRows`, `formatErrorDetailsForCopy`): the failed action, the time, the HTTP status, the public error code and the saved support code, each only when available.
     - Copying works without a support code, and confirms in Hebrew.

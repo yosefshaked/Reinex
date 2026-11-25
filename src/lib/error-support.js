@@ -95,16 +95,20 @@ function mappedMessage(code) {
   return Object.prototype.hasOwnProperty.call(API_ERROR_MESSAGES, trimmed) ? API_ERROR_MESSAGES[trimmed] : '';
 }
 
+/** The marker a server adds (withUserMessage in api/_shared/org-bff.js) to approve its message. */
+export const USER_MESSAGE_KIND = 'user';
+
 /**
- * Server text that may be shown as it is. The source decides, not the characters: only the
- * `message` of a 4xx response, where endpoints write deliberate business copy. A 5xx text, and any
- * `details`, `description` or `title`, may hold raw DB or provider text and is never shown, even
- * when it contains Hebrew. A 4xx message is shown only when it is Hebrew prose (the language rule),
- * never when it is a code.
+ * Server text that may be shown as it is. An explicit marker decides, not the status, the field or
+ * the characters: only a 4xx response whose body carries `message_kind: 'user'` (set by the server's
+ * withUserMessage). Any other server text (an unmarked 4xx `message`, which may be a forwarded
+ * exception; any 5xx text; `details`, `description`, `title`) is never shown, even when it contains
+ * Hebrew. A marked message must still be Hebrew prose, not a code.
  */
 function serverPublicMessage(payload, status) {
   if (!(Number(status) >= 400 && Number(status) < 500)) return '';
-  const value = payload && typeof payload === 'object' ? payload.message : '';
+  if (!payload || typeof payload !== 'object' || payload.message_kind !== USER_MESSAGE_KIND) return '';
+  const value = payload.message;
   if (typeof value !== 'string' || !value.trim() || API_CODE_SHAPE.test(value.trim())) return '';
   return isHebrewText(value) ? value.trim() : '';
 }
@@ -165,12 +169,12 @@ export const NETWORK_ERROR_MESSAGE = 'לא הצלחנו להתחבר לשרת. �
 export const GENERAL_ERROR_MESSAGE = 'הפעולה נכשלה.';
 
 /**
- * The public, stable API code of a response: a snake_case value of `message` or `error` only.
+ * The public, stable API code of a response: a snake_case value of `message`, `error` or `code` only.
  * Free text (details, descriptions, provider or DB messages) is never treated as a code.
  */
 export function publicErrorCodeFromPayload(payload) {
   if (!payload || typeof payload !== 'object') return '';
-  for (const value of [payload.message, payload.error]) {
+  for (const value of [payload.message, payload.error, payload.code]) {
     if (typeof value === 'string' && API_CODE.test(value.trim())) return value.trim();
   }
   return '';
