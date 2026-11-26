@@ -13,7 +13,7 @@ Read this block first when you continue this plan in a new conversation.
   - `docs/plans/index.csv` and `npm run lint:plans` exist.
   - The raw evidence is outside the repository, in `$env:TEMP\reinex-restructure\stage0\`, `stage1\`, `stage2\` and `stage3\`.
   - Nothing has been pushed; the owner decides on the push together with Claude.
-- **Last update:** 2026-11-26. F2 marked the Hebrew 4xx copy that helpers build into a whole body (the clock-change refusal, the missing-rate refusal, organisation create and the public-form verification), with tests from the real body to the display.
+- **Last update:** 2026-11-26. F2 marked the remaining verification messages of the public forms (lockdown and expired code); a failed duplicate check keeps warning and uploading.
 
 Each stage appends to the [Progress log](#progress-log), ticks its subtasks and records answers under [Open decisions](#open-decisions). Keep this block at five bullets. It is a pointer, not a history.
 
@@ -2581,7 +2581,7 @@ Append one entry per stage. Newest last.
       - Anything else shows one toast per upload (`id: duplicate-check-failed`) through `toast.apiError`, with "בדיקת הכפילויות לא הושלמה. הקבצים יועלו בלי בדיקת כפילויות." plus the public code, details and copy.
       - A network failure gets its own title ("…כי אין חיבור לשרת…"). `toast.apiError` now accepts a screen `message`, which is also the copied "הודעה".
     - **Telling the outcomes apart:** the result keeps the success shape and adds `check_failed` (and `failure_kind`), so a caller can tell a failed check from zero duplicates. The student and instructor bulk flows carry it as `checkFailed`.
-    - **Upload behaviour is unchanged:** a failed check still does not block the upload. Whether it should is an open owner decision.
+    - **Upload behaviour is unchanged:** a failed check shows the warning and the upload continues.
   - **3. The participants branch in `LockedCorrectionPanel`.**
     - The function moved to `src/features/calendar/utils/correctionErrorMessage.js`, so it can be tested.
     - An unmapped code now gives the Hebrew title with `(public_code)` (or `(HTTP <status>)`), followed by "משתתפים שדורשים טיפול: <names>." or "<N> משתתפים דורשים טיפול.". The raw "`code`: names" prefix is gone.
@@ -2599,7 +2599,7 @@ Append one entry per stage. Newest last.
   - **Docs:**
     - `20` "Showing an error": the marker rule, and `code` as a public code.
     - `30`: Hebrew business copy in a 4xx goes out through `withUserMessage`, and no exception text in a 4xx `message`.
-  - **Still outside this round:** the screens already listed in the previous entry; the `consumption-entries` forward; the open decision on blocking an upload when the duplicate check fails.
+  - **Still outside this round:** the screens already listed in the previous entry; the `consumption-entries` forward.
   - **Next:** joint review, then push to #64, then F3.
 - **2026-11-26, F2: the marker for bodies built in helpers** (owner review). Nothing was pushed.
   - **The gap:** the previous inventory read only `message` written inside the `respond` call. Helpers that compose a whole 4xx body were not marked, so their Hebrew copy got the default: the clock-change refusal lost the hours the clock jumps between, and the missing-rate refusal lost the instruction and the date on every screen except the rate notice, which read `data.message` without the marker.
@@ -2617,7 +2617,18 @@ Append one entry per stage. Newest last.
     - Tester: `employee-rates` (16 of 16) and `lesson-dialog-regressions` (clock scenario passed) now assert `message_kind=user`, the clock hours and the rate date. Six calendar UI workflows of `lesson-dialog-regressions` (A1–A4, P3 ×2) time out finding the test lesson, the same on the base commit with these changes stashed; not caused by this change.
   - **Checks:** `test:finance-calendar` exit 0 (592 tests, 563 passed, 29 todo, 0 failed); `npx eslint .` 0 problems after one fix in the new test (the zone from `DEFAULT_ORG_TIME_ZONE`); `lint:api`, `lint:upsert-conflicts`, `lint:doc-links`, `lint:plans` OK; `npm run build` exit 0 (3563 modules); the type check 3064, no new issue.
   - **Docs:** `20` names `user-message.js` and the dedicated readers; `30` says to mark where the wording is written, inline or in the helper that composes the whole body, and never in a generic path.
-  - **Unchanged:** a failed duplicate check still does not block the upload, until the owner decides.
+  - **Unchanged:** a failed duplicate check shows the warning and the upload continues.
+  - **Next:** joint review, then push to #64, then F3.
+- **2026-11-26, F2: the remaining verification messages in `form-submissions`** (owner review). Nothing was pushed.
+  - **Documents upload:** a failed duplicate check keeps today's behaviour: the warning is shown and the upload continues. This is the product behaviour, not an open question.
+  - **Marked:** `VERIFY_LOCKDOWN_MESSAGE` (429, 5 sites) and `OTP_INVALID_OR_EXPIRED_MESSAGE` (401, 1 site), next to `INVALID_VERIFY_MESSAGE` (401, 9 sites). The three bodies live in `api/form-submissions/verify-responses.js`, which builds each one with `withUserMessage`; the wording and the verification flow are unchanged.
+  - **Not changed:** the local mapping of these messages in `SubmitFormPage`. It is follow-up work, already recorded in Issue #65.
+  - **Tests (`tests/server-user-messages.test.js`, 14 of 14):** each body, sent through `respond` and parsed, keeps its exact wording and carries `message_kind: 'user'`. A source check confirms that the endpoint sends every verification failure through these bodies (9, 1 and 5 calls) and has no bare `{ message: <constant> }` left.
+  - **Checks:**
+    - `error-support`, `error-display-paths` and `lesson-dialog-model`: 145 tests, 0 failed.
+    - `lint:api`, `lint:upsert-conflicts` and eslint on the changed files: OK.
+    - `validate:api` fails with the same 7 `ensureMembership` errors as before the change, all in other endpoints.
+  - **Tester `form-sending`:** 6 workflows passed and 4 failed. All 4 failures follow from `students-list` returning 500 ("URI too long": an unchunked `.in('client_profile_id', …)` on the large local test DB, in a file unchanged since #55). This is unrelated to this change, so it gets a separate task.
   - **Next:** joint review, then push to #64, then F3.
 
 ---
