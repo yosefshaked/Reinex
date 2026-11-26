@@ -1,5 +1,6 @@
 /* eslint-env node */
 import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../_shared/supabase-admin.js';
+import { withUserMessage } from '../_shared/user-message.js';
 
 function jsonResponse(context, status, payload, extraHeaders = {}) {
   context.res = {
@@ -300,7 +301,7 @@ export default async function (context, req) {
   const trimmedName = typeof body.name === 'string' ? body.name.trim() : '';
 
   if (!trimmedName) {
-    jsonResponse(context, 400, { error: 'missing_name', message: 'יש להזין שם ארגון.' });
+    jsonResponse(context, 400, withUserMessage({ error: 'missing_name', message: 'יש להזין שם ארגון.' }));
     return;
   }
 
@@ -356,10 +357,10 @@ export default async function (context, req) {
     });
 
     if (error?.code === '23505') {
-      jsonResponse(context, 409, {
+      jsonResponse(context, 409, withUserMessage({
         error: 'duplicate_organization',
         message: 'ארגון עם שם זה כבר קיים.',
-      });
+      }));
       return;
     }
 

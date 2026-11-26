@@ -389,10 +389,11 @@ describe('lessonDialogModel: getDisplayInstance / getDisplayParticipants', () =>
 // readMissingLessonRate
 // ---------------------------------------------------------------------------
 describe('lessonDialogModel: readMissingLessonRate', () => {
-  it('reads who, what and when from the missing-rate refusal, with the server message', () => {
+  it('reads who, what and when from the missing-rate refusal, with the marked server message', () => {
     const message = 'לדנה כהן אין תעריף על "רכיבה".';
     const error = apiError({
       message,
+      message_kind: 'user',
       code: 'instructor_rate_not_configured',
       instructor_employee_id: 'dana',
       service_id: 'riding',
@@ -406,6 +407,17 @@ describe('lessonDialogModel: readMissingLessonRate', () => {
       message,
     });
     assert.equal(error.message, message, 'the plain error text is already the Hebrew explanation');
+  });
+
+  it('an unmarked server message is not shown: the refusal keeps its fields with the default text', () => {
+    const error = apiError({
+      message: 'DB detail: דוגמה פנימית',
+      code: 'instructor_rate_not_configured',
+      instructor_employee_id: 'dana',
+      service_id: 'riding',
+      rate_date: '2026-11-20',
+    }, 422);
+    assert.equal(readMissingLessonRate(error).message, 'למדריך/ה אין תעריף על השירות הזה בתאריך הזה.');
   });
 
   it('is null for any other error', () => {

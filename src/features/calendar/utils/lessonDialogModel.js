@@ -4,7 +4,7 @@ import { toShekel } from '../../../lib/currency.js';
 import { formatDateDisplay, formatTimeDisplay } from './timeGrid.js';
 import { buildSchedulingOverrideReasonDetails } from './schedulingOverride.js';
 import { getParticipantDisplayName } from './participantDisplay.js';
-import { extractSupportCode, resolveApiErrorMessage, resolveUserErrorMessage } from '../../../lib/error-support.js';
+import { extractSupportCode, resolveApiErrorMessage, resolveUserErrorMessage, serverPublicMessage } from '../../../lib/error-support.js';
 import { dateKeyFromCalendarDate } from '../../../lib/local-time.js';
 import { describeLessonStartClockChange } from '../../../lib/clock-change.js';
 
@@ -132,7 +132,9 @@ export function getDisplayParticipants(instance) {
 /**
  * The "instructor has no rate for this service on this date" refusal from a lesson or template save,
  * as { instructorEmployeeId, serviceId, rateDate, message }, or null for any other error. The form
- * uses it to offer adding the rate there and then.
+ * uses it to offer adding the rate there and then. The server's explanation (who, which service, the
+ * dates and where to add the rate) is used only when the body carries the user-message marker, like
+ * every other server text (docs/project-rules/20, "Showing an error").
  */
 export function readMissingLessonRate(error) {
   const data = error?.data;
@@ -143,7 +145,7 @@ export function readMissingLessonRate(error) {
     instructorEmployeeId: String(data.instructor_employee_id),
     serviceId: String(data.service_id),
     rateDate: typeof data.rate_date === 'string' ? data.rate_date : '',
-    message: typeof data.message === 'string' && data.message ? data.message : 'למדריך/ה אין תעריף על השירות הזה בתאריך הזה.',
+    message: serverPublicMessage(data, error?.status) || 'למדריך/ה אין תעריף על השירות הזה בתאריך הזה.',
   };
 }
 

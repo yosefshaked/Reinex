@@ -95,7 +95,7 @@ function mappedMessage(code) {
   return Object.prototype.hasOwnProperty.call(API_ERROR_MESSAGES, trimmed) ? API_ERROR_MESSAGES[trimmed] : '';
 }
 
-/** The marker a server adds (withUserMessage in api/_shared/org-bff.js) to approve its message. */
+/** The marker a server adds (withUserMessage in api/_shared/user-message.js) to approve its message. */
 export const USER_MESSAGE_KIND = 'user';
 
 /**
@@ -105,7 +105,7 @@ export const USER_MESSAGE_KIND = 'user';
  * exception; any 5xx text; `details`, `description`, `title`) is never shown, even when it contains
  * Hebrew. A marked message must still be Hebrew prose, not a code.
  */
-function serverPublicMessage(payload, status) {
+export function serverPublicMessage(payload, status) {
   if (!(Number(status) >= 400 && Number(status) < 500)) return '';
   if (!payload || typeof payload !== 'object' || payload.message_kind !== USER_MESSAGE_KIND) return '';
   const value = payload.message;
@@ -326,7 +326,7 @@ export function describeError(error, { fallback: givenFallback = '', action: giv
   if (network) {
     return { ...base, message: NETWORK_ERROR_MESSAGE, specific: false };
   }
-  // Shown as it is only from a trusted source: our own code map, a 4xx `message` from the server,
+  // Shown as it is only from a trusted source: our own code map, a marked 4xx `message` from the server,
   // or an error our own app threw (no HTTP status and no response data).
   const isApiError = Boolean(status) || Boolean(error?.data) || Boolean(supportCode);
   const specific = mappedMessage(publicCode)

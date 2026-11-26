@@ -14,15 +14,9 @@ export function readEnv(context) {
   return process.env ?? {};
 }
 
-/**
- * Marks a 4xx response body whose `message` is Hebrew business copy written for users. The frontend
- * shows a server `message` as it is only with this marker (docs/project-rules/20, "Showing an
- * error"); without it, the message is treated as internal and the user gets a safe default. Never
- * pass DB, provider or exception text through it.
- */
-export function withUserMessage(body) {
-  return { ...body, message_kind: 'user' };
-}
+// The marker for Hebrew business copy in a 4xx body (see user-message.js); re-exported here so
+// endpoints import it next to `respond`.
+export { withUserMessage, USER_MESSAGE_KIND } from './user-message.js';
 
 export function respond(context, status, body, extraHeaders) {
   const response = json(status, body, extraHeaders);

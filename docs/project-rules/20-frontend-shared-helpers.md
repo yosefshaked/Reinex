@@ -59,7 +59,7 @@ These files are an entry point, not a boundary: follow imports, callers (grep th
   - **A saved support code** (`error_id`) is shown only when the server returned one, which means the event was saved. It is an extra field: the public code stays in the title next to it. A public error code is not a support code.
   - **Which server text may be shown is decided by an explicit marker, not by the status, the field or the characters:**
     - a code in `API_ERROR_MESSAGES`;
-    - the `message` of a 4xx response whose body carries `message_kind: 'user'`, which the server sets with `withUserMessage(body)` (`api/_shared/org-bff.js`) for deliberate Hebrew business copy;
+    - the `message` of a 4xx response whose body carries `message_kind: 'user'`, which the server sets with `withUserMessage(body)` (`api/_shared/user-message.js`) for deliberate Hebrew business copy. Dedicated readers of a refusal (for example `readMissingLessonRate`) use the same check (`serverPublicMessage`);
     - an error the app itself threw.
     - **Never shown, even when it contains Hebrew:** any other server text. That includes an unmarked 4xx `message`, which may be a forwarded exception; any 5xx text; and `details`, `description` or `title`. The user gets the general message with the public code or `(HTTP <status>)` instead.
   - **The public error code** is a `snake_case` value of the response's `message`, `error` or `code` (`publicErrorCode`). Free text, `details`, DB or provider messages are never shown or copied.

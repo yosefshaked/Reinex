@@ -13,6 +13,7 @@ import {
   resolveOrgId,
   withOrgScope,
   respond,
+  withUserMessage,
 } from '../_shared/org-bff.js';
 import { sendAndLogBrevoEmail } from '../_shared/email-log.js';
 import { fetchStudentIdsByInstructor } from '../_shared/instructor-student-scope.js';
@@ -40,6 +41,8 @@ const ROUTING_CATEGORY = 'form_submission';
 const FAILED_VERIFY_WINDOW_MINUTES = 5;
 const MAX_VERIFY_FAILURES = 5;
 const INVALID_VERIFY_MESSAGE = 'מזהה או קוד אימות שגויים';
+// Our own wording for a failed public-form verification, marked for display (docs/project-rules/30).
+const invalidVerifyBody = () => withUserMessage({ message: INVALID_VERIFY_MESSAGE });
 const OTP_INVALID_OR_EXPIRED_MESSAGE = 'קוד האימות שגוי או שפג תוקפו';
 const VERIFY_LOCKDOWN_MESSAGE = 'מטעמי אבטחה, כל הקישורים הפעילים עבור תלמיד זה בוטלו עקב יותר מדי נסיונות כושלים. יש ליצור קשר עם המרפאה לקבלת קוד חדש.';
 const WAITING_LIST_ROUTING_CATEGORY = 'waiting_list_intake';
@@ -1768,7 +1771,7 @@ async function verifySubmissionAccess(context, req, { controlClient }) {
   const otpCode = normalizeOtp(body?.otp);
 
   if (!identityNumber || otpCode.length !== OTP_DIGITS) {
-    return respond(context, 401, { message: INVALID_VERIFY_MESSAGE });
+    return respond(context, 401, invalidVerifyBody());
   }
 
   const ipAddress = resolveClientIp(req);
@@ -1798,7 +1801,7 @@ async function verifySubmissionAccess(context, req, { controlClient }) {
         message: rateError?.message,
       });
     }
-    return respond(context, 401, { message: INVALID_VERIFY_MESSAGE });
+    return respond(context, 401, invalidVerifyBody());
   }
 
   const orgId = normalizeString(routingRow.org_id);
@@ -1819,7 +1822,7 @@ async function verifySubmissionAccess(context, req, { controlClient }) {
         message: rateError?.message,
       });
     }
-    return respond(context, 401, { message: INVALID_VERIFY_MESSAGE });
+    return respond(context, 401, invalidVerifyBody());
   }
 
   attachErrorTracking(context, req, controlClient, {
@@ -1861,7 +1864,7 @@ async function verifySubmissionAccess(context, req, { controlClient }) {
         message: rateError?.message,
       });
     }
-    return respond(context, 401, { message: INVALID_VERIFY_MESSAGE });
+    return respond(context, 401, invalidVerifyBody());
   }
 
   const subject = await resolveSubmissionSubject(controlClient, orgId, {
@@ -1898,7 +1901,7 @@ async function verifySubmissionAccess(context, req, { controlClient }) {
         message: rateError?.message,
       });
     }
-    return respond(context, 401, { message: INVALID_VERIFY_MESSAGE });
+    return respond(context, 401, invalidVerifyBody());
   }
 
   let otpChallenge;
@@ -2021,7 +2024,7 @@ async function finalizeSubmission(context, req, { controlClient, env }) {
   const ipAddress = resolveClientIp(req);
 
   if (!UUID_PATTERN.test(submissionId) || otpCode.length !== OTP_DIGITS) {
-    return respond(context, 401, { message: INVALID_VERIFY_MESSAGE });
+    return respond(context, 401, invalidVerifyBody());
   }
 
   let routingRow;
@@ -2036,12 +2039,12 @@ async function finalizeSubmission(context, req, { controlClient, env }) {
   }
 
   if (!routingRow) {
-    return respond(context, 401, { message: INVALID_VERIFY_MESSAGE });
+    return respond(context, 401, invalidVerifyBody());
   }
 
   const orgId = normalizeString(routingRow.org_id);
   if (!UUID_PATTERN.test(orgId)) {
-    return respond(context, 401, { message: INVALID_VERIFY_MESSAGE });
+    return respond(context, 401, invalidVerifyBody());
   }
 
   attachErrorTracking(context, req, controlClient, {
@@ -2092,7 +2095,7 @@ async function finalizeSubmission(context, req, { controlClient, env }) {
   }
 
   if (!otpChallenge) {
-    return respond(context, 401, { message: INVALID_VERIFY_MESSAGE });
+    return respond(context, 401, invalidVerifyBody());
   }
 
   const nowIso = getNowIso();

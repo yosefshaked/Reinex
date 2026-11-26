@@ -48,6 +48,8 @@ test('checkRequestedLessonStart: refuses only a requested wall time in a skipped
   assert.deepEqual(refusal, {
     code: LESSON_TIME_SKIPPED_CODE,
     message: 'השעה הזו לא קיימת בלילה הזה: השעון עובר מ-02:00 ל-03:00.',
+    // Our own wording, marked for display (docs/project-rules/30).
+    message_kind: 'user',
     clock_change: { date: '2026-03-27', kind: 'skipped', start_time: '02:00', end_time: '03:00' },
   });
   assert.equal(checkRequestedLessonStart({ start_local_date: '2026-03-27', start_local_time: '03:30' }, ZONE), null);
