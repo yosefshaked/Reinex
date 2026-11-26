@@ -13,7 +13,7 @@ Read this block first when you continue this plan in a new conversation.
   - `docs/plans/index.csv` and `npm run lint:plans` exist.
   - The raw evidence is outside the repository, in `$env:TEMP\reinex-restructure\stage0\`, `stage1\`, `stage2\` and `stage3\`.
   - Nothing has been pushed; the owner decides on the push together with Claude.
-- **Last update:** 2026-11-25. F2 closed its last targeted gaps: the explicit user-message marker, the duplicate check on all three documents screens, and the locked-correction participants branch.
+- **Last update:** 2026-11-26. F2 marked the Hebrew 4xx copy that helpers build into a whole body (the clock-change refusal, the missing-rate refusal, organisation create and the public-form verification), with tests from the real body to the display.
 
 Each stage appends to the [Progress log](#progress-log), ticks its subtasks and records answers under [Open decisions](#open-decisions). Keep this block at five bullets. It is a pointer, not a history.
 
@@ -2600,6 +2600,24 @@ Append one entry per stage. Newest last.
     - `20` "Showing an error": the marker rule, and `code` as a public code.
     - `30`: Hebrew business copy in a 4xx goes out through `withUserMessage`, and no exception text in a 4xx `message`.
   - **Still outside this round:** the screens already listed in the previous entry; the `consumption-entries` forward; the open decision on blocking an upload when the duplicate check fails.
+  - **Next:** joint review, then push to #64, then F3.
+- **2026-11-26, F2: the marker for bodies built in helpers** (owner review). Nothing was pushed.
+  - **The gap:** the previous inventory read only `message` written inside the `respond` call. Helpers that compose a whole 4xx body were not marked, so their Hebrew copy got the default: the clock-change refusal lost the hours the clock jumps between, and the missing-rate refusal lost the instruction and the date on every screen except the rate notice, which read `data.message` without the marker.
+  - **The inventory:** every `respond`/`respondTracked` call whose body is not an inline literal or whose status is not a literal (115 calls, `$env:TEMP\…\scratchpad\scan-4xx-bodies.cjs`), every Hebrew string in API code (`scan-hebrew-api.cjs`), and local responders (`jsonResponse`, `context.res`).
+  - **Marked where the wording is written:**
+    - `checkRequestedLessonStart` (`clock-change-rules.js`): 3 endpoint sites send it as is.
+    - `validateInstructorRateForLesson` (`employee-finance.js`): 6 sites through `checkInstructorRateForLesson` and `checkTemplateInstructorRate`.
+    - `organizations` POST: `missing_name` (400) and `duplicate_organization` (409), through its local `jsonResponse`.
+    - `form-submissions`: the public-form verification message (401, 9 sites). `SubmitFormPage` still maps it to its own text.
+  - **Not marked:** the leave conflicts and other prepared bodies carry codes; the Hebrew in `impacts`, `conflicts` and `warnings` is nested data in 200 or preview bodies, read by their own components; every `catch` path, including the 500 of the rate check.
+  - **Code:** `api/_shared/user-message.js` (new, dependency-free) holds `withUserMessage` and `USER_MESSAGE_KIND`, so the isomorphic `clock-change-rules.js` can mark its body; `org-bff.js` re-exports them. `readMissingLessonRate` now uses `serverPublicMessage` (exported), like the general display.
+  - **Tests:**
+    - `tests/server-user-messages.test.js` (new, 10 of 10): the real helper body, sent through `respond` and parsed, reaches `error.message`, `resolveMutationError`, `describeError`, `readMissingLessonRate` and the copy. The clock case keeps 02:00 and 03:00. The rate case keeps the date, the path and, with a later rate, both dates. A failed lookup is not marked. The unmarked DB-text cases (alone and with the rate code) still get the default.
+    - `clock-change-rules.test.js` expects the marker; `lesson-dialog-model.test.js` adds the unmarked rate refusal.
+    - Tester: `employee-rates` (16 of 16) and `lesson-dialog-regressions` (clock scenario passed) now assert `message_kind=user`, the clock hours and the rate date. Six calendar UI workflows of `lesson-dialog-regressions` (A1–A4, P3 ×2) time out finding the test lesson, the same on the base commit with these changes stashed; not caused by this change.
+  - **Checks:** `test:finance-calendar` exit 0 (592 tests, 563 passed, 29 todo, 0 failed); `npx eslint .` 0 problems after one fix in the new test (the zone from `DEFAULT_ORG_TIME_ZONE`); `lint:api`, `lint:upsert-conflicts`, `lint:doc-links`, `lint:plans` OK; `npm run build` exit 0 (3563 modules); the type check 3064, no new issue.
+  - **Docs:** `20` names `user-message.js` and the dedicated readers; `30` says to mark where the wording is written, inline or in the helper that composes the whole body, and never in a generic path.
+  - **Unchanged:** a failed duplicate check still does not block the upload, until the owner decides.
   - **Next:** joint review, then push to #64, then F3.
 
 ---
