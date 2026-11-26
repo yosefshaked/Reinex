@@ -5,7 +5,7 @@
 Read this block first when you continue this plan in a new conversation.
 
 - **Plan status:** the overall status of this plan is recorded only in [`docs/plans/index.csv`](../index.csv). Check it with `npm run lint:plans`.
-- **Current stage:** 3F. F1 (narrow) and F2 are done, including the review refinements (the error display rule, the docs separation, the support search and the wrapper check). **Next:** joint review, then push the local commits to draft PR #64, then F3. The follow-up plan [`students/atomic-student-operations.md`](../students/atomic-student-operations.md) (#63) can start after F2.
+- **Current stage:** 3F. F1 (narrow) and F2 are done and pushed to draft PR #64 (`f21742d`, "Doc links" and "Plan registry" green on that SHA). F3.1 (the baseline and the classification) is done. **Next:** owner review of the F3 work groups, then F3.2 (the validator) before the API edits. The follow-up plan [`students/atomic-student-operations.md`](../students/atomic-student-operations.md) (#63) can start after F2.
 - **Execution branch:** `repository-reconstruction`, based on `origin/staging` `dce8f2e790e939b7f0805803d7d44e71a23346ba`. See [Planning base](#planning-base) and [Q1](#q1-execution-branch).
 - **Repository state:**
   - `test/` is now `tests/`; `agents-docs/` is now `docs/project-rules/`.
@@ -13,7 +13,7 @@ Read this block first when you continue this plan in a new conversation.
   - `docs/plans/index.csv` and `npm run lint:plans` exist.
   - The raw evidence is outside the repository, in `$env:TEMP\reinex-restructure\stage0\`, `stage1\`, `stage2\` and `stage3\`.
   - Nothing has been pushed; the owner decides on the push together with Claude.
-- **Last update:** 2026-11-26. F2 marked the remaining verification messages of the public forms (lockdown and expired code); a failed duplicate check keeps warning and uploading.
+- **Last update:** 2026-11-26. F2 pushed to #64; F3.1 measured and classified, work groups proposed for review.
 
 Each stage appends to the [Progress log](#progress-log), ticks its subtasks and records answers under [Open decisions](#open-decisions). Keep this block at five bullets. It is a pointer, not a history.
 
@@ -1293,7 +1293,7 @@ It was moved because it is product-reliability work, wider than this restructure
 #### F3 Strict error tracking as a blocking CI check
 
 **Subtasks:**
-- [ ] F3.1 Measure again at execution time with `npm run lint:error-tracking`. The baseline at `0339f45` is 276 untracked 5xx in 100 files. Classify each finding by route and handling:
+- [x] F3.1 Measure again at execution time with `npm run lint:error-tracking`. The baseline at `0339f45` is 276 untracked 5xx in 100 files. Classify each finding by route and handling:
   - a client is available: `respondTrackedError`;
   - tracking is attached: `respondTracked`;
   - a failure before a suitable client exists: exempt, with the real reason;
@@ -2630,6 +2630,42 @@ Append one entry per stage. Newest last.
     - `validate:api` fails with the same 7 `ensureMembership` errors as before the change, all in other endpoints.
   - **Tester `form-sending`:** 6 workflows passed and 4 failed. All 4 failures follow from `students-list` returning 500 ("URI too long": an unchunked `.in('client_profile_id', …)` on the large local test DB, in a file unchanged since #55). This is unrelated to this change, so it gets a separate task.
   - **Next:** joint review, then push to #64, then F3.
+
+- **2026-11-26, F2 published and F3.1** (owner review of F2 closed).
+  - **F2 published:** 21 local commits were pushed to `repository-reconstruction`. Draft PR #64's head is `f21742d`. "Doc links" and "Plan registry" passed on that SHA. The PR summary lists the checks and the known limits (`validate:api`, `form-sending`, the six calendar UI workflows). The PR stays a draft: no merge, no push to `main`.
+  - **F3.1, the baseline at `f21742d`:** `npm run lint:error-tracking` reports 276 findings in 100 files, identical to `0339f45`: 270 × 500, 5 × 501, 1 × 502. There are no `tracked-error-exempt` markers today. The classification script is `$env:TEMP\…\scratchpad\f3-classify.cjs`. It is a heuristic by enclosing function, so each site is confirmed in F3.3.
+    - **Before a client exists: 94.** All of them are `server_misconfigured` (Supabase admin config missing). No event can be saved there.
+    - **A client is in scope (`respondTrackedError`): 139.**
+    - **Tracking is attached (`respondTracked` or the file's tracked wrapper): 12.**
+    - **Other: 31.** Handlers that receive the client as a parameter (`me`, `student-required-forms`, `restore`, `local-export`/`local-import`, `system-admin-email-log`/`-error-events`/`-user-detail`) and the `config` catch. They need `respondTrackedError` with the passed client. Org-purge's `prepare`/`execute`: their own `{ error }` shape.
+  - **What the validator detects:** only a literal `respond(context, 5xx` (the first argument must be named `context`). It accepts any `respond<Name>(` by name.
+  - **What it misses (untracked 5xx outside the 276):**
+    - **A variable status:**
+      - `ensureSystemAdmin` throws `statusCode: 500` (`authorization_check_failed`), which 21 system-admin endpoints and both org-purge endpoints send with `respond(context, err.statusCode || 403, …)`.
+      - `user-context` (4) and `users-me` (1) send `error.status || 500`.
+      - `invite-load` (1) sends a computed 500.
+      - `settings` sends `mapped.status` (9 sites, 500 by default) and `cancelled.status` (1). `employee-rates` (1) and `employee-leave` (1) send a 500 from `cancelSettingVersion`/`cancelFutureRate`.
+      - `system-admin-backups` sends `result.status` (to confirm).
+    - **A local responder:** `organizations` `jsonResponse(context, 500, …)` (2).
+    - **Wrappers by name:** the 33 local `respond…Error` wrappers all call a tracked helper, and their files attach tracking where needed. None passes by name only today, but nothing stops a future one.
+  - **Related findings outside F3's scope, not fixed:**
+    - `org-purge/prepare` returns `detail: err?.message` in a 500, a leak that `lint:api-responses` does not catch.
+    - `billing` maps an unknown exception to 400 `invalid_billing_action`, so an internal failure is neither 5xx nor tracked.
+    - `storage-test-connection` calls `isAdminRole(req)`, which takes a role, so the check always refuses.
+  - **Proposed order (awaiting the owner):**
+    - **F3.2 first:** the validator reports a non-literal status that can be 5xx, local responders and wrapper bodies, with tests. The baseline grows from 276 to about 320 before it shrinks.
+    - **The 94 `server_misconfigured` sites:** one shared responder that logs and returns 500 without a code, as the single audited exemption with its reason, rather than 94 exemption comments. NEW PATTERN PROPOSAL, awaiting approval.
+    - **F3.3 by area, one commit per group:**
+      - A: system-admin and purge, 63 + 23 hidden;
+      - H: org, auth and settings, 47 + 17 hidden;
+      - C: students and clients, 54;
+      - G: finance, employees and services, 37 + 2 hidden;
+      - D: documents and storage, 31;
+      - E: calendar and sessions, 25;
+      - F: forms and waiting list, 10 + 1 hidden;
+      - B: import, backup and restore, 9.
+    - **Then:** F3.4 to F3.6 as planned.
+  - **Next:** owner review of this classification and the proposed order. No API code was changed.
 
 ---
 
