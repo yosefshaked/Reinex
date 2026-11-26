@@ -1,7 +1,7 @@
 /* eslint-env node */
 /**
  * Dated pay rates. `RateHistory` is the single source of truth for every pay rate
- * (spec: implementations/business-process/payroll-prerequisites.md, P2).
+ * (spec: docs/plans/payroll/payroll-prerequisites.md, P2; rule: docs/product/payroll.md, PD11).
  *
  * A row means "from `effective_date` until the next row of the same kind, this employee's rate is X".
  * `pay_basis` says what the number means:

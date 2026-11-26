@@ -1,5 +1,5 @@
 // Instructor / employee pay rules as executable scenarios.
-// Spec: implementations/business-process/payroll-scenarios.md (IDs PAY-A1 … PAY-K7).
+// Rules: docs/product/payroll.md (IDs PAY-A1 … PAY-K7).
 // Rules that already exist are real tests against the pure pay helpers. Rules not built yet are
 // `it.todo` entries with the same IDs, so the whole spec shows in the test run without failing it;
 // each todo becomes a real test when its feature is built (tests before code).

@@ -1,6 +1,8 @@
 # Instructor pay — rules as scenarios (P1)
 
-These are the pay rules the monthly cycle will enforce, written as acceptance scenarios. They follow the same format as [business-process-map.md](business-process-map.md). Each one becomes a test (IDs such as `PAY-B2`) *before* the code is built. See [payroll-prerequisites.md](payroll-prerequisites.md) for the technical plan.
+> **Completed plan (moved here on 2026-11-26).** The rules and decisions it set are now in [`docs/product/payroll.md`](../../product/payroll.md), the legal research in [`docs/research/israel-payroll-components.md`](../../research/israel-payroll-components.md). This file is the historical spec: its "Today" column is from 2026-09-15, and sections H and I (month closing) need the owner's confirmation before they bind.
+
+These are the pay rules the monthly cycle will enforce, written as acceptance scenarios. They follow the same format as [business-process-map.md](../../../implementations/business-process/business-process-map.md). Each one becomes a test (IDs such as `PAY-B2`) *before* the code is built. See [payroll-prerequisites.md](payroll-prerequisites.md) for the technical plan.
 
 **Status:**
 - The owner answered PD1–PD10 on 2026-09-17 and confirmed the follow-ups.

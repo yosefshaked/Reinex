@@ -29,6 +29,7 @@ These files are an entry point, not a boundary: follow imports, callers (grep th
 - Finance/policy helpers in [`../../api/_shared/employee-finance.js`](../../api/_shared/employee-finance.js)
 
 ## Known patterns / do not reinvent
+- **The leave rules** the business requires (entitlement, days worked, carry-over, leave pay, half days) are `LV-*` and `PAY-G*` in [`../product/payroll.md`](../product/payroll.md), with the legal research in [`../research/israel-payroll-components.md`](../research/israel-payroll-components.md). The notes below are how the code applies them.
 - Employees/instructors use an overlay model:
   - `Employees` is the base record
   - `instructor_profiles` adds profile-only fields

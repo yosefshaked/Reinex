@@ -2,3 +2,5 @@ path,title,status
 repository/directory-restructure.md,Repository directory restructure,active
 students/atomic-student-operations.md,Prevent partial student creation during imports and lesson scheduling,planned
 api/strict-error-tracking.md,Strict 5xx error tracking as a blocking CI check,planned
+payroll/payroll-prerequisites.md,Instructor pay: technical prerequisites (D9),completed
+payroll/payroll-scenarios.md,Instructor pay: rules as scenarios (P1),completed

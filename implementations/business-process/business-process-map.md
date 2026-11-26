@@ -22,7 +22,7 @@
 
 | | Stages |
 |---|---|
-| **Must** | Stage 0, Stage 1 (the instructor as an entity), Stage 2, Stage 3, Stage 4, Stage 5 (for HMO customers), and monthly instructor pay (see [payroll-prerequisites.md](payroll-prerequisites.md)) |
+| **Must** | Stage 0, Stage 1 (the instructor as an entity), Stage 2, Stage 3, Stage 4, Stage 5 (for HMO customers), and monthly instructor pay (see [payroll-prerequisites.md](../../docs/plans/payroll/payroll-prerequisites.md)) |
 | **Later** | Hiring pipeline (CV, interview); collecting payments inside Reinex (card clearing, business Bit/PayBox); Reinex issuing its own invoices; farm-wide activity hours (only with self sign-up) |
 | **Deferred** | Horses: vet approvals and treatments for yearly reviews (#52) |
 
@@ -85,7 +85,7 @@ The hiring pipeline (CV, interview) is out of scope.
 | S4.1 | The instructor or the office marks each participant as attended, no-show or cancelled. Billing and pay follow the policy. | ✅ `lesson-dialog-regressions` and node tests |
 | S4.2 | For services that require a session report, the instructor fills it in after the lesson. Missing reports appear in "דוחות ממתינים". | 🟡 Exists; no tester scenario |
 | S4.3 | After a lesson, one-time customers get a review request by their preferred channel (WhatsApp or email). Regular students get one occasionally. Anyone can opt out of review requests. | ❌ (**D5**) |
-| S4.4 | By default, customer cancellations and no-shows are billed, unless an excused absence applies (S4.5). A cancellation made **before the day's list was sent to the instructor**, by a student with an excused absence still available, isn't billed (owner decision PD2 in [payroll-scenarios.md](payroll-scenarios.md)). The rules are configurable per farm. | 🟡 The billing policy per status exists (S0.2); the per-farm default rules are 🔍 (**D4**) |
+| S4.4 | By default, customer cancellations and no-shows are billed, unless an excused absence applies (S4.5). A cancellation made **before the day's list was sent to the instructor**, by a student with an excused absence still available, isn't billed (owner decision PD2 in [payroll-scenarios.md](../../docs/plans/payroll/payroll-scenarios.md)). The rules are configurable per farm. | 🟡 The billing policy per status exists (S0.2); the per-farm default rules are 🔍 (**D4**) |
 | S4.5 | A student has an allowance of excused absences. An absence counts as excused once the required proof (for example a doctor's note) is uploaded. If it hasn't arrived by the deadline (default about a month), the lesson is billed. Alternatively, it's billed immediately and credited back when the proof arrives. | 🟡 Only a manual "excused" flag per participant exists. There's no allowance, proof upload, deadline or credit-back (**D4**) |
 
 ## Stage 5 — Month end
@@ -96,7 +96,7 @@ The hiring pipeline (CV, interview) is out of scope.
 | S5.2 | The office creates and submits a claim batch per provider. Lessons in a submitted batch are locked. | ✅ `hmo-claiming` |
 | S5.3 | Claims reach each HMO through its API. HMO sites don't accept uploaded files. Until API access is granted, the office enters claims on the HMO site by hand, using Reinex's per-provider list. | ❌ The API integration waits for access (**D8**). The per-provider list ✅ (S5.1) |
 | S5.4 | When an approval is about to run out (lessons used up or the date passing), the office is reminded to renew it. | 🟡 The expiry is tracked; no reminder |
-| S5.5 | Monthly instructor pay: each instructor's lessons and pay for the month, reviewed, approved and closed. After closing, the month can't change silently. | ❌ See [payroll-prerequisites.md](payroll-prerequisites.md) and the pay rules in [payroll-scenarios.md](payroll-scenarios.md) (**D9**, #49) |
+| S5.5 | Monthly instructor pay: each instructor's lessons and pay for the month, reviewed, approved and closed. After closing, the month can't change silently. | ❌ See [payroll-prerequisites.md](../../docs/plans/payroll/payroll-prerequisites.md) and the pay rules in [payroll-scenarios.md](../../docs/plans/payroll/payroll-scenarios.md) (**D9**, #49) |
 
 ## Stage 6 — Student leaves
 
@@ -159,7 +159,7 @@ None of these is needed now, so instructor availability is enough.
 - An intermediary provider (for example Twilio or 360dialog) can shorten B's onboarding, at a higher cost per message.
 - Check Meta's current rules and prices before building. They change often, and a farm's existing WhatsApp Business app number may or may not be usable alongside the API.
 
-**D9:** see [payroll-prerequisites.md](payroll-prerequisites.md). Summary:
+**D9:** see [payroll-prerequisites.md](../../docs/plans/payroll/payroll-prerequisites.md). Summary:
 - The calculation pieces exist, but there's no monthly cycle (period, approval, freeze).
 - Rates aren't tied to dates, so paid months can change silently.
 - Prerequisites, in order: P1 pay rules as approved scenarios → P2 dated rates in `RateHistory` ("from this date on, the rate is X"; owner decision) → P3 frozen earnings after close → P4 a pay-period cycle with locks (fixes #49) → P7 monthly screen and export. P6 tests go alongside each step.

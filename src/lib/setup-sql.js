@@ -6798,7 +6798,7 @@ DROP FUNCTION IF EXISTS public.commit_import_chunk(uuid, uuid, uuid[]);
 
 -- =================================================================
 -- Patch 2026-09-17: RateHistory is the single source of truth for pay rates
--- (implementations/business-process/payroll-prerequisites.md, P2).
+-- (docs/plans/payroll/payroll-prerequisites.md, P2).
 -- A row means "from effective_date until the next row of the same kind, the rate is X".
 -- pay_basis: lesson_hourly / lesson_flat (service required), attendance_hourly /
 -- monthly_salary / leave_day (no service). Pay code reads only RateHistory.
