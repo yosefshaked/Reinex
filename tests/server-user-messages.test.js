@@ -3,6 +3,7 @@
 // the real body, sent through `respond` and read back as the browser reads it, reaches every display
 // path with its business detail. Unmarked text (a catch, a provider, a DB) still gets the default.
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { describe, it } from 'node:test';
 
 import { respond } from '../api/_shared/org-bff.js';
@@ -11,6 +12,14 @@ import { checkRequestedLessonStart, LESSON_TIME_SKIPPED_CODE } from '../api/_sha
 import { checkInstructorRateForLesson, checkTemplateInstructorRate } from '../api/_shared/employee-finance.js';
 import { DEFAULT_ORG_TIME_ZONE } from '../api/_shared/local-time.js';
 import { PAY_BASIS } from '../api/_shared/rate-history.js';
+import {
+  INVALID_VERIFY_MESSAGE,
+  OTP_INVALID_OR_EXPIRED_MESSAGE,
+  VERIFY_LOCKDOWN_MESSAGE,
+  invalidVerifyBody,
+  otpInvalidOrExpiredBody,
+  verifyLockdownBody,
+} from '../api/form-submissions/verify-responses.js';
 import { readMissingLessonRate, resolveMutationError } from '../src/features/calendar/utils/lessonDialogModel.js';
 import {
   USER_MESSAGE_KIND as FRONTEND_USER_MESSAGE_KIND,
@@ -151,6 +160,32 @@ describe('an instructor without a rate for the lesson date', () => {
     const result = await checkInstructorRateForLesson(brokenClient, params, { log: { error() {} } });
     assert.equal(result.status, 500);
     assert.equal(result.body.message_kind, undefined);
+  });
+});
+
+describe('a failed public-form verification', () => {
+  const cases = [
+    ['the id or code does not match', 401, invalidVerifyBody, INVALID_VERIFY_MESSAGE, 'מזהה או קוד אימות שגויים'],
+    ['the one-time code is wrong or expired', 401, otpInvalidOrExpiredBody, OTP_INVALID_OR_EXPIRED_MESSAGE, 'קוד האימות שגוי או שפג תוקפו'],
+    ['too many failures (lockdown)', 429, verifyLockdownBody, VERIFY_LOCKDOWN_MESSAGE,
+      'מטעמי אבטחה, כל הקישורים הפעילים עבור תלמיד זה בוטלו עקב יותר מדי נסיונות כושלים. יש ליצור קשר עם המרפאה לקבלת קוד חדש.'],
+  ];
+
+  for (const [name, status, build, constant, wording] of cases) {
+    it(`${name}: the response keeps its wording and carries the marker`, () => {
+      assert.equal(constant, wording, 'the wording is unchanged');
+      const { parsed, error } = throughTheWire(status, build());
+      assert.deepEqual(parsed, { message: wording, message_kind: USER_MESSAGE_KIND });
+      assert.equal(describeError(error).message, wording);
+    });
+  }
+
+  it('the endpoint sends every verification failure through these bodies, never the bare message', () => {
+    const source = readFileSync(new URL('../api/form-submissions/index.js', import.meta.url), 'utf8');
+    assert.doesNotMatch(source, /_MESSAGE\s*\}/, 'no { message: <constant> } body is left');
+    assert.equal(source.match(/respond\(context, 401, invalidVerifyBody\(\)\)/g)?.length, 9);
+    assert.equal(source.match(/respond\(context, 401, otpInvalidOrExpiredBody\(\)\)/g)?.length, 1);
+    assert.equal(source.match(/respond\(context, 429, verifyLockdownBody\(\)\)/g)?.length, 5);
   });
 });
 

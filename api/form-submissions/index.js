@@ -13,8 +13,8 @@ import {
   resolveOrgId,
   withOrgScope,
   respond,
-  withUserMessage,
 } from '../_shared/org-bff.js';
+import { invalidVerifyBody, otpInvalidOrExpiredBody, verifyLockdownBody } from './verify-responses.js';
 import { sendAndLogBrevoEmail } from '../_shared/email-log.js';
 import { fetchStudentIdsByInstructor } from '../_shared/instructor-student-scope.js';
 import { logAuditEvent, AUDIT_ACTIONS, AUDIT_CATEGORIES } from '../_shared/audit-log.js';
@@ -40,11 +40,6 @@ const OTP_TTL_MINUTES = 15;
 const ROUTING_CATEGORY = 'form_submission';
 const FAILED_VERIFY_WINDOW_MINUTES = 5;
 const MAX_VERIFY_FAILURES = 5;
-const INVALID_VERIFY_MESSAGE = 'מזהה או קוד אימות שגויים';
-// Our own wording for a failed public-form verification, marked for display (docs/project-rules/30).
-const invalidVerifyBody = () => withUserMessage({ message: INVALID_VERIFY_MESSAGE });
-const OTP_INVALID_OR_EXPIRED_MESSAGE = 'קוד האימות שגוי או שפג תוקפו';
-const VERIFY_LOCKDOWN_MESSAGE = 'מטעמי אבטחה, כל הקישורים הפעילים עבור תלמיד זה בוטלו עקב יותר מדי נסיונות כושלים. יש ליצור קשר עם המרפאה לקבלת קוד חדש.';
 const WAITING_LIST_ROUTING_CATEGORY = 'waiting_list_intake';
 
 function respondFormSubmissionError(context, status, message, error, metadata = {}) {
@@ -1794,7 +1789,7 @@ async function verifySubmissionAccess(context, req, { controlClient }) {
         ipAddress,
       });
       if (result.shouldLockDown) {
-        return respond(context, 429, { message: VERIFY_LOCKDOWN_MESSAGE });
+        return respond(context, 429, verifyLockdownBody());
       }
     } catch (rateError) {
       context.log?.warn?.('form-submissions verify failed to process failed attempt', {
@@ -1815,7 +1810,7 @@ async function verifySubmissionAccess(context, req, { controlClient }) {
         ipAddress,
       });
       if (result.shouldLockDown) {
-        return respond(context, 429, { message: VERIFY_LOCKDOWN_MESSAGE });
+        return respond(context, 429, verifyLockdownBody());
       }
     } catch (rateError) {
       context.log?.warn?.('form-submissions verify failed to process invalid routing attempt', {
@@ -1857,7 +1852,7 @@ async function verifySubmissionAccess(context, req, { controlClient }) {
         ipAddress,
       });
       if (result.shouldLockDown) {
-        return respond(context, 429, { message: VERIFY_LOCKDOWN_MESSAGE });
+        return respond(context, 429, verifyLockdownBody());
       }
     } catch (rateError) {
       context.log?.warn?.('form-submissions verify failed to process missing submission attempt', {
@@ -1894,7 +1889,7 @@ async function verifySubmissionAccess(context, req, { controlClient }) {
         ipAddress,
       });
       if (result.shouldLockDown) {
-        return respond(context, 429, { message: VERIFY_LOCKDOWN_MESSAGE });
+        return respond(context, 429, verifyLockdownBody());
       }
     } catch (rateError) {
       context.log?.warn?.('form-submissions verify failed to process student mismatch attempt', {
@@ -1928,14 +1923,14 @@ async function verifySubmissionAccess(context, req, { controlClient }) {
         ipAddress,
       });
       if (result.shouldLockDown) {
-        return respond(context, 429, { message: VERIFY_LOCKDOWN_MESSAGE });
+        return respond(context, 429, verifyLockdownBody());
       }
     } catch (rateError) {
       context.log?.warn?.('form-submissions verify failed to process invalid otp attempt', {
         message: rateError?.message,
       });
     }
-    return respond(context, 401, { message: OTP_INVALID_OR_EXPIRED_MESSAGE });
+    return respond(context, 401, otpInvalidOrExpiredBody());
   }
 
   const verifyMetadata = normalizeJsonObject(submission.metadata, {});
