@@ -53,7 +53,7 @@ RLS protects requests made with a user's token. The API uses the service-role cl
   - the operational log gets one `context.log.error('error-events: tracking failed', …)` entry with the original error and the reason tracking failed;
   - tracking is never attempted again, so a tracking failure cannot recurse;
   - the frontend then shows a Hebrew message without a support code (`20`, "Showing an error").
-- **Enforcement today.** `npm run lint:error-tracking` flags a literal `respond(` with a 5xx status. It only warns, both in `npm run build` and in the `integrity-checks` CI on `main`, so neither blocks. It accepts any `respond<Name>(` call by its name, without reading the wrapper. Follow the rules above; the check does not yet enforce them.
+- **Enforcement today.** `npm run lint:error-tracking` flags a literal `respond(context, 5xx`. It only warns, both in `npm run build` and in the `integrity-checks` CI on `main`, so neither blocks. It misses a 5xx status held in a variable and local responders, and it accepts any `respond<Name>(` call by its name, without reading the wrapper. Follow the rules above in every endpoint you add or change; the check does not yet enforce them. The existing backlog and the move to a blocking check are the deferred plan [`strict-error-tracking.md`](../plans/api/strict-error-tracking.md).
 
 ## Shared helpers to reuse
 - `resolveBearerAuthorization`, `json`

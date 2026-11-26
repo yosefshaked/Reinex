@@ -5,10 +5,10 @@
 Read this block first when you continue this plan in a new conversation.
 
 - **Plan status:** the overall status of this plan is recorded only in [`docs/plans/index.csv`](../index.csv).
-- **Current stage:** not started; waiting for F2 in the [repository restructure plan](../repository/directory-restructure.md) (stage 3F). The first subtask after F2 is 1.1 (design review).
+- **Current stage:** not started. F2 in the [repository restructure plan](../repository/directory-restructure.md) is done (2026-11-26), but that does not start this plan: it starts by an owner decision, after the restructure. The first subtask is 1.1 (design review).
 - **Origin:** split on 2026-11-24 out of the restructure plan's F1. That plan keeps only the narrow org-isolation fix of the four link writes. This plan owns the reliability work. The evidence gathered there is moved here, not copied. Its history stays in that plan's Progress log.
 - **GitHub issue:** [#63](https://github.com/yosefshaked/Reinex/issues/63), opened on 2026-11-24 with a permanent link to this plan at `d0aeaf3`.
-- **Last update:** 2026-11-24. Issue #63 opened (0.1). The plan stays `planned`.
+- **Last update:** 2026-11-26. F2 done; the start waits for the owner, after the restructure. The plan stays `planned`.
 
 ---
 
@@ -35,7 +35,7 @@ The user always learns the real outcome, even when a response is lost.
 4. **Measurement.** It must be possible to see a failed attempt followed by a success with the same input.
    - The evidence of the failure must survive the rollback.
    - The input fingerprint of the success must be stored at the time of the success.
-5. **F3 (blocking error tracking in CI)** stays approved and open. It keeps its own place in the restructure plan's stage 3F. It is not part of this plan.
+5. **F3 (blocking error tracking in CI)** stays approved. Since 2026-11-26 it is the deferred plan [`api/strict-error-tracking.md`](../api/strict-error-tracking.md). It is not part of this plan.
 
 ## Subtasks
 

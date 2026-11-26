@@ -5,17 +5,18 @@
 Read this block first when you continue this plan in a new conversation.
 
 - **Plan status:** the overall status of this plan is recorded only in [`docs/plans/index.csv`](../index.csv). Check it with `npm run lint:plans`.
-- **Current stage:** 3F. F1 (narrow) and F2 are done and pushed to draft PR #64 (`f21742d`, "Doc links" and "Plan registry" green on that SHA). F3.1 (the baseline and the classification) is done. **Next:** owner review of the F3 work groups, then F3.2 (the validator) before the API edits. The follow-up plan [`students/atomic-student-operations.md`](../students/atomic-student-operations.md) (#63) can start after F2.
+- **Current stage:** 4 (`docs/product/` and `docs/research/`, payroll and leave first). Stages 0–3, F1, F1.5 and F2 are done. F3.1 is done; F3.2–F3.6 are deferred to [`api/strict-error-tracking.md`](../api/strict-error-tracking.md) and are not a condition for closing this plan. **Next:** the first unticked subtask of stage 4, then stages 5–8 in order.
 - **Execution branch:** `repository-reconstruction`, based on `origin/staging` `dce8f2e790e939b7f0805803d7d44e71a23346ba`. See [Planning base](#planning-base) and [Q1](#q1-execution-branch).
 - **Repository state:**
   - `test/` is now `tests/`; `agents-docs/` is now `docs/project-rules/`.
   - `AGENTS.md` is the binding entry point, and `CLAUDE.md` is `@AGENTS.md`.
   - `docs/plans/index.csv` and `npm run lint:plans` exist.
-  - The raw evidence is outside the repository, in `$env:TEMP\reinex-restructure\stage0\`, `stage1\`, `stage2\` and `stage3\`.
-  - Nothing has been pushed; the owner decides on the push together with Claude.
-- **Last update:** 2026-11-26. F2 pushed to #64; F3.1 measured and classified, work groups proposed for review.
+  - **On GitHub:** draft PR [#64](https://github.com/yosefshaked/Reinex/pull/64) (`repository-reconstruction` → `staging`) holds everything up to F2, head `f21742d`. "Doc links" and "Plan registry" passed on that SHA. Commits after it are local until the next push (`git log origin/repository-reconstruction..HEAD`). Pushing the branch is allowed; any push or merge to `main` needs the owner's explicit approval.
+  - The raw evidence is outside the repository, in `$env:TEMP\reinex-restructure\stage0\` to `stage3\`.
+- **Follow-ups outside this plan, not started here:** [#63](https://github.com/yosefshaked/Reinex/issues/63) (atomic student operations, its own plan), [#65](https://github.com/yosefshaked/Reinex/issues/65) (public error codes and Hebrew messages), the migration research (stage 4R, deferred) and strict error tracking (above). Finishing F2 does not start #63.
+- **Last update:** 2026-11-26. The owner returned the work to the restructure: F3.2–F3.6 deferred, stage 4 started.
 
-Each stage appends to the [Progress log](#progress-log), ticks its subtasks and records answers under [Open decisions](#open-decisions). Keep this block at five bullets. It is a pointer, not a history.
+Each stage appends to the [Progress log](#progress-log), ticks its subtasks and records answers under [Open decisions](#open-decisions). Keep this block short. It is a pointer, not a history.
 
 ---
 
@@ -49,7 +50,7 @@ Today that knowledge is spread over seven documentation folders and two instruct
 - changing CI triggers or behaviour. The owner-approved exceptions are:
   - the "Plan registry" workflow (Q9, stage 2);
   - the "Doc links" workflow (3.9), approved at the stage 3 review on 2026-11-24;
-  - making error tracking a blocking CI check (3.1 C2, stage 3F subtask F3), approved on 2026-11-24;
+  - making error tracking a blocking CI check (3.1 C2, F3), approved on 2026-11-24. On 2026-11-26 the owner deferred F3.2–F3.6 to [`api/strict-error-tracking.md`](../api/strict-error-tracking.md), after this plan;
 - automating migrations in deployment. The research on it (stage 4R) is deferred by the owner;
 - performance work;
 - moving off Azure;
@@ -812,7 +813,7 @@ Then confirm that the local data is back, using the report count and the `.env` 
 
 The work is two separate units, in this order:
 1. **F2:** the runtime bug in the support code.
-2. **F3:** strict static enforcement in CI.
+2. **F3:** strict static enforcement in CI. Deferred on 2026-11-26 to [`api/strict-error-tracking.md`](../api/strict-error-tracking.md), after this plan.
 
 **Wording:**
 
@@ -1035,8 +1036,8 @@ The aim is to fix what the change made stale. It does not require a full documen
 - ~~the two memory rules above that need an owner decision~~ (both decided 2026-11-24);
 - a verified source for the preview and production claims;
 - the F1 fix design, after the callers are reviewed;
-- the F3 workflow, confirmed at its review;
-- making the F3 check a required check (F3). "Plan registry" and "Doc links" are decided (Q9, 2026-11-24);
+- the F3 workflow, confirmed at its review (moved to [`api/strict-error-tracking.md`](../api/strict-error-tracking.md));
+- making the F3 check a required check (same plan). "Plan registry" and "Doc links" are decided (Q9, 2026-11-24);
 - the migration workflow decision (Q11), deferred with 4R by the owner on 2026-11-24;
 - Q2 and Q4–Q8.
 
@@ -1219,8 +1220,8 @@ Every line of the two old files, and where it is maintained at the end of stage 
 - **F1** (narrow: org isolation only) stands on its own.
 - **F2 also comes before** the follow-up plan [Prevent partial student creation during imports and lesson scheduling](../students/atomic-student-operations.md), which continues after F2.
 - **F2 must land before F3.** F3 routes many more 5xx responses through the tracking helpers. Without F2, each of them could show the user a code that support cannot find.
-- **Default sequence:** 3 → F1 → F2 → F3 → 4.
-- **Possible change at the stage 3 review:** F3 is large (276 findings at `0339f45`), so the owner may move it after stage 4. Its commits never mix with a move stage.
+- **Sequence as executed:** 3 → F1 → F1.5 → F2 → F3.1 → 4.
+- **F3.2–F3.6 deferred (owner, 2026-11-26):** they moved to [`api/strict-error-tracking.md`](../api/strict-error-tracking.md), which starts after this plan is completed. They are not a condition for any stage here. Until then, the rule in `30` "5xx responses and the support code" applies to code that is added or changed.
 
 #### F1 Org scoping of the four writes in `ensureStudentForClientProfile`
 
@@ -1298,34 +1299,7 @@ It was moved because it is product-reliability work, wider than this restructure
   - tracking is attached: `respondTracked`;
   - a failure before a suitable client exists: exempt, with the real reason;
   - other.
-- [ ] F3.2 Audit the validator: what it detects and what it misses. Known: a literal `respond(` with a 5xx is flagged, and any `respond<Name>(` passes by its name. Check status values held in variables, and wrappers that look right by name only. Strengthen the validator where it misses, with tests. **Never close a finding by:**
-  - renaming;
-  - blanket exemptions;
-  - hiding warnings.
-- [ ] F3.3 Fix the routes with the helpers, in reviewable commits by area. Give each `tracked-error-exempt` a real reason.
-- [ ] F3.4 Give the validator a directory option and tests, like `lint:plans`:
-  - a clean fixture exits 0;
-  - a fixture with a bare `respond(context, 500, …)` exits 1;
-  - a fixture with a wrapper that does not track also exits 1, if F3.2 extends the validator to check wrapper bodies.
-- [ ] F3.5 Make it blocking in CI. **Proposal, confirmed at this subtask's review:**
-  - **Workflow:** a new `.github/workflows/error-tracking.yml`, named "Error tracking", following "Plan registry":
-    - **Events:** `pull_request` (opened, synchronize, reopened) and `push`, to `staging` and `main`. No path filter.
-    - **Setup:** Node 20, `permissions: contents: read`, no install; the validator uses only Node built-ins [V].
-    - **Steps:** `npm run lint:error-tracking:strict` and the F3.4 tests.
-  - **Effect on the job:** any finding exits non-zero, so the step and the job fail. There is no `continue-on-error`.
-  - **Left unchanged:**
-    - the warn-only step in `integrity-checks.yml` keeps reporting;
-    - `npm run build` keeps the warn-only command, so the deploy build does not run this gate twice.
-- [ ] F3.6 Update the C2 enforcement line in `30-backend-shared-helpers.md` and `AGENTS.md` (D8).
-
-**Acceptance:**
-- The tree after F3.3 passes `npm run lint:error-tracking:strict`: exit 0, 0 findings.
-- A controlled invalid case (the F3.4 fixture) fails the check.
-- After a push, GitHub runs the "Error tracking" job. It is recorded green on the valid tree and red on a controlled invalid commit (on a throwaway branch, never merged).
-- **A failing job is not the same as a required check.** A red job marks the PR but blocks merging only if "Error tracking" is set as a required status check in the branch rules. That setting is a separate owner decision, like "Plan registry" (Q9), and this plan does not make it.
-- The F2 behaviour and the F3 enforcement are verified separately, each with its own evidence.
-
-**Rollback:** revert per subtask. F3.5 is reverted alone if the workflow needs to be withdrawn.
+- **F3.2–F3.6, their acceptance and rollback moved to [`api/strict-error-tracking.md`](../api/strict-error-tracking.md)** (owner, 2026-11-26), together with the F3.1 mapping and the open question on the 94 `server_misconfigured` sites. The F3.1 evidence stays in the Progress log, entry "2026-11-26, F2 published and F3.1".
 
 ### Stage 4: `docs/product/` and `docs/research/`, first domain: payroll and leave
 
@@ -1698,7 +1672,7 @@ Stage 4R and Q11 are deferred and are **not** preconditions (owner, 2026-11-24).
 - [ ] 8.1 Run success test 2 in a new conversation with no memory, and record a summary.
 - [ ] 8.2 Run success test 3 in a new conversation, giving it only this plan's path.
 - [ ] 8.3 Fix whatever was not found, and re-run once.
-- [ ] 8.4 Set this plan to `completed` in `index.csv`.
+- [ ] 8.4 Set this plan to `completed` in `index.csv` once the structural conditions are met. The deferred follow-ups (stage 4R, [`api/strict-error-tracking.md`](../api/strict-error-tracking.md), #63, #65) are not conditions for closing.
 
 **Evidence:** the agent's answers against the pass criteria.
 
@@ -1720,7 +1694,7 @@ Stage 4R and Q11 are deferred and are **not** preconditions (owner, 2026-11-24).
 | The app builds but bundles a different schema | `SetupAssistant.jsx` bundles `SETUP_SQL_SCRIPT` | Compare the hash, and check the `dist/assets` marker. |
 | Docs and comments point to moved specs | 16 session-reports comment references (plus 3 in the schema), `purge-manifest.js:6`, `payroll-rules.test.js:2`, `AGENTS.md:34-35`, and 262 relative links in agents-docs | The stage 3 link check |
 | An instruction names a helper that is gone | `eslint.config.js:103,143`, `validate-api-endpoints.js:27` and `docs/api-validation-tool.md:49` recommend the removed `resolveTenantClient` (fixed in 3.7) | `git grep` each helper named in the rules and check that it is exported. |
-| A check passes by name only | `validate-error-tracking.js` accepts any `respond<Name>(` without reading the wrapper; `respondTracked` without `attachErrorTracking` is untracked | Stage 3F, F2.4 and F3.2 |
+| A check passes by name only | `validate-error-tracking.js` accepts any `respond<Name>(` without reading the wrapper; `respondTracked` without `attachErrorTracking` is untracked | F2.4 (done); F3.2 in [`api/strict-error-tracking.md`](../api/strict-error-tracking.md) |
 
 **npm scripts that execute code from `implementations/` [V]:** only `test:isolation-stress-test`.
 
@@ -1896,7 +1870,7 @@ After any stage, give a new agent only the text "Continue `docs/plans/repository
 - that overall status comes from `docs/plans/index.csv`.
 
 **What supports this:**
-- the five-bullet "Resume here" block;
+- the short "Resume here" block;
 - the ticked subtasks;
 - one Progress log entry per stage: date, commit SHA, checks against baseline, tester mode, gaps, and the joint-review outcome;
 - answers written under each Q-item.
@@ -2666,6 +2640,12 @@ Append one entry per stage. Newest last.
       - B: import, backup and restore, 9.
     - **Then:** F3.4 to F3.6 as planned.
   - **Next:** owner review of this classification and the proposed order. No API code was changed.
+- **2026-11-26, back to the restructure** (owner direction). The restructure is the active task until stage 8.
+  - **Kept as done:** stages 0–2, the structural work of stage 3, F1, F1.5 and F2. The F3.1 findings and the decision to reach a blocking check stay recorded.
+  - **Deferred:** F3.2–F3.6, with the F3.1 mapping, moved to a new plan, [`api/strict-error-tracking.md`](../api/strict-error-tracking.md) (`planned` in `index.csv`). No existing item fitted: #65 is about public error codes, not 5xx tracking, and this plan closes at stage 8. The rule in `30` keeps applying to code that is touched; `30` "Enforcement today" now names the gaps and links the plan.
+  - **Resume here:** points to stage 4. It separates what is on PR #64 (`f21742d`) from local commits, and replaces the stale "Nothing has been pushed" line. The stage 3F order, the non-goals, the 3.1 C2 note, the dependency row and 8.4 now say that the deferred follow-ups are not conditions for closing.
+  - **#63:** its plan now says that F2 being done does not start it.
+  - **Checks:** `lint:plans` OK (3 plans); `lint:doc-links` OK.
 
 ---
 
