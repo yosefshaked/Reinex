@@ -1545,6 +1545,14 @@
             {
               "variable": "REFUSAL_EMPLOYEE_ID",
               "field": "instructor_employee_id"
+            },
+            {
+              "variable": "REFUSAL_KIND",
+              "field": "message_kind"
+            },
+            {
+              "variable": "REFUSAL_RATE_DATE",
+              "field": "rate_date"
             }
           ]
         },
@@ -1552,13 +1560,13 @@
           "id": "probe-refusal-code",
           "description": "Puts the refusal code in the address (before the hash, which the app never rewrites) so it can be asserted; a lesson created instead would leave no code there",
           "action": "navigate",
-          "url": "{{BASE_URL}}/?rate_refusal={{REFUSAL_CODE}}&employee={{REFUSAL_EMPLOYEE_ID}}#/employees"
+          "url": "{{BASE_URL}}/?rate_refusal={{REFUSAL_CODE}}&employee={{REFUSAL_EMPLOYEE_ID}}&kind={{REFUSAL_KIND}}&rate_date={{REFUSAL_RATE_DATE}}#/employees"
         },
         {
           "id": "assert-refusal-code",
           "action": "assert",
           "type": "url",
-          "pattern": "rate_refusal=instructor_rate_not_configured&employee={{UNRATED_INSTRUCTOR_ID}}"
+          "pattern": "rate_refusal=instructor_rate_not_configured&employee={{UNRATED_INSTRUCTOR_ID}}&kind=user&rate_date=[0-9]{4}-[0-9]{2}-[0-9]{2}"
         },
         {
           "id": "add-the-rate",

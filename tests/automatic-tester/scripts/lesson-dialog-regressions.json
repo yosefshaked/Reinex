@@ -319,20 +319,23 @@
           "ignoreStatus": [422],
           "stores": [
             { "variable": "CLOCK_REFUSAL_CODE", "field": "code" },
-            { "variable": "CLOCK_REFUSAL_DATE", "field": "clock_change.date" }
+            { "variable": "CLOCK_REFUSAL_DATE", "field": "clock_change.date" },
+            { "variable": "CLOCK_REFUSAL_KIND", "field": "message_kind" },
+            { "variable": "CLOCK_REFUSAL_FROM", "field": "clock_change.start_time" },
+            { "variable": "CLOCK_REFUSAL_TO", "field": "clock_change.end_time" }
           ]
         },
         {
           "id": "probe-clock-refusal-code",
-          "description": "Puts the refusal code in the address (before the hash) so it can be asserted; a lesson created instead would leave no code there",
+          "description": "Puts the refusal code, its user-message marker and the hours the clock jumps between in the address (before the hash) so they can be asserted; a lesson created instead would leave no code there",
           "action": "navigate",
-          "url": "{{BASE_URL}}/?clock_refusal={{CLOCK_REFUSAL_CODE}}&date={{CLOCK_REFUSAL_DATE}}#/calendar"
+          "url": "{{BASE_URL}}/?clock_refusal={{CLOCK_REFUSAL_CODE}}&date={{CLOCK_REFUSAL_DATE}}&kind={{CLOCK_REFUSAL_KIND}}&from={{CLOCK_REFUSAL_FROM}}&to={{CLOCK_REFUSAL_TO}}#/calendar"
         },
         {
           "id": "assert-clock-refusal-code",
           "action": "assert",
           "type": "url",
-          "pattern": "clock_refusal=lesson_time_skipped_by_clock_change&date={{CLOCK_SKIPPED_DATE}}"
+          "pattern": "clock_refusal=lesson_time_skipped_by_clock_change&date={{CLOCK_SKIPPED_DATE}}&kind=user&from=[0-9]{2}:[0-9]{2}&to=[0-9]{2}:[0-9]{2}"
         },
         {
           "id": "create-lesson-after-skipped-hour",
