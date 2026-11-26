@@ -5,16 +5,16 @@
 Read this block first when you continue this plan in a new conversation.
 
 - **Plan status:** the overall status of this plan is recorded only in [`docs/plans/index.csv`](../index.csv). Check it with `npm run lint:plans`.
-- **Current stage:** 4 (`docs/product/` and `docs/research/`, payroll and leave first). Stages 0–3, F1, F1.5 and F2 are done. F3.1 is done; F3.2–F3.6 are deferred to [`api/strict-error-tracking.md`](../api/strict-error-tracking.md) and are not a condition for closing this plan. **Next:** the first unticked subtask of stage 4, then stages 5–8 in order.
+- **Current stage:** 5 (database assets into `database/`). Stage 4 is done except 4.7: the owner's answer on month closing (listed under "Needs confirmation" in [`docs/product/payroll.md`](../../product/payroll.md)); it does not block stages 5–8. F3.2–F3.6 are deferred to [`api/strict-error-tracking.md`](../api/strict-error-tracking.md) and are not a condition for closing this plan. **Next:** 5.0, then stages 6–8 in order.
 - **Execution branch:** `repository-reconstruction`, based on `origin/staging` `dce8f2e790e939b7f0805803d7d44e71a23346ba`. See [Planning base](#planning-base) and [Q1](#q1-execution-branch).
 - **Repository state:**
   - `test/` is now `tests/`; `agents-docs/` is now `docs/project-rules/`.
   - `AGENTS.md` is the binding entry point, and `CLAUDE.md` is `@AGENTS.md`.
   - `docs/plans/index.csv` and `npm run lint:plans` exist.
-  - **On GitHub:** draft PR [#64](https://github.com/yosefshaked/Reinex/pull/64) (`repository-reconstruction` → `staging`) holds everything up to F2, head `f21742d`. "Doc links" and "Plan registry" passed on that SHA. Commits after it are local until the next push (`git log origin/repository-reconstruction..HEAD`). Pushing the branch is allowed; any push or merge to `main` needs the owner's explicit approval.
+  - **On GitHub:** draft PR [#64](https://github.com/yosefshaked/Reinex/pull/64) (`repository-reconstruction` → `staging`) holds everything up to F2, head `f21742d`. "Doc links" and "Plan registry" passed on that SHA. Commits after it are local (`git log origin/repository-reconstruction..HEAD`) until the owner asks for the next push to the branch; any push or merge to `main` needs the owner's explicit approval for that action.
   - The raw evidence is outside the repository, in `$env:TEMP\reinex-restructure\stage0\` to `stage3\`.
 - **Follow-ups outside this plan, not started here:** [#63](https://github.com/yosefshaked/Reinex/issues/63) (atomic student operations, its own plan), [#65](https://github.com/yosefshaked/Reinex/issues/65) (public error codes and Hebrew messages), the migration research (stage 4R, deferred) and strict error tracking (above). Finishing F2 does not start #63.
-- **Last update:** 2026-11-26. The owner returned the work to the restructure: F3.2–F3.6 deferred, stage 4 started.
+- **Last update:** 2026-11-26. Stage 4 done (docs/product, docs/research, payroll first); 4.7 waits for the owner on month closing.
 
 Each stage appends to the [Progress log](#progress-log), ticks its subtasks and records answers under [Open decisions](#open-decisions). Keep this block short. It is a pointer, not a history.
 
@@ -1327,17 +1327,17 @@ It was moved because it is product-reliability work, wider than this restructure
 - The tester scripts `employee-rates.json`, `pay-summary.json` and `leave-settings.json`.
 
 **Subtasks:**
-- [ ] 4.1 `docs/product/README.md` (at most 30 lines). It defines:
+- [x] 4.1 `docs/product/README.md` (at most 30 lines). It defines:
   - a product rule: true even if the code is rewritten;
   - the rule format: `ID · rule · why · status (built / not built, from tests) · tests`;
   - the decision format: `ID · decision · date · source · verified by`;
   - that "needs confirmation" items are not binding.
-- [ ] 4.2 `docs/product/payroll.md`.
+- [x] 4.2 `docs/product/payroll.md`.
   - Keep the PAY-* IDs and PD1–PD10. New decisions get PD11 and up.
   - Drop the "Today" column.
   - Sections H and I are not copied as rules. They are listed under "Open: conflicts with the live-pay rule" until 4.7 settles them.
-- [ ] 4.3 `docs/research/README.md`, from the draft below, and `docs/research/israel-payroll-components.md`, from section K. Keep the accountant disclaimer under Limits.
-- [ ] 4.4 The decision table, with a source and status for each:
+- [x] 4.3 `docs/research/README.md`, from the draft below, and `docs/research/israel-payroll-components.md`, from section K. Keep the accountant disclaimer under Limits.
+- [x] 4.4 The decision table, with a source and status for each (results: the "Decisions" table in `docs/product/payroll.md`, PD11–PD20, and the Progress log entry "2026-11-26, stage 4"):
 
 | Decision | Source found | Status |
 |---|---|---|
@@ -1351,13 +1351,13 @@ It was moved because it is product-reliability work, wider than this restructure
 | 150-employee limit (L1) | wiki only, not read | **needs wiki check and the owner** |
 | Waiver: the student does not pay and the instructor is not paid (#57; nuance in #60) | GitHub issues | [P] verify |
 
-- [ ] 4.5 Shrink `docs/project-rules/80` and `50` to development content, linking to `docs/product/payroll.md`.
-- [ ] 4.6 Move `payroll-scenarios.md` and `payroll-prerequisites.md` to `docs/plans/payroll/` as `completed`, each with a top line pointing to the product doc. Update:
+- [x] 4.5 Shrink `docs/project-rules/80` and `50` to development content, linking to `docs/product/payroll.md`.
+- [x] 4.6 Move `payroll-scenarios.md` and `payroll-prerequisites.md` to `docs/plans/payroll/` as `completed`, each with a top line pointing to the product doc. Update:
   - `tests/payroll-rules.test.js:2` (a comment);
   - `api/_shared/rate-history.js:4` (a comment);
   - `src/lib/setup-sql.js:6801`. That SQL comment changes the text `SetupAssistant` shows; record the new `SETUP_SQL_SCRIPT` hash.
 - [ ] 4.7 **Joint review.** Present the "needs confirmation" items. Write each as binding only after confirmation, and record PD-n with date and source.
-- [ ] 4.8 The expansion recipe in `docs/product/README.md`:
+- [x] 4.8 The expansion recipe in `docs/product/README.md`:
   - **order:** billing and HMO, calendar, students and clients, forms, settings;
   - **per domain:** extract rules from `project-rules` and the `implementations` specs, assign IDs, link tests, mark unconfirmed decisions.
 
@@ -2646,6 +2646,30 @@ Append one entry per stage. Newest last.
   - **Resume here:** points to stage 4. It separates what is on PR #64 (`f21742d`) from local commits, and replaces the stale "Nothing has been pushed" line. The stage 3F order, the non-goals, the 3.1 C2 note, the dependency row and 8.4 now say that the deferred follow-ups are not conditions for closing.
   - **#63:** its plan now says that F2 being done does not start it.
   - **Checks:** `lint:plans` OK (3 plans); `lint:doc-links` OK.
+
+- **2026-11-26, stage 4** (commits `88d9a8a`, `f354b6a`; local, not pushed).
+  - **Structure:**
+    - `docs/product/README.md` (21 lines): the rule and decision formats, "needs confirmation" is not binding, and the recipe for the next domains (4.8).
+    - `docs/product/payroll.md`: PAY-A1–K7 (PAY-B8 added from the tests), the leave rules LV-1–LV-9, the decisions PD1–PD20, and "Needs confirmation". Each rule has a status taken from its tests.
+    - `docs/research/README.md`: when to open a document, when to update an existing one, and where the conclusion and the decision go.
+    - `docs/research/israel-payroll-components.md`: section K, the leave law, and the leave-value research from #56.
+    - The two payroll specs moved with `git mv` to `docs/plans/payroll/` (R094, R096), registered `completed`, each with a top note pointing to the product doc.
+    - `project-rules/80` and `50` now link to the product doc, and two product-only lines left `80`. `AGENTS.md` says where product decisions and research live, and the payroll routing row points to the product doc.
+  - **The 4.4 decision table:**
+    - **Verified in the repository:** live pay (PD13); the salaried half day (LV-8, `pay-calculation` 766); an unmarked past lesson counts as attended (PD14); a missing rate blocks adding or moving a lesson, not marking (PD15); the "ממוצע מומלץ" formula (PAY-G1, PD19, #56 of 2026-11-18); paid leave counts as a day worked, 2 decimals, no carry-over cap and the balance reasons (PD18, LV-5, LV-6); the waiver (PD20, #57, with the open nuance in #60).
+    - **Source for PD13–PD15:** the owner-approved implementation plan of 2026-11-10, outside the repository, built in #55.
+    - **Needs confirmation:** month closing. PAY-H1–H6, I1–I2, J4, the closed-month parts of A3, A4, D2 and D3, PD6, PD7 and PD10 conflict with PD13. The 2026-11-10 plan lists month closing as outside that plan, so it is unclear whether it was rejected or postponed.
+    - **Not added:** the 150-employee limit (L1), whose only source is the wiki, which was not read.
+  - **Found in passing:** PAY-J1 is still an `it.todo`, although `EmployeePaySummary` and the "שכר" tab exist. Recorded as "not built per the tests"; the todo is stale. Changing it adds coverage, so it is left for the pay work.
+  - **Checker:** `lint:doc-links` now also checks `docs/product/` and `docs/research/`, so the new docs are covered locally and in CI. Two tests were added (`tests/check-doc-links.test.js`, 22 of 22), and the `AGENTS.md` validation row and the workflow comment were updated. This fixes a gap that would otherwise have left the stage unverified.
+  - **Acceptance:**
+    - **PAY IDs:** the `PAY-*` ID set in `tests/payroll-rules.test.js` equals the set in `docs/product/payroll.md`: 49 = 49, `diff` empty.
+    - **`test:finance-calendar`:** exit 0. 592 tests: 563 passed, 29 todo, 0 failed. The identity sha256 is `2898957908A2B799…` before and after.
+    - **`SETUP_SQL_SCRIPT`:** sha256 `fce6b94b…` (259,620 characters) became `933f56ac…` (259,606), from the one comment path change.
+    - **Linters:** `lint:sql` 0 errors and the same 21 warnings; `lint:doc-links` OK (347 links in 18 files); `lint:plans` OK (5 plans); eslint on the changed files: 0 problems.
+    - **Evidence:** in `$env:TEMP\reinex-restructure\stage4\`.
+  - **Left for stage 7:** the older leave and finance notes (`docs/employee-leave-ledger-reference-review.md`, `implementations/finance/info-from-tuttiud-leaves.md`, `implementations/financial/investigation-report/2026-03-24-…`) and `implementations/business-process/business-process-map.md`.
+  - **4.7:** the month-closing question is with the owner. Stages 5–8 do not depend on it.
 
 ---
 
