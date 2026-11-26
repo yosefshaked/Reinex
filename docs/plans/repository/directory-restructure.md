@@ -5,16 +5,16 @@
 Read this block first when you continue this plan in a new conversation.
 
 - **Plan status:** the overall status of this plan is recorded only in [`docs/plans/index.csv`](../index.csv). Check it with `npm run lint:plans`.
-- **Current stage:** 5 (database assets into `database/`). Stage 4 is done, 4.7 included (PD21: pay is live for every month). F3.2–F3.6 are deferred to [`api/strict-error-tracking.md`](../api/strict-error-tracking.md) and are not a condition for closing this plan. **Next:** 5.0, then stages 6–8 in order.
+- **Current stage:** 6 (scripts, tools, backups and local output). Stages 4 and 5 are done: the schema is `database/setup-sql.js` and the migrations are `database/migrations/`. F3.2–F3.6 are deferred to [`api/strict-error-tracking.md`](../api/strict-error-tracking.md) and are not a condition for closing this plan. **Next:** stage 6, then 7 and 8.
 - **Execution branch:** `repository-reconstruction`, based on `origin/staging` `dce8f2e790e939b7f0805803d7d44e71a23346ba`. See [Planning base](#planning-base) and [Q1](#q1-execution-branch).
 - **Repository state:**
-  - `test/` is now `tests/`; `agents-docs/` is now `docs/project-rules/`.
+  - `test/` is now `tests/`; `agents-docs/` is now `docs/project-rules/`; `src/lib/setup-sql.js` and `migrations/` are now under `database/`.
   - `AGENTS.md` is the binding entry point, and `CLAUDE.md` is `@AGENTS.md`.
   - `docs/plans/index.csv` and `npm run lint:plans` exist.
   - **On GitHub:** draft PR [#64](https://github.com/yosefshaked/Reinex/pull/64) (`repository-reconstruction` → `staging`) holds everything up to F2, head `f21742d`. "Doc links" and "Plan registry" passed on that SHA. Commits after it are local (`git log origin/repository-reconstruction..HEAD`) until the owner asks for the next push to the branch; any push or merge to `main` needs the owner's explicit approval for that action.
   - The raw evidence is outside the repository, in `$env:TEMP\reinex-restructure\stage0\` to `stage3\`.
 - **Follow-ups outside this plan, not started here:** [#63](https://github.com/yosefshaked/Reinex/issues/63) (atomic student operations, its own plan), [#65](https://github.com/yosefshaked/Reinex/issues/65) (public error codes and Hebrew messages), the migration research (stage 4R, deferred) and strict error tracking (above). Finishing F2 does not start #63.
-- **Last update:** 2026-11-26. 4.7 closed (PD21); stage 5 started.
+- **Last update:** 2026-11-26. Stage 5 done (`database/`); next stage 6.
 
 Each stage appends to the [Progress log](#progress-log), ticks its subtasks and records answers under [Open decisions](#open-decisions). Keep this block short. It is a pointer, not a history.
 
@@ -1523,22 +1523,22 @@ Stage 4R and Q11 are deferred and are **not** preconditions (owner, 2026-11-24).
 - Migrations are applied by hand. The tester does not apply them.
 
 **Subtasks:**
-- [ ] 5.0 **Practical check before the move** (owner, 2026-11-24):
+- [x] 5.0 **Practical check before the move** (owner, 2026-11-24):
   - Identify again every current consumer of the schema and of the migrations, starting from the two lists above, at the then-current HEAD.
   - Find which paths the preprod process uses to apply the schema and the migrations: workflows, scripts, documented manual steps, and any setting that names a path.
   - Record the result. If a path cannot be verified from a source, ask the owner before moving.
   - Read-only: no command runs against preprod or production.
-- [ ] 5.1 Confirm Q2. The default is a relative import from `SetupAssistant.jsx`.
-- [ ] 5.2 Measure the baseline for this stage:
+- [x] 5.1 Confirm Q2. The default is a relative import from `SetupAssistant.jsx`.
+- [x] 5.2 Measure the baseline for this stage:
   - the standard checks;
   - `npm run lint:sql:json` (record `file`);
   - `node --test api/org-purge/purge-manifest.test.js`;
   - `tests/dated-settings.test.js` (through the npm script's identity);
   - the `SETUP_SQL_SCRIPT` hash.
-- [ ] 5.3 Run `git mv src/lib/setup-sql.js database/setup-sql.js` and `git mv migrations database/migrations`.
-- [ ] 5.4 Update every consumer in the two lists above.
-- [ ] 5.5 Update `database/migrations/README.md`, and add `database/README.md` (at most 15 lines) covering both cases: a new DB takes the snapshot only; an existing DB takes the migrations in order, then the snapshot.
-- [ ] 5.6 Verify.
+- [x] 5.3 Run `git mv src/lib/setup-sql.js database/setup-sql.js` and `git mv migrations database/migrations`.
+- [x] 5.4 Update every consumer in the two lists above.
+- [x] 5.5 Update `database/migrations/README.md`, and add `database/README.md` (at most 15 lines) covering both cases: a new DB takes the snapshot only; an existing DB takes the migrations in order, then the snapshot.
+- [x] 5.6 Verify.
 
 **Acceptance:**
 
@@ -2683,6 +2683,49 @@ Append one entry per stage. Newest last.
     - 5 todo names (A3, A4, D2, D3, J2) lost "closed month".
   - **Finance identity:** 592 → 583 tests, 563 passed and 29 → 20 todo, 0 failed. The diff is exactly those 9 removals and 5 renames; no passing test changed. New sha256 `372E8541…`.
   - **Also updated:** `project-rules/80`, the notes on the two old payroll specs, and success test 2 part 2 (the warning with the pay difference for past months is not built).
+
+- **2026-11-26, stage 5** (one commit; local, not pushed).
+  - **5.0, consumers at `c814cbf`** (read-only):
+    - **Schema:**
+      - the app import (`SetupAssistant.jsx`);
+      - the two validators;
+      - `purge-manifest.test.js`;
+      - the tester's `setup.js` (path and messages);
+      - the user-facing hints in two impersonation endpoints and `ImpersonateUserDialog.jsx`;
+      - comments in `backup-utils.js`, `purge-manifest.js` and `session-reports-permission.js`;
+      - the docs `AGENTS.md`, `README.md`, `project-rules` 00, 80, 90 and 95, and `docs/product/payroll.md`.
+    - **Migrations:** `tests/dated-settings.test.js`, `project-rules` 00, 50 and 80, and `docs/product/payroll.md`.
+    - **Historical scripts naming the old path** (root `_*.cjs`, `implementations/database/one-db-refactor/*.cjs`) are left for stages 6 and 7, as planned.
+  - **5.0, the preprod process:**
+    - **No automation:** no workflow, script or setting applies the schema or the migrations; CI and `npm run build` only run `lint:sql`.
+    - **The snapshot** is pasted from the Setup Assistant, which is bundled in the app, so its path does not matter.
+    - **The migrations** are applied by hand from the repository files (`migrations/README.md`, `00` "Schema").
+    - **Recording:** a migration records itself in `schema_migrations` by its version name, not its path.
+    - **Conclusion:** every path was verifiable from a source, so no owner question was needed. The preview environment (PR #62) uses the production DB, and nothing here runs against it.
+  - **5.1, Q2:** a relative import, `SetupAssistant.jsx` → `../../../database/setup-sql.js`. `eslint.config.js` adds `database/**/*.js` to the `src`/`api` rules block, so the file keeps the config it had: `--print-config` is identical as JSON.
+  - **5.3, the moves:** `git mv` to `database/setup-sql.js` and `database/migrations/`. Recorded as R100 for `setup-sql.js` and the five `.sql` files, and R068 for the edited README.
+  - **5.4, the consumers:**
+    - Every consumer above was updated. In `validate-setup-sql.js`, the `src/` exclusion suffix was removed, since the file is no longer in `src/`.
+    - The migration files were not edited, because applied migrations are immutable. Their comments still name `src/lib/setup-sql.js`, and the migrations README now says so.
+  - **5.5, the READMEs:** `database/README.md` (12 lines) covers a new DB (snapshot only), an existing DB (migrations in order, then the snapshot) and the manual application. `database/migrations/README.md` describes the manual process.
+  - **5.6, acceptance:**
+    - **The schema:** the `SETUP_SQL_SCRIPT` sha256 `933f56ac…` is identical before and after, and the same through the dev server and the tester's path.
+    - **Reports:**
+      - **Text:** `lint:sql` gives an identical report: 0 errors, 21 warnings.
+      - **JSON:** `file` is `database/setup-sql.js`, which exists; the rest of the report is identical.
+      - **GitHub format:** in a throwaway worktree with a deliberate `CREATE TABLE  public.…`: exit 1; all 22 annotations, including the SQL001 error, name `database/setup-sql.js`. The worktree was removed.
+    - **No old path:** `git grep` finds no `src/lib/setup-sql` or bare `migrations/0` in `scripts`, `api`, `tests`, `src` or the config files.
+    - **Tests:**
+      - `lint:upsert-conflicts` output is identical.
+      - `purge-manifest.test.js`: the same identity and result as before. It already failed before the move: 6 tables missing from the manifest, an existing task that this stage does not address.
+      - `test:finance-calendar`: identity `372E8541…`, identical to the stage 4.7 baseline.
+    - **Linters:** `npx eslint .` 0 problems; `lint:api`, `lint:doc-links` (348 links) and `lint:plans` OK.
+    - **Build:** exit 0 with the same counts: 3563 modules, 21 SQL warnings, 276 error-tracking warnings, 3064 type issues. `dist/assets/main-*.js` contains the snapshot header and `schema_migrations`. `tsc --listFilesOnly` follows the import to `database/setup-sql.js`.
+    - **The wizard:** the dev server serves `/database/setup-sql.js`. Importing `SetupAssistant.jsx` in the browser pane works and yields the same script hash. The admin console itself needs a login, which this work does not use.
+    - **Tester:** `setup.js --dry-run` was not run, because it reads `api/local.settings.json` and prints the service keys. Instead, the code reads `join(REPO_ROOT, 'database', 'setup-sql.js')`, and importing that path the same way gives the same hash.
+    - **Not done:** the optional real local apply.
+  - **Found:** `validate-setup-sql.js` SQL001 uses `/CREATE TABLE\s+(?!IF NOT EXISTS)\s+public\./`, which misses a one-space `CREATE TABLE public.x`. The snapshot has none today. Fixing it needs the checker's first tests and a restructured entry point, so it goes to a separate task, not this stage.
+  - **Evidence:** in `$env:TEMP\reinex-restructure\stage5\`.
 
 ---
 
