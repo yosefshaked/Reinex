@@ -197,7 +197,7 @@ export default async function adminImpersonationStart(context, req) {
 
   // Record the session. If the impersonation_sessions table is missing we
   // surface a clear error (501) rather than silently failing — the SSOT
-  // setup script at src/lib/setup-sql.js must be applied against the DB.
+  // setup script at database/setup-sql.js must be applied against the DB.
   let sessionRow;
   try {
     const { data, error } = await supabase
@@ -228,7 +228,7 @@ export default async function adminImpersonationStart(context, req) {
       if (String(error.code) === '42P01') {
         return respond(context, 501, {
           message: 'impersonation_table_missing',
-          hint: 'Run the SSOT setup script at src/lib/setup-sql.js against your database',
+          hint: 'Run the SSOT setup script at database/setup-sql.js against your database',
         });
       }
       throw error;

@@ -6,7 +6,7 @@
  *   implementations/admin-page/org-nuke/README.md  (Section 3 + Section 14)
  *   MANIFEST_VERSION below
  *
- * Any new org-scoped table added to src/lib/setup-sql.js MUST be added to
+ * Any new org-scoped table added to database/setup-sql.js MUST be added to
  * this manifest before that table ships to production. Failing to do so will
  * cause check C1 (coverage gap) to block all future org-purge prepare calls.
  *

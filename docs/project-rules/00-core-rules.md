@@ -74,16 +74,16 @@ Reinex serves Israeli organisations; stored instants stay UTC for data integrity
 
 ## Schema
 - **Two parts, applied in this order:**
-  - `src/lib/setup-sql.js` is the target snapshot. A new database is set up from it alone.
-  - On an existing database, run the new migrations from `migrations/` in order, then the snapshot.
-  - The procedure is in [`../../migrations/README.md`](../../migrations/README.md): migrations are applied by hand, in order, before the snapshot.
+  - `database/setup-sql.js` is the target snapshot. A new database is set up from it alone.
+  - On an existing database, run the new migrations from `database/migrations/` in order, then the snapshot.
+  - The procedure is in [`../../database/migrations/README.md`](../../database/migrations/README.md): migrations are applied by hand, in order, before the snapshot.
   - **Why:** a new database needs only the target state; an existing one must first lose what the snapshot no longer defines.
 - **The snapshot is safe to run again.** Every `CREATE TABLE`, `CREATE INDEX` and `ALTER TABLE ... ADD COLUMN` uses `IF NOT EXISTS`; every `ADD CONSTRAINT ... UNIQUE` sits inside a `DO $$ BEGIN IF NOT EXISTS ... END $$` guard. **Why:** the same file is applied to new and existing databases, repeatedly.
 - **Checks:** `npm run lint:sql` checks the snapshot. Some tests read a migration file (for example `tests/dated-settings.test.js`). No general checker validates every migration file yet.
 
 **Upsert contract (42P10 prevention).** Every `.upsert(...)` states `onConflict` explicitly. A new or changed `withOrgScope().upsert({ onConflict: '...' })` requires three simultaneous changes:
 1. Add the table+columns to `EXPECTED_CONFLICTS_BY_TABLE` in `scripts/validate-upsert-conflicts.js`.
-2. Add `CREATE UNIQUE INDEX IF NOT EXISTS` or a named `UNIQUE` constraint in `src/lib/setup-sql.js`.
+2. Add `CREATE UNIQUE INDEX IF NOT EXISTS` or a named `UNIQUE` constraint in `database/setup-sql.js`.
 3. Run `npm run lint:upsert-conflicts` to verify both sides agree.
 
 Missing step 2 causes PostgreSQL error `42P10` at runtime — silent in code review, only visible when the upsert is exercised on a real DB.

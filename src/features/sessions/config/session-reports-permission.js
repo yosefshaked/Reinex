@@ -3,7 +3,7 @@ import { useOrg } from '@/org/OrgContext.jsx';
 /**
  * Org-scoped replacement for the old hardcoded SESSION_RECORDS_ENABLED flag.
  * Reads organizations.permissions.session_reports_enabled (see permission_registry
- * seed in src/lib/setup-sql.js and initialize_org_permissions() for backfill).
+ * seed in database/setup-sql.js and initialize_org_permissions() for backfill).
  *
  * Two layers are involved:
  * - permission_registry.default_value ('session_reports_enabled') is the global default.

@@ -27,7 +27,7 @@ function extractCreateTableBlocks(sql) {
 }
 
 test('purge manifest classifies every setup-sql table with org_id FK to organizations', () => {
-  const sql = readFileSync(new URL('../../src/lib/setup-sql.js', import.meta.url), 'utf8');
+  const sql = readFileSync(new URL('../../database/setup-sql.js', import.meta.url), 'utf8');
   const knownTables = new Set([...MANIFEST_TABLE_SET, ...PLATFORM_TABLES.keys()]);
 
   const orgScopedTables = extractCreateTableBlocks(sql)

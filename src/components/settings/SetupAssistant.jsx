@@ -7,7 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { toast } from '@/lib/toast.jsx';
 import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { useOrg } from '@/org/OrgContext.jsx';
-import { SETUP_SQL_SCRIPT } from '@/lib/setup-sql.js';
+import { SETUP_SQL_SCRIPT } from '../../../database/setup-sql.js';
 import { asError } from '@/lib/error-utils.js';
 import {
   AlertCircle,

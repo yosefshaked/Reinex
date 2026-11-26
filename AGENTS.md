@@ -49,8 +49,8 @@ Run the matching npm scripts (defined in `package.json`) before the task is done
 
 | Files changed | Command |
 |---|---|
-| `src/lib/setup-sql.js` | `npm run lint:sql` |
-| `src/lib/setup-sql.js` plus a migration | `npm run lint:sql && npm run lint:upsert-conflicts` |
+| `database/setup-sql.js` | `npm run lint:sql` |
+| `database/setup-sql.js` plus a migration | `npm run lint:sql && npm run lint:upsert-conflicts` |
 | `api/**/*.js`, any `.upsert({ onConflict })` added or changed | `npm run lint:upsert-conflicts` (contract: [`00`](docs/project-rules/00-core-rules.md) "Upsert contract") |
 | `scripts/validate-upsert-conflicts.js` | `npm run lint:upsert-conflicts` |
 | `scripts/validate-setup-sql.js` | `npm run lint:sql` |

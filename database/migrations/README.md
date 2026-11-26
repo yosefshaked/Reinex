@@ -1,6 +1,6 @@
 # Migrations
 
-`src/lib/setup-sql.js` is the snapshot of the schema as it should be. It only creates and
+[`database/setup-sql.js`](../setup-sql.js) is the snapshot of the schema as it should be. It only creates and
 replaces; it never drops a table or a column and holds no one-time data fixes.
 
 A change that an existing database needs once (dropping a table or a column, moving data,
@@ -16,8 +16,14 @@ replacing a constraint) is a numbered file here. Each file:
 - New database: `setup-sql.js` only. Running the migrations on it afterwards changes nothing
   and records them as applied.
 
-The files are applied by hand for now, the same way `setup-sql.js` is. Applying them from CI
-on deploy is planned and not built yet.
+Both are applied by hand: the snapshot is copied from the Setup Assistant in the app (or from
+`database/setup-sql.js`) into the Supabase SQL editor, and each migration file from this folder the
+same way. Nothing applies them automatically; research on automating it is deferred (repository
+restructure plan, stage 4R). A migration records itself by its version name, not its path, so the
+move to `database/` (2026-11-26) changes nothing for a database that already ran it.
+
+Files that were already applied are not edited. The comments of `0001`–`0005` were written before
+that move and still name `src/lib/setup-sql.js`, which is now `database/setup-sql.js`.
 
 ## Files
 

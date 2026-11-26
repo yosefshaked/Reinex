@@ -476,13 +476,13 @@ function findDbContainer(supabaseUrl = null) {
 
 async function applySchema(supabaseUrl) {
   // Load the SQL from the repo's SSOT
-  const sqlModulePath = join(REPO_ROOT, 'src', 'lib', 'setup-sql.js');
+  const sqlModulePath = join(REPO_ROOT, 'database', 'setup-sql.js');
   if (!existsSync(sqlModulePath)) {
     throw new Error(`setup-sql.js not found at ${sqlModulePath}`);
   }
 
   // Dynamically import the module to get SETUP_SQL_SCRIPT
-  step('Loading SQL from src/lib/setup-sql.js ...');
+  step('Loading SQL from database/setup-sql.js ...');
   let sql;
   try {
     const mod = await import(pathToFileURL(sqlModulePath).href);
@@ -582,7 +582,7 @@ async function checkAndApplySchema(supabaseUrl, serviceKey) {
   step('Running setup-sql.js against the database...');
 
   if (DRY_RUN) {
-    warn('[dry-run] Would apply schema from src/lib/setup-sql.js');
+    warn('[dry-run] Would apply schema from database/setup-sql.js');
     return;
   }
 

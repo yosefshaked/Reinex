@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import fs from 'node:fs';
 import path from 'node:path';
-import { SETUP_SQL_SCRIPT } from '../src/lib/setup-sql.js';
+import { SETUP_SQL_SCRIPT } from '../database/setup-sql.js';
 
 const root = process.cwd();
 const setupSql = String(SETUP_SQL_SCRIPT || '');

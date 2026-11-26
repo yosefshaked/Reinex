@@ -384,7 +384,7 @@ describe('an employee\'s own leave pay method as a dated setting', () => {
 });
 
 describe('migration 0002 copies the legacy rates before dropping them', () => {
-  const sql = readFileSync(new URL('../migrations/0002_remove_legacy_rate_columns.sql', import.meta.url), 'utf8');
+  const sql = readFileSync(new URL('../database/migrations/0002_remove_legacy_rate_columns.sql', import.meta.url), 'utf8');
   const dropAt = sql.indexOf('ALTER TABLE public."Employees"\n  DROP COLUMN'.replace(/\n/g, sql.includes('\r\n') ? '\r\n' : '\n'));
 
   it('copies each legacy column into RateHistory with the pay basis the rate-history change used, before the drop', () => {

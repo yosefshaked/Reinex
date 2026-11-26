@@ -178,7 +178,8 @@ export default defineConfig([
     },
   },
   {
-    files: ['src/**/*.{js,jsx}', 'api/**/*.{js,jsx,mjs}'],
+    // database/setup-sql.js keeps the rules it had under src/lib/ before the move.
+    files: ['src/**/*.{js,jsx}', 'api/**/*.{js,jsx,mjs}', 'database/**/*.js'],
     rules: {
       'no-restricted-syntax': ['error', NO_NAME_ASSIGNMENT, ...DATE_AND_TIME_ZONE_RESTRICTIONS, MONEY_CONVERSION_RESTRICTION],
     },

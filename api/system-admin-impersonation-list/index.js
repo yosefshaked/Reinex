@@ -77,7 +77,7 @@ export default async function adminImpersonationList(context, req) {
       if (String(error.code) === '42P01') {
         return respond(context, 501, {
           message: 'impersonation_table_missing',
-          hint: 'Run the SSOT setup script at src/lib/setup-sql.js against your database',
+          hint: 'Run the SSOT setup script at database/setup-sql.js against your database',
         });
       }
       throw error;
