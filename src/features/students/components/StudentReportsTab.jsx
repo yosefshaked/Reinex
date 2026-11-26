@@ -5,7 +5,8 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Skeleton } from '@/components/ui/skeleton';
 import { authenticatedFetch } from '@/lib/api-client.js';
-import { resolveApiErrorMessage } from '@/lib/error-support.js';
+import ErrorMessageText from '@/components/ui/ErrorMessageText.jsx';
+import { withErrorContext } from '@/lib/error-support.js';
 import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { useOrg } from '@/org/OrgContext.jsx';
 import ReportView from '@/features/sessions/components/ReportView.jsx';
@@ -67,7 +68,7 @@ export default function StudentReportsTab({ studentId }) {
     } catch (err) {
       if (err?.name === 'AbortError') return;
       console.error('Failed to load student reports', err);
-      setError(resolveApiErrorMessage(err) || 'טעינת הדוחות נכשלה.');
+      setError(withErrorContext(err, { action: 'טעינת דוחות התלמיד', fallback: 'טעינת הדוחות נכשלה.' }));
       setState('error');
     }
   }, [canFetch, session, activeOrgId, studentId]);
@@ -116,7 +117,7 @@ export default function StudentReportsTab({ studentId }) {
         ) : hasError ? (
           <div className="rounded-lg bg-destructive/10 p-3 text-sm text-destructive flex items-start gap-2">
             <AlertCircle className="h-4 w-4 flex-shrink-0 mt-0.5" />
-            <span>{error}</span>
+            <div className="min-w-0"><ErrorMessageText as="span" error={error} fallback="טעינת הדוחות נכשלה." showDetails supportClassName="text-destructive" /></div>
           </div>
         ) : reports.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-8 text-neutral-500">

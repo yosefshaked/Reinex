@@ -141,8 +141,8 @@ Disposition legend: keep = leave as-is, update = rewrite to the new flow, delete
 - api/_shared/backup-utils.js:55 - update
 - api/restore/index.js:14 - update
 - api/restore/index.js:162 - update
-- test/verify-backup.cjs:6 - update
-- test/verify-backup.cjs:20 - update
+- tests/verify-backup.cjs:6 - update
+- tests/verify-backup.cjs:20 - update
 - ProjectDoc/TutTiud_Agents.md:251 - update
 
 ### exportTenantData

@@ -11,6 +11,7 @@ import {
   resolveOrgId,
   UUID_PATTERN,
   withOrgScope,
+  withUserMessage,
 } from '../_shared/org-bff.js';
 import {
   coerceBooleanFlag,
@@ -249,12 +250,12 @@ export default async function handler(context, req) {
     const invalidColumnsList = unrecognizedColumns.join(', ');
     const validColumnsList = validHebrewNames.join(', ');
     
-    return respond(context, 400, {
+    return respond(context, 400, withUserMessage({
       code: 'unrecognized_columns',
       message: `ערך "${invalidColumnsList}" אינו חוקי`,
       columns: unrecognizedColumns,
       hint: `ערכים חוקיים: ${validColumnsList}`,
-    });
+    }));
   }
 
   const stagedRows = parsed.rows.map((row, index) => ({
@@ -377,12 +378,12 @@ export default async function handler(context, req) {
 
   // If there are unmatched tags, return them for user mapping
   if (unmatchedTags.size > 0) {
-    return respond(context, 400, {
+    return respond(context, 400, withUserMessage({
       code: 'unmatched_tags',
       message: 'חלק מהתוויות בקובץ CSV לא נמצאו בקטלוג. אנא מפה אותן לתוויות קיימות.',
       unmatched_tags: Array.from(unmatchedTags),
       available_tags: Array.from(tagById.values()).map(tag => ({ id: tag.id, name: tag.name })),
-    });
+    }));
   }
 
   const failures = [];

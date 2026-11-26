@@ -1166,9 +1166,9 @@ export default function WaitingListPage() {
       }
     } catch (error) {
       if (showLoadingToast) {
-        toast.error(resolveApiErrorMessage(error, 'עדכון רשומת ההמתנה נכשל.'), { id: toastId });
+        toast.apiError(error, { id: toastId, action: 'עדכון רשומת ההמתנה', fallback: 'עדכון רשומת ההמתנה נכשל.' });
       } else {
-        toast.error(resolveApiErrorMessage(error, 'עדכון רשומת ההמתנה נכשל.'));
+        toast.apiError(error, { action: 'עדכון רשומת ההמתנה', fallback: 'עדכון רשומת ההמתנה נכשל.' });
       }
     }
   }, [activeOrgId, session]);

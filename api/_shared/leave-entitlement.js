@@ -34,7 +34,7 @@
  * This reproduces both Kol Zchut tables year by year and every worked example on the pages
  * (17 -> 13, 16 -> 12, 8 -> 6, 7 -> 5 on a 5-day week; 7 -> 6, 9 -> 8, 28 -> 24 on a 6-day week).
  *
- * Decisions where the law leaves room (owner, 2026-11-16; see agents-docs/50):
+ * Decisions where the law leaves room (owner, 2026-11-16; see docs/project-rules/50):
  *   - A day with any counted lesson or any recorded work minutes is one full day worked.
  *   - The work week is the employee's own defined working days: exactly 6 -> the 6-day table,
  *     anything else (none defined included) -> the 5-day table.

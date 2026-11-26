@@ -18,9 +18,9 @@ Define an enforceable two-pass AI review protocol and staged rollout checklist f
 - src/features/calendar/components/LessonInstanceDialog.jsx
 - src/features/calendar/components/ManualGenerationDialog.jsx
 - src/pages/FinancialsPage.jsx
-- test/finance-preview-contract.test.js
-- test/calendar-generate-hmo-warning.test.js
-- test/billing-claim-payment.test.js
+- tests/finance-preview-contract.test.js
+- tests/calendar-generate-hmo-warning.test.js
+- tests/billing-claim-payment.test.js
 
 ## Expected Output Schema
 Each release validation record must include:
@@ -80,11 +80,11 @@ Blockers:
 
 ## AC-to-Evidence Mapping (Mission Steps 3-9)
 - AC-PREVIEW-004, AC-PREVIEW-005, AC-UI-PREVIEW-003:
-  - evidence: node --test test/finance-preview-contract.test.js
+  - evidence: node --test tests/finance-preview-contract.test.js
 - AC-GEN-001, AC-GEN-002, AC-GEN-003:
-  - evidence: node --test test/calendar-generate-hmo-warning.test.js
+  - evidence: node --test tests/calendar-generate-hmo-warning.test.js
 - AC-CLAIMS-003, AC-CLAIMS-004:
-  - evidence: node --test test/billing-claim-payment.test.js
+  - evidence: node --test tests/billing-claim-payment.test.js
 - AC-REL-001, AC-REL-002:
   - evidence: completion of this protocol with recorded pass_1 and pass_2 outputs
 
@@ -92,9 +92,9 @@ Blockers:
 
 ### Stage 0: pre-prod gate
 1. Run:
-   - node --test test/finance-preview-contract.test.js
-   - node --test test/calendar-generate-hmo-warning.test.js
-   - node --test test/billing-claim-payment.test.js
+   - node --test tests/finance-preview-contract.test.js
+   - node --test tests/calendar-generate-hmo-warning.test.js
+   - node --test tests/billing-claim-payment.test.js
 2. Run diagnostics for changed files.
 3. Run anchor checks:
    - hmo_split_detail
@@ -149,9 +149,9 @@ Checks:
 - No changes to billing formulas in this step.
 
 ## Verification Command Set
-1. node --test test/finance-preview-contract.test.js
-2. node --test test/calendar-generate-hmo-warning.test.js
-3. node --test test/billing-claim-payment.test.js
+1. node --test tests/finance-preview-contract.test.js
+2. node --test tests/calendar-generate-hmo-warning.test.js
+3. node --test tests/billing-claim-payment.test.js
 4. Use search to verify release anchors exist in documentation:
    - finance-workflow-release-hardening-v1.md
    - AC-REL-001

@@ -25,7 +25,7 @@ const IMPERSONATION_ERRORS = {
   target_user_not_found: 'No user with that email exists in the database.',
   generate_link_failed: 'Failed to generate a login token. Check that the user\'s auth record is active in Supabase.',
   generate_link_missing_token: 'The server returned a token-generation response with no token — check Supabase Auth settings.',
-  session_insert_failed: 'Could not create the impersonation session row. Run the setup SQL (src/lib/setup-sql.js) against your database.',
+  session_insert_failed: 'Could not create the impersonation session row. Run the setup SQL (database/setup-sql.js) against your database.',
   impersonation_table_missing: 'The impersonation_sessions table is missing. Run the setup SQL against your Supabase project.',
   server_misconfigured: 'Server is missing Supabase credentials. Check Azure application settings.',
   mfa_required: 'Your admin session does not have MFA (AAL2). Re-authenticate with TOTP before impersonating.',

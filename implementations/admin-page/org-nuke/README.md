@@ -781,8 +781,8 @@ The `plan_id` and `row_counts` from prepare are stored **in memory / process-loc
 - [ ] **M6 — Azure Function handler:** Create `api/org-purge/index.js`. Wire prepare (C1–C7 + row counts + challenge) and execute (verify challenge + advisory lock + phases + storage + audit log) sub-actions. Use `respond(context, ...)` and `resolveBearerAuthorization(req)`.
 - [ ] **M7 — Admin UI:** Create `OrgNukePage.jsx` in `/system-admin`. Show org lookup, row count table, warning banners, org-name confirmation field, and phased progress indicator during execute.
 - [ ] **M8 — Environment variables:** Add `ORG_PURGE_CHALLENGE_SECRET` to `api/local.settings.example.json` and Azure Function App settings.
-- [ ] **M9 — Test:** Write an integration test in `test/` that creates a test org, seeds ≥1 row per manifest table, runs prepare, verifies counts, runs execute, and verifies all tables return 0 rows for the org.
-- [ ] **M10 — Doc update:** After implementation, update `agents-docs/95-system-admin-console.md` to document the org-purge endpoints and link to this README.
+- [ ] **M9 — Test:** Write an integration test in `tests/` that creates a test org, seeds ≥1 row per manifest table, runs prepare, verifies counts, runs execute, and verifies all tables return 0 rows for the org.
+- [ ] **M10 — Doc update:** After implementation, update `docs/project-rules/95-system-admin-console.md` to document the org-purge endpoints and link to this README.
 
 ---
 

@@ -7,6 +7,7 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { toast } from '@/lib/toast.jsx';
+import { reportDuplicateCheckFailure } from '@/features/students/api/duplicate-check-result.js';
 import { 
   FileText, 
   Upload, 
@@ -512,18 +513,9 @@ export default function OrgDocumentsManager({ session, orgId, membershipRole }) 
         return result;
       } catch (error) {
         console.error('Duplicate check error:', error);
-        
-        const errorMessage = error?.message || '';
-        if (errorMessage.includes('401') || errorMessage.includes('Unauthorized')) {
-          toast.error('שגיאת הרשאה. נא להתחבר מחדש');
-        } else if (errorMessage.includes('403') || errorMessage.includes('admin_only')) {
-          toast.error('רק בעלי/ות הרשאות מנהל יכולים/ות להעלות מסמכים ארגוניים');
-        } else if (errorMessage.includes('500')) {
-          toast.error('שגיאת שרת בעת בדיקת כפליות');
-        } else if (!errorMessage.includes('AbortError')) {
-          console.warn('Duplicate check error details:', error);
-        }
-        return { has_duplicates: false, duplicates: [] };
+        // Silent on cancel; 401/403 keep their messages; anything else says the check did not
+        // complete, with details and a support copy. check_failed lets the caller tell it apart.
+        return reportDuplicateCheckFailure(error, { toast, forbiddenMessage: 'רק בעלי/ות הרשאות מנהל יכולים/ות להעלות מסמכים ארגוניים' });
       }
     },
     [session, orgId]

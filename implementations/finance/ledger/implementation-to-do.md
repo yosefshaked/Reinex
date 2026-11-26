@@ -22,7 +22,7 @@ Why not another way: Jumping straight into edits causes accidental behavior chan
 		- HMO authorization coupling (create/update/delete all trigger window resync),
 		- frontend preview consumption and impact grouping.
 	- Included required step frame sections inside contract: objective, bounded file set, expected output schema, explicit non-goals, verification command set, rollback note.
-	- Linked the contract into the AGENTS instruction tree so agents discover it by default from AGENTS.md and agents-docs/80-finance-billing-payroll.md.
+	- Linked the contract into the AGENTS instruction tree so agents discover it by default from AGENTS.md and docs/project-rules/80-finance-billing-payroll.md.
 	- Verification pass 1 completed: contract structure quality and required sections present.
 	- Verification pass 2 completed: source alignment checks confirmed contract anchors still exist in code.
 - What to expect:
@@ -108,7 +108,7 @@ Why: Prevents regressions when later missions modify attendance or authorization
 Why not another way: Manual QA alone will miss edge status combinations and race conditions.
 - Status: Completed (verified).
 - Summary:
-	- Added focused automated tests: test/finance-preview-contract.test.js.
+	- Added focused automated tests: tests/finance-preview-contract.test.js.
 	- Added coverage for billing/preview contract behavior:
 		- attended with active authorization yields explicit HMO split entries,
 		- no_show excluded by policy is not chargeable,
@@ -144,7 +144,7 @@ Why not another way: Hard-blocking generation is operationally risky for MVP and
 		- warnings array,
 		- warnings_notice for schema-unavailable fallback.
 	- Kept generation non-blocking: warnings are informational and do not prevent proposals from entering to_insert_instances.
-	- Added focused tests: test/calendar-generate-hmo-warning.test.js.
+	- Added focused tests: tests/calendar-generate-hmo-warning.test.js.
 	- Extended acceptance criteria with AC-GEN-001 and AC-GEN-002 in implementations/finance/ledger/finance-workflow-acceptance-criteria-v1.md.
 	- Verification pass 1 completed: focused Step 6 test suite passed (4/4).
 	- Verification pass 2 completed: response schema and criteria artifacts include generation warning fields and assertions.
@@ -262,7 +262,7 @@ Why not another way: Single-agent “looks good” approvals are exactly where c
 		- AC-REL-002.
 	- Wired discoverability into instruction hubs:
 		- AGENTS.md now links finance-workflow-release-hardening-v1.md in Read By Task.
-		- agents-docs/80-finance-billing-payroll.md now includes release hardening baseline guidance.
+		- docs/project-rules/80-finance-billing-payroll.md now includes release hardening baseline guidance.
 	- Verification pass 1 completed: all focused contract tests pass.
 	- Verification pass 2 completed: Step 10 documentation anchors and diagnostics checks pass.
 - What to expect:

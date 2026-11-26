@@ -4,7 +4,7 @@ import { toShekel } from '../../../lib/currency.js';
 import { formatDateDisplay, formatTimeDisplay } from './timeGrid.js';
 import { buildSchedulingOverrideReasonDetails } from './schedulingOverride.js';
 import { getParticipantDisplayName } from './participantDisplay.js';
-import { extractSupportCode, resolveApiErrorMessage } from '../../../lib/error-support.js';
+import { extractSupportCode, resolveApiErrorMessage, resolveUserErrorMessage, serverPublicMessage } from '../../../lib/error-support.js';
 import { dateKeyFromCalendarDate } from '../../../lib/local-time.js';
 import { describeLessonStartClockChange } from '../../../lib/clock-change.js';
 
@@ -132,7 +132,9 @@ export function getDisplayParticipants(instance) {
 /**
  * The "instructor has no rate for this service on this date" refusal from a lesson or template save,
  * as { instructorEmployeeId, serviceId, rateDate, message }, or null for any other error. The form
- * uses it to offer adding the rate there and then.
+ * uses it to offer adding the rate there and then. The server's explanation (who, which service, the
+ * dates and where to add the rate) is used only when the body carries the user-message marker, like
+ * every other server text (docs/project-rules/20, "Showing an error").
  */
 export function readMissingLessonRate(error) {
   const data = error?.data;
@@ -143,7 +145,7 @@ export function readMissingLessonRate(error) {
     instructorEmployeeId: String(data.instructor_employee_id),
     serviceId: String(data.service_id),
     rateDate: typeof data.rate_date === 'string' ? data.rate_date : '',
-    message: typeof data.message === 'string' && data.message ? data.message : 'למדריך/ה אין תעריף על השירות הזה בתאריך הזה.',
+    message: serverPublicMessage(data, error?.status) || 'למדריך/ה אין תעריף על השירות הזה בתאריך הזה.',
   };
 }
 
@@ -167,7 +169,11 @@ export function pickMissingRateForSelection(stored, selectionKey) {
   return stored.selectionKey === selectionKey ? stored.missingRate : null;
 }
 
-export function resolveMutationError(error) {
+/**
+ * The dialog's message for a failed request. `fallback` is the wording for this action; it can also
+ * travel on the error itself (withErrorContext), so the display and the support copy agree.
+ */
+export function resolveMutationError(error, fallback = '') {
   const supportMessage = resolveApiErrorMessage(error);
   if (extractSupportCode(supportMessage)) {
     return supportMessage;
@@ -181,25 +187,25 @@ export function resolveMutationError(error) {
   if (supportMessage === 'cancel_instance_requires_dedicated_action') {
     return 'ביטול שיעור נעשה דרך "בטל שיעור" ולא דרך העריכה.';
   }
-  if (error?.message === 'missing_instructor_service_capability') {
+  if (supportMessage === 'missing_instructor_service_capability') {
     return 'למדריך/ה שנבחר/ה אין יכולת שירות פעילה עבור השירות הזה.';
   }
-  if (error?.message === 'missing_instructor_service_availability') {
+  if (supportMessage === 'missing_instructor_service_availability') {
     return 'לשירות הזה עדיין לא הוגדרה זמינות אצל המדריך/ה שנבחר/ה.';
   }
-  if (error?.message === 'outside_instructor_service_availability') {
+  if (supportMessage === 'outside_instructor_service_availability') {
     return 'המועד שנבחר נמצא מחוץ לחלונות הזמינות של השירות אצל המדריך/ה.';
   }
-  if (error?.message === 'failed_to_validate_instructor_availability') {
+  if (supportMessage === 'failed_to_validate_instructor_availability') {
     return 'לא הצלחנו לבדוק את זמינות המדריך/ה כרגע. נסו שוב.';
   }
-  if (error?.message === 'invalid_service_duration') {
+  if (supportMessage === 'invalid_service_duration') {
     return 'לשירות שנבחר אין משך תקין. יש לעדכן את משך השירות לפני שמירת השיעור.';
   }
-  if (error?.message === 'failed_to_load_service') {
+  if (supportMessage === 'failed_to_load_service') {
     return 'לא ניתן היה לטעון את פרטי השירות כרגע. נסו שוב.';
   }
-  if (error?.message === 'failed_to_build_status_change_preview') {
+  if (supportMessage === 'failed_to_build_status_change_preview') {
     return 'לא ניתן היה לבנות תצוגה מקדימה לשינוי הסטטוס.';
   }
   const cancellationConflictMessage = resolveApiErrorMessage(error);
@@ -223,7 +229,9 @@ export function resolveMutationError(error) {
     const hasTranslatedMessage = typeof error?.message === 'string' && error.message && error.message !== supportMessage;
     return hasTranslatedMessage ? error.message : 'השיעור עודכן על ידי משתמש אחר. רעננו את התצוגה ונסו שוב.';
   }
-  return error?.message || 'הפעולה נכשלה.';
+  // Anything not explained above: a general Hebrew message with the public code or HTTP status in
+  // parentheses, or the connection message when the request got no response (docs/project-rules/20).
+  return resolveUserErrorMessage(error, fallback || error?.displayFallback || 'הפעולה נכשלה.');
 }
 
 export const ATTENDANCE_MARK_UNCHANGED_REASON = 'אין שינוי לשמור';

@@ -1,0 +1,38 @@
+name: Plan registry
+
+# Checks docs/plans/index.csv (see docs/plans/README.md). No path filter on purpose:
+# a PR that only changes documentation must run it too.
+on:
+  push:
+    branches:
+      - staging
+      - main
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches:
+      - staging
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  plan_registry:
+    name: Plan registry
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # Both commands use only Node built-ins, so no npm install is needed.
+      - name: Check the plan registry
+        run: npm run lint:plans
+
+      - name: Run the registry checker tests
+        run: node --test tests/validate-plans-index.test.js

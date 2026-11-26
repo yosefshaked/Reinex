@@ -68,7 +68,7 @@ A comprehensive 4-document analysis of code duplication across the codebase, wit
 - [`api-validator-enhancement-summary.md`](api-validator-enhancement-summary.md) - Enhancement history
 
 #### Code Quality
-- [`AI-Coder-Gotchas.md`](AI-Coder-Gotchas.md) - Common pitfalls and patterns to avoid
+- [`project-rules/20-frontend-shared-helpers.md`](project-rules/20-frontend-shared-helpers.md) - Frontend pitfalls to avoid (dialog footers, Select/Popover inside dialogs)
 - [`code-duplication-*`](code-duplication-index.md) - Duplication analysis (4 documents)
 
 #### Bug Fixes
@@ -91,7 +91,7 @@ A comprehensive 4-document analysis of code duplication across the codebase, wit
 
 ### For Developers (New to Project)
 **Onboarding reading order:**
-1. `AI-Coder-Gotchas.md` - Common patterns and pitfalls
+1. `../AGENTS.md` and `project-rules/` - Development rules, common patterns and pitfalls
 2. `code-duplication-index.md` - Architecture and refactoring plans
 3. `api-validation-tool.md` - How to validate your API work
 4. Feature-specific docs as needed
@@ -137,7 +137,7 @@ A comprehensive 4-document analysis of code duplication across the codebase, wit
 → `storage-ui-states.md` (UI state testing)
 
 **Common pitfalls?**
-→ `AI-Coder-Gotchas.md` (RTL, forms, selects, CSV patterns)  
+→ `project-rules/20-frontend-shared-helpers.md` (dialogs, selects inside dialogs)  
 → `code-duplication-analysis.md` (Anti-patterns to avoid)  
 → `RACE_CONDITION_FIX.md` (Race condition patterns)
 
@@ -153,7 +153,7 @@ A comprehensive 4-document analysis of code duplication across the codebase, wit
 **Total Documents:** 20  
 **Latest Update:** 2025-01 (Code duplication analysis)  
 **Most Comprehensive:** `code-duplication-analysis.md` (~1000 lines)  
-**Quick Reference:** `api-validation-quick-reference.md`, `AI-Coder-Gotchas.md`  
+**Quick Reference:** `api-validation-quick-reference.md`  
 
 **Documentation Coverage:**
 - ✅ Feature implementations

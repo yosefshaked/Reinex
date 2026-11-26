@@ -12,7 +12,7 @@ The workflow only has two steps:
 
 **Missing Checks:**
 - ❌ No ESLint run (project has `eslint.config.js`)
-- ❌ No tests run (project has tests in `test/` folder)
+- ❌ No tests run (project has tests in `tests/` folder)
 - ❌ No build verification (assumes build always succeeds)
 - ❌ No type checking
 - ❌ No security scanning
@@ -70,4 +70,4 @@ Use GitHub's built-in security features or third-party actions.
 - `.github/workflows/azure-static-web-apps-lemon-wave-0e6c61303.yml`
 - `package.json` (test script needs configuration)
 - `eslint.config.js` (already configured)
-- `test/` folder (has test files)
+- `tests/` folder (has test files)

@@ -7,7 +7,8 @@ import { Badge } from '@/components/ui/badge';
 import { useOrg } from '@/org/OrgContext.jsx';
 import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { authenticatedFetch } from '@/lib/api-client.js';
-import { resolveApiErrorMessage } from '@/lib/error-support.js';
+import ErrorMessageText from '@/components/ui/ErrorMessageText.jsx';
+import { withErrorContext } from '@/lib/error-support.js';
 import { normalizeMembershipRole, isAdminOrOffice } from '@/features/students/utils/endpoints.js';
 import { useSessionReportsEnabled } from '@/features/sessions/config/session-reports-permission.js';
 import {
@@ -90,7 +91,7 @@ export default function PendingReportsPage() {
     } catch (err) {
       if (err?.name === 'AbortError') return;
       console.error('Failed to load pending reports', err);
-      setError(resolveApiErrorMessage(err) || 'טעינת הדיווחים הממתינים נכשלה.');
+      setError(withErrorContext(err, { action: 'טעינת דיווחים ממתינים', fallback: 'טעינת הדיווחים הממתינים נכשלה.' }));
       setState(REQUEST_STATE.error);
     }
   }, [canFetch, activeOrgId, session, scope]);
@@ -177,7 +178,7 @@ export default function PendingReportsPage() {
             </div>
           ) : hasError ? (
             <div className="rounded-lg bg-red-50 p-4 text-sm text-red-700">
-              {error || 'טעינת הדיווחים נכשלה.'}
+              <ErrorMessageText as="span" error={error} fallback="טעינת הדיווחים נכשלה." showDetails supportClassName="text-red-700" />
             </div>
           ) : items.length === 0 ? (
             <div className="text-center py-12 text-neutral-500">

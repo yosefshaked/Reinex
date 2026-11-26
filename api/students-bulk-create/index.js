@@ -11,6 +11,7 @@ import {
   respond,
   resolveOrgId,
   withOrgScope,
+  withUserMessage,
 } from '../_shared/org-bff.js';
 import {
   coerceBooleanFlag,
@@ -230,12 +231,12 @@ export default async function handler(context, req) {
 
   if (unrecognizedColumns.length > 0) {
     const hebrewCols = Object.keys(COLUMN_MAP).filter((k) => /[\u0590-\u05FF]/.test(k));
-    return respond(context, 400, {
+    return respond(context, 400, withUserMessage({
       code: 'unrecognized_columns',
       message: `עמודות לא מוכרות: ${unrecognizedColumns.join(', ')}`,
       columns: unrecognizedColumns,
       hint: `עמודות חוקיות: ${hebrewCols.join(', ')}`,
-    });
+    }));
   }
 
   const coveredFields = new Set(columnToField.values());
@@ -243,22 +244,22 @@ export default async function handler(context, req) {
   const hasGuardianColumns = coveredFields.has('guardian_first_name') || coveredFields.has('guardian_phone') || coveredFields.has('guardian_relationship');
 
   if (!hasStudentPhone && !hasGuardianColumns) {
-    return respond(context, 400, {
+    return respond(context, 400, withUserMessage({
       code: 'missing_required_columns',
       message: 'חסרה עמודת טלפון (לתלמיד) או עמודות אפוטרופוס (שם פרטי אפוטרופוס, טלפון אפוטרופוס, קשר לתלמיד)',
       missing_fields: ['phone'],
-    });
+    }));
   }
 
   const ALWAYS_REQUIRED = ['first_name', 'last_name', 'identity_number'];
   const missingBase = ALWAYS_REQUIRED.filter((f) => !coveredFields.has(f));
   if (missingBase.length > 0) {
     const LABELS = { first_name: 'שם פרטי', last_name: 'שם משפחה', identity_number: 'מספר זהות' };
-    return respond(context, 400, {
+    return respond(context, 400, withUserMessage({
       code: 'missing_required_columns',
       message: `חסרות עמודות חובה: ${missingBase.map((f) => LABELS[f] || f).join(', ')}`,
       missing_fields: missingBase,
-    });
+    }));
   }
 
   // Load tags catalog
@@ -586,11 +587,11 @@ export default async function handler(context, req) {
     (c) => !guardianResolutionMap.has(c.line_number),
   );
   if (unresolvedConflicts.length > 0) {
-    return respond(context, 409, {
+    return respond(context, 409, withUserMessage({
       code: 'unresolved_guardian_name_conflicts',
       message: 'יש התנגשויות שמות אפוטרופוס שלא נפתרו.',
       guardian_name_conflicts: unresolvedConflicts,
-    });
+    }));
   }
 
   // --- Live run: create students ---

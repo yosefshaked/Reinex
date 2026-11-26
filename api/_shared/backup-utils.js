@@ -13,7 +13,7 @@ const IV_LENGTH = 16;
 const AUTH_TAG_LENGTH = 16;
 
 // Platform/control tables are intentionally excluded from tenant backups.
-// Update this set whenever platform tables are added in src/lib/setup-sql.js.
+// Update this set whenever platform tables are added in database/setup-sql.js.
 const SYSTEM_TABLES = new Set([
   'organizations',
   'profiles',

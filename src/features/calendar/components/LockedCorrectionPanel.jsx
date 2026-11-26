@@ -16,7 +16,9 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { authenticatedFetch } from '@/lib/api-client.js'
-import { extractSupportCode, resolveApiErrorMessage } from '@/lib/error-support.js'
+import { stripSupportCode, withErrorContext } from '@/lib/error-support.js'
+import { CORRECTION_ERROR_FALLBACK, resolveCorrectionErrorMessage } from '../utils/correctionErrorMessage.js'
+import ErrorDetails from '@/components/ui/ErrorDetails.jsx'
 import { AlertTriangle, Loader2, Lock, ShieldAlert } from 'lucide-react'
 import { getParticipantDisplayName } from '../utils/participantDisplay.js'
 import { getDisplayInstance, getDisplayParticipants } from '../utils/lessonDialogModel.js'
@@ -55,48 +57,6 @@ function formatCurrencyDelta(amount) {
   return `${prefix}${numericAmount.toFixed(2)} ₪`
 }
 
-function resolveCorrectionErrorMessage(error, participantsById = new Map()) {
-  const code = resolveApiErrorMessage(error)
-  const details = error?.data?.details || {}
-  if (extractSupportCode(code)) {
-    return code
-  }
-  const blockingNames = Array.isArray(details?.participant_ids)
-    ? details.participant_ids
-      .map((participantId) => participantsById.get(participantId))
-      .filter(Boolean)
-    : []
-
-  if (code === 'cancelled_instance_has_attended_participants') {
-    return blockingNames.length > 0
-      ? `לא ניתן לסמן את השיעור כמבוטל כל עוד יש משתתפים שסומנו כנוכחים: ${blockingNames.join(', ')}.`
-      : 'לא ניתן לסמן את השיעור כמבוטל כל עוד יש משתתפים שסומנו כנוכחים. יש לעדכן קודם את סטטוס המשתתפים הרלוונטיים.'
-  }
-
-  if (code === 'completed_instance_has_scheduled_participants') {
-    return blockingNames.length > 0
-      ? `לא ניתן לסמן את השיעור כהושלם כל עוד המשתתפים הבאים עדיין במצב מתוכנן: ${blockingNames.join(', ')}.`
-      : 'לא ניתן לסמן את השיעור כהושלם כל עוד יש משתתפים שעדיין במצב מתוכנן.'
-  }
-
-  if (code === 'invalid_participant_patch_status') {
-    return 'אחד מסטטוסי המשתתפים שנבחרו אינו תקין.'
-  }
-
-  if (code === 'failed_to_build_correction_preview') {
-    return 'יצירת תצוגת ההשפעה נכשלה. נסו לרענן את השיעור ולנסות שוב.'
-  }
-
-  if (blockingNames.length > 0) {
-    return `${code}: ${blockingNames.join(', ')}`
-  }
-
-  if (details?.participant_ids?.length) {
-    return `${code}: ${details.participant_ids.length} משתתפים דורשים טיפול.`
-  }
-
-  return resolveApiErrorMessage(error, 'יצירת תצוגת מקדימה נכשלה.')
-}
 
 export function LockedCorrectionPanel({ instance, orgId, forceOpen = false, onApplied }) {
   const displayInstance = useMemo(() => getDisplayInstance(instance), [instance])
@@ -173,7 +133,7 @@ export function LockedCorrectionPanel({ instance, orgId, forceOpen = false, onAp
       })
       setPreview(payload)
     } catch (err) {
-      setError(resolveCorrectionErrorMessage(err, participantNamesById))
+      setError({ text: resolveCorrectionErrorMessage(err, participantNamesById), error: withErrorContext(err, { action: 'תצוגת התיקון לשיעור נעול', fallback: CORRECTION_ERROR_FALLBACK }) })
     } finally {
       setIsPreviewLoading(false)
     }
@@ -198,7 +158,7 @@ export function LockedCorrectionPanel({ instance, orgId, forceOpen = false, onAp
       if (err?.status === 423 && err?.data?.preview) {
         setPreview(err.data.preview)
       }
-      setError(resolveCorrectionErrorMessage(err, participantNamesById))
+      setError({ text: resolveCorrectionErrorMessage(err, participantNamesById), error: withErrorContext(err, { action: 'תצוגת התיקון לשיעור נעול', fallback: CORRECTION_ERROR_FALLBACK }) })
       setConfirmOpen(false)
     } finally {
       setIsApplyLoading(false)
@@ -248,7 +208,9 @@ export function LockedCorrectionPanel({ instance, orgId, forceOpen = false, onAp
           {error && (
             <Alert variant="destructive">
               <AlertTriangle className="h-4 w-4" />
-              <AlertDescription>{error}</AlertDescription>
+              <AlertDescription>{error.text}</AlertDescription>
+              {/* The caught error is kept with the shown text, so the details and the copy match it. */}
+              <ErrorDetails error={error.error} message={stripSupportCode(error.text)} />
             </Alert>
           )}
 

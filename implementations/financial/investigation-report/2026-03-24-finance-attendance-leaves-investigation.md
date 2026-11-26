@@ -182,7 +182,7 @@ Severity: Medium
 
 Evidence:
 
-- Repository tests are still limited to a small number of generic files under `test/` and `src/runtime/`.
+- Repository tests are still limited to a small number of generic files under `tests/` and `src/runtime/`.
 - Search did not reveal dedicated automated tests for:
   - employee leave flows
   - employee attendance flows

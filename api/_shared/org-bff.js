@@ -14,6 +14,10 @@ export function readEnv(context) {
   return process.env ?? {};
 }
 
+// The marker for Hebrew business copy in a 4xx body (see user-message.js); re-exported here so
+// endpoints import it next to `respond`.
+export { withUserMessage, USER_MESSAGE_KIND } from './user-message.js';
+
 export function respond(context, status, body, extraHeaders) {
   const response = json(status, body, extraHeaders);
   context.res = response;

@@ -1,6 +1,6 @@
 // @ts-check
 /* eslint-env node */
-import { isAdminOrOffice, normalizeString, withOrgScope } from './org-bff.js';
+import { isAdminOrOffice, normalizeString, withOrgScope, withUserMessage } from './org-bff.js';
 import { selectInChunks } from './query-chunks.js';
 import { coerceAgorot } from './currency.js';
 import { shouldParticipantTriggerInstructorCompensation } from './calendar-workflow-decisions.js';
@@ -1324,7 +1324,9 @@ export async function validateInstructorRateForLesson(
       withOrgScope(tenantClient, 'Services', resolvedOrgId).select('name').eq('id', resolvedServiceId).maybeSingle(),
     ]);
 
-    return {
+    // The message is our own wording (describeMissingLessonRate), marked here where its source is
+    // known, so every screen keeps the instruction and the dates.
+    return withUserMessage({
       code: 'instructor_rate_not_configured',
       instructor_employee_id: resolvedInstructorId,
       service_id: resolvedServiceId,
@@ -1336,7 +1338,7 @@ export async function validateInstructorRateForLesson(
         lessonDate: rateDate,
         nextRateDate,
       }),
-    };
+    });
   }
 
   return null;

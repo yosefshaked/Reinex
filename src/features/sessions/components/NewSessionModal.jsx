@@ -7,7 +7,8 @@ import { toast } from '@/lib/toast.jsx';
 import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { useOrg } from '@/org/OrgContext.jsx';
 import { authenticatedFetch } from '@/lib/api-client.js';
-import { resolveApiErrorMessage } from '@/lib/error-support.js';
+import ErrorMessageText from '@/components/ui/ErrorMessageText.jsx';
+import { withErrorContext } from '@/lib/error-support.js';
 import NewSessionForm, { NewSessionFormFooter } from './NewSessionForm.jsx';
 import { buildInitialAnswers } from '@/features/forms/lib/form-schema.js';
 
@@ -99,7 +100,7 @@ export default function NewSessionModal({
       console.error('Failed to load session report context', error);
       setReportContext(null);
       setContextState(REQUEST_STATE.error);
-      setContextError(resolveApiErrorMessage(error) || 'טעינת נתוני הדיווח נכשלה.');
+      setContextError(withErrorContext(error, { action: 'טעינת נתוני הדיווח', fallback: 'טעינת נתוני הדיווח נכשלה.' }));
     }
   }, [canFetchContext, session, activeOrgId, lessonParticipantId]);
 
@@ -170,7 +171,7 @@ export default function NewSessionModal({
     } catch (error) {
       console.error('Failed to save session report', error);
       setSubmitState(REQUEST_STATE.error);
-      setSubmitError(resolveApiErrorMessage(error) || 'שמירת הדיווח נכשלה.');
+      setSubmitError(withErrorContext(error, { action: 'שמירת הדיווח', fallback: 'שמירת הדיווח נכשלה.' }));
     }
   }, [session, activeOrgId, lessonParticipantId, onCreated]);
 
@@ -250,7 +251,7 @@ export default function NewSessionModal({
           </div>
         ) : hasContextError ? (
           <div className="rounded-lg bg-red-50 p-md text-sm text-red-700" role="alert">
-            {contextError}
+            <ErrorMessageText as="span" error={contextError} fallback="טעינת נתוני הדיווח נכשלה." showDetails supportClassName="text-red-700" />
           </div>
         ) : successReport ? (
           <div className="flex flex-col items-center gap-sm py-lg text-center">

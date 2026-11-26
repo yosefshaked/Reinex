@@ -14,7 +14,7 @@ release
 *.local
 
 # Editor directories and files
-.claude/
+.claude/*
 .vscode/*
 !.vscode/extensions.json
 .idea
@@ -25,6 +25,8 @@ release
 *.sln
 *.sw?
 settings.json
+# Shared Claude Code project settings are versioned; local overrides stay ignored.
+!/.claude/settings.json
 .env
 
 /api/local.settings.json
@@ -41,5 +43,5 @@ settings.json
 /manual-db-backup/backups
 /manual-db-backup/supabase
 /supabase/.temp
-/test/automatic-tester/reports
+/tests/automatic-tester/reports
 /.cache

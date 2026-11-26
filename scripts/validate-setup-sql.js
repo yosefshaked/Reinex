@@ -3,7 +3,7 @@ import process from 'node:process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { SETUP_SQL_SCRIPT } from '../src/lib/setup-sql.js';
+import { SETUP_SQL_SCRIPT } from '../database/setup-sql.js';
 
 const sql = String(SETUP_SQL_SCRIPT || '');
 
@@ -447,13 +447,7 @@ function collectFilesRecursive(rootDir, predicate) {
 
 function collectFrontendRpcNames() {
   const srcRoot = path.join(repoRoot, 'src');
-  const files = collectFilesRecursive(srcRoot, (filePath) => {
-    const normalized = filePath.replace(/\\/g, '/');
-    if (normalized.endsWith('/src/lib/setup-sql.js')) {
-      return false;
-    }
-    return /\.(js|jsx|ts|tsx)$/i.test(filePath);
-  });
+  const files = collectFilesRecursive(srcRoot, (filePath) => /\.(js|jsx|ts|tsx)$/i.test(filePath));
 
   const names = new Set();
   const rpcPattern = /\.rpc\(\s*['"](?:public\.)?([a-zA-Z_][a-zA-Z0-9_]*)['"]/g;
@@ -744,14 +738,14 @@ function printGitHubOutput() {
     const column = finding.column ?? 1;
     const title = escapeGitHubMessage(finding.ruleId);
     const message = escapeGitHubMessage(finding.message);
-    console.log(`::${type} file=src/lib/setup-sql.js,line=${line},col=${column},title=${title}::${message}`);
+    console.log(`::${type} file=database/setup-sql.js,line=${line},col=${column},title=${title}::${message}`);
   }
 }
 
 function printJsonOutput(options, exitCode) {
   const payload = {
     tool: 'validate-setup-sql',
-    file: 'src/lib/setup-sql.js',
+    file: 'database/setup-sql.js',
     strict: options.strict,
     maxWarnings: options.maxWarnings,
     exitCode,

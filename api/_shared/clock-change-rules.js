@@ -21,6 +21,7 @@ import {
   isDateKey,
   resolveOrgTimeZone,
 } from './local-time.js';
+import { withUserMessage } from './user-message.js';
 
 export const LESSON_TIME_SKIPPED_CODE = 'lesson_time_skipped_by_clock_change';
 export const GENERATION_SKIPPED_BY_CLOCK_CHANGE_TYPE = 'clock_change_skipped_time';
@@ -91,7 +92,9 @@ export function checkRequestedLessonStart(body, timeZone = resolveOrgTimeZone())
   if (!requested) return null;
   const notice = describeLessonStartClockChange(requested.dateKey, requested.clock, timeZone);
   if (!notice?.blocking) return null;
-  return {
+  // The message is our own wording (skippedTimeMessage), so it is marked for display here, where
+  // its source is known: the user reads between which hours the clock jumps.
+  return withUserMessage({
     code: LESSON_TIME_SKIPPED_CODE,
     message: notice.message,
     clock_change: {
@@ -100,7 +103,7 @@ export function checkRequestedLessonStart(body, timeZone = resolveOrgTimeZone())
       start_time: notice.change.startTime,
       end_time: notice.change.endTime,
     },
-  };
+  });
 }
 
 /** The fields the calendar sends with `datetime_start`. @param {string} dateKey @param {string} clock */

@@ -104,7 +104,7 @@ export default function NewSessionForm({
 
       {error ? (
         <div className="rounded-lg bg-red-50 p-md text-sm text-red-700 text-end" role="alert">
-          <ErrorMessageText error={error} supportClassName="text-red-700" />
+          <ErrorMessageText error={error} showDetails supportClassName="text-red-700" />
         </div>
       ) : null}
 

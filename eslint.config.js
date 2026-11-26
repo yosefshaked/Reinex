@@ -7,7 +7,7 @@ import { defineConfig, globalIgnores } from 'eslint/config'
 import importPlugin from 'eslint-plugin-import'
 
 // Dates and time zones: every local-date decision goes through api/_shared/local-time.js
-// (re-exported as src/lib/local-time.js). See agents-docs/00-core-rules.md "Dates and time zones".
+// (re-exported as src/lib/local-time.js). See docs/project-rules/00-core-rules.md "Dates and time zones".
 const LOCAL_TIME_MODULE_FILES = ['api/_shared/local-time.js', 'api/_shared/local-time.test.js']
 const NO_NAME_ASSIGNMENT = {
   selector:
@@ -100,7 +100,7 @@ export default defineConfig([
           patterns: [
             {
               group: ['**/supabase-tenant.js'],
-              message: 'supabase-tenant.js is deprecated. Use resolveTenantClient from org-bff.js instead.',
+              message: 'supabase-tenant.js is deprecated. Use createSingleClient(env) from org-bff.js for the client and withOrgScope(client, table, orgId) for tenant tables.',
             },
             {
               group: ['**/_shared/storage-drivers*'],
@@ -140,7 +140,7 @@ export default defineConfig([
           patterns: [
             {
               group: ['**/supabase-tenant.js'],
-              message: 'supabase-tenant.js is deprecated. Use resolveTenantClient from org-bff.js instead.',
+              message: 'supabase-tenant.js is deprecated. Use createSingleClient(env) from org-bff.js for the client and withOrgScope(client, table, orgId) for tenant tables.',
             },
             {
               group: ['**/_shared/storage-drivers*'],
@@ -163,7 +163,7 @@ export default defineConfig([
     },
   },
   {
-    files: ['test/**/*.{js,jsx,mjs}'],
+    files: ['tests/**/*.{js,jsx,mjs}'],
     languageOptions: {
       globals: {
         ...globals.node,
@@ -178,7 +178,8 @@ export default defineConfig([
     },
   },
   {
-    files: ['src/**/*.{js,jsx}', 'api/**/*.{js,jsx,mjs}'],
+    // database/setup-sql.js keeps the rules it had under src/lib/ before the move.
+    files: ['src/**/*.{js,jsx}', 'api/**/*.{js,jsx,mjs}', 'database/**/*.js'],
     rules: {
       'no-restricted-syntax': ['error', NO_NAME_ASSIGNMENT, ...DATE_AND_TIME_ZONE_RESTRICTIONS, MONEY_CONVERSION_RESTRICTION],
     },

@@ -39,7 +39,8 @@ function normalizeIsoOrNull(value) {
   return parsed.toISOString();
 }
 
-async function handleGet(context, req, supabase) {
+// Exported for tests: the support search over error_events (exact match on support_code, or q).
+export async function handleGet(context, req, supabase) {
   const limit = normalizeLimit(req?.query?.limit);
   const offset = normalizeOffset(req?.query?.offset);
   const q = normalizeString(req?.query?.q);

@@ -1,5 +1,6 @@
 import { toast as baseToast } from 'sonner';
-import { extractSupportCode, stripSupportCode } from '@/lib/error-support.js';
+import ErrorDetails from '@/components/ui/ErrorDetails.jsx';
+import { describeError, extractSupportCode, stripSupportCode } from '@/lib/error-support.js';
 
 function copySupportCode(code) {
   if (!code) return;
@@ -55,6 +56,35 @@ export const toast = Object.assign(
     error(message, data) {
       const [nextMessage, nextData] = withSupportAction(message, data);
       return baseToast.error(nextMessage, nextData);
+    },
+    /**
+     * An error toast built from the caught error itself, so its status and codes reach the UI
+     * (docs/project-rules/20, "Showing an error"). It shows the Hebrew message, the saved support
+     * code when there is one, "פירוט השגיאה" and "העתקה לשליחה לתמיכה". It stays open until the
+     * user closes it, so it cannot vanish while the details are read or copied.
+     *
+     * @param {any} error
+     * @param {any} [options] { action, fallback, message (the screen's own title, also copied), ...sonner options such as id }
+     */
+    apiError(error, options = {}) {
+      const { action = '', fallback = '', message = '', ...data } = options;
+      const described = describeError(error, { action, fallback });
+      const details = message ? { ...described, message } : described;
+      return baseToast.error(details.message, {
+        duration: Infinity,
+        closeButton: true,
+        ...data,
+        description: (
+          <span dir="rtl" className="block">
+            {details.supportCode ? (
+              <span className="block text-xs font-medium">
+                קוד תמיכה: <span dir="ltr">{details.supportCode}</span>
+              </span>
+            ) : null}
+            <ErrorDetails details={details} className="mt-1" />
+          </span>
+        ),
+      });
     },
   },
 );

@@ -38,7 +38,7 @@ TutTiud-Refactored/
 ├── ProjectDoc/              # Project documentation: Eng.md, Heb.md, Conventions.md
 ├── public/                  # Static assets, runtime config, SPA routing config
 ├── scripts/                 # Node scripts (e.g., checkSchema.js)
-├── test/                    # Tests mirroring features and utilities
+├── tests/                    # Tests mirroring features and utilities
 ├── supabase/                # Supabase-specific functions or migrations
 └── [config files]           # eslint.config.js, vite.config.mjs, tailwind.config.js, etc.
 ```
@@ -229,7 +229,7 @@ Prefer **validation errors (4xx)** with precise, machine-readable message codes:
 
 ### Testing
 - No `npm test` script is configured per AGENTS.md.
-- Tests live under `test/` and are executed in CI as configured.
+- Tests live under `tests/` and are executed in CI as configured.
 - When adding features, consider adding test coverage for complex logic (e.g., `reports.test.js`, `time-entry.test.js`).
 
 ---
