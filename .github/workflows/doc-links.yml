@@ -1,6 +1,6 @@
 name: Doc links
 
-# Checks the relative links in AGENTS.md and docs/project-rules/ (scripts/check-doc-links.js).
+# Checks the relative links in AGENTS.md, docs/project-rules/, docs/product/ and docs/research/ (scripts/check-doc-links.js).
 # No path filter on purpose: a PR that only changes documentation must run it too.
 on:
   push:

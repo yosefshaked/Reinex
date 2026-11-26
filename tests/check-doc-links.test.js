@@ -66,9 +66,31 @@ describe('doc links: valid instructions pass', () => {
     assert.deepEqual(result.errors, []);
     assert.equal(result.files, 4);
   });
+
+  it('also checks docs/product and docs/research', () => {
+    const result = checkDocLinks(repo({
+      ...BASE,
+      'docs/product/payroll.md': '[rules](../project-rules/30-backend.md) [research](../research/law.md)\n',
+      'docs/research/law.md': '[product](../product/payroll.md)\n',
+    }));
+    assert.deepEqual(result.errors, []);
+    assert.equal(result.files, 5);
+  });
 });
 
 describe('doc links: broken instructions fail', () => {
+  it('reports a broken link in docs/product and in docs/research', () => {
+    const result = checkDocLinks(repo({
+      ...BASE,
+      'docs/product/payroll.md': '[gone](../project-rules/missing.md)\n',
+      'docs/research/law.md': '[gone](../product/missing.md)\n',
+    }));
+    assert.deepEqual(result.errors, [
+      'docs/product/payroll.md:1: link "../project-rules/missing.md" -> missing target docs/project-rules/missing.md',
+      'docs/research/law.md:1: link "../product/missing.md" -> missing target docs/product/missing.md',
+    ]);
+  });
+
   it('reports a missing target with the source file, line and resolved target', () => {
     const { errors } = checkDocLinks(repo({
       ...BASE,

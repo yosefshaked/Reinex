@@ -2,8 +2,8 @@
 /**
  * check-doc-links.js
  *
- * Checks the relative Markdown links in the agent instructions: AGENTS.md and every .md file
- * under docs/project-rules/. Each link is resolved from the folder of the file that contains it
+ * Checks the relative Markdown links in the agent instructions and the documents they send agents
+ * to: AGENTS.md and every .md file under docs/project-rules/, docs/product/ and docs/research/. Each link is resolved from the folder of the file that contains it
  * and must point to an existing file or folder inside the repository.
  *
  * - Checked, when the target is a relative path (an optional `#anchor` or `?query` is ignored;
@@ -26,6 +26,8 @@ import { fileURLToPath } from 'node:url';
 
 export const ENTRY_FILE = 'AGENTS.md';
 export const RULES_DIR = path.join('docs', 'project-rules');
+/** Every folder whose Markdown files are checked, besides AGENTS.md. */
+export const CHECKED_DIRS = [RULES_DIR, path.join('docs', 'product'), path.join('docs', 'research')];
 
 const TITLE = String.raw`(?:\s+(?:"[^"]*"|'[^']*'|\([^)]*\)))?`;
 // [text](target) or [text](<target>). Link text may hold escapes and one level of brackets; a bare
@@ -107,7 +109,7 @@ export function checkDocLinks(rootDir) {
   if (!fs.existsSync(entry)) errors.push(`${ENTRY_FILE} does not exist under ${root}`);
   const sources = [
     ...(fs.existsSync(entry) ? [entry] : []),
-    ...listMarkdown(path.join(root, RULES_DIR)).sort(),
+    ...CHECKED_DIRS.flatMap((dir) => listMarkdown(path.join(root, dir)).sort()),
   ];
 
   let links = 0;
