@@ -5,7 +5,7 @@
 Read this block first when you continue this plan in a new conversation.
 
 - **Plan status:** the overall status of this plan is recorded only in [`docs/plans/index.csv`](../index.csv). Check it with `npm run lint:plans`.
-- **Current stage:** 5 (database assets into `database/`). Stage 4 is done except 4.7: the owner's answer on month closing (listed under "Needs confirmation" in [`docs/product/payroll.md`](../../product/payroll.md)); it does not block stages 5–8. F3.2–F3.6 are deferred to [`api/strict-error-tracking.md`](../api/strict-error-tracking.md) and are not a condition for closing this plan. **Next:** 5.0, then stages 6–8 in order.
+- **Current stage:** 5 (database assets into `database/`). Stage 4 is done, 4.7 included (PD21: pay is live for every month). F3.2–F3.6 are deferred to [`api/strict-error-tracking.md`](../api/strict-error-tracking.md) and are not a condition for closing this plan. **Next:** 5.0, then stages 6–8 in order.
 - **Execution branch:** `repository-reconstruction`, based on `origin/staging` `dce8f2e790e939b7f0805803d7d44e71a23346ba`. See [Planning base](#planning-base) and [Q1](#q1-execution-branch).
 - **Repository state:**
   - `test/` is now `tests/`; `agents-docs/` is now `docs/project-rules/`.
@@ -14,7 +14,7 @@ Read this block first when you continue this plan in a new conversation.
   - **On GitHub:** draft PR [#64](https://github.com/yosefshaked/Reinex/pull/64) (`repository-reconstruction` → `staging`) holds everything up to F2, head `f21742d`. "Doc links" and "Plan registry" passed on that SHA. Commits after it are local (`git log origin/repository-reconstruction..HEAD`) until the owner asks for the next push to the branch; any push or merge to `main` needs the owner's explicit approval for that action.
   - The raw evidence is outside the repository, in `$env:TEMP\reinex-restructure\stage0\` to `stage3\`.
 - **Follow-ups outside this plan, not started here:** [#63](https://github.com/yosefshaked/Reinex/issues/63) (atomic student operations, its own plan), [#65](https://github.com/yosefshaked/Reinex/issues/65) (public error codes and Hebrew messages), the migration research (stage 4R, deferred) and strict error tracking (above). Finishing F2 does not start #63.
-- **Last update:** 2026-11-26. Stage 4 done (docs/product, docs/research, payroll first); 4.7 waits for the owner on month closing.
+- **Last update:** 2026-11-26. 4.7 closed (PD21); stage 5 started.
 
 Each stage appends to the [Progress log](#progress-log), ticks its subtasks and records answers under [Open decisions](#open-decisions). Keep this block short. It is a pointer, not a history.
 
@@ -1356,7 +1356,7 @@ It was moved because it is product-reliability work, wider than this restructure
   - `tests/payroll-rules.test.js:2` (a comment);
   - `api/_shared/rate-history.js:4` (a comment);
   - `src/lib/setup-sql.js:6801`. That SQL comment changes the text `SetupAssistant` shows; record the new `SETUP_SQL_SCRIPT` hash.
-- [ ] 4.7 **Joint review.** Present the "needs confirmation" items. Write each as binding only after confirmation, and record PD-n with date and source.
+- [x] 4.7 **Joint review.** Present the "needs confirmation" items. Write each as binding only after confirmation, and record PD-n with date and source. Done 2026-11-26: PD21 (pay is live for every month; month closing retired).
 - [x] 4.8 The expansion recipe in `docs/product/README.md`:
   - **order:** billing and HMO, calendar, students and clients, forms, settings;
   - **per domain:** extract rules from `project-rules` and the `implementations` specs, assign IDs, link tests, mark unconfirmed decisions.
@@ -1854,7 +1854,7 @@ The same task is given to a new agent with no memory before the pilot, after sta
   - the live-pay rule in `agents-docs/80:130` (later `docs/product/payroll.md`), under which "nothing derived is stored" and a locked month would need a stored copy.
 
   The agent fails if it silently builds month closing, or silently declares it rejected.
-- **After the decision is confirmed and recorded (stage 4.7):** the agent passes if it finds the decision, explains its reason, applies it to the request (declining the lock and pointing to the existing impact warning for edits to past months), and does not treat PAY-H as current.
+- **After the decision is confirmed and recorded (stage 4.7):** the agent passes if it finds the decision, explains its reason, applies it to the request (declining the lock under PD21, and noting that a warning with the pay difference for edits to past months is not built), and does not treat PAY-H as current. PD21 was recorded on 2026-11-26.
 
 **Before the pilot:** run the task, record what the agent actually did, and grade it against the criteria for the current decision status. That record is the baseline for later runs. No outcome is assumed in advance.
 
@@ -2670,6 +2670,19 @@ Append one entry per stage. Newest last.
     - **Evidence:** in `$env:TEMP\reinex-restructure\stage4\`.
   - **Left for stage 7:** the older leave and finance notes (`docs/employee-leave-ledger-reference-review.md`, `implementations/finance/info-from-tuttiud-leaves.md`, `implementations/financial/investigation-report/2026-03-24-…`) and `implementations/business-process/business-process-map.md`.
   - **4.7:** the month-closing question is with the owner. Stages 5–8 do not depend on it.
+
+- **2026-11-26, 4.7 closed** (owner decision).
+  - **PD21:** pay is computed live for every month, also after a correction back in time. Locking a month's pay is not an active requirement; it is reconsidered only if a need comes up. No pay behaviour changed.
+  - **`docs/product/payroll.md`:**
+    - PAY-H1–H6, I1–I2 and J4 moved to "Retired rules" with the reason.
+    - PAY-A3, A4, D2 and D3 lost their closed-month parts.
+    - PD6, PD7 and PD10 are marked superseded by PD21.
+    - "Needs confirmation" now holds only L1.
+  - **`tests/payroll-rules.test.js`:**
+    - The 9 retired `it.todo` entries were replaced by one comment that names their IDs and PD21, so the ID sets stay equal (49 = 49). Otherwise "turn its todo into a real test" would point an agent at building month closing.
+    - 5 todo names (A3, A4, D2, D3, J2) lost "closed month".
+  - **Finance identity:** 592 → 583 tests, 563 passed and 29 → 20 todo, 0 failed. The diff is exactly those 9 removals and 5 renames; no passing test changed. New sha256 `372E8541…`.
+  - **Also updated:** `project-rules/80`, the notes on the two old payroll specs, and success test 2 part 2 (the warning with the pay difference for past months is not built).
 
 ---
 

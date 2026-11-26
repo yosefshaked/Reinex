@@ -1,6 +1,6 @@
 # Instructor pay — technical prerequisites (D9)
 
-> **Completed plan (moved here on 2026-11-26).** P2 (dated rates) and the live-pay model were built; the rules are in [`docs/product/payroll.md`](../../product/payroll.md). P3 and P4 (frozen months and a pay-period cycle) depend on the month-closing decision listed there under "Needs confirmation". This file is kept as the historical technical plan.
+> **Completed plan (moved here on 2026-11-26).** P2 (dated rates) and the live-pay model were built; the rules are in [`docs/product/payroll.md`](../../product/payroll.md). P3 and P4 (frozen months and a pay-period cycle) were dropped with month closing on 2026-11-26 (PD21). This file is kept as the historical technical plan.
 
 This is the answer to D9 in [business-process-map.md](../../../implementations/business-process/business-process-map.md), which asked for an investigation and a decision on what must be true technically before the monthly instructor-pay cycle (S5.5) is built.
 

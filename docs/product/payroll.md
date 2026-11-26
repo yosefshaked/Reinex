@@ -16,8 +16,8 @@ The product rules for what an employee is paid and how much leave they have. For
 |---|---|---|---|---|
 | PAY-A1 | A rate set "from 1.10" pays every lesson from 1.10 until the next change of that kind; earlier lessons keep the earlier rate. | A rate change must not rewrite pay already earned (PD11). | built | `payroll-rules` PAY-A1 |
 | PAY-A2 | A rate with a future date is scheduled: it shows as "current X, from 1.10: Y" and takes effect on its own. | The office enters a raise when it is agreed, not on the day. | built | `payroll-rules` PAY-A2 |
-| PAY-A3 | A back-dated rate change warns first, then changes the pay of the lessons it reaches. (The scenario also says that closed months get a pay difference: see [Needs confirmation](#needs-confirmation).) | A past date changes pay that may already have been shown or paid. | not built | `payroll-rules` PAY-A3 (todo); the live recalculation: `pay-calculation` "a rate added for a past date changes the pay of that month straight away" |
-| PAY-A4 | A lesson whose instructor has no rate for its service on its date is "missing rate": nothing is guessed and nothing is paid until a rate exists. (The scenario's "blocks closing the month" depends on [Needs confirmation](#needs-confirmation).) | A guessed rate is a wrong payment nobody notices. | partly built | `payroll-rules` PAY-A4 (real and todo) |
+| PAY-A3 | A back-dated rate change warns first, then changes the pay of every month it reaches (PD21). | A past date changes pay that may already have been shown or paid. | not built | `payroll-rules` PAY-A3 (todo); the live recalculation: `pay-calculation` "a rate added for a past date changes the pay of that month straight away" |
+| PAY-A4 | A lesson whose instructor has no rate for its service on its date is "missing rate": nothing is guessed, nothing is paid until a rate exists, and the monthly summary lists it. (The scenario's "blocks closing the month" is retired with month closing, PD21.) | A guessed rate is a wrong payment nobody notices. | partly built | `payroll-rules` PAY-A4 (real and todo) |
 | PAY-A5 | Paid per hour (`lesson_hourly`): rate × lesson length. Paid per lesson (`lesson_flat`): the same amount whatever the length. | Both exist at farms (owner, 2026-09-15). | built | `payroll-rules` PAY-A5 |
 | PAY-A6 | An employee with several kinds of rates (lessons, office hours, salary) is paid each part of the month from its own rate. | One person can teach and do office work (PD12). | built | `payroll-rules` PAY-A6 |
 
@@ -50,8 +50,8 @@ The lesson is the source of truth: whatever is recorded on the participant (stat
 | ID | Rule | Why | Status | Tests |
 |---|---|---|---|---|
 | PAY-D1 | A substitute: the pay goes to whoever gave the lesson, at their rate on that date. | — | built | `payroll-rules` PAY-D1; `pay-calculation` "reassigning one lesson to another instructor moves its pay…" |
-| PAY-D2 | A length change recalculates hourly pay. (The scenario's pay difference for a closed month: see [Needs confirmation](#needs-confirmation).) | — | not built as written | `payroll-rules` PAY-D2 (todo) |
-| PAY-D3 | An attendance fix after the lesson recalculates pay. (Closed month: same.) | — | not built as written | `payroll-rules` PAY-D3 (todo) |
+| PAY-D2 | A length change recalculates hourly pay, in any month (PD21). | — | not built | `payroll-rules` PAY-D2 (todo) |
+| PAY-D3 | An attendance fix after the lesson recalculates pay, in any month (PD21). | — | not built | `payroll-rules` PAY-D3 (todo) |
 | PAY-D4 | A lesson moved to another date belongs to the month of the new date, at that date's rate. | — | built | `payroll-rules` PAY-D4 |
 
 ### E — Hours
@@ -130,11 +130,11 @@ Every legal amount is a **dated farm setting** with its source, a legal default 
 | PD3 | A farm cancellation is not paid by default. | 2026-09-17 | same | PAY-B5 |
 | PD4 | An excused absence is not paid. | 2026-09-17 | same | PAY-B6 |
 | PD5 | A non-instructor hourly employee enters their own hours; the office approves them. | 2026-09-17 | same, follow-up 2 | PAY-E3 (not built) |
-| PD6 | Closing a month is blocked while anything is unmarked or missing, with a list that opens each blocker in a new tab. | 2026-09-17 | same | **Needs confirmation** (month closing) |
-| PD7 | A closed month is never reopened; fixes become pay differences in the next month. | 2026-09-17 | same, the PD7 recommendation | **Needs confirmation** (month closing) |
+| PD6 | Closing a month is blocked while anything is unmarked or missing, with a list that opens each blocker in a new tab. | 2026-09-17 | same | superseded by PD21 |
+| PD7 | A closed month is never reopened; fixes become pay differences in the next month. | 2026-09-17 | same, the PD7 recommendation | superseded by PD21 |
 | PD8 | Reinex computes gross components only, follows the law as editable settings, and exports for the accountant. | 2026-09-17 | same, follow-up 3 | Scope above; PAY-J2 (not built) |
 | PD9 | An employee may see their own month. | 2026-09-17 | same | PAY-J3 (not built) |
-| PD10 | The office can close a month, as well as owners and admins. | 2026-09-17 | same | **Needs confirmation** (month closing) |
+| PD10 | The office can close a month, as well as owners and admins. | 2026-09-17 | same | superseded by PD21 |
 | PD11 | Every rate is a dated `RateHistory` row of one kind (`pay_basis`: per-service lesson hourly or flat, office hourly, monthly salary, leave day); a lesson reads the rate of its kind in force on its date; there is no fallback between kinds; "once per lesson / per student" stays a service setting. | 2026-09-15 | owner, [`payroll-prerequisites.md`](../plans/payroll/payroll-prerequisites.md) P2 | `api/_shared/rate-history.js`; `tests/dated-settings.test.js` "migration 0002 copies the legacy rates…" |
 | PD12 | Pay is additive across kinds: an employee is paid every part they have rates for; there is no pay model. | 2026-09-23 | owner, recorded in `project-rules/80` | PAY-A6 |
 | PD13 | Pay is computed live from facts; nothing derived (lesson earnings, pay runs, lesson minutes) is stored. A changed rate, mark or lesson shows on the next read. | 2026-11-10 | the owner-approved implementation plan of pay computed live (outside the repository), built in [#55](https://github.com/yosefshaked/Reinex/pull/55) (`migrations/0001_live_pay_remove_stored_copies.sql`) | `pay-calculation` "a rate added for a past date changes the pay of that month straight away" |
@@ -145,25 +145,30 @@ Every legal amount is a **dated farm setting** with its source, a legal default 
 | PD18 | A paid leave day counts as a day worked; leave days are kept to 2 decimals, not rounded down; there is no carry-over cap. | 2026-11-17 | owner, [#56](https://github.com/yosefshaked/Reinex/issues/56) comment | LV-2, LV-3, LV-5 |
 | PD19 | "ממוצע מומלץ" values a leave day by the formula in PAY-G1; the window and new-employee assumptions are in the research. The accountant's check is pending. | 2026-11-18 | [#56](https://github.com/yosefshaked/Reinex/issues/56) comment | PAY-G1 |
 | PD20 | "ביטול גבייה" (fee waived) on a participant: the student is not charged and the instructor is not paid. An interim choice; separating the two when the instructor was already there is open in [#60](https://github.com/yosefshaked/Reinex/issues/60). | 2026-11-17 | owner, [#57](https://github.com/yosefshaked/Reinex/issues/57) comment | instructor side: `pay-calculation` "an excused absence pays nothing even when the status alone would"; student side not built ([#57](https://github.com/yosefshaked/Reinex/issues/57) open) |
+| PD21 | Pay is computed live for every month, also after a correction back in time. Locking a month's pay is not an active requirement; it is reconsidered only if a need comes up. This retires month closing (PAY-H1–H6, PAY-I1–I2, PAY-J4) and supersedes PD6, PD7 and PD10. | 2026-11-26 | owner, restructure review 4.7 ([plan](../plans/repository/directory-restructure.md)) | PD13; `pay-calculation` "a rate added for a past date changes the pay of that month straight away" |
 
 ---
 
+## Retired rules
+
+Kept so that their IDs stay unique and the reason is findable. Do not build them; a request to lock a month's pay is answered with PD21.
+
+**Month closing**, approved on 2026-09-17 and retired by PD21 on 2026-11-26: pay is live for every month, so there is no period to close and no pay difference to carry.
+
+| ID | Scenario (2026-09-17) |
+|---|---|
+| PAY-H1 | One pay period per farm per month, opened on its own. |
+| PAY-H2 | The office reviews the month for every employee. (The monthly summary, PAY-J1, covers the review without closing.) |
+| PAY-H3 | Closing confirms a summary with the disclaimer, freezes the month, locks its lessons and re-syncs lesson closure. |
+| PAY-H4 | Closing is blocked by unmarked attendance, missing rates, lessons without an instructor or unapproved hours, each listed with a link. |
+| PAY-H5 | A closed month is never reopened; later changes become linked pay differences in the next open month. |
+| PAY-H6 | A reminder to close before pay is due on the 9th. (The pay date itself is PAY-K7.) |
+| PAY-I1 | A correction in a closed month creates its pay difference automatically. |
+| PAY-I2 | A bonus or deduction lands in the month of its date, or the next open month if that one is closed. (Bonuses and deductions dated in their month exist; only the closed-month part is retired.) |
+| PAY-J4 | Owners, admins and the office can review and close a month; nobody can reopen one. |
+
 ## Needs confirmation
 
-Not binding until the owner decides. Ask before changing pay behaviour that depends on them.
-
-- **Month closing.** The scenarios approved on 2026-09-17 plan a monthly cycle: PAY-H1–H6 (a pay period opened each month, an org-wide review, closing that freezes the month and locks its lessons, blockers, never reopening, a reminder before the 9th), PAY-I1–I2 (a later change becomes a "הפרש עבור MM/YYYY" line in the next open month), PAY-J4 (who may close), the closed-month parts of PAY-A3, A4, D2 and D3, and PD6, PD7 and PD10. The owner-approved plan of 2026-11-10 (PD13) chose live pay: "אין סגירת חודש ואין נתונים מחושבים שנשמרים", with month closing, differences to the next month and pay snapshots listed as outside that plan, and the code removed `payroll_runs`. **Open:** is month closing rejected, or only not built yet? Until then the IDs keep their `it.todo` tests, and a request to lock a month is answered by pointing to this conflict.
-
-  | ID | Scenario (2026-09-17) |
-  |---|---|
-  | PAY-H1 | One pay period per farm per month, opened on its own. |
-  | PAY-H2 | The office reviews the month for every employee. |
-  | PAY-H3 | Closing confirms a summary with the disclaimer, freezes the month, locks its lessons and re-syncs lesson closure. |
-  | PAY-H4 | Closing is blocked by unmarked attendance, missing rates, lessons without an instructor or unapproved hours, each listed with a link. |
-  | PAY-H5 | A closed month is never reopened; later changes become linked pay differences in the next open month. |
-  | PAY-H6 | A reminder to close before pay is due on the 9th. |
-  | PAY-I1 | A correction in a closed month creates its pay difference automatically. |
-  | PAY-I2 | A bonus or deduction lands in the month of its date, or the next open month if that one is closed. (Bonuses and deductions exist; the closed-month part does not.) |
-  | PAY-J4 | Owners, admins and the office can review and close a month; nobody can reopen one. |
+Not binding until the owner decides. Ask before changing behaviour that depends on them.
 
 - **The 150-employee limit (L1).** Named only in the wiki, which this work did not read. Not added as a rule.

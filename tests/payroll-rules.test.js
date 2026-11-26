@@ -149,8 +149,8 @@ describe('PAY-A rates', () => {
     assert.doesNotMatch(none, /רק מ-/, 'no start date is invented when there is no rate at all');
   });
 
-  it.todo('PAY-A3 a back-dated rate recalculates open months and adds pay differences for closed months');
-  it.todo('PAY-A4 a lesson without a rate is flagged "missing rate" in the monthly review and blocks closing');
+  it.todo('PAY-A3 a back-dated rate change warns first, then recalculates every month it reaches');
+  it.todo('PAY-A4 a lesson without a rate is flagged "missing rate" in the monthly summary');
 });
 
 describe('PAY-B instructor pay per participant outcome', () => {
@@ -283,8 +283,8 @@ describe('PAY-D changes to a lesson', () => {
     assert.equal(lessonPay({ employeeId: 'dana', date: '2026-10-02' }), 12000, 'after moving past 1.10');
   });
 
-  it.todo('PAY-D2 a length change recalculates an open month and becomes a pay difference for a closed month');
-  it.todo('PAY-D3 an attendance fix recalculates an open month and becomes a pay difference for a closed month');
+  it.todo('PAY-D2 a length change recalculates hourly pay, in any month');
+  it.todo('PAY-D3 an attendance fix after the lesson recalculates pay, in any month');
 });
 
 describe('PAY-E hours', () => {
@@ -537,25 +537,13 @@ describe('PAY-G annual leave', () => {
   });
 });
 
-describe('PAY-H monthly cycle', () => {
-  it.todo('PAY-H1 each farm has one pay period per month, opened automatically');
-  it.todo('PAY-H2 the monthly review lists every employee\'s components and total');
-  it.todo('PAY-H3 closing freezes the month, locks its lessons and re-syncs lesson closure');
-  it.todo('PAY-H4 closing is blocked by unmarked attendance, missing rates, lessons without an instructor or unapproved hours, with a list of each blocker');
-  it.todo('PAY-H5 a closed month is never reopened; later changes become linked pay differences in the next open month');
-  it.todo('PAY-H6 the office is reminded to close the month before pay is due on the 9th');
-});
-
-describe('PAY-I after closing', () => {
-  it.todo('PAY-I1 a correction to a closed month creates a pay difference line "הפרש עבור MM/YYYY" in the next open month');
-  it.todo('PAY-I2 a bonus or deduction dated in a closed month lands in the next open month');
-});
+// Retired, not to be built (docs/product/payroll.md, PD21, 2026-11-26): pay is live for every month,
+// so there is no month to close. PAY-H1 PAY-H2 PAY-H3 PAY-H4 PAY-H5 PAY-H6 PAY-I1 PAY-I2 PAY-J4.
 
 describe('PAY-J outputs and access', () => {
   it.todo('PAY-J1 a monthly summary per employee and in total, with its lines');
-  it.todo('PAY-J2 an Excel / CSV export of the closed month with farm-chosen columns and the legal disclaimer');
+  it.todo('PAY-J2 an Excel / CSV export of a month with farm-chosen columns and the legal disclaimer');
   it.todo('PAY-J3 an employee sees their own month read-only');
-  it.todo('PAY-J4 owner, admins and office can close a month; nobody can reopen it');
 });
 
 describe('PAY-K legal pay components (Israel, dated settings)', () => {
